@@ -29,7 +29,7 @@ export function ResultScreen({
 
   return (
     <section className="screen result-screen result-screen-v4">
-      <span className="version-tag">我只要一刀 V0.4 IAA版</span>
+      <span className="version-tag">我只要一刀 V0708001 IAA版</span>
       <div className={`result-medal ${result.win ? "win" : "lost"}`}>{result.rating}</div>
       <h2>{result.win ? "破阵成功" : "防线失守"}</h2>
       <p>

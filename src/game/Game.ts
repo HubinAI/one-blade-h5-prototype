@@ -1226,7 +1226,7 @@ export class Game {
     ctx.fillText(`分 ${Math.floor(this.score)}`, 374, 45);
     ctx.fillStyle = "rgba(255, 211, 90, 0.68)";
     ctx.font = '800 10px "Microsoft YaHei", sans-serif';
-    ctx.fillText("V0.4 IAA", 374, 66);
+    ctx.fillText("V0708001", 374, 66);
 
     ctx.textAlign = "center";
     for (let i = 0; i < this.maxHp; i += 1) {
