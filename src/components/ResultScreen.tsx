@@ -12,7 +12,7 @@ type ResultScreenProps = {
 };
 
 function percent(value: number, target: number) {
-  return `${Math.min(100, Math.round((value / target) * 100))}%`;
+  return `${Math.min(100, Math.round((value / Math.max(1, target)) * 100))}%`;
 }
 
 export function ResultScreen({
@@ -29,15 +29,16 @@ export function ResultScreen({
 
   return (
     <section className="screen result-screen result-screen-v4">
+      <span className="version-tag">我只要一刀 V0.4 IAA版</span>
       <div className={`result-medal ${result.win ? "win" : "lost"}`}>{result.rating}</div>
       <h2>{result.win ? "破阵成功" : "防线失守"}</h2>
       <p>
-        第 {result.levelId} 关 · {result.levelTitle} · {Math.round(result.duration)} 秒
+        第 {result.levelId} 关 · {result.levelTitle} · 用时 {Math.round(result.duration)} 秒
       </p>
 
       <dl className="result-grid result-grid-v4">
         <div>
-          <dt>击杀</dt>
+          <dt>击杀数</dt>
           <dd>{result.kills}</dd>
         </div>
         <div>
@@ -50,15 +51,27 @@ export function ResultScreen({
         </div>
         <div>
           <dt>一刀破阵</dt>
-          <dd>{result.triggeredOneBlade ? "已触发" : "未触发"}</dd>
+          <dd>{result.oneBladeBreaks}</dd>
         </div>
         <div>
-          <dt>阵眼</dt>
-          <dd>{result.hitCore ? `${result.coreCollapseCount} 次` : "未切中"}</dd>
+          <dt>火药连爆</dt>
+          <dd>{result.explosiveCount}</dd>
+        </div>
+        <div>
+          <dt>阵眼崩散</dt>
+          <dd>{result.coreCollapseCount}</dd>
+        </div>
+        <div>
+          <dt>挥刀次数</dt>
+          <dd>{result.slashes}</dd>
         </div>
         <div>
           <dt>本关目标</dt>
           <dd>{result.completedGoal ? "完成" : "未完成"}</dd>
+        </div>
+        <div>
+          <dt>阵眼切中</dt>
+          <dd>{result.hitCore ? "是" : "否"}</dd>
         </div>
       </dl>
 
@@ -76,8 +89,10 @@ export function ResultScreen({
           <span>{result.rewards.shardName}</span>
           <b>+{result.rewards.shardCount}</b>
         </div>
-        {result.rewards.chestOpened && <em>战功宝箱已开启，获得额外金币与碎片</em>}
-        {result.rewards.adChestOpened && <em>广告宝箱已领取</em>}
+        {result.rewards.dailyBonusApplied && <em>今日首胜已生效：金币翻倍，额外战功和碎片已到账</em>}
+        {result.rewards.highYieldBonusApplied && <em>高收益挑战加成已生效</em>}
+        {result.rewards.chestOpened && <em>战功宝箱已开启，获得额外金币和碎片</em>}
+        {result.rewards.adChestOpened && <em>广告额外宝箱已领取</em>}
       </div>
 
       <div className="progress-panel">
@@ -122,11 +137,6 @@ export function ResultScreen({
         {result.win && hasNext && (
           <button className="primary-button" onClick={onNext}>
             下一关
-          </button>
-        )}
-        {!result.win && result.canReviveAd && (
-          <button className="primary-button" onClick={onRetry}>
-            看广告复活
           </button>
         )}
         <button className={result.win && hasNext ? "ghost-button" : "primary-button"} onClick={onRetry}>

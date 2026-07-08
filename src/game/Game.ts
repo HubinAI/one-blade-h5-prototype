@@ -9,7 +9,7 @@ import { REWARD_CONFIG } from "./config/rewards";
 import { getBladeTier, getTierConfig, consumeEnergyForSlash, recoverEnergy } from "./systems/bladeEnergySystem";
 import { isSharpTurn, segmentHitCircle } from "./systems/collisionSystem";
 import { paperBurst, ringParticle, sparkBurst } from "./systems/particleSystem";
-import { applyBattleRewards, evaluateRating } from "./services/ProgressionService";
+import { applyBattleRewards, evaluateRating, getUpgradeModifiers } from "./services/ProgressionService";
 import { logEvent } from "./services/Analytics";
 import type {
   BattleResult,
@@ -83,6 +83,7 @@ export class Game {
   private usedBuffTimes = new Set<number>();
   private runBuffs = new Set<BuffId>();
   private discoveredEnemies = new Set<EnemyKind>();
+  private progressionModifiers = getUpgradeModifiers();
 
   private stats: BattleStats = {
     kills: 0,
@@ -102,9 +103,9 @@ export class Game {
     this.level = level;
     this.onFinish = onFinish;
     this.onReviveOffer = onReviveOffer;
-    this.maxHp = Math.min(level.hp, BALANCE.player.maxHp);
+    this.maxHp = Math.min(level.hp + this.progressionModifiers.openingShield, BALANCE.player.maxHp + this.progressionModifiers.openingShield);
     this.hp = this.maxHp;
-    this.energy = level.initialEnergy;
+    this.energy = clamp(level.initialEnergy + this.progressionModifiers.initialEnergyBonus, 0, BALANCE.swordEnergy.max);
     this.hintSeen = this.readSeenHints();
     this.discoveredEnemies.add("infantry");
     if (level.id === 1) {
@@ -281,7 +282,7 @@ export class Game {
     this.warriorDrawTimer = 0.2;
     this.warriorSheathTimer = 0;
     this.lastSlashAngle = this.angleFromWarrior(pos);
-    logEvent("slash_start", { energy: lockedEnergy, stage: stage.name });
+    logEvent("slash_start", { levelId: this.level.id, energy: lockedEnergy, stage: stage.name });
     this.addText(pos.x, pos.y - 18, stage.prompt, stage.color, 16, BALANCE.feedback.stageTextLife);
     if (lockedEnergy < 25) {
       this.showHint("low-energy-slash", "刀势越满，刀芒越强", DESIGN_WIDTH / 2, 118, 2);
@@ -377,6 +378,7 @@ export class Game {
     }
 
     logEvent("slash_end", {
+      levelId: this.level.id,
       hitCount: trail.hitEnemyIds.size,
       killCount: trail.kills,
       stage: stage.name,
@@ -410,11 +412,11 @@ export class Game {
   }
 
   private getPathLengthMultiplier() {
-    return this.hasBuff("longBlade") ? 1.18 : 1;
+    return (this.hasBuff("longBlade") ? 1.18 : 1) * this.progressionModifiers.pathLength;
   }
 
   private getPassiveRegenMultiplier() {
-    return this.hasBuff("warDrum") ? 1.2 : 1;
+    return (this.hasBuff("warDrum") ? 1.2 : 1) * this.progressionModifiers.energyRegen;
   }
 
   private getKillEnergyMultiplier() {
@@ -422,7 +424,7 @@ export class Game {
   }
 
   private getExplosionRadiusMultiplier() {
-    return this.hasBuff("fireOil") ? 1.25 : 1;
+    return (this.hasBuff("fireOil") ? 1.25 : 1) * this.progressionModifiers.explosionRadius;
   }
 
   private getCoreRadiusMultiplier() {
@@ -580,7 +582,7 @@ export class Game {
       if (stage.canBreakShield || (trail.tier === "normal" && this.hasBuff("shieldBreaker"))) {
         this.killEnemy(enemy, trail, false, "shield");
       } else if (trail.tier === "normal") {
-        this.damageEnemy(enemy, 1, trail, false, "shield_crack");
+        this.damageEnemy(enemy, 1 * this.progressionModifiers.shieldDamageMultiplier, trail, false, "shield_crack");
         if (enemy.alive) {
           enemy.shieldCrack = 1;
           this.addText(enemy.x, enemy.y - 18, "盾裂", "#ffd67c", 13);
@@ -778,6 +780,12 @@ export class Game {
     pickup.active = false;
     this.stats.pickups += 1;
     this.score += 35;
+    logEvent("pickup_collected", {
+      levelId: this.level.id,
+      time: this.elapsed,
+      pickupKind: pickup.kind,
+      slashStage: SWORD_STAGE_BY_ID[trail.tier].name
+    });
     trail.energyBank = Math.min(
       BALANCE.swordEnergy.maxEnergyGainPerSlash,
       trail.energyBank + PICKUP_BALANCE[pickup.kind].energyGain
@@ -925,6 +933,9 @@ export class Game {
       kills: this.stats.kills,
       maxSingleBlade: this.stats.maxSingleBlade,
       maxChain: this.stats.maxChain,
+      oneBladeBreaks: this.stats.oneBladeBreaks,
+      coreCollapseCount: this.stats.coreCollapses,
+      explosiveCount: this.stats.explosions,
       rating,
       discoveredEnemies: [...this.discoveredEnemies]
     });
@@ -938,6 +949,7 @@ export class Game {
       kills: this.stats.kills,
       maxSingleBlade: this.stats.maxSingleBlade,
       maxChain: this.stats.maxChain,
+      oneBladeBreaks: this.stats.oneBladeBreaks,
       triggeredOneBlade,
       hitCore: this.stats.coreHits > 0,
       coreCollapseCount: this.stats.coreCollapses,
@@ -1159,6 +1171,9 @@ export class Game {
     const remaining = Math.max(0, Math.ceil(this.level.durationSeconds - this.elapsed));
     ctx.fillText(`${remaining}s  ${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`, 374, 24);
     ctx.fillText(`分 ${Math.floor(this.score)}`, 374, 45);
+    ctx.fillStyle = "rgba(255, 211, 90, 0.68)";
+    ctx.font = '800 10px "Microsoft YaHei", sans-serif';
+    ctx.fillText("V0.4 IAA", 374, 66);
 
     ctx.textAlign = "center";
     for (let i = 0; i < this.maxHp; i += 1) {

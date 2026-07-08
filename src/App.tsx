@@ -6,19 +6,27 @@ import { MainMenu } from "./components/MainMenu";
 import { LevelSelect } from "./components/LevelSelect";
 import { ResultScreen } from "./components/ResultScreen";
 import { AdOverlay } from "./components/AdOverlay";
+import { UpgradeScreen } from "./components/UpgradeScreen";
 import type { ReviveOffer } from "./game/Game";
 import { AdService } from "./game/services/AdService";
 import {
   beginRun,
+  buyUpgrade,
   canShowInterstitial,
   claimAdChest,
   claimDoubleReward,
+  claimOfflineReward,
+  getHomeSnapshot,
   markInterstitialShown,
-  registerRewardedAd
+  registerRewardedAd,
+  restoreStaminaByAd,
+  spendStamina,
+  type RunMode
 } from "./game/services/ProgressionService";
 import { logEvent } from "./game/services/Analytics";
+import type { UpgradeId } from "./game/config/rewards";
 
-type Screen = "menu" | "levels" | "battle" | "result";
+type Screen = "menu" | "levels" | "battle" | "result" | "upgrades";
 
 const SAVE_KEY = "one_blade_v02_progress";
 
@@ -35,6 +43,7 @@ function writeUnlockedLevel(levelId: number) {
 export default function App() {
   const [screen, setScreen] = useState<Screen>("menu");
   const [unlockedLevel, setUnlockedLevel] = useState(readUnlockedLevel);
+  const [home, setHome] = useState(getHomeSnapshot);
   const [currentLevel, setCurrentLevel] = useState<LevelConfig>(LEVELS[0]);
   const [lastResult, setLastResult] = useState<BattleResult | null>(null);
   const [runIndex, setRunIndex] = useState(0);
@@ -42,29 +51,39 @@ export default function App() {
   const [reviveSignal, setReviveSignal] = useState(0);
   const [declineReviveSignal, setDeclineReviveSignal] = useState(0);
 
+  const refreshHome = useCallback(() => setHome(getHomeSnapshot()), []);
+
   const unlockedMap = useMemo(() => {
     return new Set(LEVELS.filter((level) => level.id <= unlockedLevel).map((level) => level.id));
   }, [unlockedLevel]);
 
-  const startLevel = useCallback((level: LevelConfig) => {
-    setRunIndex(beginRun(level.id));
-    setCurrentLevel(level);
-    setLastResult(null);
-    setReviveOffer(null);
-    setScreen("battle");
-  }, []);
+  const startLevel = useCallback(
+    (level: LevelConfig, mode: RunMode = "normal") => {
+      setRunIndex(beginRun(level.id, mode));
+      setCurrentLevel(level);
+      setLastResult(null);
+      setReviveOffer(null);
+      refreshHome();
+      setScreen("battle");
+    },
+    [refreshHome]
+  );
 
-  const handleFinish = useCallback((result: BattleResult) => {
-    setLastResult(result);
-    if (result.win) {
-      setUnlockedLevel((current) => {
-        const next = Math.max(current, Math.min(LEVELS.length, result.levelId + 1));
-        writeUnlockedLevel(next);
-        return next;
-      });
-    }
-    window.setTimeout(() => setScreen("result"), 180);
-  }, []);
+  const handleFinish = useCallback(
+    (result: BattleResult) => {
+      setLastResult(result);
+      if (result.win) {
+        setUnlockedLevel((current) => {
+          const next = Math.max(current, Math.min(LEVELS.length, result.levelId + 1));
+          writeUnlockedLevel(next);
+          return next;
+        });
+      }
+      refreshHome();
+      window.setTimeout(() => setScreen("result"), 180);
+    },
+    [refreshHome]
+  );
 
   const nextLevel = LEVELS.find((level) => level.id === (lastResult?.levelId ?? 0) + 1);
 
@@ -91,30 +110,78 @@ export default function App() {
     const success = await AdService.showRewardedAd("double_reward");
     if (!success) return;
     setLastResult(claimDoubleReward(lastResult));
-  }, [lastResult]);
+    refreshHome();
+  }, [lastResult, refreshHome]);
 
   const handleAdChest = useCallback(async () => {
     if (!lastResult) return;
     const success = await AdService.showRewardedAd("bonus_chest");
     if (!success) return;
     setLastResult(claimAdChest(lastResult));
-  }, [lastResult]);
+    refreshHome();
+  }, [lastResult, refreshHome]);
 
   const handleRevive = useCallback(async () => {
     if (!reviveOffer) return;
     const success = await AdService.showRewardedAd("revive");
     if (success) {
-      registerRewardedAd();
+      registerRewardedAd("revive", reviveOffer.levelId);
       setReviveSignal((value) => value + 1);
+      refreshHome();
     } else {
+      logEvent("ad_skip", { adType: "rewarded", reason: "revive", levelId: reviveOffer.levelId });
       setDeclineReviveSignal((value) => value + 1);
     }
     setReviveOffer(null);
-  }, [reviveOffer]);
+  }, [refreshHome, reviveOffer]);
 
   const declineRevive = useCallback(() => {
+    if (reviveOffer) logEvent("ad_skip", { adType: "rewarded", reason: "revive", levelId: reviveOffer.levelId });
     setDeclineReviveSignal((value) => value + 1);
     setReviveOffer(null);
+  }, [reviveOffer]);
+
+  const handleHighYieldChallenge = useCallback(async () => {
+    if (!spendStamina(5, "high_yield_challenge")) {
+      const success = await AdService.showRewardedAd("stamina_restore");
+      if (success) {
+        restoreStaminaByAd();
+        refreshHome();
+      }
+      return;
+    }
+    refreshHome();
+    startLevel(LEVELS[Math.max(0, unlockedLevel - 1)], "highYield");
+  }, [refreshHome, startLevel, unlockedLevel]);
+
+  const handleRestoreStamina = useCallback(async () => {
+    const success = await AdService.showRewardedAd("stamina_restore");
+    if (success) {
+      restoreStaminaByAd();
+      refreshHome();
+    }
+  }, [refreshHome]);
+
+  const handleDailyChallenge = useCallback(() => {
+    const level = LEVELS[Math.max(0, Math.min(LEVELS.length - 1, unlockedLevel - 1))];
+    startLevel(level, "dailyChallenge");
+  }, [startLevel, unlockedLevel]);
+
+  const handleBuyUpgrade = useCallback(
+    (id: UpgradeId) => {
+      const result = buyUpgrade(id);
+      setHome(result.progress);
+    },
+    []
+  );
+
+  const handleClaimOffline = useCallback(() => {
+    setHome(claimOfflineReward(false));
+  }, []);
+
+  const handleClaimOfflineDouble = useCallback(async () => {
+    const success = await AdService.showRewardedAd("double_reward");
+    if (success) setHome(claimOfflineReward(true));
   }, []);
 
   return (
@@ -122,8 +189,16 @@ export default function App() {
       {screen === "menu" && (
         <MainMenu
           unlockedLevel={unlockedLevel}
-          onStart={() => startLevel(LEVELS[Math.max(0, unlockedLevel - 1)])}
+          home={home}
+          onStart={() => startLevel(LEVELS[0])}
+          onContinue={() => startLevel(LEVELS[Math.max(0, unlockedLevel - 1)])}
           onLevels={() => setScreen("levels")}
+          onDailyChallenge={handleDailyChallenge}
+          onHighYieldChallenge={handleHighYieldChallenge}
+          onUpgrades={() => setScreen("upgrades")}
+          onRestoreStamina={handleRestoreStamina}
+          onClaimOffline={handleClaimOffline}
+          onClaimOfflineDouble={handleClaimOfflineDouble}
         />
       )}
 
@@ -131,8 +206,22 @@ export default function App() {
         <LevelSelect
           levels={LEVELS}
           unlockedIds={unlockedMap}
-          onBack={() => setScreen("menu")}
-          onSelect={startLevel}
+          onBack={() => {
+            refreshHome();
+            setScreen("menu");
+          }}
+          onSelect={(level) => startLevel(level)}
+        />
+      )}
+
+      {screen === "upgrades" && (
+        <UpgradeScreen
+          home={home}
+          onBack={() => {
+            refreshHome();
+            setScreen("menu");
+          }}
+          onBuy={handleBuyUpgrade}
         />
       )}
 
@@ -170,7 +259,10 @@ export default function App() {
           onRetry={handleRetry}
           onNext={handleNext}
           onLevels={() => setScreen("levels")}
-          onHome={() => setScreen("menu")}
+          onHome={() => {
+            refreshHome();
+            setScreen("menu");
+          }}
           onDoubleReward={handleDoubleReward}
           onAdChest={handleAdChest}
         />

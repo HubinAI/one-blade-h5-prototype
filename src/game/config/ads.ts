@@ -7,7 +7,7 @@ export const AD_CONFIG = {
   rewardedDoubleReward: {
     enabled: true
   },
-  rewardedChest: {
+  rewardedExtraChest: {
     enabled: true
   },
   interstitial: {

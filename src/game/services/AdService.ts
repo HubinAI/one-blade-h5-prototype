@@ -2,7 +2,7 @@ import { AD_CONFIG } from "../config/ads";
 import { logEvent } from "./Analytics";
 
 export type AdType = "rewarded" | "interstitial";
-export type AdReason = "revive" | "double_reward" | "bonus_chest" | "next_level" | "between_runs";
+export type AdReason = "revive" | "double_reward" | "bonus_chest" | "stamina_restore" | "next_level" | "between_runs";
 
 export type AdRequest = {
   adType: AdType;
@@ -42,7 +42,8 @@ export const AdService = {
   canShowRewardedAd(reason: AdReason) {
     if (reason === "revive") return AD_CONFIG.rewardedRevive.enabled;
     if (reason === "double_reward") return AD_CONFIG.rewardedDoubleReward.enabled;
-    if (reason === "bonus_chest") return AD_CONFIG.rewardedChest.enabled;
+    if (reason === "bonus_chest") return AD_CONFIG.rewardedExtraChest.enabled;
+    if (reason === "stamina_restore") return true;
     return true;
   },
 

@@ -164,6 +164,8 @@ export type RunRewards = {
   doubled: boolean;
   chestOpened: boolean;
   adChestOpened: boolean;
+  dailyBonusApplied?: boolean;
+  highYieldBonusApplied?: boolean;
 };
 
 export type RunProgress = {
@@ -189,6 +191,7 @@ export type BattleResult = {
   kills: number;
   maxSingleBlade: number;
   maxChain: number;
+  oneBladeBreaks: number;
   triggeredOneBlade: boolean;
   hitCore: boolean;
   coreCollapseCount: number;
