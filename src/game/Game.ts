@@ -26,6 +26,7 @@ import { choose, clamp, distance, randomRange } from "../utils/math";
 type FinishCallback = (result: BattleResult) => void;
 
 const paperColors = ["#ead8a7", "#caa565", "#f6e7bd", "#8f5b32", "#ffd67c"];
+const HINT_STORAGE_KEY = "one_blade_v03_seen_hints";
 
 export class Game {
   readonly level: LevelConfig;
@@ -62,6 +63,7 @@ export class Game {
   private warriorSheathTimer = 0;
   private lastSlashAngle = -Math.PI / 2;
   private debugEnabled = false;
+  private hintSeen: Set<string>;
 
   private stats: BattleStats = {
     kills: 0,
@@ -77,6 +79,10 @@ export class Game {
     this.onFinish = onFinish;
     this.hp = Math.min(level.hp, BALANCE.player.maxHp);
     this.energy = level.initialEnergy;
+    this.hintSeen = this.readSeenHints();
+    if (level.id === 1) {
+      this.showHint("start-slash", "随时拖动挥刀", DESIGN_WIDTH / 2, 118, 2);
+    }
   }
 
   toggleDebugPanel() {
@@ -98,6 +104,9 @@ export class Game {
     this.regenDelayTimer = Math.max(0, this.regenDelayTimer - scaledDt);
     if (!this.currentSlash?.active && this.regenDelayTimer <= 0) {
       this.energy = recoverEnergy(this.energy, scaledDt, this.drumTimer);
+    }
+    if (!this.currentSlash?.active && this.energy >= 90) {
+      this.showHint("burst-ready", "破阵锋已成", DESIGN_WIDTH / 2, 656, 1);
     }
 
     this.drumTimer = Math.max(0, this.drumTimer - scaledDt);
@@ -164,11 +173,6 @@ export class Game {
   }
 
   private startSlash(pos: Vec2) {
-    if (this.energy < BALANCE.slash.minEnergyToSlash) {
-      this.addText(pos.x, pos.y - 18, "刀势未起", "#d9b45b", 14);
-      return;
-    }
-
     const lockedEnergy = clamp(this.energy, 0, BALANCE.swordEnergy.max);
     const tier = getBladeTier(lockedEnergy);
     const stage = SWORD_STAGE_BY_ID[tier];
@@ -212,7 +216,10 @@ export class Game {
     this.warriorDrawTimer = 0.2;
     this.warriorSheathTimer = 0;
     this.lastSlashAngle = this.angleFromWarrior(pos);
-    this.addText(pos.x, pos.y - 18, stage.name, stage.color, 17);
+    this.addText(pos.x, pos.y - 18, stage.prompt, stage.color, 16, BALANCE.feedback.stageTextLife);
+    if (lockedEnergy < 25) {
+      this.showHint("low-energy-slash", "刀势越满，刀芒越强", DESIGN_WIDTH / 2, 118, 2);
+    }
     this.particles.push(...sparkBurst(pos, tier === "burst" ? 15 : 8, stage.color));
     this.checkSegmentHits(point, point, this.currentSlash);
   }
@@ -265,9 +272,12 @@ export class Game {
 
     trail.active = false;
     this.resolvePendingSlash(trail);
+    const slashBonus = this.getSlashScoreBonus(trail.kills);
+    if (slashBonus > 0) this.score += slashBonus;
 
     if (BALANCE.swordEnergy.applyKillEnergyAfterSlash) {
-      this.energy = clamp(this.energy + trail.energyBank, 0, BALANCE.swordEnergy.max);
+      const gainedEnergy = Math.min(trail.energyBank, BALANCE.swordEnergy.maxEnergyGainPerSlash);
+      this.energy = clamp(this.energy + gainedEnergy, 0, BALANCE.swordEnergy.max);
     }
 
     this.stats.maxSingleBlade = Math.max(this.stats.maxSingleBlade, trail.kills);
@@ -285,6 +295,7 @@ export class Game {
     }
     if (trail.kills > 0) {
       this.addText(last.x, last.y - 28, `${stage.scoreName} x${trail.kills}`, stage.color, 17);
+      if (slashBonus > 0) this.addText(last.x, last.y - 46, `+${slashBonus}`, "#ffd67c", 13);
     } else {
       this.addText(last.x, last.y - 22, reason, "#d9b45b", 14);
     }
@@ -307,6 +318,13 @@ export class Game {
     if (trail.kills >= 4) return "连斩";
     if (trail.kills >= 1) return "斩击";
     return fallback;
+  }
+
+  private getSlashScoreBonus(kills: number) {
+    if (kills >= 12) return BALANCE.score.slashKillBonus12;
+    if (kills >= 8) return BALANCE.score.slashKillBonus8;
+    if (kills >= 4) return BALANCE.score.slashKillBonus4;
+    return 0;
   }
 
   private getSlashRatio(trail: SlashTrail) {
@@ -368,15 +386,23 @@ export class Game {
       trail.pendingExplosionIds.add(enemy.id);
       this.score += 4;
       this.addText(enemy.x, enemy.y - 18, "点燃", "#ffb15c", 14);
+      this.showHint("powder-hit", "收刀引爆火药", enemy.x, Math.max(110, enemy.y - 38), 2);
       this.particles.push(...sparkBurst(enemy, 10, "#ffb15c"));
     }
 
     if (enemy.kind === "core") {
-      enemy.marked = true;
-      trail.pendingCoreIds.add(enemy.id);
-      this.score += 6;
-      this.addText(enemy.x, enemy.y - 20, "阵眼破裂", "#e8d7ff", 14);
-      this.particles.push(ringParticle(enemy, "#e8d7ff", 34));
+      if (stage.canTriggerCoreCollapse) {
+        enemy.marked = true;
+        trail.pendingCoreIds.add(enemy.id);
+        this.score += 6;
+        this.addText(enemy.x, enemy.y - 20, "阵眼破裂", "#e8d7ff", 14);
+        this.showHint("core-hit", "收刀破阵", enemy.x, Math.max(110, enemy.y - 42), 2);
+        this.particles.push(ringParticle(enemy, "#e8d7ff", 34));
+      } else {
+        enemy.flash = 0.32;
+        this.addText(enemy.x, enemy.y - 20, "裂纹未成", "#d9b45b", 13);
+        this.particles.push(ringParticle(enemy, "#d9b45b", 22));
+      }
     }
 
     if (trail.hasOil && !trail.oilTriggeredIds.has(enemy.id)) {
@@ -386,6 +412,7 @@ export class Game {
   }
 
   private triggerOilBurst(origin: Vec2, trail: SlashTrail) {
+    const stage = SWORD_STAGE_BY_ID[trail.tier];
     const radius = PICKUP_BALANCE.oil.extraExplosionRadius ?? 60;
     this.particles.push(ringParticle(origin, "#f0a235", radius));
     this.particles.push(...sparkBurst(origin, 16, "#f0a235"));
@@ -396,10 +423,10 @@ export class Game {
       if (enemy.kind === "powder") {
         enemy.ignited = true;
         trail.pendingExplosionIds.add(enemy.id);
-      } else if (enemy.kind === "core") {
+      } else if (enemy.kind === "core" && stage.canTriggerCoreCollapse) {
         enemy.marked = true;
         trail.pendingCoreIds.add(enemy.id);
-      } else {
+      } else if (enemy.kind !== "core") {
         this.damageEnemy(enemy, 1, trail, true, "oil");
       }
     }
@@ -430,8 +457,10 @@ export class Game {
     const affectByBlast = (target: Enemy, damage: number, source: string) => {
       if (target.kind === "powder") {
         enqueueExplosion(target);
-      } else if (target.kind === "core") {
+      } else if (target.kind === "core" && stage.canTriggerCoreCollapse) {
         enqueueCore(target);
+      } else if (target.kind === "core") {
+        target.flash = 0.25;
       } else {
         this.damageEnemy(target, damage, trail, true, source);
       }
@@ -471,7 +500,7 @@ export class Game {
         collapsed.add(id);
         trail.coreCollapseCount += 1;
         this.killEnemy(enemy, trail, true, "core");
-        const radius = Math.max(stage.coreCollapseRadius, trail.tier === "weak" ? 0 : ENEMY_BALANCE.core.collapseRadius ?? 130);
+        const radius = stage.canTriggerCoreCollapse ? stage.coreCollapseRadius : 0;
         this.particles.push(ringParticle(enemy, "#e8d7ff", radius));
         this.particles.push(...paperBurst(enemy, 28, ["#e8d7ff", "#c7a7ff", "#5d4a8f"]));
         this.addText(enemy.x, enemy.y - 30, trail.tier === "burst" ? "大阵崩散" : "阵崩", "#e8d7ff", 18);
@@ -512,12 +541,15 @@ export class Game {
     trail.kills += 1;
     if (chainKill) trail.chain += 1;
     this.stats.kills += 1;
-    const chainBonus = chainKill ? 6 + trail.chain * 2 : 0;
+    const stage = SWORD_STAGE_BY_ID[trail.tier];
+    const chainBonus = chainKill ? BALANCE.score.chainKillBonus * Math.max(1, trail.chain) : 0;
     this.score += enemy.score + chainBonus;
-    trail.energyBank += enemy.energyGain + (chainKill ? 2 : 0);
+    const energyReward = (enemy.energyGain + (chainKill ? 1.5 : 0)) * stage.killEnergyMultiplier;
+    trail.energyBank = Math.min(BALANCE.swordEnergy.maxEnergyGainPerSlash, trail.energyBank + energyReward);
 
     const colors = source === "core" || source === "core_chain" ? ["#e8d7ff", "#5d4a8f", "#ead8a7"] : paperColors;
-    this.particles.push(...paperBurst(enemy, enemy.kind === "shield" ? 20 : 15, colors));
+    const stageBurstBoost = trail.tier === "burst" ? 8 : trail.tier === "strong" ? 4 : 0;
+    this.particles.push(...paperBurst(enemy, (enemy.kind === "shield" ? 20 : 15) + stageBurstBoost, colors));
     if (source === "powder" || source === "oil" || source === "chain") {
       this.particles.push(...sparkBurst(enemy, 18, source === "powder" ? "#ffb15c" : "#ffd67c"));
     }
@@ -529,7 +561,10 @@ export class Game {
     pickup.active = false;
     this.stats.pickups += 1;
     this.score += 35;
-    trail.energyBank += PICKUP_BALANCE[pickup.kind].energyGain;
+    trail.energyBank = Math.min(
+      BALANCE.swordEnergy.maxEnergyGainPerSlash,
+      trail.energyBank + PICKUP_BALANCE[pickup.kind].energyGain
+    );
 
     if (pickup.kind === "drum") {
       this.drumTimer = PICKUP_BALANCE.drum.duration === "next_slash" ? 5 : PICKUP_BALANCE.drum.duration;
@@ -606,6 +641,9 @@ export class Game {
 
     for (const spawn of wave.enemies) {
       this.enemies.push(this.createEnemy(spawn.kind, spawn.x, BALANCE.battlefield.enemySpawnY - (spawn.yOffset ?? 0)));
+    }
+    if (wave.enemies.some((spawn) => spawn.kind === "shield")) {
+      this.showHint("shield-seen", "强锋可破盾", DESIGN_WIDTH / 2, 118, 2);
     }
 
     const configuredPickup = wave.pickups?.[0];
@@ -700,14 +738,47 @@ export class Game {
     return `${prefix}_${this.idCounter}`;
   }
 
-  private addText(x: number, y: number, text: string, color: string, size: number) {
+  private readSeenHints() {
+    if (typeof window === "undefined") return new Set<string>();
+    try {
+      const raw = window.localStorage.getItem(HINT_STORAGE_KEY);
+      return new Set<string>(raw ? JSON.parse(raw) : []);
+    } catch {
+      return new Set<string>();
+    }
+  }
+
+  private persistSeenHints() {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(HINT_STORAGE_KEY, JSON.stringify([...this.hintSeen]));
+    } catch {
+      // localStorage can be unavailable in private browser contexts.
+    }
+  }
+
+  private showHint(id: string, text: string, x: number, y: number, life: number = BALANCE.feedback.hintTextLife) {
+    if (this.hintSeen.has(id)) return;
+    this.hintSeen.add(id);
+    this.persistSeenHints();
+    this.addText(clamp(x, 72, DESIGN_WIDTH - 72), clamp(y, 104, 668), text, "#fff0ba", 16, life);
+  }
+
+  private addText(
+    x: number,
+    y: number,
+    text: string,
+    color: string,
+    size: number,
+    life: number = BALANCE.feedback.floatingTextLife
+  ) {
     this.texts.push({
       id: this.nextId("text"),
       x,
       y,
       text,
-      life: BALANCE.feedback.floatingTextLife,
-      maxLife: BALANCE.feedback.floatingTextLife,
+      life,
+      maxLife: life,
       color,
       size
     });
@@ -722,6 +793,15 @@ export class Game {
 
   private angleFromWarrior(pos: Vec2) {
     return Math.atan2(pos.y - (BALANCE.battlefield.warriorY + 28), pos.x - DESIGN_WIDTH / 2);
+  }
+
+  private getDefensePressure() {
+    if (this.enemies.length === 0) return 0;
+    const closest = this.enemies.reduce(
+      (min, enemy) => (enemy.alive ? Math.min(min, BALANCE.battlefield.bottomDefenseY - enemy.y) : min),
+      Number.POSITIVE_INFINITY
+    );
+    return clamp(1 - closest / 128, 0, 1);
   }
 
   private drawBackground(ctx: CanvasRenderingContext2D) {
@@ -760,14 +840,18 @@ export class Game {
     this.drawBanner(ctx, 28, 112, "#77311d");
     this.drawBanner(ctx, 356, 132, "#5c2c54");
 
-    ctx.strokeStyle = "rgba(255, 214, 124, 0.22)";
-    ctx.lineWidth = 1;
+    const pressure = this.getDefensePressure();
+    ctx.strokeStyle = pressure > 0 ? `rgba(255, 86, 68, ${0.22 + pressure * 0.58})` : "rgba(255, 214, 124, 0.22)";
+    ctx.lineWidth = pressure > 0 ? 1.5 + pressure * 3 : 1;
+    ctx.shadowColor = "rgba(255, 70, 56, 0.55)";
+    ctx.shadowBlur = pressure * 18;
     ctx.setLineDash([8, 8]);
     ctx.beginPath();
     ctx.moveTo(18, BALANCE.battlefield.bottomDefenseY);
     ctx.lineTo(DESIGN_WIDTH - 18, BALANCE.battlefield.bottomDefenseY);
     ctx.stroke();
     ctx.setLineDash([]);
+    ctx.shadowBlur = 0;
   }
 
   private drawBanner(ctx: CanvasRenderingContext2D, x: number, y: number, color: string) {
@@ -901,6 +985,18 @@ export class Game {
         ctx.lineTo(-10, 8);
         ctx.closePath();
         ctx.stroke();
+        if (enemy.marked) {
+          ctx.strokeStyle = "#fff8d8";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(-9, -9);
+          ctx.lineTo(1, -1);
+          ctx.lineTo(-4, 10);
+          ctx.moveTo(8, -7);
+          ctx.lineTo(2, 1);
+          ctx.lineTo(9, 10);
+          ctx.stroke();
+        }
       }
 
       if (enemy.ignited || enemy.marked) {
@@ -955,7 +1051,9 @@ export class Game {
     const stage = SWORD_STAGE_BY_ID[trail.tier];
     const ratio = this.getSlashRatio(trail);
     const points = trail.points;
-    const width = stage.width * trail.widthMultiplier * (0.35 + ratio * 0.9);
+    const isLowBlade = ratio <= BALANCE.slash.lowBladeRemainRatio;
+    const lowFade = isLowBlade ? 0.46 + (ratio / BALANCE.slash.lowBladeRemainRatio) * 0.38 : 1;
+    const width = stage.width * trail.widthMultiplier * (0.28 + ratio * 0.95);
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
@@ -966,10 +1064,10 @@ export class Game {
       const a = points[i - 1];
       const b = points[i];
       const age = i / Math.max(1, points.length - 1);
-      const alpha = clamp(age * b.energyRatio * stage.brightness, 0.08, 0.95);
+      const alpha = clamp(age * b.energyRatio * stage.brightness * lowFade, 0.05, 0.95);
       ctx.strokeStyle = `rgba(255, 213, 112, ${alpha * 0.58})`;
       ctx.shadowColor = stage.color;
-      ctx.shadowBlur = 18 + stage.width * 0.7;
+      ctx.shadowBlur = (18 + stage.width * 0.7) * lowFade;
       ctx.lineWidth = width * (0.9 + b.energyRatio);
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
@@ -988,7 +1086,7 @@ export class Game {
     const last = points[points.length - 1];
     const prev = points[points.length - 2];
     const angle = prev ? Math.atan2(last.y - prev.y, last.x - prev.x) : this.lastSlashAngle;
-    const visualLength = stage.visualLength * (0.45 + ratio * 0.78);
+    const visualLength = stage.visualLength * (0.34 + ratio * 0.82) * lowFade;
     this.drawBladeTip(ctx, last, angle, visualLength, width, stage.color, ratio);
     ctx.restore();
   }
@@ -999,10 +1097,11 @@ export class Game {
     const side = angle + Math.PI / 2;
 
     ctx.shadowColor = color;
-    ctx.shadowBlur = 18 + width;
+    const lowFade = ratio <= BALANCE.slash.lowBladeRemainRatio ? 0.48 : 1;
+    ctx.shadowBlur = (18 + width) * lowFade;
     const blade = ctx.createLinearGradient(pos.x, pos.y, x2, y2);
-    blade.addColorStop(0, `rgba(255,255,255,${0.42 + ratio * 0.5})`);
-    blade.addColorStop(0.48, `rgba(255,233,151,${0.36 + ratio * 0.5})`);
+    blade.addColorStop(0, `rgba(255,255,255,${(0.36 + ratio * 0.54) * lowFade})`);
+    blade.addColorStop(0.48, `rgba(255,233,151,${(0.28 + ratio * 0.55) * lowFade})`);
     blade.addColorStop(1, "rgba(255,255,255,0)");
     ctx.fillStyle = blade;
     ctx.beginPath();
@@ -1022,7 +1121,7 @@ export class Game {
     ctx.closePath();
     ctx.fill();
 
-    ctx.fillStyle = `rgba(255,255,255,${0.22 + ratio * 0.36})`;
+    ctx.fillStyle = `rgba(255,255,255,${(0.18 + ratio * 0.38) * lowFade})`;
     ctx.beginPath();
     ctx.arc(pos.x, pos.y, Math.max(5, width * 0.72), 0, Math.PI * 2);
     ctx.fill();
@@ -1062,6 +1161,7 @@ export class Game {
 
   private drawDefenseAndWarrior(ctx: CanvasRenderingContext2D) {
     ctx.save();
+    const energyRatio = this.energy / BALANCE.swordEnergy.max;
     const wall = ctx.createLinearGradient(0, WALL_TOP_Y, 0, DESIGN_HEIGHT);
     wall.addColorStop(0, "#57331f");
     wall.addColorStop(1, "#1f140f");
@@ -1073,6 +1173,20 @@ export class Game {
     ctx.moveTo(0, WALL_TOP_Y);
     ctx.lineTo(DESIGN_WIDTH, WALL_TOP_Y);
     ctx.stroke();
+    if (energyRatio >= 0.9) {
+      const pulse = 0.5 + Math.sin(this.elapsed * 6) * 0.5;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.strokeStyle = `rgba(255, 222, 112, ${0.28 + pulse * 0.34})`;
+      ctx.shadowColor = "#ffd35a";
+      ctx.shadowBlur = 18 + pulse * 10;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(0, WALL_TOP_Y + 1);
+      ctx.lineTo(DESIGN_WIDTH, WALL_TOP_Y + 1);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     ctx.globalAlpha = 0.23;
     ctx.fillStyle = "#efd08c";
@@ -1084,7 +1198,6 @@ export class Game {
 
     const cx = DESIGN_WIDTH / 2;
     const cy = BALANCE.battlefield.warriorY + 28;
-    const energyRatio = this.energy / BALANCE.swordEnergy.max;
     const stage = SWORD_STAGE_BY_ID[getBladeTier(this.energy)];
     const drawPulse = this.warriorDrawTimer > 0 ? 1 : 0;
     const sheathPulse = this.warriorSheathTimer > 0 ? 1 : 0;
@@ -1092,7 +1205,8 @@ export class Game {
     ctx.save();
     ctx.translate(cx, cy);
     ctx.globalCompositeOperation = "lighter";
-    for (let i = 0; i < (energyRatio >= 0.9 ? 3 : 1); i += 1) {
+    const auraCount = energyRatio >= 0.9 ? 4 : energyRatio >= 0.6 ? 2 : 1;
+    for (let i = 0; i < auraCount; i += 1) {
       ctx.strokeStyle = stage.color;
       ctx.shadowColor = stage.color;
       ctx.shadowBlur = 12 + energyRatio * 28;
@@ -1101,6 +1215,19 @@ export class Game {
       ctx.beginPath();
       ctx.arc(0, -12, 42 + energyRatio * 18 + drawPulse * 8 + i * 9 + Math.sin(this.elapsed * 5 + i) * 2, -Math.PI * 0.92, -Math.PI * 0.92 + energyRatio * Math.PI * 1.85);
       ctx.stroke();
+    }
+    if (energyRatio >= 0.6) {
+      for (let i = 0; i < 4; i += 1) {
+        const angle = this.elapsed * 2.2 + i * Math.PI * 0.5;
+        const r = 34 + energyRatio * 28 + Math.sin(this.elapsed * 4 + i) * 4;
+        ctx.globalAlpha = 0.2 + energyRatio * 0.28;
+        ctx.strokeStyle = stage.color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(angle) * r, -14 + Math.sin(angle) * r * 0.36);
+        ctx.quadraticCurveTo(0, -44 - energyRatio * 18, Math.cos(angle + 0.7) * (r + 12), -12 + Math.sin(angle + 0.7) * r * 0.36);
+        ctx.stroke();
+      }
     }
     ctx.restore();
 
@@ -1160,7 +1287,7 @@ export class Game {
     ctx.fillStyle = "#f6e7bd";
     ctx.font = '700 13px "Microsoft YaHei", sans-serif';
     ctx.textAlign = "center";
-    ctx.fillText(`刀势 ${stage.name}`, DESIGN_WIDTH / 2, 828);
+    ctx.fillText(`刀势 ${Math.floor(this.energy)}% ${stage.name}`, DESIGN_WIDTH / 2, 828);
   }
 
   private drawFloatingTexts(ctx: CanvasRenderingContext2D) {
@@ -1185,21 +1312,24 @@ export class Game {
     const stage = getTierConfig(tier);
     const slash = this.currentSlash;
     const lines = [
-      `energy: ${this.energy.toFixed(1)}`,
-      `stage: ${stage.label}`,
-      `slash time: ${slash ? slash.remainingDuration.toFixed(2) : "-"}`,
-      `slash path: ${slash ? slash.remainingPathLength.toFixed(0) : "-"}`,
+      `level: ${this.level.id}`,
+      `phase: ${this.phase}`,
       `wave: ${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`,
       `enemies: ${this.enemies.length}`,
+      `energy: ${this.energy.toFixed(1)}`,
+      `stage: ${stage.label}`,
+      `slash stage: ${slash ? SWORD_STAGE_BY_ID[slash.tier].name : "-"}`,
+      `slash time: ${slash ? slash.remainingDuration.toFixed(2) : "-"}`,
+      `slash path: ${slash ? slash.remainingPathLength.toFixed(0) : "-"}`,
       `hits: ${slash ? slash.hitEnemyIds.size : 0}`,
       `max single: ${this.stats.maxSingleBlade}`
     ];
 
     ctx.save();
     ctx.fillStyle = "rgba(13, 16, 17, 0.78)";
-    ctx.fillRect(10, 82, 156, 154);
+    ctx.fillRect(10, 82, 178, 190);
     ctx.strokeStyle = "rgba(255, 214, 124, 0.36)";
-    ctx.strokeRect(10, 82, 156, 154);
+    ctx.strokeRect(10, 82, 178, 190);
     ctx.fillStyle = "#f6e7bd";
     ctx.font = '11px "Consolas", monospace';
     ctx.textAlign = "left";
