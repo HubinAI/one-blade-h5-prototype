@@ -9,7 +9,7 @@ import { REWARD_CONFIG } from "./config/rewards";
 import { getBladeTier, getTierConfig, consumeEnergyForSlash, recoverEnergy } from "./systems/bladeEnergySystem";
 import { isSharpTurn, segmentHitCircle } from "./systems/collisionSystem";
 import { paperBurst, ringParticle, sparkBurst } from "./systems/particleSystem";
-import { applyBattleRewards, evaluateRating, getUpgradeModifiers } from "./services/ProgressionService";
+import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers } from "./services/ProgressionService";
 import { logEvent } from "./services/Analytics";
 import type {
   BattleResult,
@@ -84,6 +84,7 @@ export class Game {
   private runBuffs = new Set<BuffId>();
   private discoveredEnemies = new Set<EnemyKind>();
   private progressionModifiers = getUpgradeModifiers();
+  private runContext = getCurrentRunContext();
 
   private stats: BattleStats = {
     kills: 0,
@@ -416,7 +417,8 @@ export class Game {
   }
 
   private getPassiveRegenMultiplier() {
-    return (this.hasBuff("warDrum") ? 1.2 : 1) * this.progressionModifiers.energyRegen;
+    const dailyBoost = this.runContext.mode === "dailyChallenge" && this.runContext.dailyChallengeId === "fast_energy" ? 1.2 : 1;
+    return (this.hasBuff("warDrum") ? 1.2 : 1) * this.progressionModifiers.energyRegen * dailyBoost;
   }
 
   private getKillEnergyMultiplier() {
@@ -428,7 +430,22 @@ export class Game {
   }
 
   private getCoreRadiusMultiplier() {
-    return this.hasBuff("coreBreak") ? 1.25 : 1;
+    const dailyBoost = this.runContext.mode === "dailyChallenge" && this.runContext.dailyChallengeId === "core_bonus" ? 1.18 : 1;
+    return (this.hasBuff("coreBreak") ? 1.25 : 1) * dailyBoost;
+  }
+
+  private getEffectivePickupChance() {
+    if (this.runContext.mode === "dailyChallenge" && this.runContext.dailyChallengeId === "more_pickups") {
+      return Math.min(0.36, this.level.pickupChance + 0.18);
+    }
+    return this.level.pickupChance;
+  }
+
+  private getEffectivePickupLimit() {
+    if (this.runContext.mode === "dailyChallenge" && this.runContext.dailyChallengeId === "more_pickups") {
+      return BALANCE.waves.randomPickupLimit + 3;
+    }
+    return BALANCE.waves.randomPickupLimit;
   }
 
   private canOfferRevive() {
@@ -762,6 +779,10 @@ export class Game {
     this.score += enemy.score + chainBonus;
     const energyReward = (enemy.energyGain + (chainKill ? 1.5 : 0)) * stage.killEnergyMultiplier * this.getKillEnergyMultiplier();
     trail.energyBank = Math.min(BALANCE.swordEnergy.maxEnergyGainPerSlash, trail.energyBank + energyReward);
+    if (this.runContext.mode === "dailyChallenge" && this.runContext.dailyChallengeId === "core_bonus" && enemy.kind === "core") {
+      this.score += enemy.score;
+      trail.energyBank = Math.min(BALANCE.swordEnergy.maxEnergyGainPerSlash, trail.energyBank + 5);
+    }
 
     const colors = source === "core" || source === "core_chain" ? ["#e8d7ff", "#5d4a8f", "#ead8a7"] : paperColors;
     const stageBurstBoost = trail.tier === "burst" ? 8 : trail.tier === "strong" ? 4 : 0;
@@ -874,6 +895,14 @@ export class Game {
       this.enemies.push(this.createEnemy(spawn.kind, spawn.x, BALANCE.battlefield.enemySpawnY - (spawn.yOffset ?? 0), speedMultiplier));
       this.discoveredEnemies.add(spawn.kind);
     }
+    if (
+      this.runContext.mode === "dailyChallenge" &&
+      this.runContext.dailyChallengeId === "more_powder" &&
+      this.elapsed >= 20
+    ) {
+      this.enemies.push(this.createEnemy("powder", randomRange(72, 318), BALANCE.battlefield.enemySpawnY - 42, speedMultiplier));
+      this.discoveredEnemies.add("powder");
+    }
     if (wave.enemies.some((spawn) => spawn.kind === "shield")) {
       this.showHint("shield-seen", "强锋可破盾", DESIGN_WIDTH / 2, 118, 2);
     }
@@ -882,7 +911,10 @@ export class Game {
     if (configuredPickup && this.pickupsSpawned < BALANCE.waves.randomPickupLimit) {
       this.pickups.push(this.createPickup(configuredPickup.kind, configuredPickup.x, BALANCE.battlefield.topY + 78 - (configuredPickup.yOffset ?? 0)));
       this.pickupsSpawned += 1;
-    } else if (Math.random() < this.level.pickupChance && this.pickupsSpawned < BALANCE.waves.randomPickupLimit) {
+    } else if (
+      Math.random() < this.getEffectivePickupChance() &&
+      this.pickupsSpawned < this.getEffectivePickupLimit()
+    ) {
       this.pickups.push(this.createPickup(choose<PickupKind>(["drum", "soul", "oil"]), randomRange(56, 334), BALANCE.battlefield.topY + randomRange(46, 104)));
       this.pickupsSpawned += 1;
     }
@@ -975,14 +1007,15 @@ export class Game {
 
   private createEnemy(kind: EnemyKind, x: number, y: number, speedMultiplier = 1): Enemy {
     const balance = ENEMY_BALANCE[kind];
+    const dailyShieldBonus = this.runContext.mode === "dailyChallenge" && this.runContext.dailyChallengeId === "hard_shield" && kind === "shield" ? 1 : 0;
     return {
       id: this.nextId("enemy"),
       kind,
       x,
       y,
       radius: balance.radius,
-      hp: balance.hp,
-      maxHp: balance.hp,
+      hp: balance.hp + dailyShieldBonus,
+      maxHp: balance.hp + dailyShieldBonus,
       speed: balance.speed * this.level.enemySpeed * speedMultiplier * randomRange(0.94, 1.08),
       hpDamage: balance.defenseDamage,
       score: balance.score,

@@ -329,6 +329,14 @@ export function beginRun(levelId: number, mode: RunMode = "normal") {
   return progress.runIndex;
 }
 
+export function getCurrentRunContext() {
+  const progress = readProgress();
+  return {
+    mode: progress.currentRunMode,
+    dailyChallengeId: getDailyChallenge(progress.daily.date).id
+  };
+}
+
 export function makeProgressView(progress: PlayerProgress, fragmentName: string = REWARD_CONFIG.shards.firstName): RunProgress {
   return {
     runIndex: progress.runIndex,
