@@ -64,6 +64,7 @@ export class Game {
   private pickups: Pickup[] = [];
   private particles: Particle[] = [];
   private texts: FloatingText[] = [];
+  private splitFlashes: { x: number; y: number; angle: number; length: number; life: number; maxLife: number }[] = [];
   private currentSlash?: SlashTrail;
 
   private pointerDown = false;
@@ -202,6 +203,7 @@ export class Game {
     this.drawParticles(ctx);
     this.drawDefenseAndWarrior(ctx);
     this.drawHud(ctx);
+    this.drawSplitFlashes(ctx);
     this.drawFloatingTexts(ctx);
     this.drawWaveProgress(ctx);
     this.drawDebugPanel(ctx);
@@ -802,6 +804,10 @@ export class Game {
     const colors = source === "core" || source === "core_chain" ? ["#e8d7ff", "#5d4a8f", "#ead8a7"] : paperColors;
     const stageBurstBoost = trail.tier === "burst" ? 8 : trail.tier === "strong" ? 4 : 0;
     this.particles.push(...paperBurst(enemy, (enemy.kind === "shield" ? 20 : 15) + stageBurstBoost, colors));
+    // 斩断闪光分割线
+    const slashAngle = this.lastSlashAngle;
+    const splitLen = enemy.radius * 2.2 + (trail.tier === "burst" ? 14 : trail.tier === "strong" ? 8 : 0);
+    this.splitFlashes.push({ x: enemy.x, y: enemy.y, angle: slashAngle, length: splitLen, life: 0.28, maxLife: 0.28 });
     if (source === "powder" || source === "oil" || source === "chain") {
       this.particles.push(...sparkBurst(enemy, 18, source === "powder" ? "#ffb15c" : "#ffd67c"));
     }
@@ -883,6 +889,10 @@ export class Game {
       particle.rotation += particle.spin * dt;
     }
     this.particles = this.particles.filter((particle) => particle.life > 0);
+    for (const sf of this.splitFlashes) {
+      sf.life -= dt;
+    }
+    this.splitFlashes = this.splitFlashes.filter((sf) => sf.life > 0);
   }
 
   private updateTexts(dt: number) {
@@ -1226,7 +1236,7 @@ export class Game {
     ctx.fillText(`分 ${Math.floor(this.score)}`, 374, 45);
     ctx.fillStyle = "rgba(255, 211, 90, 0.68)";
     ctx.font = '800 10px "Microsoft YaHei", sans-serif';
-    ctx.fillText("V0708003", 374, 66);
+    ctx.fillText("V0708004", 374, 66);
 
     ctx.textAlign = "center";
     for (let i = 0; i < this.maxHp; i += 1) {
@@ -1774,6 +1784,37 @@ export class Game {
     ctx.font = '11px "Consolas", monospace';
     ctx.textAlign = "left";
     lines.forEach((line, index) => ctx.fillText(line, 18, 102 + index * 16));
+    ctx.restore();
+  }
+
+  private drawSplitFlashes(ctx: CanvasRenderingContext2D) {
+    if (this.splitFlashes.length === 0) return;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (const sf of this.splitFlashes) {
+      const alpha = sf.life / sf.maxLife;
+      const x1 = sf.x - Math.cos(sf.angle) * sf.length * 0.5;
+      const y1 = sf.y - Math.sin(sf.angle) * sf.length * 0.5;
+      const x2 = sf.x + Math.cos(sf.angle) * sf.length * 0.5;
+      const y2 = sf.y + Math.sin(sf.angle) * sf.length * 0.5;
+      // 外层光晕
+      ctx.strokeStyle = `rgba(255, 213, 112, ${alpha * 0.42})`;
+      ctx.shadowColor = "#ffd35a";
+      ctx.shadowBlur = 18 * alpha;
+      ctx.lineWidth = 8 * alpha;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      // 内层亮线
+      ctx.strokeStyle = `rgba(255, 255, 238, ${alpha * 0.82})`;
+      ctx.shadowBlur = 6;
+      ctx.lineWidth = 2.5 * alpha;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 

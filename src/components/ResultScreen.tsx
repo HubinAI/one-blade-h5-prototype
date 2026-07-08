@@ -27,10 +27,11 @@ export function ResultScreen({
 
   return (
     <section className="screen result-screen result-screen-v5">
-      <span className="version-tag">我只要一刀 V0708003</span>
+      <span className="version-tag">我只要一刀 V0708004</span>
 
       <div className="result-header">
-        <div className={`result-medal ${result.win ? "win" : "lost"}`}>{result.rating}</div>
+        <div className={`result-medal ${result.win ? "win" : "lost"} ${result.win && result.rating !== "C" ? "medal-pop" : ""}`}>{result.rating}</div>
+        {result.win && result.rating !== "C" && <div className="medal-glow-ring" />}
         <h2>{result.win ? "破阵成功" : "防线失守"}</h2>
         <p>
           第 {result.levelId} 关 · {result.levelTitle}
