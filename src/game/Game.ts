@@ -3,12 +3,18 @@ import { ENEMY_DEFS } from "../data/enemies";
 import { PICKUP_DEFS } from "../data/pickups";
 import { DESIGN_HEIGHT, DESIGN_WIDTH, HUD_HEIGHT, WALL_TOP_Y } from "./config/constants";
 import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID } from "./config/balance";
+import { AD_CONFIG } from "./config/ads";
+import { RUN_BUFFS, RUN_BUFF_BY_ID } from "./config/buffs";
+import { REWARD_CONFIG } from "./config/rewards";
 import { getBladeTier, getTierConfig, consumeEnergyForSlash, recoverEnergy } from "./systems/bladeEnergySystem";
 import { isSharpTurn, segmentHitCircle } from "./systems/collisionSystem";
 import { paperBurst, ringParticle, sparkBurst } from "./systems/particleSystem";
+import { applyBattleRewards, evaluateRating } from "./services/ProgressionService";
+import { logEvent } from "./services/Analytics";
 import type {
   BattleResult,
   BattleStats,
+  BuffId,
   Enemy,
   EnemyKind,
   FloatingText,
@@ -24,20 +30,27 @@ import type {
 import { choose, clamp, distance, randomRange } from "../utils/math";
 
 type FinishCallback = (result: BattleResult) => void;
+export type ReviveOffer = {
+  levelId: number;
+  surviveTime: number;
+};
+type ReviveOfferCallback = (offer: ReviveOffer) => void;
 
 const paperColors = ["#ead8a7", "#caa565", "#f6e7bd", "#8f5b32", "#ffd67c"];
-const HINT_STORAGE_KEY = "one_blade_v03_seen_hints";
+const HINT_STORAGE_KEY = "one_blade_v04_seen_hints";
 
 export class Game {
   readonly level: LevelConfig;
 
   private readonly onFinish: FinishCallback;
+  private readonly onReviveOffer?: ReviveOfferCallback;
   private phase: GamePhase = "playing";
   private elapsed = 0;
   private idCounter = 0;
   private finished = false;
 
   private hp: number;
+  private maxHp: number;
   private score = 0;
   private energy: number;
   private regenDelayTimer = 0;
@@ -64,22 +77,36 @@ export class Game {
   private lastSlashAngle = -Math.PI / 2;
   private debugEnabled = false;
   private hintSeen: Set<string>;
+  private reviveOfferSent = false;
+  private buffChoiceOptions: BuffId[] = [];
+  private buffChoicePause = 0;
+  private usedBuffTimes = new Set<number>();
+  private runBuffs = new Set<BuffId>();
+  private discoveredEnemies = new Set<EnemyKind>();
 
   private stats: BattleStats = {
     kills: 0,
     maxSingleBlade: 0,
     maxChain: 0,
+    oneBladeBreaks: 0,
+    coreHits: 0,
+    coreCollapses: 0,
+    explosions: 0,
+    usedReviveAd: false,
     slashes: 0,
     pickups: 0,
     score: 0
   };
 
-  constructor(level: LevelConfig, onFinish: FinishCallback) {
+  constructor(level: LevelConfig, onFinish: FinishCallback, onReviveOffer?: ReviveOfferCallback) {
     this.level = level;
     this.onFinish = onFinish;
-    this.hp = Math.min(level.hp, BALANCE.player.maxHp);
+    this.onReviveOffer = onReviveOffer;
+    this.maxHp = Math.min(level.hp, BALANCE.player.maxHp);
+    this.hp = this.maxHp;
     this.energy = level.initialEnergy;
     this.hintSeen = this.readSeenHints();
+    this.discoveredEnemies.add("infantry");
     if (level.id === 1) {
       this.showHint("start-slash", "随时拖动挥刀", DESIGN_WIDTH / 2, 118, 2);
     }
@@ -89,10 +116,41 @@ export class Game {
     this.debugEnabled = !this.debugEnabled;
   }
 
+  reviveFromRewardedAd() {
+    if (this.phase !== "revive") return;
+    this.phase = "playing";
+    this.stats.usedReviveAd = true;
+    this.hp = 1;
+    this.energy = 80;
+    const closest = [...this.enemies]
+      .filter((enemy) => enemy.alive)
+      .sort((a, b) => b.y - a.y)
+      .slice(0, 8);
+    for (const enemy of closest) {
+      enemy.alive = false;
+      this.particles.push(...paperBurst(enemy, 12, paperColors));
+    }
+    this.enemies = this.enemies.filter((enemy) => enemy.alive);
+    this.flash = Math.max(this.flash, 0.85);
+    this.screenShake = Math.max(this.screenShake, 0.65);
+    this.addText(DESIGN_WIDTH / 2, 142, "复活反击，刀势 80%", "#ffd35a", 20, 1.2);
+  }
+
+  declineReviveOffer() {
+    if (this.phase === "revive") this.finish(false);
+  }
+
   update(dt: number) {
     const frameDt = Math.min(dt, 0.04);
     const scaledDt = frameDt * (this.slowMoTimer > 0 ? 0.58 : 1);
     this.slowMoTimer = Math.max(0, this.slowMoTimer - frameDt);
+
+    if (this.phase === "buffChoice") {
+      this.buffChoicePause = Math.max(0, this.buffChoicePause - frameDt);
+      this.updateParticles(frameDt);
+      this.updateTexts(frameDt);
+      return;
+    }
 
     if (this.phase !== "playing") {
       this.updateParticles(scaledDt);
@@ -103,7 +161,7 @@ export class Game {
     this.elapsed += scaledDt;
     this.regenDelayTimer = Math.max(0, this.regenDelayTimer - scaledDt);
     if (!this.currentSlash?.active && this.regenDelayTimer <= 0) {
-      this.energy = recoverEnergy(this.energy, scaledDt, this.drumTimer);
+      this.energy = recoverEnergy(this.energy, scaledDt * this.getPassiveRegenMultiplier(), this.drumTimer);
     }
     if (!this.currentSlash?.active && this.energy >= 90) {
       this.showHint("burst-ready", "破阵锋已成", DESIGN_WIDTH / 2, 656, 1);
@@ -121,6 +179,7 @@ export class Game {
     this.updateParticles(scaledDt);
     this.updateTexts(scaledDt);
     this.updateWaves(scaledDt);
+    this.updateBuffChoiceTriggers();
     this.checkBattleEnd();
   }
 
@@ -142,6 +201,8 @@ export class Game {
     this.drawHud(ctx);
     this.drawFloatingTexts(ctx);
     this.drawDebugPanel(ctx);
+    this.drawBuffChoice(ctx);
+    this.drawRevivePause(ctx);
 
     if (this.flash > 0) {
       ctx.fillStyle = `rgba(255, 232, 146, ${this.flash * 0.18})`;
@@ -152,6 +213,10 @@ export class Game {
   }
 
   handlePointerDown(pos: Vec2) {
+    if (this.phase === "buffChoice") {
+      this.selectBuffAt(pos);
+      return;
+    }
     if (this.phase !== "playing") return;
     this.pointerDown = true;
     this.pointerPos = this.clampPointer(pos);
@@ -176,7 +241,7 @@ export class Game {
     const lockedEnergy = clamp(this.energy, 0, BALANCE.swordEnergy.max);
     const tier = getBladeTier(lockedEnergy);
     const stage = SWORD_STAGE_BY_ID[tier];
-    const pathMultiplier = this.nextSoul ? PICKUP_BALANCE.soul.pathLengthMultiplier ?? 1 : 1;
+    const pathMultiplier = (this.nextSoul ? PICKUP_BALANCE.soul.pathLengthMultiplier ?? 1 : 1) * this.getPathLengthMultiplier();
     const widthMultiplier = this.nextSoul ? PICKUP_BALANCE.soul.widthMultiplier ?? 1 : 1;
     const maxPathLength = stage.maxPathLength * pathMultiplier;
     const point = { x: pos.x, y: pos.y, t: this.elapsed, energyRatio: 1 };
@@ -216,6 +281,7 @@ export class Game {
     this.warriorDrawTimer = 0.2;
     this.warriorSheathTimer = 0;
     this.lastSlashAngle = this.angleFromWarrior(pos);
+    logEvent("slash_start", { energy: lockedEnergy, stage: stage.name });
     this.addText(pos.x, pos.y - 18, stage.prompt, stage.color, 16, BALANCE.feedback.stageTextLife);
     if (lockedEnergy < 25) {
       this.showHint("low-energy-slash", "刀势越满，刀芒越强", DESIGN_WIDTH / 2, 118, 2);
@@ -272,6 +338,10 @@ export class Game {
 
     trail.active = false;
     this.resolvePendingSlash(trail);
+    const last = trail.points[trail.points.length - 1];
+    if (this.hasBuff("burstLine") && trail.kills >= 5) {
+      this.triggerBuffBurst(last, trail);
+    }
     const slashBonus = this.getSlashScoreBonus(trail.kills);
     if (slashBonus > 0) this.score += slashBonus;
 
@@ -287,11 +357,11 @@ export class Game {
     this.regenDelayTimer = BALANCE.swordEnergy.regenDelayAfterSlash;
     this.screenShake = Math.max(this.screenShake, trail.chain > 0 ? 0.5 : 0.18);
 
-    const last = trail.points[trail.points.length - 1];
     const stage = SWORD_STAGE_BY_ID[trail.tier];
     const praise = this.getSlashPraise(trail, reason);
     if (praise) {
       this.addText(DESIGN_WIDTH / 2, 136, praise, stage.color, praise === "一刀破阵" ? 26 : 20);
+      if (praise === "一刀破阵") this.stats.oneBladeBreaks += 1;
     }
     if (trail.kills > 0) {
       this.addText(last.x, last.y - 28, `${stage.scoreName} x${trail.kills}`, stage.color, 17);
@@ -305,6 +375,14 @@ export class Game {
       this.flash = Math.max(this.flash, 1);
       this.screenShake = Math.max(this.screenShake, 0.78);
     }
+
+    logEvent("slash_end", {
+      hitCount: trail.hitEnemyIds.size,
+      killCount: trail.kills,
+      stage: stage.name,
+      triggeredExplosive: trail.explosionCount > 0,
+      triggeredCore: trail.coreCollapseCount > 0
+    });
 
     this.currentSlash = undefined;
   }
@@ -325,6 +403,121 @@ export class Game {
     if (kills >= 8) return BALANCE.score.slashKillBonus8;
     if (kills >= 4) return BALANCE.score.slashKillBonus4;
     return 0;
+  }
+
+  private hasBuff(id: BuffId) {
+    return this.runBuffs.has(id);
+  }
+
+  private getPathLengthMultiplier() {
+    return this.hasBuff("longBlade") ? 1.18 : 1;
+  }
+
+  private getPassiveRegenMultiplier() {
+    return this.hasBuff("warDrum") ? 1.2 : 1;
+  }
+
+  private getKillEnergyMultiplier() {
+    return this.hasBuff("breath") ? 1.3 : 1;
+  }
+
+  private getExplosionRadiusMultiplier() {
+    return this.hasBuff("fireOil") ? 1.25 : 1;
+  }
+
+  private getCoreRadiusMultiplier() {
+    return this.hasBuff("coreBreak") ? 1.25 : 1;
+  }
+
+  private canOfferRevive() {
+    return (
+      AD_CONFIG.rewardedRevive.enabled &&
+      this.level.id >= 3 &&
+      !this.reviveOfferSent &&
+      !this.stats.usedReviveAd &&
+      this.elapsed >= AD_CONFIG.rewardedRevive.minSurviveTime
+    );
+  }
+
+  private updateBuffChoiceTriggers() {
+    if (this.currentSlash?.active || this.pointerDown) return;
+    if (this.runBuffs.size >= 3) return;
+    for (const time of this.level.buffTimes) {
+      if (this.usedBuffTimes.has(time)) continue;
+      if (this.elapsed >= time) {
+        this.usedBuffTimes.add(time);
+        this.openBuffChoice();
+        return;
+      }
+    }
+  }
+
+  private openBuffChoice() {
+    const available = RUN_BUFFS.filter((buff) => !this.runBuffs.has(buff.id));
+    const options: BuffId[] = [];
+    while (options.length < 3 && available.length > 0) {
+      const index = Math.floor(Math.random() * available.length);
+      const [picked] = available.splice(index, 1);
+      options.push(picked.id);
+    }
+    this.buffChoiceOptions = options;
+    this.buffChoicePause = 1;
+    this.phase = "buffChoice";
+    this.pointerDown = false;
+  }
+
+  private selectBuffAt(pos: Vec2) {
+    if (this.buffChoicePause > 0) return;
+    for (let index = 0; index < this.buffChoiceOptions.length; index += 1) {
+      const rect = this.getBuffCardRect(index);
+      if (pos.x >= rect.x && pos.x <= rect.x + rect.w && pos.y >= rect.y && pos.y <= rect.y + rect.h) {
+        this.applyBuff(this.buffChoiceOptions[index]);
+        return;
+      }
+    }
+  }
+
+  private applyBuff(id: BuffId) {
+    this.runBuffs.add(id);
+    const buff = RUN_BUFF_BY_ID[id];
+    if (id === "fortify") {
+      this.maxHp = Math.min(BALANCE.player.maxHp + 1, this.maxHp + 1);
+      this.hp = Math.min(this.maxHp, this.hp + 1);
+    }
+    this.addText(DESIGN_WIDTH / 2, 148, buff.feedback, "#ffd35a", 16, 1.4);
+    logEvent("buff_choice", { levelId: this.level.id, time: this.elapsed, selectedBuff: id });
+    this.buffChoiceOptions = [];
+    this.buffChoicePause = 0;
+    this.phase = "playing";
+  }
+
+  private getBuffCardRect(index: number) {
+    return {
+      x: 38,
+      y: 238 + index * 112,
+      w: DESIGN_WIDTH - 76,
+      h: 92
+    };
+  }
+
+  private triggerBuffBurst(origin: Vec2, trail: SlashTrail) {
+    const radius = 66;
+    this.particles.push(ringParticle(origin, "#ffb15c", radius));
+    this.particles.push(...sparkBurst(origin, 22, "#ffb15c"));
+    this.addText(origin.x, origin.y - 24, "爆裂", "#ffb15c", 16);
+    for (const enemy of this.enemies) {
+      if (!enemy.alive || distance(enemy, origin) > radius) continue;
+      this.damageEnemy(enemy, 1, trail, true, "oil");
+    }
+  }
+
+  private triggerPaperSplash(origin: Enemy, trail: SlashTrail) {
+    const radius = 52;
+    this.particles.push(ringParticle(origin, "#f6e7bd", radius));
+    for (const enemy of this.enemies) {
+      if (!enemy.alive || enemy.kind !== "infantry" || distance(enemy, origin) > radius) continue;
+      this.damageEnemy(enemy, 1, trail, true, "paper_splash");
+    }
   }
 
   private getSlashRatio(trail: SlashTrail) {
@@ -355,6 +548,24 @@ export class Game {
         this.handleEnemyHit(enemy, trail);
       }
     }
+
+    if (trail.tier === "burst" && this.hasBuff("doubleBlade")) {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const offset = 28;
+      const ox = (-dy / len) * offset;
+      const oy = (dx / len) * offset;
+      const a2 = { x: a.x + ox, y: a.y + oy };
+      const b2 = { x: b.x + ox, y: b.y + oy };
+      for (const enemy of this.enemies) {
+        if (!enemy.alive || trail.hitEnemyIds.has(enemy.id)) continue;
+        if (segmentHitCircle(a2, b2, enemy, enemy.radius + bladeReach * 0.72)) {
+          trail.hitEnemyIds.add(enemy.id);
+          this.handleEnemyHit(enemy, trail);
+        }
+      }
+    }
   }
 
   private handleEnemyHit(enemy: Enemy, trail: SlashTrail) {
@@ -366,7 +577,7 @@ export class Game {
     }
 
     if (enemy.kind === "shield") {
-      if (stage.canBreakShield) {
+      if (stage.canBreakShield || (trail.tier === "normal" && this.hasBuff("shieldBreaker"))) {
         this.killEnemy(enemy, trail, false, "shield");
       } else if (trail.tier === "normal") {
         this.damageEnemy(enemy, 1, trail, false, "shield_crack");
@@ -392,6 +603,7 @@ export class Game {
 
     if (enemy.kind === "core") {
       if (stage.canTriggerCoreCollapse) {
+        this.stats.coreHits += 1;
         enemy.marked = true;
         trail.pendingCoreIds.add(enemy.id);
         this.score += 6;
@@ -413,7 +625,7 @@ export class Game {
 
   private triggerOilBurst(origin: Vec2, trail: SlashTrail) {
     const stage = SWORD_STAGE_BY_ID[trail.tier];
-    const radius = PICKUP_BALANCE.oil.extraExplosionRadius ?? 60;
+    const radius = (PICKUP_BALANCE.oil.extraExplosionRadius ?? 60) * this.getExplosionRadiusMultiplier();
     this.particles.push(ringParticle(origin, "#f0a235", radius));
     this.particles.push(...sparkBurst(origin, 16, "#f0a235"));
     this.addText(origin.x, origin.y + 24, "火油爆", "#f0a235", 13);
@@ -477,9 +689,10 @@ export class Game {
 
         exploded.add(id);
         trail.explosionCount += 1;
+        this.stats.explosions += 1;
         this.killEnemy(enemy, trail, true, "powder");
 
-        const radius = (ENEMY_BALANCE.powder.explosionRadius ?? 85) * stage.explosionRadiusMultiplier;
+        const radius = (ENEMY_BALANCE.powder.explosionRadius ?? 85) * stage.explosionRadiusMultiplier * this.getExplosionRadiusMultiplier();
         this.particles.push(ringParticle(enemy, "#ffb15c", radius));
         this.particles.push(...sparkBurst(enemy, 24, "#ffb15c"));
         this.screenShake = Math.max(this.screenShake, 0.55);
@@ -499,8 +712,9 @@ export class Game {
 
         collapsed.add(id);
         trail.coreCollapseCount += 1;
+        this.stats.coreCollapses += 1;
         this.killEnemy(enemy, trail, true, "core");
-        const radius = stage.canTriggerCoreCollapse ? stage.coreCollapseRadius : 0;
+        const radius = stage.canTriggerCoreCollapse ? stage.coreCollapseRadius * this.getCoreRadiusMultiplier() : 0;
         this.particles.push(ringParticle(enemy, "#e8d7ff", radius));
         this.particles.push(...paperBurst(enemy, 28, ["#e8d7ff", "#c7a7ff", "#5d4a8f"]));
         this.addText(enemy.x, enemy.y - 30, trail.tier === "burst" ? "大阵崩散" : "阵崩", "#e8d7ff", 18);
@@ -544,7 +758,7 @@ export class Game {
     const stage = SWORD_STAGE_BY_ID[trail.tier];
     const chainBonus = chainKill ? BALANCE.score.chainKillBonus * Math.max(1, trail.chain) : 0;
     this.score += enemy.score + chainBonus;
-    const energyReward = (enemy.energyGain + (chainKill ? 1.5 : 0)) * stage.killEnergyMultiplier;
+    const energyReward = (enemy.energyGain + (chainKill ? 1.5 : 0)) * stage.killEnergyMultiplier * this.getKillEnergyMultiplier();
     trail.energyBank = Math.min(BALANCE.swordEnergy.maxEnergyGainPerSlash, trail.energyBank + energyReward);
 
     const colors = source === "core" || source === "core_chain" ? ["#e8d7ff", "#5d4a8f", "#ead8a7"] : paperColors;
@@ -554,6 +768,9 @@ export class Game {
       this.particles.push(...sparkBurst(enemy, 18, source === "powder" ? "#ffb15c" : "#ffd67c"));
     }
     this.addText(enemy.x, enemy.y - 20, chainKill ? "连锁" : "碎", chainKill ? "#ffd67c" : "#f6e7bd", 12);
+    if (enemy.kind === "infantry" && source !== "paper_splash" && this.hasBuff("paperSplash") && Math.random() < 0.2) {
+      this.triggerPaperSplash(enemy, trail);
+    }
     return true;
   }
 
@@ -630,17 +847,24 @@ export class Game {
   }
 
   private updateWaves(dt: number) {
-    if (this.enemies.length > 0 || this.wavesSpawned >= this.level.waves.length) return;
-
-    this.nextWaveTimer -= dt;
-    if (this.nextWaveTimer > 0) return;
-
+    if (this.wavesSpawned >= this.level.waves.length) return;
     const wave = this.level.waves[this.wavesSpawned];
+
+    if (wave.spawnAt !== undefined) {
+      if (this.elapsed < wave.spawnAt) return;
+    } else {
+      if (this.enemies.length > 0) return;
+      this.nextWaveTimer -= dt;
+      if (this.nextWaveTimer > 0) return;
+      this.nextWaveTimer = wave.delay;
+    }
+
     this.wavesSpawned += 1;
-    this.nextWaveTimer = wave.delay;
+    const speedMultiplier = wave.speedMultiplier ?? 1;
 
     for (const spawn of wave.enemies) {
-      this.enemies.push(this.createEnemy(spawn.kind, spawn.x, BALANCE.battlefield.enemySpawnY - (spawn.yOffset ?? 0)));
+      this.enemies.push(this.createEnemy(spawn.kind, spawn.x, BALANCE.battlefield.enemySpawnY - (spawn.yOffset ?? 0), speedMultiplier));
+      this.discoveredEnemies.add(spawn.kind);
     }
     if (wave.enemies.some((spawn) => spawn.kind === "shield")) {
       this.showHint("shield-seen", "强锋可破盾", DESIGN_WIDTH / 2, 118, 2);
@@ -660,11 +884,22 @@ export class Game {
 
   private checkBattleEnd() {
     if (this.hp <= 0) {
+      if (this.canOfferRevive()) {
+        this.phase = "revive";
+        this.reviveOfferSent = true;
+        this.onReviveOffer?.({ levelId: this.level.id, surviveTime: this.elapsed });
+        return;
+      }
       this.finish(false);
       return;
     }
 
-    if (this.wavesSpawned >= this.level.waves.length && this.enemies.length === 0 && !this.currentSlash) {
+    if (
+      this.wavesSpawned >= this.level.waves.length &&
+      this.enemies.length === 0 &&
+      !this.currentSlash &&
+      this.elapsed >= Math.max(0, this.level.durationSeconds - 8)
+    ) {
       this.finish(true);
     }
   }
@@ -674,28 +909,59 @@ export class Game {
     this.finished = true;
     this.phase = win ? "won" : "lost";
     this.stats.score = this.score;
-    this.onFinish({
+    const triggeredOneBlade = this.stats.oneBladeBreaks > 0 || this.stats.maxSingleBlade >= REWARD_CONFIG.godSlashThreshold;
+    const rating = evaluateRating({
+      win,
+      kills: this.stats.kills,
+      maxSingleBlade: this.stats.maxSingleBlade,
+      maxChain: this.stats.maxChain,
+      triggeredOneBlade,
+      coreCollapseCount: this.stats.coreCollapses,
+      explosiveCount: this.stats.explosions
+    });
+    const rewardMeta = applyBattleRewards({
+      win,
+      levelId: this.level.id,
+      kills: this.stats.kills,
+      maxSingleBlade: this.stats.maxSingleBlade,
+      maxChain: this.stats.maxChain,
+      rating,
+      discoveredEnemies: [...this.discoveredEnemies]
+    });
+    const result: BattleResult = {
       win,
       levelId: this.level.id,
       levelTitle: this.level.title,
+      duration: this.elapsed,
+      completedGoal: win,
       score: this.score,
       kills: this.stats.kills,
       maxSingleBlade: this.stats.maxSingleBlade,
       maxChain: this.stats.maxChain,
+      triggeredOneBlade,
+      hitCore: this.stats.coreHits > 0,
+      coreCollapseCount: this.stats.coreCollapses,
+      explosiveCount: this.stats.explosions,
+      usedReviveAd: this.stats.usedReviveAd,
+      canReviveAd: false,
+      canDoubleReward: win,
       slashes: this.stats.slashes,
-      rating: this.getRating(win)
+      rating,
+      ...rewardMeta
+    };
+    logEvent("game_end", {
+      levelId: this.level.id,
+      result: win ? "win" : "lost",
+      duration: this.elapsed,
+      kills: this.stats.kills,
+      maxSlashKills: this.stats.maxSingleBlade,
+      rating,
+      usedReviveAd: this.stats.usedReviveAd
     });
+    this.onFinish(result);
   }
 
-  private getRating(win: boolean) {
-    if (!win) return "败阵";
-    if (this.stats.maxSingleBlade >= 13 || this.stats.maxChain >= 10) return "甲";
-    if (this.stats.maxSingleBlade >= 8 || this.stats.maxChain >= 6) return "乙";
-    if (this.stats.kills >= 18) return "丙";
-    return "丁";
-  }
-
-  private createEnemy(kind: EnemyKind, x: number, y: number): Enemy {
+  private createEnemy(kind: EnemyKind, x: number, y: number, speedMultiplier = 1): Enemy {
     const balance = ENEMY_BALANCE[kind];
     return {
       id: this.nextId("enemy"),
@@ -705,7 +971,7 @@ export class Game {
       radius: balance.radius,
       hp: balance.hp,
       maxHp: balance.hp,
-      speed: balance.speed * this.level.enemySpeed * randomRange(0.94, 1.08),
+      speed: balance.speed * this.level.enemySpeed * speedMultiplier * randomRange(0.94, 1.08),
       hpDamage: balance.defenseDamage,
       score: balance.score,
       energyGain: balance.energyReward,
@@ -890,11 +1156,12 @@ export class Game {
     ctx.textAlign = "right";
     ctx.fillStyle = "#f6e7bd";
     ctx.font = '700 13px "Microsoft YaHei", sans-serif';
-    ctx.fillText(`波次 ${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`, 374, 24);
+    const remaining = Math.max(0, Math.ceil(this.level.durationSeconds - this.elapsed));
+    ctx.fillText(`${remaining}s  ${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`, 374, 24);
     ctx.fillText(`分 ${Math.floor(this.score)}`, 374, 45);
 
     ctx.textAlign = "center";
-    for (let i = 0; i < BALANCE.player.maxHp; i += 1) {
+    for (let i = 0; i < this.maxHp; i += 1) {
       const x = 302 + i * 16;
       ctx.fillStyle = i < this.hp ? "#d64b3b" : "rgba(214, 75, 59, 0.18)";
       ctx.beginPath();
@@ -904,6 +1171,14 @@ export class Game {
       ctx.lineTo(x - 6, 63);
       ctx.closePath();
       ctx.fill();
+    }
+
+    if (this.runBuffs.size > 0) {
+      ctx.textAlign = "left";
+      ctx.fillStyle = "rgba(255, 211, 90, 0.86)";
+      ctx.font = '700 11px "Microsoft YaHei", sans-serif';
+      const labels = [...this.runBuffs].map((id) => RUN_BUFF_BY_ID[id].shortName).join(" / ");
+      ctx.fillText(`军令 ${labels}`, 16, 68);
     }
   }
 
@@ -1081,6 +1356,21 @@ export class Game {
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.stroke();
+
+      if (trail.tier === "burst" && this.hasBuff("doubleBlade")) {
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const ox = (-dy / len) * 28;
+        const oy = (dx / len) * 28;
+        ctx.strokeStyle = `rgba(255, 245, 200, ${alpha * 0.46})`;
+        ctx.shadowBlur = 10;
+        ctx.lineWidth = Math.max(2, width * 0.24);
+        ctx.beginPath();
+        ctx.moveTo(a.x + ox, a.y + oy);
+        ctx.lineTo(b.x + ox, b.y + oy);
+        ctx.stroke();
+      }
     }
 
     const last = points[points.length - 1];
@@ -1303,6 +1593,76 @@ export class Game {
       ctx.shadowBlur = 4;
       ctx.fillText(text.text, text.x, text.y);
     }
+    ctx.restore();
+  }
+
+  private drawBuffChoice(ctx: CanvasRenderingContext2D) {
+    if (this.phase !== "buffChoice") return;
+    ctx.save();
+    ctx.fillStyle = "rgba(10, 7, 5, 0.72)";
+    ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#fff3c0";
+    ctx.font = '800 21px "Microsoft YaHei", sans-serif';
+    ctx.fillText("选择一枚军令", DESIGN_WIDTH / 2, 148);
+    ctx.font = '13px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = "rgba(246, 231, 189, 0.78)";
+    ctx.fillText("改变这一局的刀势", DESIGN_WIDTH / 2, 172);
+
+    if (this.buffChoicePause > 0) {
+      ctx.fillStyle = "#ffd35a";
+      ctx.font = '800 18px "Microsoft YaHei", sans-serif';
+      ctx.fillText("军令将至", DESIGN_WIDTH / 2, 402);
+      ctx.restore();
+      return;
+    }
+
+    for (let index = 0; index < this.buffChoiceOptions.length; index += 1) {
+      const buff = RUN_BUFF_BY_ID[this.buffChoiceOptions[index]];
+      const rect = this.getBuffCardRect(index);
+      ctx.save();
+      ctx.translate(rect.x, rect.y);
+      ctx.fillStyle = "rgba(30, 18, 10, 0.94)";
+      ctx.strokeStyle = "#d8a75d";
+      ctx.lineWidth = 2;
+      this.paperCard(ctx, 0, 0, rect.w, rect.h);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#17100d";
+      ctx.beginPath();
+      ctx.arc(34, 46, 24, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ffd35a";
+      ctx.font = '900 16px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(buff.shortName, 34, 46);
+      ctx.textBaseline = "alphabetic";
+      ctx.textAlign = "left";
+      ctx.fillStyle = "#fff3c0";
+      ctx.font = '800 17px "Microsoft YaHei", sans-serif';
+      ctx.fillText(buff.name, 72, 35);
+      ctx.fillStyle = "rgba(246, 231, 189, 0.78)";
+      ctx.font = '13px "Microsoft YaHei", sans-serif';
+      ctx.fillText(buff.description, 72, 62);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  private drawRevivePause(ctx: CanvasRenderingContext2D) {
+    if (this.phase !== "revive") return;
+    ctx.save();
+    ctx.fillStyle = "rgba(20, 5, 4, 0.48)";
+    ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+    ctx.fillStyle = "#fff3c0";
+    ctx.font = '800 19px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = "center";
+    ctx.fillText("防线将破", DESIGN_WIDTH / 2, 246);
+    ctx.font = '13px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = "rgba(246, 231, 189, 0.78)";
+    ctx.fillText("看广告复活，立即释放强锋反击", DESIGN_WIDTH / 2, 272);
     ctx.restore();
   }
 

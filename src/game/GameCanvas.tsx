@@ -1,14 +1,17 @@
 import { useEffect, useRef } from "react";
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from "./config/constants";
-import { Game } from "./Game";
+import { Game, type ReviveOffer } from "./Game";
 import type { BattleResult, LevelConfig, Vec2 } from "./types";
 
 type GameCanvasProps = {
   level: LevelConfig;
   onFinish: (result: BattleResult) => void;
+  onReviveOffer?: (offer: ReviveOffer) => void;
+  reviveSignal?: number;
+  declineReviveSignal?: number;
 };
 
-export function GameCanvas({ level, onFinish }: GameCanvasProps) {
+export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, declineReviveSignal = 0 }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const gameRef = useRef<Game | null>(null);
 
@@ -24,7 +27,7 @@ export function GameCanvas({ level, onFinish }: GameCanvasProps) {
     canvas.height = DESIGN_HEIGHT * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const game = new Game(level, onFinish);
+    const game = new Game(level, onFinish, onReviveOffer);
     gameRef.current = game;
     let frame = 0;
     let last = performance.now();
@@ -42,7 +45,15 @@ export function GameCanvas({ level, onFinish }: GameCanvasProps) {
       cancelAnimationFrame(frame);
       gameRef.current = null;
     };
-  }, [level, onFinish]);
+  }, [level, onFinish, onReviveOffer]);
+
+  useEffect(() => {
+    if (reviveSignal > 0) gameRef.current?.reviveFromRewardedAd();
+  }, [reviveSignal]);
+
+  useEffect(() => {
+    if (declineReviveSignal > 0) gameRef.current?.declineReviveOffer();
+  }, [declineReviveSignal]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

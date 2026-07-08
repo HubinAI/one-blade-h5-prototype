@@ -6,7 +6,19 @@ export type Vec2 = {
 export type BladeTier = "weak" | "normal" | "strong" | "burst";
 export type EnemyKind = "infantry" | "shield" | "powder" | "core";
 export type PickupKind = "drum" | "soul" | "oil";
-export type GamePhase = "playing" | "won" | "lost";
+export type GamePhase = "playing" | "buffChoice" | "revive" | "won" | "lost";
+export type RatingGrade = "C" | "B" | "A" | "S" | "SS" | "神之一刀";
+export type BuffId =
+  | "longBlade"
+  | "burstLine"
+  | "breath"
+  | "shieldBreaker"
+  | "fireOil"
+  | "coreBreak"
+  | "warDrum"
+  | "fortify"
+  | "doubleBlade"
+  | "paperSplash";
 
 export type EnemySpawn = {
   kind: EnemyKind;
@@ -23,6 +35,8 @@ export type PickupSpawn = {
 export type WaveConfig = {
   name: string;
   delay: number;
+  spawnAt?: number;
+  speedMultiplier?: number;
   enemies: EnemySpawn[];
   pickups?: PickupSpawn[];
 };
@@ -35,6 +49,8 @@ export type LevelConfig = {
   hp: number;
   enemySpeed: number;
   pickupChance: number;
+  durationSeconds: number;
+  buffTimes: number[];
   waves: WaveConfig[];
 };
 
@@ -130,19 +146,60 @@ export type BattleStats = {
   kills: number;
   maxSingleBlade: number;
   maxChain: number;
+  oneBladeBreaks: number;
+  coreHits: number;
+  coreCollapses: number;
+  explosions: number;
+  usedReviveAd: boolean;
   slashes: number;
   pickups: number;
   score: number;
+};
+
+export type RunRewards = {
+  coins: number;
+  battlePass: number;
+  shardName: string;
+  shardCount: number;
+  doubled: boolean;
+  chestOpened: boolean;
+  adChestOpened: boolean;
+};
+
+export type RunProgress = {
+  runIndex: number;
+  chestProgress: number;
+  chestTarget: number;
+  codexFound: number;
+  codexTotal: number;
+  oneBladeChallenge: number;
+  oneBladeChallengeTarget: number;
+  fragmentName: string;
+  fragmentCount: number;
+  fragmentTarget: number;
 };
 
 export type BattleResult = {
   win: boolean;
   levelId: number;
   levelTitle: string;
+  duration: number;
+  completedGoal: boolean;
   score: number;
   kills: number;
   maxSingleBlade: number;
   maxChain: number;
+  triggeredOneBlade: boolean;
+  hitCore: boolean;
+  coreCollapseCount: number;
+  explosiveCount: number;
+  usedReviveAd: boolean;
+  canReviveAd: boolean;
+  canDoubleReward: boolean;
   slashes: number;
-  rating: string;
+  rating: RatingGrade;
+  nextRatingHint: string;
+  nearMisses: string[];
+  rewards: RunRewards;
+  progress: RunProgress;
 };

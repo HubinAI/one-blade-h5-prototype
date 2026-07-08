@@ -2,7 +2,6 @@ import type { EnemyKind, EnemySpawn, LevelConfig, PickupKind, PickupSpawn } from
 
 const lanes = [44, 92, 140, 188, 236, 284, 336];
 const rowGap = 42;
-const waveDelay = 2;
 
 function enemy(kind: EnemyKind, lane: number, row = 0, xOffset = 0): EnemySpawn {
   return { kind, x: lanes[lane] + xOffset, yOffset: row * rowGap };
@@ -16,7 +15,7 @@ function row(kind: EnemyKind, laneIds: number[], rowIndex = 0): EnemySpawn[] {
   return laneIds.map((lane) => enemy(kind, lane, rowIndex));
 }
 
-function diagonal(kind: EnemyKind, laneIds: number[], startRow = 0): EnemySpawn[] {
+function diag(kind: EnemyKind, laneIds: number[], startRow = 0): EnemySpawn[] {
   return laneIds.map((lane, index) => enemy(kind, lane, startRow + index));
 }
 
@@ -24,239 +23,197 @@ function mix(items: EnemySpawn[][]): EnemySpawn[] {
   return items.flat();
 }
 
+function wave(name: string, spawnAt: number, enemies: EnemySpawn[], pickups?: PickupSpawn[], speedMultiplier = 1) {
+  return { name, spawnAt, delay: 0, enemies, pickups, speedMultiplier };
+}
+
 export const LEVELS: LevelConfig[] = [
   {
     id: 1,
     title: "第一刀",
-    subtitle: "随时拖动挥刀，满势更强",
+    subtitle: "90秒新手体验，随时拖动挥刀",
     initialEnergy: 78,
     hp: 3,
-    enemySpeed: 0.85,
+    enemySpeed: 0.78,
     pickupChance: 0,
+    durationSeconds: 90,
+    buffTimes: [30],
     waves: [
-      { name: "横排试锋", delay: waveDelay, enemies: row("infantry", [0, 1, 2, 4, 5, 6]) },
-      {
-        name: "斜排压近",
-        delay: waveDelay,
-        enemies: diagonal("infantry", [0, 1, 2, 3, 4, 5, 6, 3])
-      },
-      {
-        name: "密集小阵",
-        delay: waveDelay,
-        enemies: mix([row("infantry", [1, 2, 3, 4, 5], 0), row("infantry", [2, 3, 4], 1), row("infantry", [2, 5], 2)])
-      },
-      {
-        name: "一刀收场",
-        delay: waveDelay,
-        enemies: mix([row("infantry", [0, 2, 3, 4, 6], 0), row("infantry", [1, 2, 4, 5], 1), row("infantry", [0, 3, 6], 2)])
-      }
+      wave("爽感启动", 1, row("infantry", [0, 1, 2, 4, 5, 6])),
+      wave("斜排练刀", 13, diag("infantry", [0, 1, 2, 3, 4, 5, 6, 3])),
+      wave("第一军令", 30, mix([row("infantry", [1, 2, 3, 4, 5], 0), row("infantry", [2, 3, 4], 1), row("shield", [0, 6], 2)]), undefined, 0.95),
+      wave("少量盾兵", 48, mix([row("shield", [2, 4], 0), row("infantry", [0, 1, 3, 5, 6], 1), row("infantry", [2, 3, 4], 2)]), undefined, 1),
+      wave("一刀收束", 72, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("shield", [3], 2)]), undefined, 1.08)
     ]
   },
   {
     id: 2,
     title: "蓄势再斩",
-    subtitle: "等一息，刀芒更长",
+    subtitle: "100秒刀势教学，等高刀势更爽",
     initialEnergy: 34,
     hp: 3,
-    enemySpeed: 0.85,
-    pickupChance: 0,
+    enemySpeed: 0.86,
+    pickupChance: 0.03,
+    durationSeconds: 100,
+    buffTimes: [30],
     waves: [
-      { name: "残锋救急", delay: waveDelay, enemies: mix([row("infantry", [0, 1, 3, 5, 6], 0), row("infantry", [2, 4, 3], 1)]) },
-      { name: "常锋横切", delay: waveDelay, enemies: mix([row("infantry", [0, 1, 2, 3, 4], 0), row("infantry", [2, 3, 4, 5, 6], 1)]) },
-      {
-        name: "刀魂入刃",
-        delay: waveDelay,
-        enemies: mix([row("infantry", [0, 2, 3, 4, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("infantry", [0, 3, 6], 2)]),
-        pickups: [pickup("soul", 3)]
-      },
-      {
-        name: "蓄满多斩",
-        delay: waveDelay,
-        enemies: mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("infantry", [0, 6], 2)])
-      }
+      wave("残锋救急", 1, mix([row("infantry", [0, 1, 3, 5, 6], 0), row("infantry", [2, 4, 3], 1)])),
+      wave("常锋横切", 16, mix([row("infantry", [0, 1, 2, 3, 4], 0), row("infantry", [2, 3, 4, 5, 6], 1)])),
+      wave("刀魂入刃", 32, mix([row("infantry", [0, 2, 3, 4, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("shield", [2, 4], 2)]), [pickup("soul", 3)]),
+      wave("等势多斩", 55, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("shield", [1, 5], 1), row("infantry", [0, 2, 3, 4, 6], 2)]), undefined, 1.08),
+      wave("高刀收场", 82, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("shield", [2, 4], 2)]), undefined, 1.12)
     ]
   },
   {
     id: 3,
-    title: "盾兵出现",
-    subtitle: "低势会被挡，强锋可破盾",
+    title: "盾兵压力",
+    subtitle: "110秒强锋破盾，失败可复活",
     initialEnergy: 58,
     hp: 3,
-    enemySpeed: 1,
-    pickupChance: 0.06,
+    enemySpeed: 0.95,
+    pickupChance: 0.04,
+    durationSeconds: 110,
+    buffTimes: [30, 75],
     waves: [
-      { name: "盾兵初现", delay: waveDelay, enemies: mix([row("infantry", [0, 1, 3, 4, 5, 6], 1), row("infantry", [2, 5], 2), row("shield", [2, 4], 0)]) },
-      { name: "盾后藏兵", delay: waveDelay, enemies: mix([row("shield", [0, 3, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("infantry", [0, 2, 4, 6, 3], 2)]) },
-      { name: "破盾一线", delay: waveDelay, enemies: mix([row("shield", [1, 2, 3, 4, 5], 0), row("infantry", [0, 1, 3, 5, 6], 1), row("infantry", [2, 4, 6], 2)]) },
-      { name: "盾前兵后", delay: waveDelay, enemies: mix([row("shield", [0, 1, 2, 4, 5, 6], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), row("infantry", [2, 3, 4], 2)]) }
+      wave("盾兵初现", 1, mix([row("shield", [2, 4], 0), row("infantry", [0, 1, 3, 5, 6], 1)])),
+      wave("盾后藏兵", 18, mix([row("shield", [0, 3, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("infantry", [0, 2, 4, 6], 2)])),
+      wave("军令破盾", 32, mix([row("shield", [1, 2, 4, 5], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1)]), [pickup("drum", 3)], 1.04),
+      wave("盾墙压近", 58, mix([row("shield", [0, 1, 2, 4, 5, 6], 0), row("shield", [2, 4], 1), row("infantry", [0, 1, 3, 5, 6], 2)]), undefined, 1.12),
+      wave("强锋检验", 86, mix([row("shield", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), row("shield", [1, 3, 5], 2)]), undefined, 1.18)
     ]
   },
   {
     id: 4,
-    title: "盾墙压力",
-    subtitle: "强锋破盾，乱切会漏兵",
-    initialEnergy: 48,
+    title: "火药连爆",
+    subtitle: "120秒火药爽点，收刀引爆",
+    initialEnergy: 64,
     hp: 3,
-    enemySpeed: 1,
-    pickupChance: 0.08,
+    enemySpeed: 1.02,
+    pickupChance: 0.05,
+    durationSeconds: 120,
+    buffTimes: [30, 75],
     waves: [
-      { name: "盾墙横排", delay: waveDelay, enemies: mix([row("shield", [0, 1, 2, 4, 5, 6], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), [enemy("infantry", 3, 2)]]) },
-      { name: "斜盾压城", delay: waveDelay, enemies: mix([diagonal("shield", [0, 1, 2, 3, 4, 5, 6, 3], 0), row("infantry", [0, 1, 2, 4, 5, 6], 3), row("infantry", [2, 3, 4, 5], 4)]) },
-      { name: "盾护密阵", delay: waveDelay, enemies: mix([row("shield", [1, 3, 5], 0), row("shield", [0, 2, 4, 6], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2), row("infantry", [1, 2, 3, 4, 5], 3)]) },
-      { name: "盾墙压城", delay: waveDelay, enemies: mix([row("shield", [0, 1, 2, 3, 4, 5, 6], 0), row("shield", [1, 2, 4, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2), row("infantry", [2, 3, 4, 6], 3)]) }
+      wave("开场人群", 1, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 3, 5], 1)])),
+      wave("第一桶火", 20, mix([row("infantry", [0, 1, 2, 4, 5, 6], 0), row("powder", [3], 1), row("infantry", [1, 3, 5], 2)])),
+      wave("双火在人群", 38, mix([row("infantry", [0, 1, 3, 5, 6], 0), row("powder", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("oil", 1)], 1.08),
+      wave("盾前火后", 62, mix([row("shield", [1, 3, 5], 0), row("powder", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.16),
+      wave("三火连爆", 90, mix([row("powder", [1, 3, 5], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), row("shield", [2, 4], 2)]), [pickup("drum", 3)], 1.22),
+      wave("火线收束", 108, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("powder", [1, 2, 4, 5], 1), row("infantry", [0, 2, 3, 4, 6], 2)]), undefined, 1.28)
     ]
   },
   {
     id: 5,
-    title: "火药引爆",
-    subtitle: "切中点燃，收刀连爆",
-    initialEnergy: 66,
+    title: "阵眼破阵",
+    subtitle: "120秒阵眼加入，收刀崩阵",
+    initialEnergy: 62,
     hp: 3,
-    enemySpeed: 1.12,
-    pickupChance: 0.1,
+    enemySpeed: 1.08,
+    pickupChance: 0.06,
+    durationSeconds: 120,
+    buffTimes: [30, 75],
     waves: [
-      { name: "第一桶火", delay: waveDelay, enemies: mix([row("infantry", [0, 1, 2, 4, 5, 6, 3], 0), row("infantry", [1, 5, 3], 1), [enemy("powder", 3, 2)]]) },
-      { name: "双火在人群", delay: waveDelay, enemies: mix([row("infantry", [0, 1, 3, 5, 6], 0), row("powder", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]) },
-      { name: "盾前火后", delay: waveDelay, enemies: mix([row("shield", [1, 3, 5], 0), row("powder", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2), row("infantry", [2, 4, 6], 3)]) },
-      { name: "藏火密阵", delay: waveDelay, enemies: mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("powder", [1, 3, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2), row("infantry", [0, 2, 4, 6], 3)]) }
+      wave("步兵压近", 1, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("shield", [2, 4], 1)])),
+      wave("阵眼初现", 24, mix([row("infantry", [0, 1, 2, 4, 5, 6], 0), [enemy("core", 3, 1)], row("infantry", [1, 3, 5], 2)])),
+      wave("军令破阵", 40, mix([row("shield", [1, 5], 0), [enemy("core", 3, 1)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("soul", 0)], 1.1),
+      wave("火靠阵眼", 65, mix([row("powder", [2, 4], 0), [enemy("core", 3, 1)], row("shield", [1, 5], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), undefined, 1.18),
+      wave("双阵眼", 92, mix([row("shield", [0, 2, 4, 6], 0), row("core", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("drum", 3)], 1.25),
+      wave("破阵收束", 110, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), [enemy("core", 3, 1)], row("powder", [1, 5], 2), row("shield", [2, 4], 3)]), undefined, 1.32)
     ]
   },
   {
     id: 6,
-    title: "火线连环",
-    subtitle: "找火药后排，一刀引爆",
-    initialEnergy: 54,
+    title: "军令试炼",
+    subtitle: "120秒两次强化，形成局内变化",
+    initialEnergy: 56,
     hp: 3,
     enemySpeed: 1.12,
-    pickupChance: 0.12,
+    pickupChance: 0.08,
+    durationSeconds: 120,
+    buffTimes: [30, 75],
     waves: [
-      { name: "分散火桶", delay: waveDelay, enemies: mix([row("powder", [1, 5], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), row("infantry", [2, 3, 4, 6, 0], 2)]) },
-      { name: "三火相邻", delay: waveDelay, enemies: mix([row("infantry", [0, 1, 5, 6], 0), row("powder", [2, 3, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]) },
-      {
-        name: "火盾混阵",
-        delay: waveDelay,
-        enemies: mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 3, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2), row("shield", [2, 4], 3)]),
-        pickups: [pickup("drum", 3)]
-      },
-      { name: "连爆爽点", delay: waveDelay, enemies: mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("powder", [1, 2, 4, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2), row("infantry", [0, 3, 6, 2], 3)]) }
+      wave("启动清场", 1, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 3, 5], 1)])),
+      wave("盾火试探", 20, mix([row("shield", [1, 5], 0), row("powder", [3], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)])),
+      wave("第一次变化", 36, mix([row("powder", [2, 4], 0), row("shield", [1, 3, 5], 1), row("infantry", [0, 2, 4, 6], 2)]), [pickup("soul", 3)], 1.08),
+      wave("混合压近", 62, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 4, 5, 6], 3)]), undefined, 1.18),
+      wave("第二军令", 84, mix([row("shield", [1, 3, 5], 0), row("core", [2, 4], 1), row("powder", [0, 6], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 3)], 1.26),
+      wave("Build收束", 108, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 4, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), undefined, 1.34)
     ]
   },
   {
     id: 7,
-    title: "阵眼初现",
-    subtitle: "切阵眼，收刀崩阵",
-    initialEnergy: 62,
+    title: "盾火混合",
+    subtitle: "120秒不利用火药会压力很大",
+    initialEnergy: 58,
     hp: 3,
-    enemySpeed: 1.25,
-    pickupChance: 0.12,
+    enemySpeed: 1.22,
+    pickupChance: 0.08,
+    durationSeconds: 120,
+    buffTimes: [30, 75],
     waves: [
-      { name: "阵心微光", delay: waveDelay, enemies: mix([row("infantry", [0, 1, 2, 4, 5, 6, 3], 0), row("infantry", [0, 1, 2, 4, 5], 1), [enemy("core", 3, 2)]]) },
-      { name: "盾护阵眼", delay: waveDelay, enemies: mix([row("shield", [1, 5], 0), row("shield", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2), [enemy("core", 3, 3)], row("infantry", [1, 3, 5, 6], 4)]) },
-      { name: "火靠阵眼", delay: waveDelay, enemies: mix([row("powder", [2, 4], 0), [enemy("core", 3, 1)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 2), row("shield", [1, 5], 3), row("infantry", [0, 3, 6], 4)]) },
-      { name: "密阵找眼", delay: waveDelay, enemies: mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("shield", [1, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2), [enemy("core", 3, 3)], row("shield", [2, 4], 4), row("infantry", [0, 1, 2, 3, 4, 5, 6], 5)]) }
+      wave("盾火开局", 1, mix([row("shield", [1, 5], 0), row("powder", [3], 1), row("infantry", [0, 1, 2, 4, 5, 6], 2)])),
+      wave("火药后排", 18, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 3, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)])),
+      wave("军令反击", 36, mix([row("shield", [1, 3, 5], 0), row("powder", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("oil", 3)], 1.12),
+      wave("盾火密阵", 62, mix([row("shield", [0, 1, 2, 4, 5, 6], 0), row("powder", [2, 3, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.22),
+      wave("阵眼插入", 85, mix([row("shield", [1, 5], 0), row("powder", [2, 4], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 3)], 1.32),
+      wave("火墙压城", 108, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 3, 4, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.42)
     ]
   },
   {
     id: 8,
     title: "阵眼保护",
-    subtitle: "斜切穿盾，破阵清场",
+    subtitle: "130秒盾兵护眼，需要斜切核心",
     initialEnergy: 54,
     hp: 3,
     enemySpeed: 1.25,
-    pickupChance: 0.14,
+    pickupChance: 0.09,
+    durationSeconds: 130,
+    buffTimes: [30, 75, 105],
     waves: [
-      { name: "左阵有盾", delay: waveDelay, enemies: mix([[enemy("core", 1, 0)], row("shield", [0, 2, 3], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2), row("infantry", [2, 4, 6], 3), row("infantry", [1, 3, 5], 4)]) },
-      { name: "右阵藏火", delay: waveDelay, enemies: mix([[enemy("core", 5, 0)], row("powder", [4, 6], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2), row("shield", [1, 3], 3), row("infantry", [0, 2], 4), row("infantry", [1, 3, 5], 5)]) },
-      {
-        name: "双盾护眼",
-        delay: waveDelay,
-        enemies: mix([row("shield", [2, 4], 0), [enemy("core", 3, 1)], row("shield", [1, 5], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3), row("infantry", [0, 2, 4, 6], 4), row("powder", [2, 4], 5)]),
-        pickups: [pickup("soul", 0)]
-      },
-      { name: "火阵牵引", delay: waveDelay, enemies: mix([row("powder", [1, 5], 0), [enemy("core", 3, 1)], row("shield", [0, 2, 4, 6], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3), row("powder", [2, 4], 4), row("infantry", [1, 3, 5], 5), row("infantry", [0, 3, 6], 6)]) }
+      wave("左阵有盾", 1, mix([[enemy("core", 1, 0)], row("shield", [0, 2, 3], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)])),
+      wave("右阵藏火", 20, mix([[enemy("core", 5, 0)], row("powder", [4, 6], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2), row("shield", [1, 3], 3)])),
+      wave("第一次军令", 38, mix([row("shield", [2, 4], 0), [enemy("core", 3, 1)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("soul", 0)], 1.12),
+      wave("双盾护眼", 65, mix([row("shield", [1, 2, 4, 5], 0), row("core", [2, 4], 1), row("powder", [3], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), undefined, 1.24),
+      wave("火阵牵引", 92, mix([row("powder", [1, 5], 0), [enemy("core", 3, 1)], row("shield", [0, 2, 4, 6], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 3)], 1.34),
+      wave("斜切收束", 116, mix([row("shield", [0, 1, 5, 6], 0), row("core", [2, 4], 1), row("powder", [1, 3, 5], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), undefined, 1.45)
     ]
   },
   {
     id: 9,
-    title: "补给与压力",
-    subtitle: "切补给，强化下一刀",
-    initialEnergy: 48,
+    title: "补给爆发",
+    subtitle: "130秒补给更频繁，压力更高",
+    initialEnergy: 50,
     hp: 3,
-    enemySpeed: 1.38,
-    pickupChance: 0.08,
+    enemySpeed: 1.32,
+    pickupChance: 0.12,
+    durationSeconds: 130,
+    buffTimes: [30, 75, 105],
     waves: [
-      {
-        name: "战鼓催势",
-        delay: waveDelay,
-        enemies: mix([row("shield", [1, 3, 5], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), row("infantry", [0, 2, 4, 6], 2)]),
-        pickups: [pickup("drum", 3)]
-      },
-      {
-        name: "刀魂续锋",
-        delay: waveDelay,
-        enemies: mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), row("shield", [2, 4], 2), row("infantry", [1, 3, 5], 3)]),
-        pickups: [pickup("soul", 4)]
-      },
-      {
-        name: "火油附刃",
-        delay: waveDelay,
-        enemies: mix([row("powder", [2, 4, 5], 0), row("shield", [1, 3, 6], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2), row("infantry", [0, 2, 4, 6], 3)]),
-        pickups: [pickup("oil", 1)]
-      },
-      {
-        name: "补给破围",
-        delay: waveDelay,
-        enemies: mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3), row("shield", [1, 3, 5], 4), row("infantry", [0, 2, 4, 6], 5)]),
-        pickups: [pickup("drum", 3)]
-      }
+      wave("战鼓催势", 1, mix([row("shield", [1, 3, 5], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1)]), [pickup("drum", 3)]),
+      wave("刀魂续锋", 20, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("shield", [2, 4], 1), row("infantry", [1, 3, 5], 2)]), [pickup("soul", 4)]),
+      wave("火油附刃", 42, mix([row("powder", [2, 4, 5], 0), row("shield", [1, 3, 6], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("oil", 1)], 1.16),
+      wave("补给破围", 68, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 3)], 1.28),
+      wave("高压混阵", 96, mix([row("powder", [1, 2, 4, 5], 0), row("shield", [0, 3, 6], 1), row("core", [2, 4], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("soul", 0)], 1.42),
+      wave("补给爆发", 118, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 3, 4, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("oil", 6)], 1.55)
     ]
   },
   {
     id: 10,
     title: "黄巾大阵",
-    subtitle: "综合破阵，乱切有险",
+    subtitle: "150秒综合测试，最后一刀破阵",
     initialEnergy: 68,
     hp: 3,
     enemySpeed: 1.38,
-    pickupChance: 0.06,
+    pickupChance: 0.08,
+    durationSeconds: 150,
+    buffTimes: [30, 75, 105],
     waves: [
-      {
-        name: "步兵密集阵",
-        delay: waveDelay,
-        enemies: mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), row("infantry", [1, 2, 3, 4, 5], 2)]),
-        pickups: [pickup("soul", 3)]
-      },
-      {
-        name: "盾兵前排",
-        delay: waveDelay,
-        enemies: mix([row("shield", [0, 1, 2, 3, 4, 5, 6], 0), row("shield", [1, 3, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2), row("infantry", [2, 3, 4, 6], 3)])
-      },
-      {
-        name: "火药后排",
-        delay: waveDelay,
-        enemies: mix([row("shield", [1, 3, 5], 0), row("powder", [0, 2, 4, 6], 1), row("powder", [2, 4], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3), row("infantry", [1, 3, 5], 4)]),
-        pickups: [pickup("oil", 3)]
-      },
-      {
-        name: "阵眼居中",
-        delay: waveDelay,
-        enemies: mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3), row("shield", [1, 5], 4), row("infantry", [2, 3, 4, 6], 5)]),
-        pickups: [pickup("drum", 0)]
-      },
-      {
-        name: "综合破阵",
-        delay: waveDelay,
-        enemies: mix([
-          row("shield", [0, 1, 5, 6], 0),
-          row("powder", [1, 2, 4, 5], 1),
-          row("core", [2, 4], 2),
-          row("infantry", [0, 1, 2, 3, 4, 5, 6], 3),
-          row("shield", [1, 3, 5], 4),
-          row("infantry", [0, 1, 2, 3, 4, 5, 6], 5),
-          row("powder", [2, 4], 6),
-          row("infantry", [0, 3], 7)
-        ])
-      }
+      wave("步兵密集阵", 1, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), row("infantry", [1, 2, 3, 4, 5], 2)]), [pickup("soul", 3)]),
+      wave("盾兵前排", 22, mix([row("shield", [0, 1, 2, 3, 4, 5, 6], 0), row("shield", [1, 3, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.1),
+      wave("第一次军令", 40, mix([row("shield", [1, 3, 5], 0), row("powder", [0, 2, 4, 6], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("oil", 3)], 1.18),
+      wave("火药后排", 62, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 2, 4, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.28),
+      wave("阵眼居中", 88, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 0)], 1.38),
+      wave("第三军令", 112, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 4, 5], 1), row("core", [2, 4], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("soul", 6)], 1.5),
+      wave("一刀破阵", 136, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 3, 4, 5], 1), row("core", [2, 4], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3), row("infantry", [0, 1, 2, 3, 4, 5, 6], 4), row("powder", [2, 4], 5)]), [pickup("drum", 3)], 1.65)
     ]
   }
 ];

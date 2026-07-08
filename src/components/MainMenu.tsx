@@ -8,7 +8,7 @@ export function MainMenu({ unlockedLevel, onStart, onLevels }: MainMenuProps) {
   return (
     <section className="screen menu-screen">
       <div className="title-block">
-        <span className="seal">V0.3</span>
+        <span className="seal">V0.4</span>
         <h1>我只要一刀</h1>
         <p>刀势越满，一刀越强</p>
       </div>
