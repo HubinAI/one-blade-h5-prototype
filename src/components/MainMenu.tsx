@@ -37,21 +37,20 @@ export function MainMenu({
 
   return (
     <section className="screen menu-screen menu-screen-v4">
-      <div className="home-topbar">
-        <span>金币 {home.coins}</span>
-        <span>
+      <div className="home-topbar home-topbar-v5">
+        <span className="topbar-coin">金币 {home.coins}</span>
+        <span className="topbar-stamina">
           军粮 {home.stamina}/{home.staminaMax}
         </span>
-        <span>{home.dailyFirstWinReady ? "🔥 今日首胜未领" : "今日首胜已领"}</span>
       </div>
 
       <div className="title-block title-block-v4">
-        <span className="seal">V0708001 IAA版</span>
+        <span className="seal">V0708002 IAA版</span>
         <h1>我只要一刀</h1>
         <p>随时能砍，但刀势越满越爽</p>
       </div>
 
-      <div className="home-progress-panel">
+      <div className="home-progress-panel home-progress-panel-v5">
         <div className="home-progress-row">
           <span>战功宝箱</span>
           <b>
@@ -70,13 +69,11 @@ export function MainMenu({
         )}
       </div>
 
-      <div className="daily-card">
-        <strong>每日挑战：{home.dailyChallengeName}</strong>
-        <span>{home.dailyChallengeDescription}</span>
-        <button className="ghost-button compact-button" onClick={onDailyChallenge}>
-          进入挑战
-        </button>
-      </div>
+      <button className="daily-challenge-line" onClick={onDailyChallenge}>
+        <span>每日挑战</span>
+        <strong>{home.dailyChallengeName}</strong>
+        <b>进入</b>
+      </button>
 
       {home.offlineCoins > 0 && (
         <div className="offline-card">
@@ -97,7 +94,7 @@ export function MainMenu({
           {isFirstPlay ? "开始游戏" : `继续第 ${unlockedLevel} 关`}
         </button>
         <button className="ghost-button" onClick={onHighYieldChallenge}>
-          高收益挑战（5 军粮）
+          高收益挑战
         </button>
         <button className="ghost-button" onClick={onUpgrades}>
           刀势升级
@@ -122,7 +119,7 @@ export function MainMenu({
         </div>
       )}
 
-      <small className="stamina-note">军粮恢复：{home.staminaNextText}</small>
+      <small className="stamina-note">{home.staminaNextText}</small>
     </section>
   );
 }

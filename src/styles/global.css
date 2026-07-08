@@ -238,6 +238,49 @@ h1 {
   z-index: 1;
 }
 
+.home-topbar-v5 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.home-topbar-v5 .topbar-coin {
+  color: #ffd35a;
+}
+
+.home-topbar-v5 .topbar-stamina {
+  color: #a8e6cf;
+}
+
+.daily-challenge-line {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid rgba(240, 195, 107, 0.22);
+  border-radius: 8px;
+  background: rgba(18, 16, 14, 0.58);
+  color: rgba(246, 231, 189, 0.72);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.daily-challenge-line strong {
+  color: #fff3c0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.daily-challenge-line b {
+  color: #ffd35a;
+  font-size: 12px;
+}
+
 .home-progress-panel,
 .daily-card,
 .offline-card,
@@ -425,11 +468,157 @@ h1 {
   text-align: center;
 }
 
-.result-screen-v4 {
+.result-screen-v5 {
   justify-content: flex-start;
   gap: 12px;
-  padding: 18px 18px 24px;
+  padding: 14px 18px 22px;
   overflow: auto;
+}
+
+.result-screen-v5 .version-tag {
+  margin-bottom: 2px;
+}
+
+.result-header {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+}
+
+.result-header .result-medal {
+  width: 74px;
+  height: 74px;
+  font-size: 30px;
+}
+
+.result-header h2 {
+  margin: 0;
+  font-size: 26px;
+  color: #fff3c0;
+}
+
+.result-header p {
+  margin: 0;
+  color: rgba(246, 231, 189, 0.7);
+  font-size: 13px;
+}
+
+.result-hero-stats {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.result-hero-stats > div {
+  display: grid;
+  gap: 4px;
+  padding: 10px 6px;
+  border: 1px solid rgba(240, 195, 107, 0.22);
+  border-radius: 8px;
+  background: rgba(18, 16, 14, 0.66);
+}
+
+.result-hero-stats .hero-stat-highlight {
+  background: rgba(240, 195, 107, 0.14);
+  border-color: rgba(240, 195, 107, 0.42);
+}
+
+.result-hero-stats span {
+  color: rgba(246, 231, 189, 0.62);
+  font-size: 11px;
+}
+
+.result-hero-stats b {
+  color: #fff3c0;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.result-hero-stats .hero-stat-highlight b {
+  color: #ffd35a;
+}
+
+.reward-summary {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+.reward-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  background: rgba(18, 16, 14, 0.62);
+  border: 1px solid rgba(240, 195, 107, 0.22);
+}
+
+.reward-coins {
+  color: #ffd35a;
+  border-color: rgba(255, 211, 90, 0.42);
+  background: rgba(255, 211, 90, 0.12);
+}
+
+.reward-pass {
+  color: #f6e7bd;
+}
+
+.reward-shard {
+  color: #e8d7ff;
+  border-color: rgba(232, 215, 255, 0.32);
+}
+
+.result-progress {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(240, 195, 107, 0.22);
+  border-radius: 8px;
+  background: rgba(18, 16, 14, 0.66);
+}
+
+.result-progress-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding-bottom: 8px;
+  color: rgba(246, 231, 189, 0.76);
+  font-size: 12px;
+}
+
+.result-progress-row b {
+  color: #ffd35a;
+}
+
+.result-progress-row i {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ffd35a, #f0a235);
+}
+
+.result-screen-v5 .menu-actions {
+  margin-top: auto;
+  gap: 8px;
+}
+
+.result-screen-v5 .result-actions {
+  margin-top: 4px;
 }
 
 .version-tag {

@@ -1226,7 +1226,7 @@ export class Game {
     ctx.fillText(`分 ${Math.floor(this.score)}`, 374, 45);
     ctx.fillStyle = "rgba(255, 211, 90, 0.68)";
     ctx.font = '800 10px "Microsoft YaHei", sans-serif';
-    ctx.fillText("V0708001", 374, 66);
+    ctx.fillText("V0708002", 374, 66);
 
     ctx.textAlign = "center";
     for (let i = 0; i < this.maxHp; i += 1) {
@@ -1269,75 +1269,87 @@ export class Game {
       ctx.stroke();
 
       ctx.shadowBlur = 0;
+      ctx.strokeStyle = def.accent;
       ctx.fillStyle = def.accent;
-      ctx.font = '700 12px "Microsoft YaHei", sans-serif';
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
+      ctx.lineWidth = 2.2;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
 
       if (enemy.kind === "infantry") {
-        ctx.fillText("步", 0, 2);
-        ctx.strokeStyle = def.accent;
+        // 步兵：简洁的矛头/箭头符号
         ctx.beginPath();
-        ctx.moveTo(-9, -10);
-        ctx.lineTo(10, 12);
-        ctx.stroke();
+        ctx.moveTo(0, -10);
+        ctx.lineTo(6, 2);
+        ctx.lineTo(0, 2);
+        ctx.lineTo(0, 10);
+        ctx.lineTo(0, 2);
+        ctx.lineTo(-6, 2);
+        ctx.closePath();
+        ctx.fill();
       }
 
       if (enemy.kind === "shield") {
-        ctx.fillText("盾", 0, 2);
-        ctx.strokeStyle = "#2a1811";
-        ctx.lineWidth = 2;
+        // 盾兵：盾牌轮廓
         ctx.beginPath();
-        ctx.arc(0, 1, 12, 0.15 * Math.PI, 1.85 * Math.PI);
+        ctx.moveTo(0, -11);
+        ctx.quadraticCurveTo(9, -9, 9, 0);
+        ctx.quadraticCurveTo(9, 11, 0, 13);
+        ctx.quadraticCurveTo(-9, 11, -9, 0);
+        ctx.quadraticCurveTo(-9, -9, 0, -11);
+        ctx.closePath();
         ctx.stroke();
         if (enemy.hp < enemy.maxHp || enemy.shieldCrack > 0) {
           ctx.strokeStyle = "#f6e7bd";
+          ctx.lineWidth = 1.6;
           ctx.beginPath();
-          ctx.moveTo(-4, -10);
-          ctx.lineTo(3, -2);
-          ctx.lineTo(-2, 9);
+          ctx.moveTo(-3, -8);
+          ctx.lineTo(3, -1);
+          ctx.lineTo(-1, 8);
           ctx.stroke();
         }
       }
 
       if (enemy.kind === "powder") {
-        ctx.fillText("火", 0, 3);
-        ctx.strokeStyle = enemy.ignited ? "#ffd67c" : "#2a1811";
+        // 火药兵：火焰符号
+        ctx.fillStyle = enemy.ignited ? "#ffd67c" : def.accent;
         ctx.beginPath();
-        ctx.moveTo(8, -13);
-        ctx.quadraticCurveTo(15, -20, 6, -24);
-        ctx.stroke();
-        if (enemy.ignited) {
-          ctx.fillStyle = "#ffb15c";
-          ctx.beginPath();
-          ctx.arc(8, -16, 4 + Math.sin(this.elapsed * 18) * 1.5, 0, Math.PI * 2);
-          ctx.fill();
-        }
+        ctx.moveTo(0, -11);
+        ctx.quadraticCurveTo(7, -6, 5, 2);
+        ctx.quadraticCurveTo(8, 4, 3, 10);
+        ctx.quadraticCurveTo(0, 6, -3, 10);
+        ctx.quadraticCurveTo(-8, 4, -5, 2);
+        ctx.quadraticCurveTo(-7, -6, 0, -11);
+        ctx.closePath();
+        ctx.fill();
       }
 
       if (enemy.kind === "core") {
-        ctx.fillText("阵", 0, 2);
+        // 阵眼：旋转菱形 + 内三角
         ctx.strokeStyle = enemy.marked ? "#ffffff" : "#e8d7ff";
-        ctx.lineWidth = 1.4;
+        const pulse = 1 + Math.sin(this.elapsed * 5) * 0.14;
+        ctx.save();
+        ctx.rotate(this.elapsed * 0.6);
         ctx.beginPath();
-        ctx.arc(0, 1, 12 + Math.sin(this.elapsed * 5) * 1.4, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(0, -12);
-        ctx.lineTo(10, 8);
-        ctx.lineTo(-10, 8);
+        ctx.moveTo(0, -12 * pulse);
+        ctx.lineTo(10 * pulse, 0);
+        ctx.lineTo(0, 12 * pulse);
+        ctx.lineTo(-10 * pulse, 0);
         ctx.closePath();
         ctx.stroke();
+        ctx.restore();
+
+        ctx.beginPath();
+        ctx.moveTo(0, -9);
+        ctx.lineTo(8, 7);
+        ctx.lineTo(-8, 7);
+        ctx.closePath();
+        ctx.stroke();
+
         if (enemy.marked) {
           ctx.strokeStyle = "#fff8d8";
           ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.moveTo(-9, -9);
-          ctx.lineTo(1, -1);
-          ctx.lineTo(-4, 10);
-          ctx.moveTo(8, -7);
-          ctx.lineTo(2, 1);
-          ctx.lineTo(9, 10);
+          ctx.arc(0, 0, 14, 0, Math.PI * 2);
           ctx.stroke();
         }
       }
