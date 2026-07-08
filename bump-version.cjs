@@ -43,29 +43,30 @@ const TARGETS = [
   },
   {
     file: "index.html",
-    // 匹配完整版本标记（含V前缀），替换为新版本号（ver已含V前缀）
+    // 兼容旧格式 "V0708002 IAA版" 和新格式 "V0708002"
     replace: (content, ver) =>
-      content.replace(/V(?:\d{7}|[\d.]+)( IAA版)/, `${ver}$1`),
+      content.replace(/V(?:\d{7}|[\d.]+)(?: IAA版)?/, ver),
   },
   {
     file: "src/components/MainMenu.tsx",
     replace: (content, ver) =>
-      content.replace(/V(?:\d{7}|[\d.]+)( IAA版)/, `${ver}$1`),
+      content.replace(/V(?:\d{7}|[\d.]+)(?: IAA版)?/, ver),
   },
   {
     file: "src/game/Game.ts",
+    // 兼容旧格式 "V0.4 IAA" 或纯 "V0708002"
     replace: (content, ver) =>
-      content.replace(/"V(?:\d{7}|[\d.]+(?: IAA)?)"/, `"${ver}"`),
+      content.replace(/"V(?:\d{7}|[\d.]+)(?: IAA)?"/, `"${ver}"`),
   },
   {
     file: "src/components/ResultScreen.tsx",
     replace: (content, ver) =>
-      content.replace(/V(?:\d{7}|[\d.]+)( IAA版)/, `${ver}$1`),
+      content.replace(/V(?:\d{7}|[\d.]+)(?: IAA版)?/, ver),
   },
   {
     file: "README.md",
     replace: (content, ver) =>
-      content.replace(/V(?:\d{7}|[\d.]+)( IAA版)/, `${ver}$1`),
+      content.replace(/V(?:\d{7}|[\d.]+)(?: IAA版)?/, ver),
   },
 ];
 

@@ -45,7 +45,7 @@ export function MainMenu({
       </div>
 
       <div className="title-block title-block-v4">
-        <span className="seal">V0708002 IAA版</span>
+        <span className="seal">V0708003</span>
         <h1>我只要一刀</h1>
         <p>随时能砍，但刀势越满越爽</p>
       </div>
