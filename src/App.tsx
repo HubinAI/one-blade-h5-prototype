@@ -7,6 +7,7 @@ import { LevelSelect } from "./components/LevelSelect";
 import { ResultScreen } from "./components/ResultScreen";
 import { AdOverlay } from "./components/AdOverlay";
 import { UpgradeScreen } from "./components/UpgradeScreen";
+import { PreBattleBriefing } from "./components/PreBattleBriefing";
 import type { ReviveOffer } from "./game/Game";
 import { AdService } from "./game/services/AdService";
 import {
@@ -26,7 +27,7 @@ import {
 import { logEvent } from "./game/services/Analytics";
 import type { UpgradeId } from "./game/config/rewards";
 
-type Screen = "menu" | "levels" | "battle" | "result" | "upgrades";
+type Screen = "menu" | "levels" | "briefing" | "battle" | "result" | "upgrades";
 
 const SAVE_KEY = "one_blade_v02_progress";
 
@@ -66,10 +67,14 @@ export default function App() {
       setLastResult(null);
       setReviveOffer(null);
       refreshHome();
-      setScreen("battle");
+      setScreen("briefing");
     },
     [refreshHome]
   );
+
+  const enterBattle = useCallback(() => {
+    setScreen("battle");
+  }, []);
 
   const handleFinish = useCallback(
     (result: BattleResult) => {
@@ -213,6 +218,13 @@ export default function App() {
             setScreen("menu");
           }}
           onSelect={(level) => startLevel(level)}
+        />
+      )}
+
+      {screen === "briefing" && (
+        <PreBattleBriefing
+          level={currentLevel}
+          onReady={enterBattle}
         />
       )}
 

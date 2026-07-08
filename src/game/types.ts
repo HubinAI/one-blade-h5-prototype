@@ -8,17 +8,38 @@ export type EnemyKind = "infantry" | "shield" | "powder" | "core";
 export type PickupKind = "drum" | "soul" | "oil";
 export type GamePhase = "playing" | "buffChoice" | "revive" | "won" | "lost";
 export type RatingGrade = "C" | "B" | "A" | "S" | "SS" | "神之一刀";
+
+// ---- 战术指令路线系统 ----
+export type TacticalRoute = "scorch" | "pierce" | "ironWall";
+
 export type BuffId =
-  | "longBlade"
-  | "burstLine"
-  | "breath"
-  | "shieldBreaker"
-  | "fireOil"
-  | "coreBreak"
-  | "warDrum"
-  | "fortify"
-  | "doubleBlade"
-  | "paperSplash";
+  | "oilSoak"       // 燎原1：火油浸润
+  | "chainFuse"     // 燎原2：连锁引信
+  | "scorch"        // 燎原3：燎原
+  | "pierceShield"  // 贯阵1：穿盾
+  | "shatterCore"   // 贯阵2：碎阵
+  | "shatterArmy"   // 贯阵3：破军
+  | "fortress"      // 鐵壁1：堅城
+  | "warDrum"       // 鐵壁2：鼓阵
+  | "soulReturn";   // 鐵壁3：魂返
+
+// ---- 技能雷达四维 ----
+export type SkillDimension = "momentum" | "precision" | "shatter" | "guard";
+export type SkillScores = {
+  momentum: number;   // 势：蓄势能力
+  precision: number;  // 斩：精准能力
+  shatter: number;    // 破：破阵能力
+  guard: number;      // 守：御守能力
+};
+
+export type SkillMilestone = {
+  id: string;
+  dimension: SkillDimension;
+  title: string;
+  achieved: boolean;
+  progress: number;
+  target: number;
+};
 
 export type EnemySpawn = {
   kind: EnemyKind;
@@ -41,6 +62,13 @@ export type WaveConfig = {
   pickups?: PickupSpawn[];
 };
 
+// ---- 战术简报数据 ----
+export type BriefingData = {
+  highlightEnemies: Array<{ kind: EnemyKind; label: string; icon: string }>;
+  tacticalHint: string;
+  initialBladeTier: string;
+};
+
 export type LevelConfig = {
   id: number;
   title: string;
@@ -52,6 +80,7 @@ export type LevelConfig = {
   durationSeconds: number;
   buffTimes: number[];
   waves: WaveConfig[];
+  briefing?: BriefingData;
 };
 
 export type Enemy = {
@@ -72,6 +101,8 @@ export type Enemy = {
   shieldCrack: number;
   flash: number;
   wobble: number;
+  /** 鐵壁堅城buff：触线后减速 */
+  slowedTimer: number;
 };
 
 export type Pickup = {
@@ -154,6 +185,16 @@ export type BattleStats = {
   slashes: number;
   pickups: number;
   score: number;
+  /** 技能雷达原始数据（供SkillTracker计算） */
+  highBladeSlashCount: number;
+  totalSlashEnergy: number;
+  slashCount: number;
+  sharpTurnCount: number;
+  totalKillPerSlash: number;
+  chainKillTotal: number;
+  defenseLineHits: number;
+  remainingHp: number;
+  pickupCollectRate: number;
 };
 
 export type RunRewards = {
@@ -205,4 +246,8 @@ export type BattleResult = {
   nearMisses: string[];
   rewards: RunRewards;
   progress: RunProgress;
+  /** 技能雷达四维分数 */
+  skillScores: SkillScores;
+  /** 本局选择的路线（用于归因） */
+  selectedRoutes: TacticalRoute[];
 };

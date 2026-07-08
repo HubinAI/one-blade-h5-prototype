@@ -4,7 +4,7 @@ import { PICKUP_DEFS } from "../data/pickups";
 import { DESIGN_HEIGHT, DESIGN_WIDTH, HUD_HEIGHT, WALL_TOP_Y } from "./config/constants";
 import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID } from "./config/balance";
 import { AD_CONFIG } from "./config/ads";
-import { RUN_BUFFS, RUN_BUFF_BY_ID } from "./config/buffs";
+import { RUN_BUFFS, RUN_BUFF_BY_ID, ROUTE_COLORS, ROUTE_NAMES, ROUTE_BUFFS, getNextBuffInRoute, getBuffRoute } from "./config/buffs";
 import { REWARD_CONFIG } from "./config/rewards";
 import { getBladeTier, getTierConfig, consumeEnergyForSlash, recoverEnergy } from "./systems/bladeEnergySystem";
 import { isSharpTurn, segmentHitCircle } from "./systems/collisionSystem";
@@ -12,6 +12,7 @@ import { paperBurst, ringParticle, sparkBurst } from "./systems/particleSystem";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers } from "./services/ProgressionService";
 import { logEvent } from "./services/Analytics";
 import { AudioService } from "./services/AudioService";
+import { calculateSkillScores } from "./services/SkillTracker";
 import type {
   BattleResult,
   BattleStats,
@@ -26,6 +27,8 @@ import type {
   PickupKind,
   SlashPoint,
   SlashTrail,
+  SkillScores,
+  TacticalRoute,
   Vec2
 } from "./types";
 import { choose, clamp, distance, randomRange } from "../utils/math";
@@ -59,6 +62,14 @@ export class Game {
   private nextSoul = false;
   private nextOil = false;
   private pickupsSpawned = 0;
+  private warDrumNoDecayTimer = 0; // 鼓阵buff：击杀后1s刀势不衰减
+  private soulReturnUsed = false;   // 魂返buff：是否已使用过
+  private selectedRoutes: TacticalRoute[] = []; // 追踪选择的路线
+  private defenseLineHits = 0;      // 敌军触线次数（技能雷达数据）
+  private sharpTurnCount = 0;       // 急转弯次数
+  private highBladeSlashCount = 0;  // 高刀势(>=60)挥刀次数
+  private totalSlashEnergy = 0;     // 所有挥刀能量总和
+  private chainKillTotal = 0;       // 连杀总数
 
   private enemies: Enemy[] = [];
   private pickups: Pickup[] = [];
@@ -99,7 +110,16 @@ export class Game {
     usedReviveAd: false,
     slashes: 0,
     pickups: 0,
-    score: 0
+    score: 0,
+    highBladeSlashCount: 0,
+    totalSlashEnergy: 0,
+    slashCount: 0,
+    sharpTurnCount: 0,
+    totalKillPerSlash: 0,
+    chainKillTotal: 0,
+    defenseLineHits: 0,
+    remainingHp: 0,
+    pickupCollectRate: 0
   };
 
   constructor(level: LevelConfig, onFinish: FinishCallback, onReviveOffer?: ReviveOfferCallback) {
@@ -164,14 +184,19 @@ export class Game {
 
     this.elapsed += scaledDt;
     this.regenDelayTimer = Math.max(0, this.regenDelayTimer - scaledDt);
-    if (!this.currentSlash?.active && this.regenDelayTimer <= 0) {
+    if (!this.currentSlash?.active && this.regenDelayTimer <= 0 && this.warDrumNoDecayTimer <= 0) {
       this.energy = recoverEnergy(this.energy, scaledDt * this.getPassiveRegenMultiplier(), this.drumTimer);
+    }
+    // 鼓阵：击杀后1s内刀势不衰减（不扣regenDelay）
+    if (!this.currentSlash?.active && this.warDrumNoDecayTimer > 0) {
+      // 不恢复也不衰减，维持当前刀势
     }
     if (!this.currentSlash?.active && this.energy >= 90) {
       this.showHint("burst-ready", "破阵锋已成", DESIGN_WIDTH / 2, 656, 1);
     }
 
     this.drumTimer = Math.max(0, this.drumTimer - scaledDt);
+    this.warDrumNoDecayTimer = Math.max(0, this.warDrumNoDecayTimer - scaledDt);
     this.warriorDrawTimer = Math.max(0, this.warriorDrawTimer - scaledDt);
     this.warriorSheathTimer = Math.max(0, this.warriorSheathTimer - scaledDt);
     this.screenShake = Math.max(0, this.screenShake - scaledDt * 2.7);
@@ -284,6 +309,8 @@ export class Game {
     this.nextSoul = false;
     this.nextOil = false;
     this.stats.slashes += 1;
+    this.totalSlashEnergy += lockedEnergy;
+    if (lockedEnergy >= 60) this.highBladeSlashCount += 1;
     this.warriorDrawTimer = 0.2;
     this.warriorSheathTimer = 0;
     this.lastSlashAngle = this.angleFromWarrior(pos);
@@ -310,6 +337,7 @@ export class Game {
     let cost = dist;
     if (prev && isSharpTurn(prev, last, pos)) {
       cost += BALANCE.slash.sharpTurnExtraCost;
+      this.sharpTurnCount += 1;
       this.addText(pos.x, pos.y - 12, "折势", "#d9b45b", 12);
     }
 
@@ -346,9 +374,12 @@ export class Game {
     trail.active = false;
     this.resolvePendingSlash(trail);
     const last = trail.points[trail.points.length - 1];
-    if (this.hasBuff("burstLine") && trail.kills >= 5) {
-      this.triggerBuffBurst(last, trail);
+
+    // ---- 燎原路线收刀特效：所有点燃敌军额外爆炸 ----
+    if (this.hasBuff("scorch")) {
+      this.triggerScorchEnd(trail);
     }
+
     const slashBonus = this.getSlashScoreBonus(trail.kills);
     if (slashBonus > 0) this.score += slashBonus;
 
@@ -389,6 +420,23 @@ export class Game {
       this.screenShake = Math.max(this.screenShake, 0.78);
     }
 
+    // ---- 路线收刀特效：路线专属闪光 ----
+    if (this.selectedRoutes.length > 0) {
+      const mainRoute = this.selectedRoutes[this.selectedRoutes.length - 1];
+      const routeColor = ROUTE_COLORS[mainRoute];
+      if (mainRoute === "scorch" && trail.kills > 0) {
+        this.flash = Math.max(this.flash, 0.42);
+        this.screenShake = Math.max(this.screenShake, 0.35);
+      }
+      if (mainRoute === "pierce" && trail.coreCollapseCount > 0) {
+        this.flash = Math.max(this.flash, 0.35);
+        this.screenShake = Math.max(this.screenShake, 0.42);
+      }
+      if (mainRoute === "ironWall" && trail.kills > 0) {
+        this.screenShake = Math.max(this.screenShake, 0.18);
+      }
+    }
+
     logEvent("slash_end", {
       levelId: this.level.id,
       hitCount: trail.hitEnemyIds.size,
@@ -423,8 +471,15 @@ export class Game {
     return this.runBuffs.has(id);
   }
 
+  private hasRouteBuff(route: TacticalRoute) {
+    for (const bid of ROUTE_BUFFS[route]) {
+      if (this.runBuffs.has(bid)) return true;
+    }
+    return false;
+  }
+
   private getPathLengthMultiplier() {
-    return (this.hasBuff("longBlade") ? 1.18 : 1) * this.progressionModifiers.pathLength;
+    return this.progressionModifiers.pathLength;
   }
 
   private getPassiveRegenMultiplier() {
@@ -432,17 +487,15 @@ export class Game {
     return (this.hasBuff("warDrum") ? 1.2 : 1) * this.progressionModifiers.energyRegen * dailyBoost;
   }
 
-  private getKillEnergyMultiplier() {
-    return this.hasBuff("breath") ? 1.3 : 1;
-  }
-
   private getExplosionRadiusMultiplier() {
-    return (this.hasBuff("fireOil") ? 1.25 : 1) * this.progressionModifiers.explosionRadius;
+    const scorchBonus = this.hasBuff("chainFuse") ? 1.25 : 1;
+    return scorchBonus * this.progressionModifiers.explosionRadius;
   }
 
   private getCoreRadiusMultiplier() {
     const dailyBoost = this.runContext.mode === "dailyChallenge" && this.runContext.dailyChallengeId === "core_bonus" ? 1.18 : 1;
-    return (this.hasBuff("coreBreak") ? 1.25 : 1) * dailyBoost;
+    const pierceBonus = this.hasBuff("shatterCore") ? 1.25 : 1;
+    return pierceBonus * dailyBoost;
   }
 
   private getEffectivePickupChance() {
@@ -483,12 +536,19 @@ export class Game {
   }
 
   private openBuffChoice() {
-    const available = RUN_BUFFS.filter((buff) => !this.runBuffs.has(buff.id));
+    // 路线抽取：从三条路线各抽一个未拥有的buff
     const options: BuffId[] = [];
-    while (options.length < 3 && available.length > 0) {
-      const index = Math.floor(Math.random() * available.length);
-      const [picked] = available.splice(index, 1);
-      options.push(picked.id);
+    const routes: TacticalRoute[] = ["scorch", "pierce", "ironWall"];
+    for (const route of routes) {
+      const nextBuff = getNextBuffInRoute(route, this.runBuffs);
+      if (nextBuff) options.push(nextBuff);
+    }
+    // 如果某些路线已全部选完，从剩余路线中随机补充
+    while (options.length < 3) {
+      const remaining = RUN_BUFFS.filter((buff) => !this.runBuffs.has(buff.id) && !options.includes(buff.id));
+      if (remaining.length === 0) break;
+      const index = Math.floor(Math.random() * remaining.length);
+      options.push(remaining[index].id);
     }
     this.buffChoiceOptions = options;
     this.buffChoicePause = 1;
@@ -511,12 +571,19 @@ export class Game {
   private applyBuff(id: BuffId) {
     this.runBuffs.add(id);
     const buff = RUN_BUFF_BY_ID[id];
-    if (id === "fortify") {
+    this.selectedRoutes.push(buff.route);
+
+    // 堅城：HP+1
+    if (id === "fortress") {
       this.maxHp = Math.min(BALANCE.player.maxHp + 1, this.maxHp + 1);
       this.hp = Math.min(this.maxHp, this.hp + 1);
     }
+
+    // 鼓阵：energy regen +20% 已在getPassiveRegenMultiplier处理
+    // warDrum buff选择时无需额外即时效果
+
     this.addText(DESIGN_WIDTH / 2, 148, buff.feedback, "#ffd35a", 16, 1.4);
-    logEvent("buff_choice", { levelId: this.level.id, time: this.elapsed, selectedBuff: id });
+    logEvent("buff_choice", { levelId: this.level.id, time: this.elapsed, selectedBuff: id, route: buff.route });
     AudioService.buffSelect();
     this.buffChoiceOptions = [];
     this.buffChoicePause = 0;
@@ -532,23 +599,29 @@ export class Game {
     };
   }
 
-  private triggerBuffBurst(origin: Vec2, trail: SlashTrail) {
-    const radius = 66;
-    this.particles.push(ringParticle(origin, "#ffb15c", radius));
-    this.particles.push(...sparkBurst(origin, 22, "#ffb15c"));
-    this.addText(origin.x, origin.y - 24, "爆裂", "#ffb15c", 16);
-    for (const enemy of this.enemies) {
-      if (!enemy.alive || distance(enemy, origin) > radius) continue;
-      this.damageEnemy(enemy, 1, trail, true, "oil");
+  /** 燎原路线收刀特效：所有点燃状态敌军额外爆炸 */
+  private triggerScorchEnd(trail: SlashTrail) {
+    const ignitedEnemies = this.enemies.filter((e) => e.alive && e.ignited);
+    for (const enemy of ignitedEnemies) {
+      const radius = 45;
+      this.particles.push(ringParticle(enemy, "#ff6a33", radius));
+      this.particles.push(...sparkBurst(enemy, 14, "#ff6a33"));
+      this.screenShake = Math.max(this.screenShake, 0.28);
+      this.addText(enemy.x, enemy.y - 16, "燎原", "#ff6a33", 14);
+      // 对周围敌军造成1点伤害
+      for (const target of this.enemies) {
+        if (!target.alive || target === enemy || distance(target, enemy) > radius) continue;
+        if (target.kind === "powder" && !target.ignited) {
+          target.ignited = true;
+          trail.pendingExplosionIds.add(target.id);
+        } else if (target.kind !== "core") {
+          this.damageEnemy(target, 1, trail, true, "scorch");
+        }
+      }
     }
-  }
-
-  private triggerPaperSplash(origin: Enemy, trail: SlashTrail) {
-    const radius = 52;
-    this.particles.push(ringParticle(origin, "#f6e7bd", radius));
-    for (const enemy of this.enemies) {
-      if (!enemy.alive || enemy.kind !== "infantry" || distance(enemy, origin) > radius) continue;
-      this.damageEnemy(enemy, 1, trail, true, "paper_splash");
+    if (ignitedEnemies.length > 0) {
+      this.flash = Math.max(this.flash, ignitedEnemies.length * 0.15);
+      AudioService.explosion();
     }
   }
 
@@ -581,20 +654,22 @@ export class Game {
       }
     }
 
-    if (trail.tier === "burst" && this.hasBuff("doubleBlade")) {
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const len = Math.hypot(dx, dy) || 1;
-      const offset = 28;
-      const ox = (-dy / len) * offset;
-      const oy = (dx / len) * offset;
-      const a2 = { x: a.x + ox, y: a.y + oy };
-      const b2 = { x: b.x + ox, y: b.y + oy };
+    // ---- 破军(shatterArmy)：破阵锋阶段，刀芒proximity可触发阵眼崩塌 ----
+    if (trail.tier === "burst" && this.hasBuff("shatterArmy")) {
+      const auraReach = bladeReach * 1.5;
       for (const enemy of this.enemies) {
-        if (!enemy.alive || trail.hitEnemyIds.has(enemy.id)) continue;
-        if (segmentHitCircle(a2, b2, enemy, enemy.radius + bladeReach * 0.72)) {
+        if (!enemy.alive || enemy.kind !== "core" || trail.hitEnemyIds.has(enemy.id)) continue;
+        // 检查线段附近是否有阵眼（proximity check）
+        const midX = (a.x + b.x) / 2;
+        const midY = (a.y + b.y) / 2;
+        if (distance(enemy, { x: midX, y: midY }) < enemy.radius + auraReach) {
+          enemy.marked = true;
+          trail.pendingCoreIds.add(enemy.id);
           trail.hitEnemyIds.add(enemy.id);
-          this.handleEnemyHit(enemy, trail);
+          this.stats.coreHits += 1;
+          this.score += 6;
+          this.addText(enemy.x, enemy.y - 20, "阵眼自崩", "#9b6dff", 14);
+          this.particles.push(ringParticle(enemy, "#9b6dff", 34));
         }
       }
     }
@@ -610,7 +685,7 @@ export class Game {
     }
 
     if (enemy.kind === "shield") {
-      if (stage.canBreakShield || (trail.tier === "normal" && this.hasBuff("shieldBreaker"))) {
+      if (stage.canBreakShield || (trail.tier === "normal" && this.hasBuff("pierceShield"))) {
         this.killEnemy(enemy, trail, false, "shield");
       } else if (trail.tier === "normal") {
         this.damageEnemy(enemy, 1 * this.progressionModifiers.shieldDamageMultiplier, trail, false, "shield_crack");
@@ -633,6 +708,20 @@ export class Game {
       this.showHint("powder-hit", "收刀引爆火药", enemy.x, Math.max(110, enemy.y - 38), 2);
       this.particles.push(...sparkBurst(enemy, 10, "#ffb15c"));
       AudioService.slashHit();
+
+      // ---- 火油浸润(oilSoak)：击中火药兵时点燃附近1个敌军 ----
+      if (this.hasBuff("oilSoak")) {
+        const nearby = this.enemies.filter(
+          (e) => e.alive && !e.ignited && e.kind !== "core" && distance(e, enemy) < 55
+        );
+        if (nearby.length > 0) {
+          const target = nearby[0];
+          target.ignited = true;
+          trail.pendingExplosionIds.add(target.id);
+          this.addText(target.x, target.y - 14, "残渣点燃", "#ff6a33", 12);
+          this.particles.push(...sparkBurst(target, 6, "#ff6a33"));
+        }
+      }
     }
 
     if (enemy.kind === "core") {
@@ -737,6 +826,17 @@ export class Game {
           if (!target.alive || distance(target, enemy) > radius) continue;
           affectByBlast(target, ENEMY_BALANCE.powder.explosionDamage ?? 1, "chain");
         }
+
+        // ---- 连锁引信(chainFuse)：爆炸自动点燃相邻火药兵（无需刀触） ----
+        if (this.hasBuff("chainFuse")) {
+          for (const target of this.enemies) {
+            if (!target.alive || target.kind !== "powder" || distance(target, enemy) > radius * 1.1) continue;
+            if (!target.ignited) {
+              target.ignited = true;
+              explosionQueue.push(target.id);
+            }
+          }
+        }
       }
 
       while (coreQueue.length > 0) {
@@ -767,6 +867,16 @@ export class Game {
             this.damageEnemy(target, target.kind === "shield" ? 1 : 99, trail, true, "core_chain");
           }
         }
+
+        // ---- 碎阵(shatterCore)：崩塌连锁触发相邻阵眼 ----
+        if (this.hasBuff("shatterCore")) {
+          for (const target of this.enemies) {
+            if (!target.alive || target.kind !== "core" || target.id === enemy.id) continue;
+            if (distance(target, enemy) <= radius * 1.1) {
+              enqueueCore(target);
+            }
+          }
+        }
       }
     }
 
@@ -794,7 +904,7 @@ export class Game {
     const stage = SWORD_STAGE_BY_ID[trail.tier];
     const chainBonus = chainKill ? BALANCE.score.chainKillBonus * Math.max(1, trail.chain) : 0;
     this.score += enemy.score + chainBonus;
-    const energyReward = (enemy.energyGain + (chainKill ? 1.5 : 0)) * stage.killEnergyMultiplier * this.getKillEnergyMultiplier();
+    const energyReward = (enemy.energyGain + (chainKill ? 1.5 : 0)) * stage.killEnergyMultiplier;
     trail.energyBank = Math.min(BALANCE.swordEnergy.maxEnergyGainPerSlash, trail.energyBank + energyReward);
     if (this.runContext.mode === "dailyChallenge" && this.runContext.dailyChallengeId === "core_bonus" && enemy.kind === "core") {
       this.score += enemy.score;
@@ -813,9 +923,13 @@ export class Game {
     }
     this.addText(enemy.x, enemy.y - 20, chainKill ? "连锁" : "碎", chainKill ? "#ffd67c" : "#f6e7bd", 12);
     if (chainKill) AudioService.chainKill();
-    if (enemy.kind === "infantry" && source !== "paper_splash" && this.hasBuff("paperSplash") && Math.random() < 0.2) {
-      this.triggerPaperSplash(enemy, trail);
+
+    // ---- 鼓阵(warDrum)：击杀后1秒刀势不衰减 ----
+    if (this.hasBuff("warDrum") && chainKill) {
+      this.warDrumNoDecayTimer = 1;
     }
+
+    this.chainKillTotal += chainKill ? 1 : 0;
     return true;
   }
 
@@ -852,17 +966,37 @@ export class Game {
       if (!enemy.alive) continue;
       enemy.wobble += dt;
       enemy.flash = Math.max(0, enemy.flash - dt * 3);
+      enemy.slowedTimer = Math.max(0, enemy.slowedTimer - dt);
       const statusSlow = enemy.ignited || enemy.marked ? 0.54 : 1;
-      enemy.y += enemy.speed * statusSlow * dt;
+      const fortressSlow = enemy.slowedTimer > 0 ? 0.4 : 1;
+      enemy.y += enemy.speed * statusSlow * fortressSlow * dt;
 
       if (enemy.y >= BALANCE.battlefield.bottomDefenseY) {
-        enemy.alive = false;
-        this.hp -= enemy.hpDamage;
-        this.screenShake = Math.max(this.screenShake, 0.45);
-        this.flash = Math.max(this.flash, 0.35);
-        AudioService.defenseHit();
-        this.addText(enemy.x, BALANCE.battlefield.bottomDefenseY - 12, `-${enemy.hpDamage}`, "#ff7b6e", 18);
-        this.particles.push(...paperBurst({ x: enemy.x, y: BALANCE.battlefield.bottomDefenseY }, 12, ["#7b241f", "#d8b46e"]));
+        // ---- 堅城(fortress)buff：敌军触线后减速1秒，而非立即消失 ----
+        if (this.hasBuff("fortress") && enemy.slowedTimer <= 0) {
+          enemy.slowedTimer = 1;
+          enemy.hpDamage = Math.max(1, enemy.hpDamage - 1); // 减少伤害
+          this.hp -= 1; // 触线仍扣1点（不扣原始damage）
+          this.defenseLineHits += 1;
+          this.screenShake = Math.max(this.screenShake, 0.28);
+          this.addText(enemy.x, BALANCE.battlefield.bottomDefenseY - 12, "-1 坚城减速", "#5b8db8", 14);
+          this.particles.push(...sparkBurst(enemy, 8, "#5b8db8"));
+        } else {
+          enemy.alive = false;
+          this.hp -= enemy.hpDamage;
+          this.defenseLineHits += 1;
+          this.screenShake = Math.max(this.screenShake, 0.45);
+          this.flash = Math.max(this.flash, 0.35);
+          AudioService.defenseHit();
+          this.addText(enemy.x, BALANCE.battlefield.bottomDefenseY - 12, `-${enemy.hpDamage}`, "#ff7b6e", 18);
+          this.particles.push(...paperBurst({ x: enemy.x, y: BALANCE.battlefield.bottomDefenseY }, 12, ["#7b241f", "#d8b46e"]));
+        }
+
+        // 堅城减速到期后正常移除
+        if (enemy.slowedTimer <= 0 && this.hasBuff("fortress")) {
+          enemy.alive = false;
+          this.enemies = this.enemies.filter((e) => e.alive);
+        }
       }
     }
 
@@ -952,6 +1086,26 @@ export class Game {
 
   private checkBattleEnd() {
     if (this.hp <= 0) {
+      // ---- 魂返(soulReturn)buff：首次HP归零自动复活 ----
+      if (this.hasBuff("soulReturn") && !this.soulReturnUsed) {
+        this.soulReturnUsed = true;
+        this.hp = 1;
+        this.flash = Math.max(this.flash, 0.85);
+        this.screenShake = Math.max(this.screenShake, 0.65);
+        this.addText(DESIGN_WIDTH / 2, 142, "魂返·死而复生", "#5b8db8", 22, 1.4);
+        // 清退最近6名敌军
+        const closest = [...this.enemies]
+          .filter((e) => e.alive)
+          .sort((a, b) => b.y - a.y)
+          .slice(0, 6);
+        for (const enemy of closest) {
+          enemy.alive = false;
+          this.particles.push(...paperBurst(enemy, 14, ["#5b8db8", "#8bbdd8", paperColors[0]]));
+        }
+        this.enemies = this.enemies.filter((e) => e.alive);
+        AudioService.victory(); // 复活音效借用victory
+        return;
+      }
       if (this.canOfferRevive()) {
         this.phase = "revive";
         this.reviveOfferSent = true;
@@ -979,6 +1133,15 @@ export class Game {
     if (win) AudioService.victory();
     else AudioService.defeat();
     this.stats.score = this.score;
+    this.stats.remainingHp = this.hp;
+    this.stats.defenseLineHits = this.defenseLineHits;
+    this.stats.sharpTurnCount = this.sharpTurnCount;
+    this.stats.highBladeSlashCount = this.highBladeSlashCount;
+    this.stats.totalSlashEnergy = this.totalSlashEnergy;
+    this.stats.chainKillTotal = this.chainKillTotal;
+    this.stats.slashCount = this.stats.slashes;
+    this.stats.totalKillPerSlash = this.stats.kills;
+    this.stats.pickupCollectRate = this.pickupsSpawned > 0 ? this.stats.pickups / this.pickupsSpawned : 1;
     const triggeredOneBlade = this.stats.oneBladeBreaks > 0 || this.stats.maxSingleBlade >= REWARD_CONFIG.godSlashThreshold;
     const rating = evaluateRating({
       win,
@@ -988,6 +1151,23 @@ export class Game {
       triggeredOneBlade,
       coreCollapseCount: this.stats.coreCollapses,
       explosiveCount: this.stats.explosions
+    });
+    // 计算技能雷达四维分数
+    const skillScores: SkillScores = calculateSkillScores({
+      highBladeSlashCount: this.stats.highBladeSlashCount,
+      totalSlashEnergy: this.stats.totalSlashEnergy,
+      slashCount: this.stats.slashes,
+      kills: this.stats.kills,
+      maxSingleBlade: this.stats.maxSingleBlade,
+      sharpTurnCount: this.stats.sharpTurnCount,
+      coreCollapses: this.stats.coreCollapses,
+      chainKillTotal: this.stats.chainKillTotal,
+      explosions: this.stats.explosions,
+      defenseLineHits: this.stats.defenseLineHits,
+      remainingHp: this.stats.remainingHp,
+      maxHp: this.maxHp,
+      pickups: this.stats.pickups,
+      pickupsSpawned: this.pickupsSpawned
     });
     const rewardMeta = applyBattleRewards({
       win,
@@ -1021,7 +1201,9 @@ export class Game {
       canDoubleReward: win,
       slashes: this.stats.slashes,
       rating,
-      ...rewardMeta
+      ...rewardMeta,
+      skillScores,
+      selectedRoutes: [...this.selectedRoutes]
     };
     logEvent("game_end", {
       levelId: this.level.id,
@@ -1055,7 +1237,8 @@ export class Game {
       marked: false,
       shieldCrack: 0,
       flash: 0,
-      wobble: randomRange(0, Math.PI * 2)
+      wobble: randomRange(0, Math.PI * 2),
+      slowedTimer: 0
     };
   }
 
@@ -1236,7 +1419,7 @@ export class Game {
     ctx.fillText(`分 ${Math.floor(this.score)}`, 374, 45);
     ctx.fillStyle = "rgba(255, 211, 90, 0.68)";
     ctx.font = '800 10px "Microsoft YaHei", sans-serif';
-    ctx.fillText("V0708004", 374, 66);
+    ctx.fillText("V0708005", 374, 66);
 
     ctx.textAlign = "center";
     for (let i = 0; i < this.maxHp; i += 1) {
@@ -1446,21 +1629,6 @@ export class Game {
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.stroke();
-
-      if (trail.tier === "burst" && this.hasBuff("doubleBlade")) {
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const len = Math.hypot(dx, dy) || 1;
-        const ox = (-dy / len) * 28;
-        const oy = (dx / len) * 28;
-        ctx.strokeStyle = `rgba(255, 245, 200, ${alpha * 0.46})`;
-        ctx.shadowBlur = 10;
-        ctx.lineWidth = Math.max(2, width * 0.24);
-        ctx.beginPath();
-        ctx.moveTo(a.x + ox, a.y + oy);
-        ctx.lineTo(b.x + ox, b.y + oy);
-        ctx.stroke();
-      }
     }
 
     const last = points[points.length - 1];
@@ -1711,20 +1879,32 @@ export class Game {
     for (let index = 0; index < this.buffChoiceOptions.length; index += 1) {
       const buff = RUN_BUFF_BY_ID[this.buffChoiceOptions[index]];
       const rect = this.getBuffCardRect(index);
+      const tierLabels = ["壹", "贰", "叁"];
       ctx.save();
       ctx.translate(rect.x, rect.y);
       ctx.fillStyle = "rgba(30, 18, 10, 0.94)";
-      ctx.strokeStyle = "#d8a75d";
+      ctx.strokeStyle = buff.color;
       ctx.lineWidth = 2;
       this.paperCard(ctx, 0, 0, rect.w, rect.h);
       ctx.fill();
       ctx.stroke();
+      // 路线标签
+      ctx.fillStyle = buff.color;
+      ctx.font = '700 11px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = "left";
+      ctx.fillText(`${ROUTE_NAMES[buff.route]} · ${tierLabels[buff.tier - 1]}`, 72, 18);
+      // 图标圆
       ctx.fillStyle = "#17100d";
       ctx.beginPath();
       ctx.arc(34, 46, 24, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = "#ffd35a";
-      ctx.font = '900 16px "Microsoft YaHei", sans-serif';
+      ctx.strokeStyle = buff.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(34, 46, 24, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = buff.color;
+      ctx.font = '900 14px "Microsoft YaHei", sans-serif';
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(buff.shortName, 34, 46);

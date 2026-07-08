@@ -994,3 +994,263 @@ h1 {
     font-size: 48px;
   }
 }
+
+/* ─── 战术简报 ─── */
+.briefing-screen {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  padding: 30px 24px;
+  text-align: center;
+}
+
+.briefing-header {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+}
+
+.briefing-level-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  background: var(--gold);
+  color: #16100c;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.briefing-header h2 {
+  color: #fff3c0;
+  font-size: 28px;
+}
+
+.briefing-subtitle {
+  color: rgba(246, 231, 189, 0.72);
+  font-size: 14px;
+}
+
+.briefing-section-label {
+  display: block;
+  position: relative;
+  z-index: 1;
+  color: rgba(246, 231, 189, 0.68);
+  font-size: 11px;
+  font-weight: 800;
+  text-align: left;
+  margin-bottom: 4px;
+}
+
+.briefing-enemies {
+  position: relative;
+  z-index: 1;
+  padding: 8px 10px;
+  border: 1px solid rgba(240, 195, 107, 0.22);
+  border-radius: 8px;
+  background: rgba(18, 16, 14, 0.66);
+}
+
+.briefing-enemy-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.briefing-enemy-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid;
+  background: rgba(18, 16, 14, 0.48);
+  font-size: 12px;
+}
+
+.briefing-enemy-chip b {
+  font-size: 14px;
+}
+
+.briefing-enemy-none {
+  color: rgba(246, 231, 189, 0.62);
+  font-size: 12px;
+}
+
+.briefing-tactic {
+  position: relative;
+  z-index: 1;
+  padding: 8px 10px;
+  border: 1px solid rgba(240, 195, 107, 0.22);
+  border-radius: 8px;
+  background: rgba(18, 16, 14, 0.66);
+}
+
+.briefing-hint {
+  color: #ffd35a;
+  font-size: 14px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.briefing-blade-tier {
+  position: relative;
+  z-index: 1;
+  padding: 6px 10px;
+  border: 1px solid rgba(240, 195, 107, 0.22);
+  border-radius: 8px;
+  background: rgba(18, 16, 14, 0.66);
+  text-align: center;
+}
+
+.briefing-tier-label {
+  color: #fff3c0;
+  font-size: 16px;
+}
+
+.briefing-routes {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.briefing-route-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid;
+  background: rgba(18, 16, 14, 0.48);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.briefing-enter-btn {
+  position: relative;
+  z-index: 1;
+  margin-top: 4px;
+}
+
+/* ─── 技能雷达（结算页） ─── */
+.skill-radar-container {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(240, 195, 107, 0.22);
+  border-radius: 8px;
+  background: rgba(18, 16, 14, 0.66);
+  text-align: center;
+}
+
+.skill-radar-svg {
+  display: block;
+  width: 100%;
+  max-width: 160px;
+  margin: 0 auto;
+}
+
+.skill-radar-labels {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.skill-radar-score {
+  font-size: 12px;
+}
+
+.skill-radar-score b {
+  font-size: 14px;
+}
+
+.result-route-badge {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 12px;
+  border: 1px solid;
+  border-radius: 999px;
+  background: rgba(18, 16, 14, 0.48);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+/* ─── 迷你雷达（首页） ─── */
+.mini-radar-container {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid rgba(240, 195, 107, 0.22);
+  border-radius: 8px;
+  background: rgba(18, 16, 14, 0.62);
+}
+
+.mini-radar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.mini-radar-header span {
+  color: rgba(246, 231, 189, 0.72);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.mini-radar-header b {
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.mini-radar-svg {
+  display: block;
+  width: 80px;
+  height: 80px;
+  margin: 0 auto;
+}
+
+.mini-radar-bars {
+  display: grid;
+  gap: 2px;
+}
+
+.mini-radar-bar-row {
+  display: grid;
+  grid-template-columns: 20px 1fr 24px;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+}
+
+.mini-radar-bar-row span {
+  font-weight: 800;
+}
+
+.mini-radar-bar-track {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(246, 231, 189, 0.12);
+}
+
+.mini-radar-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.3s;
+}
+
+.mini-radar-bar-row b {
+  text-align: right;
+  color: rgba(246, 231, 189, 0.82);
+  font-size: 10px;
+}

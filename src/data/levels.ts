@@ -44,7 +44,12 @@ export const LEVELS: LevelConfig[] = [
       wave("第一军令", 30, mix([row("infantry", [1, 2, 3, 4, 5], 0), row("infantry", [2, 3, 4], 1), row("shield", [0, 6], 2)]), undefined, 0.95),
       wave("少量盾兵", 48, mix([row("shield", [2, 4], 0), row("infantry", [0, 1, 3, 5, 6], 1), row("infantry", [2, 3, 4], 2)]), undefined, 1),
       wave("一刀收束", 72, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("shield", [3], 2)]), undefined, 1.08)
-    ]
+    ],
+    briefing: {
+      highlightEnemies: [{ kind: "infantry", label: "步兵纸兵", icon: "↑" }],
+      tacticalHint: "随手一刀，纸兵即碎",
+      initialBladeTier: "残锋/常锋"
+    }
   },
   {
     id: 2,
@@ -62,7 +67,12 @@ export const LEVELS: LevelConfig[] = [
       wave("刀魂入刃", 32, mix([row("infantry", [0, 2, 3, 4, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("shield", [2, 4], 2)]), [pickup("soul", 3)]),
       wave("等势多斩", 55, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("shield", [1, 5], 1), row("infantry", [0, 2, 3, 4, 6], 2)]), undefined, 1.08),
       wave("高刀收场", 82, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("shield", [2, 4], 2)]), undefined, 1.12)
-    ]
+    ],
+    briefing: {
+      highlightEnemies: [{ kind: "infantry", label: "步兵纸兵", icon: "↑" }],
+      tacticalHint: "等满刀势再挥，一刀连斩更爽",
+      initialBladeTier: "残锋起手"
+    }
   },
   {
     id: 3,
@@ -80,7 +90,12 @@ export const LEVELS: LevelConfig[] = [
       wave("军令破盾", 32, mix([row("shield", [1, 2, 4, 5], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1)]), [pickup("drum", 3)], 1.04),
       wave("盾墙压近", 58, mix([row("shield", [0, 1, 2, 4, 5, 6], 0), row("shield", [2, 4], 1), row("infantry", [0, 1, 3, 5, 6], 2)]), undefined, 1.12),
       wave("强锋检验", 86, mix([row("shield", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), row("shield", [1, 3, 5], 2)]), undefined, 1.18)
-    ]
+    ],
+    briefing: {
+      highlightEnemies: [{ kind: "shield", label: "盾兵防线", icon: "🛡" }],
+      tacticalHint: "强锋可破盾，常锋选穿盾亦可行",
+      initialBladeTier: "常锋/强锋"
+    }
   },
   {
     id: 4,
@@ -99,7 +114,12 @@ export const LEVELS: LevelConfig[] = [
       wave("盾前火后", 62, mix([row("shield", [1, 3, 5], 0), row("powder", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.16),
       wave("三火连爆", 90, mix([row("powder", [1, 3, 5], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), row("shield", [2, 4], 2)]), [pickup("drum", 3)], 1.22),
       wave("火线收束", 108, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("powder", [1, 2, 4, 5], 1), row("infantry", [0, 2, 3, 4, 6], 2)]), undefined, 1.28)
-    ]
+    ],
+    briefing: {
+      highlightEnemies: [{ kind: "powder", label: "火药兵集群", icon: "🔥" }],
+      tacticalHint: "击中火药兵后收刀引爆，燎原路线可连锁",
+      initialBladeTier: "常锋/强锋"
+    }
   },
   {
     id: 5,
@@ -118,7 +138,15 @@ export const LEVELS: LevelConfig[] = [
       wave("火靠阵眼", 65, mix([row("powder", [2, 4], 0), [enemy("core", 3, 1)], row("shield", [1, 5], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), undefined, 1.18),
       wave("双阵眼", 92, mix([row("shield", [0, 2, 4, 6], 0), row("core", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("drum", 3)], 1.25),
       wave("破阵收束", 110, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), [enemy("core", 3, 1)], row("powder", [1, 5], 2), row("shield", [2, 4], 3)]), undefined, 1.32)
-    ]
+    ],
+    briefing: {
+      highlightEnemies: [
+        { kind: "core", label: "阵眼核心", icon: "◎" },
+        { kind: "shield", label: "盾兵护阵", icon: "🛡" }
+      ],
+      tacticalHint: "阵眼藏于军中，收刀可崩阵",
+      initialBladeTier: "强锋/破阵锋"
+    }
   },
   {
     id: 6,
@@ -137,7 +165,15 @@ export const LEVELS: LevelConfig[] = [
       wave("混合压近", 62, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 4, 5, 6], 3)]), undefined, 1.18),
       wave("第二军令", 84, mix([row("shield", [1, 3, 5], 0), row("core", [2, 4], 1), row("powder", [0, 6], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 3)], 1.26),
       wave("Build收束", 108, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 4, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), undefined, 1.34)
-    ]
+    ],
+    briefing: {
+      highlightEnemies: [
+        { kind: "shield", label: "盾兵", icon: "🛡" },
+        { kind: "powder", label: "火药兵", icon: "🔥" }
+      ],
+      tacticalHint: "两次军令，选一条路线深耕",
+      initialBladeTier: "常锋/强锋"
+    }
   },
   {
     id: 7,
@@ -156,7 +192,15 @@ export const LEVELS: LevelConfig[] = [
       wave("盾火密阵", 62, mix([row("shield", [0, 1, 2, 4, 5, 6], 0), row("powder", [2, 3, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.22),
       wave("阵眼插入", 85, mix([row("shield", [1, 5], 0), row("powder", [2, 4], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 3)], 1.32),
       wave("火墙压城", 108, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 3, 4, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.42)
-    ]
+    ],
+    briefing: {
+      highlightEnemies: [
+        { kind: "shield", label: "盾兵", icon: "🛡" },
+        { kind: "powder", label: "火药兵", icon: "🔥" }
+      ],
+      tacticalHint: "不利用火药，压力会很大",
+      initialBladeTier: "强锋"
+    }
   },
   {
     id: 8,
@@ -175,7 +219,15 @@ export const LEVELS: LevelConfig[] = [
       wave("双盾护眼", 65, mix([row("shield", [1, 2, 4, 5], 0), row("core", [2, 4], 1), row("powder", [3], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), undefined, 1.24),
       wave("火阵牵引", 92, mix([row("powder", [1, 5], 0), [enemy("core", 3, 1)], row("shield", [0, 2, 4, 6], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 3)], 1.34),
       wave("斜切收束", 116, mix([row("shield", [0, 1, 5, 6], 0), row("core", [2, 4], 1), row("powder", [1, 3, 5], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), undefined, 1.45)
-    ]
+    ],
+    briefing: {
+      highlightEnemies: [
+        { kind: "core", label: "阵眼核心", icon: "◎" },
+        { kind: "shield", label: "护阵盾兵", icon: "🛡" }
+      ],
+      tacticalHint: "盾兵护阵，斜切核心方可破",
+      initialBladeTier: "强锋/破阵锋"
+    }
   },
   {
     id: 9,
@@ -194,7 +246,16 @@ export const LEVELS: LevelConfig[] = [
       wave("补给破围", 68, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 3)], 1.28),
       wave("高压混阵", 96, mix([row("powder", [1, 2, 4, 5], 0), row("shield", [0, 3, 6], 1), row("core", [2, 4], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("soul", 0)], 1.42),
       wave("补给爆发", 118, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 3, 4, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("oil", 6)], 1.55)
-    ]
+    ],
+    briefing: {
+      highlightEnemies: [
+        { kind: "powder", label: "火药兵", icon: "🔥" },
+        { kind: "shield", label: "盾兵", icon: "🛡" },
+        { kind: "core", label: "阵眼", icon: "◎" }
+      ],
+      tacticalHint: "补给密集，三军令可选完整路线",
+      initialBladeTier: "常锋/强锋"
+    }
   },
   {
     id: 10,
@@ -214,6 +275,15 @@ export const LEVELS: LevelConfig[] = [
       wave("阵眼居中", 88, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 0)], 1.38),
       wave("第三军令", 112, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 4, 5], 1), row("core", [2, 4], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("soul", 6)], 1.5),
       wave("一刀破阵", 136, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 3, 4, 5], 1), row("core", [2, 4], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3), row("infantry", [0, 1, 2, 3, 4, 5, 6], 4), row("powder", [2, 4], 5)]), [pickup("drum", 3)], 1.65)
-    ]
+    ],
+    briefing: {
+      highlightEnemies: [
+        { kind: "shield", label: "盾兵大阵", icon: "🛡" },
+        { kind: "powder", label: "火药兵集群", icon: "🔥" },
+        { kind: "core", label: "阵眼核心", icon: "◎" }
+      ],
+      tacticalHint: "最后一刀破阵，全路线成型之战",
+      initialBladeTier: "破阵锋"
+    }
   }
 ];
