@@ -2,6 +2,14 @@
 
 基于 React + TypeScript + HTML5 Canvas + Vite 实现的竖屏手机 demo。当前版本聚焦 V0.2 正式单局体验：随时挥刀、刀势越满越爽、指尖实时切割、收刀爆发、10 关基础流程。
 
+## 在线试玩
+
+```text
+https://hubinai.github.io/one-blade-h5-prototype/
+```
+
+首次推送后 GitHub Pages 需要等待 Actions 部署完成，通常 1-3 分钟可访问。
+
 ## 本地运行
 
 ```bash
