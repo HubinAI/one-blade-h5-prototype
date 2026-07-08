@@ -11,6 +11,7 @@ import { isSharpTurn, segmentHitCircle } from "./systems/collisionSystem";
 import { paperBurst, ringParticle, sparkBurst } from "./systems/particleSystem";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers } from "./services/ProgressionService";
 import { logEvent } from "./services/Analytics";
+import { AudioService } from "./services/AudioService";
 import type {
   BattleResult,
   BattleStats,
@@ -202,6 +203,7 @@ export class Game {
     this.drawDefenseAndWarrior(ctx);
     this.drawHud(ctx);
     this.drawFloatingTexts(ctx);
+    this.drawWaveProgress(ctx);
     this.drawDebugPanel(ctx);
     this.drawBuffChoice(ctx);
     this.drawRevivePause(ctx);
@@ -284,6 +286,7 @@ export class Game {
     this.warriorSheathTimer = 0;
     this.lastSlashAngle = this.angleFromWarrior(pos);
     logEvent("slash_start", { levelId: this.level.id, energy: lockedEnergy, stage: stage.name });
+    AudioService.slashDraw(tier);
     this.addText(pos.x, pos.y - 18, stage.prompt, stage.color, 16, BALANCE.feedback.stageTextLife);
     if (lockedEnergy < 25) {
       this.showHint("low-energy-slash", "刀势越满，刀芒越强", DESIGN_WIDTH / 2, 118, 2);
@@ -357,13 +360,19 @@ export class Game {
     this.warriorSheathTimer = 0.38;
     this.warriorDrawTimer = 0;
     this.regenDelayTimer = BALANCE.swordEnergy.regenDelayAfterSlash;
+    AudioService.slashEnd();
     this.screenShake = Math.max(this.screenShake, trail.chain > 0 ? 0.5 : 0.18);
 
     const stage = SWORD_STAGE_BY_ID[trail.tier];
     const praise = this.getSlashPraise(trail, reason);
     if (praise) {
       this.addText(DESIGN_WIDTH / 2, 136, praise, stage.color, praise === "一刀破阵" ? 26 : 20);
-      if (praise === "一刀破阵") this.stats.oneBladeBreaks += 1;
+      if (praise === "一刀破阵") {
+      this.stats.oneBladeBreaks += 1;
+      AudioService.oneBladeBreak();
+    }
+    if (praise === "阵破") AudioService.coreCollapse();
+    if (praise === "连爆" || praise === "破阵") AudioService.explosion();
     }
     if (trail.kills > 0) {
       this.addText(last.x, last.y - 28, `${stage.scoreName} x${trail.kills}`, stage.color, 17);
@@ -483,6 +492,7 @@ export class Game {
     this.buffChoicePause = 1;
     this.phase = "buffChoice";
     this.pointerDown = false;
+    AudioService.buffOpen();
   }
 
   private selectBuffAt(pos: Vec2) {
@@ -505,6 +515,7 @@ export class Game {
     }
     this.addText(DESIGN_WIDTH / 2, 148, buff.feedback, "#ffd35a", 16, 1.4);
     logEvent("buff_choice", { levelId: this.level.id, time: this.elapsed, selectedBuff: id });
+    AudioService.buffSelect();
     this.buffChoiceOptions = [];
     this.buffChoicePause = 0;
     this.phase = "playing";
@@ -593,6 +604,7 @@ export class Game {
 
     if (enemy.kind === "infantry") {
       this.killEnemy(enemy, trail, false, "paper");
+      AudioService.slashHit();
     }
 
     if (enemy.kind === "shield") {
@@ -618,6 +630,7 @@ export class Game {
       this.addText(enemy.x, enemy.y - 18, "点燃", "#ffb15c", 14);
       this.showHint("powder-hit", "收刀引爆火药", enemy.x, Math.max(110, enemy.y - 38), 2);
       this.particles.push(...sparkBurst(enemy, 10, "#ffb15c"));
+      AudioService.slashHit();
     }
 
     if (enemy.kind === "core") {
@@ -710,6 +723,7 @@ export class Game {
         trail.explosionCount += 1;
         this.stats.explosions += 1;
         this.killEnemy(enemy, trail, true, "powder");
+        AudioService.explosion();
 
         const radius = (ENEMY_BALANCE.powder.explosionRadius ?? 85) * stage.explosionRadiusMultiplier * this.getExplosionRadiusMultiplier();
         this.particles.push(ringParticle(enemy, "#ffb15c", radius));
@@ -733,6 +747,7 @@ export class Game {
         trail.coreCollapseCount += 1;
         this.stats.coreCollapses += 1;
         this.killEnemy(enemy, trail, true, "core");
+        AudioService.coreCollapse();
         const radius = stage.canTriggerCoreCollapse ? stage.coreCollapseRadius * this.getCoreRadiusMultiplier() : 0;
         this.particles.push(ringParticle(enemy, "#e8d7ff", radius));
         this.particles.push(...paperBurst(enemy, 28, ["#e8d7ff", "#c7a7ff", "#5d4a8f"]));
@@ -791,6 +806,7 @@ export class Game {
       this.particles.push(...sparkBurst(enemy, 18, source === "powder" ? "#ffb15c" : "#ffd67c"));
     }
     this.addText(enemy.x, enemy.y - 20, chainKill ? "连锁" : "碎", chainKill ? "#ffd67c" : "#f6e7bd", 12);
+    if (chainKill) AudioService.chainKill();
     if (enemy.kind === "infantry" && source !== "paper_splash" && this.hasBuff("paperSplash") && Math.random() < 0.2) {
       this.triggerPaperSplash(enemy, trail);
     }
@@ -820,6 +836,7 @@ export class Game {
 
     this.particles.push(ringParticle(pickup, PICKUP_DEFS[pickup.kind].color, 34));
     this.particles.push(...sparkBurst(pickup, 14, PICKUP_DEFS[pickup.kind].color));
+    AudioService.pickup();
     this.addText(pickup.x, pickup.y - 18, PICKUP_BALANCE[pickup.kind].feedback, PICKUP_DEFS[pickup.kind].color, 15);
     trail.chain += 1;
   }
@@ -837,6 +854,7 @@ export class Game {
         this.hp -= enemy.hpDamage;
         this.screenShake = Math.max(this.screenShake, 0.45);
         this.flash = Math.max(this.flash, 0.35);
+        AudioService.defenseHit();
         this.addText(enemy.x, BALANCE.battlefield.bottomDefenseY - 12, `-${enemy.hpDamage}`, "#ff7b6e", 18);
         this.particles.push(...paperBurst({ x: enemy.x, y: BALANCE.battlefield.bottomDefenseY }, 12, ["#7b241f", "#d8b46e"]));
       }
@@ -948,6 +966,8 @@ export class Game {
     if (this.finished) return;
     this.finished = true;
     this.phase = win ? "won" : "lost";
+    if (win) AudioService.victory();
+    else AudioService.defeat();
     this.stats.score = this.score;
     const triggeredOneBlade = this.stats.oneBladeBreaks > 0 || this.stats.maxSingleBlade >= REWARD_CONFIG.godSlashThreshold;
     const rating = evaluateRating({
@@ -1742,6 +1762,37 @@ export class Game {
     ctx.font = '11px "Consolas", monospace';
     ctx.textAlign = "left";
     lines.forEach((line, index) => ctx.fillText(line, 18, 102 + index * 16));
+    ctx.restore();
+  }
+
+  private drawWaveProgress(ctx: CanvasRenderingContext2D) {
+    if (this.phase !== "playing") return;
+    const totalWaves = this.level.waves.length;
+    const currentWave = Math.min(this.wavesSpawned, totalWaves);
+    const progressRatio = currentWave / Math.max(1, totalWaves);
+
+    // 底部波次进度条（紧贴刀势文字上方）
+    const barY = 806;
+    const barHeight = 4;
+    const barLeft = 16;
+    const barWidth = DESIGN_WIDTH - 32;
+
+    ctx.save();
+    ctx.fillStyle = "rgba(246, 231, 189, 0.12)";
+    ctx.fillRect(barLeft, barY, barWidth, barHeight);
+
+    const waveColors = ["#d9b45b", "#ffe7a3", "#ffd35a", "#ffd35a"];
+    ctx.fillStyle = waveColors[Math.min(currentWave - 1, waveColors.length - 1)] || "#d9b45b";
+    ctx.fillRect(barLeft, barY, barWidth * progressRatio, barHeight);
+
+    // 阶段标记点
+    for (let i = 0; i < totalWaves; i += 1) {
+      const x = barLeft + barWidth * ((i + 1) / totalWaves);
+      ctx.fillStyle = i < currentWave ? "#fff3c0" : "rgba(246, 231, 189, 0.3)";
+      ctx.beginPath();
+      ctx.arc(x, barY + barHeight / 2, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
   }
 

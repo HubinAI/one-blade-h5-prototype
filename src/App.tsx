@@ -59,6 +59,8 @@ export default function App() {
 
   const startLevel = useCallback(
     (level: LevelConfig, mode: RunMode = "normal") => {
+      // 确保 AudioContext 在用户交互时激活（移动端需要用户手势触发）
+      try { new AudioContext().close(); } catch { /* no-op */ }
       setRunIndex(beginRun(level.id, mode));
       setCurrentLevel(level);
       setLastResult(null);

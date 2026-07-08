@@ -117,8 +117,8 @@ button {
 
 .menu-screen-v4 {
   justify-content: flex-start;
-  gap: 12px;
-  padding: 18px 18px 20px;
+  gap: 10px;
+  padding: 14px 18px 16px;
   overflow: auto;
   overscroll-behavior: contain;
 }
@@ -132,8 +132,8 @@ button {
 }
 
 .home-topbar span {
-  min-height: 32px;
-  padding: 7px 6px;
+  min-height: 28px;
+  padding: 5px 6px;
   border: 1px solid rgba(240, 195, 107, 0.2);
   border-radius: 8px;
   background: rgba(18, 16, 14, 0.58);
@@ -145,7 +145,7 @@ button {
 
 .title-block-v4 {
   margin: 0;
-  padding-top: 16px;
+  padding-top: 8px;
 }
 
 .seal {
@@ -179,14 +179,14 @@ h1 {
 }
 
 .menu-screen-v4 h1 {
-  margin-top: 14px;
-  font-size: 44px;
+  margin-top: 10px;
+  font-size: 38px;
 }
 
 .title-block p {
-  margin-top: 18px;
+  margin-top: 12px;
   color: rgba(246, 231, 189, 0.78);
-  font-size: 17px;
+  font-size: 15px;
 }
 
 .menu-actions {
@@ -195,7 +195,7 @@ h1 {
 }
 
 .menu-screen-v4 .menu-actions {
-  gap: 8px;
+  gap: 6px;
 }
 
 .primary-button,
@@ -243,8 +243,8 @@ h1 {
 .offline-card,
 .fragment-panel {
   display: grid;
-  gap: 8px;
-  padding: 10px;
+  gap: 6px;
+  padding: 8px;
   border: 1px solid rgba(240, 195, 107, 0.22);
   border-radius: 8px;
   background: rgba(18, 16, 14, 0.62);

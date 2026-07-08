@@ -33,6 +33,7 @@ export function MainMenu({
 }: MainMenuProps) {
   const firstFragment = home.fragments[0];
   const activeTasks = home.dailyTasks.filter((task) => !task.claimed).slice(0, 3);
+  const isFirstPlay = unlockedLevel <= 1 && home.coins === 0;
 
   return (
     <section className="screen menu-screen menu-screen-v4">
@@ -41,7 +42,7 @@ export function MainMenu({
         <span>
           军粮 {home.stamina}/{home.staminaMax}
         </span>
-        <span>{home.dailyFirstWinReady ? "今日首胜未领" : "今日首胜已领"}</span>
+        <span>{home.dailyFirstWinReady ? "🔥 今日首胜未领" : "今日首胜已领"}</span>
       </div>
 
       <div className="title-block title-block-v4">
@@ -73,7 +74,7 @@ export function MainMenu({
         <strong>每日挑战：{home.dailyChallengeName}</strong>
         <span>{home.dailyChallengeDescription}</span>
         <button className="ghost-button compact-button" onClick={onDailyChallenge}>
-          进入每日挑战
+          进入挑战
         </button>
       </div>
 
@@ -91,20 +92,9 @@ export function MainMenu({
         </div>
       )}
 
-      <div className="daily-task-strip">
-        {activeTasks.map((task) => (
-          <span key={task.id}>
-            {task.name} {task.progress}/{task.target}
-          </span>
-        ))}
-      </div>
-
       <div className="menu-actions">
-        <button className="primary-button" onClick={onStart}>
-          开始游戏
-        </button>
-        <button className="ghost-button" onClick={onContinue}>
-          继续第 {unlockedLevel} 关
+        <button className="primary-button" onClick={isFirstPlay ? onStart : onContinue}>
+          {isFirstPlay ? "开始游戏" : `继续第 ${unlockedLevel} 关`}
         </button>
         <button className="ghost-button" onClick={onHighYieldChallenge}>
           高收益挑战（5 军粮）
@@ -121,6 +111,16 @@ export function MainMenu({
           </button>
         )}
       </div>
+
+      {activeTasks.length > 0 && (
+        <div className="daily-task-strip">
+          {activeTasks.map((task) => (
+            <span key={task.id}>
+              {task.name} {task.progress}/{task.target}
+            </span>
+          ))}
+        </div>
+      )}
 
       <small className="stamina-note">军粮恢复：{home.staminaNextText}</small>
     </section>
