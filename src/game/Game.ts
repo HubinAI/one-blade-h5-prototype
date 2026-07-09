@@ -3,6 +3,7 @@ import { ENEMY_DEFS } from "../data/enemies";
 import { PICKUP_DEFS } from "../data/pickups";
 import { ELITE_VISUAL_DEFS } from "../data/elites";
 import { BOSS_VISUAL_DEFS } from "../data/bosses";
+import { FORMATIONS } from "../data/formations";
 import { DESIGN_HEIGHT, DESIGN_WIDTH, HUD_HEIGHT, WALL_TOP_Y } from "./config/constants";
 import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID } from "./config/balance";
 import { AD_CONFIG } from "./config/ads";
@@ -704,6 +705,46 @@ export class Game {
 
     for (const enemy of this.enemies) {
       if (!enemy.alive || trail.hitEnemyIds.has(enemy.id)) continue;
+
+      // ---- 阵眼：检测阵法亮字 ----
+      if (enemy.kind === "core" && enemy.formationId) {
+        const formation = FORMATIONS[enemy.formationId] || FORMATIONS.snake;
+        const chars = formation.chars;
+        const totalWidth = (chars.length - 1) * 24;
+        const startX = -totalWidth / 2;
+        const charRadius = 14;
+        for (let i = 0; i < chars.length; i++) {
+          const cx = enemy.x + startX + i * 24;
+          const cy = enemy.y;
+          const pos = { x: cx, y: cy };
+          if (segmentHitCircle(a, b, pos, charRadius + bladeReach * 0.5)) {
+            trail.hitEnemyIds.add(enemy.id);
+            const litIndex = enemy.formationLitIndex ?? 0;
+            if (enemy.marked || i === litIndex) {
+              // ✅ 切中亮字 → 阵眼破裂
+              enemy.marked = true;
+              this.handleEnemyHit(enemy, trail);
+            } else {
+              // ❌ 切错字 → 扣容错
+              enemy.formationWrongHits = (enemy.formationWrongHits ?? 0) + 1;
+              enemy.flash = 0.5;
+              this.addText(cx, cy - 16, "切错", "#ff7b6e", 12);
+              this.particles.push(...sparkBurst({ x: cx, y: cy }, 6, "#ff7b6e"));
+              if (enemy.formationWrongHits >= formation.maxWrongHits) {
+                // 容错耗尽，阵法崩塌（视为死亡）
+                enemy.alive = false;
+                this.score += 10;
+                this.particles.push(...paperBurst(enemy, 18, ["#5d4a8f", "#e8d7ff"]));
+                this.addText(enemy.x, enemy.y - 20, "阵法溃散", "#ff7b6e", 16);
+                AudioService.defenseHit();
+              }
+            }
+            break;
+          }
+        }
+        continue; // 跳过默认碰撞检测
+      }
+
       if (segmentHitCircle(a, b, enemy, enemy.radius + bladeReach)) {
         trail.hitEnemyIds.add(enemy.id);
         this.handleEnemyHit(enemy, trail);
@@ -781,13 +822,27 @@ export class Game {
     }
 
     if (enemy.kind === "core") {
-      if (stage.canTriggerCoreCollapse) {
+      // 阵眼：已通过checkSegmentHits的亮字判定，只需处理标记逻辑
+      if (enemy.marked && stage.canTriggerCoreCollapse) {
         this.stats.coreHits += 1;
+        trail.pendingCoreIds.add(enemy.id);
+        this.score += 6;
+        this.addText(enemy.x, enemy.y - 20, "阵眼破", "#e8d7ff", 14);
+        this.showHint("core-hit", "收刀破阵", enemy.x, Math.max(110, enemy.y - 42), 2);
+        this.particles.push(ringParticle(enemy, "#e8d7ff", 34));
+        // 亮字命中反馈
+        const litIdx = enemy.formationLitIndex ?? 0;
+        if (enemy.formationId) {
+          const fm = FORMATIONS[enemy.formationId] || FORMATIONS.snake;
+          const offsetX = (-(fm.chars.length - 1) * 24 / 2) + litIdx * 24;
+          this.addText(enemy.x + offsetX, enemy.y - 28, `「${fm.chars[litIdx]}」破`, "#9b6dff", 16);
+        }
+      } else if (!enemy.marked && stage.canTriggerCoreCollapse) {
+        // 通过周边爆炸/崩塌触发的标记（无亮字检测）
         enemy.marked = true;
         trail.pendingCoreIds.add(enemy.id);
         this.score += 6;
-        this.addText(enemy.x, enemy.y - 20, "阵眼破裂", "#e8d7ff", 14);
-        this.showHint("core-hit", "收刀破阵", enemy.x, Math.max(110, enemy.y - 42), 2);
+        this.addText(enemy.x, enemy.y - 20, "阵眼被波及", "#e8d7ff", 14);
         this.particles.push(ringParticle(enemy, "#e8d7ff", 34));
       } else {
         enemy.flash = 0.32;
@@ -1103,6 +1158,19 @@ export class Game {
       enemy.wobble += dt;
       enemy.flash = Math.max(0, enemy.flash - dt * 3);
       enemy.slowedTimer = Math.max(0, enemy.slowedTimer - dt);
+
+      // ---- 阵法亮字切换 ----
+      if (enemy.kind === "core" && enemy.marked && enemy.formationId) {
+        const formation = FORMATIONS[enemy.formationId] || FORMATIONS.snake;
+        enemy.formationLitTimer = (enemy.formationLitTimer ?? 0) + dt;
+        if (enemy.formationLitTimer >= formation.litInterval) {
+          enemy.formationLitTimer = 0;
+          // 随机选下一个亮字（不重复当前）
+          const nextIndex = Math.floor(Math.random() * formation.chars.length);
+          enemy.formationLitIndex = nextIndex;
+        }
+      }
+
       const statusSlow = enemy.ignited || enemy.marked ? 0.54 : 1;
       const fortressSlow = enemy.slowedTimer > 0 ? 0.4 : 1;
       enemy.y += enemy.speed * statusSlow * fortressSlow * dt;
@@ -1402,7 +1470,12 @@ export class Game {
       shieldCrack: 0,
       flash: 0,
       wobble: randomRange(0, Math.PI * 2),
-      slowedTimer: 0
+      slowedTimer: 0,
+      // 阵眼添加阵法配置
+      formationId: kind === "core" ? this.level.formationId : undefined,
+      formationLitIndex: 0,
+      formationLitTimer: 0,
+      formationWrongHits: 0
     };
   }
 
@@ -1611,115 +1684,142 @@ export class Game {
       const baseColor = enemy.flash > 0 ? "#fff1b8" : def.color;
       const accentColor = def.accent;
 
+      // ═════════════════════════════════════
+      // 汉字化渲染：单字 + 颜色 + 动效
+      // ═════════════════════════════════════
+
       if (enemy.kind === "infantry") {
-        // 步兵：向上的箭头/矛头，无底框
+        // 步兵："兵"字 朱红，旋转下落动画
+        const rot = Math.sin(enemy.wobble * 5) * 0.15;
+        ctx.save();
+        ctx.rotate(rot);
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = "rgba(0,0,0,0.6)";
         ctx.fillStyle = baseColor;
-        ctx.strokeStyle = accentColor;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(0, -enemy.radius + 2);
-        ctx.lineTo(8, 4);
-        ctx.lineTo(3, 4);
-        ctx.lineTo(3, enemy.radius - 2);
-        ctx.lineTo(-3, enemy.radius - 2);
-        ctx.lineTo(-3, 4);
-        ctx.lineTo(-8, 4);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
+        ctx.font = `800 ${enemy.radius * 1.6}px "Microsoft YaHei", "SimHei", sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("兵", 0, 0);
+        ctx.restore();
+        // 重置shadow
+        ctx.shadowBlur = 6;
+        ctx.shadowOffsetY = 3;
       }
 
       if (enemy.kind === "shield") {
-        // 盾兵：盾牌形，无底框
+        // 盾兵："盾"字 钢蓝，带白色光环
         ctx.fillStyle = baseColor;
-        ctx.strokeStyle = accentColor;
-        ctx.lineWidth = 2.5;
+        ctx.font = `800 ${enemy.radius * 1.5}px "Microsoft YaHei", "SimHei", sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("盾", 0, 0);
+        // 光环
+        ctx.strokeStyle = enemy.hp < enemy.maxHp ? "#f6e7bd" : "rgba(255,255,255,0.18)";
+        ctx.lineWidth = 2;
+        ctx.shadowBlur = 0;
         ctx.beginPath();
-        ctx.moveTo(0, -enemy.radius + 2);
-        ctx.quadraticCurveTo(enemy.radius - 2, -enemy.radius + 4, enemy.radius - 2, 2);
-        ctx.quadraticCurveTo(enemy.radius - 2, enemy.radius - 2, 0, enemy.radius);
-        ctx.quadraticCurveTo(-(enemy.radius - 2), enemy.radius - 2, -(enemy.radius - 2), 2);
-        ctx.quadraticCurveTo(-(enemy.radius - 2), -enemy.radius + 4, 0, -enemy.radius + 2);
-        ctx.closePath();
-        ctx.fill();
+        ctx.arc(0, 0, enemy.radius + 3, 0, Math.PI * 2);
         ctx.stroke();
-        // 盾牌内纹
-        if (enemy.hp < enemy.maxHp || enemy.shieldCrack > 0) {
-          ctx.strokeStyle = "#f6e7bd";
-          ctx.lineWidth = 1.6;
-          ctx.beginPath();
-          ctx.moveTo(-4, -8);
-          ctx.lineTo(4, 0);
-          ctx.lineTo(-2, 10);
-          ctx.stroke();
-        } else {
-          ctx.strokeStyle = "rgba(255,255,255,0.2)";
-          ctx.lineWidth = 1.2;
-          ctx.beginPath();
-          ctx.moveTo(0, -10);
-          ctx.lineTo(0, enemy.radius - 6);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(-7, 0);
-          ctx.lineTo(7, 0);
-          ctx.stroke();
-        }
+        ctx.shadowBlur = 6;
+        ctx.shadowOffsetY = 3;
       }
 
       if (enemy.kind === "powder") {
-        // 火药兵：火焰形，无底框
+        // 火药兵："火"字 橙红，点燃时火星粒子
         ctx.fillStyle = enemy.ignited ? "#ffd67c" : baseColor;
-        ctx.strokeStyle = enemy.ignited ? "#ff8833" : accentColor;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(0, -enemy.radius + 2);
-        ctx.quadraticCurveTo(8, -enemy.radius + 8, 6, 0);
-        ctx.quadraticCurveTo(10, 4, 4, enemy.radius - 4);
-        ctx.quadraticCurveTo(0, enemy.radius, 0, enemy.radius - 2);
-        ctx.quadraticCurveTo(0, enemy.radius, -4, enemy.radius - 4);
-        ctx.quadraticCurveTo(-10, 4, -6, 0);
-        ctx.quadraticCurveTo(-8, -enemy.radius + 8, 0, -enemy.radius + 2);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
+        ctx.font = `800 ${enemy.radius * 1.6}px "Microsoft YaHei", "SimHei", sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("火", 0, 0);
+        // 点燃状态火星粒子
+        if (enemy.ignited) {
+          ctx.shadowBlur = 0;
+          const sparkCount = 3;
+          for (let i = 0; i < sparkCount; i++) {
+            const a = this.elapsed * 4 + i * 2.1;
+            const sx = Math.cos(a) * enemy.radius * 0.8;
+            const sy = Math.sin(a + 1) * enemy.radius * 0.6 - 2;
+            ctx.fillStyle = `rgba(255, 150, 50, ${0.4 + Math.sin(this.elapsed * 6 + i) * 0.3})`;
+            ctx.beginPath();
+            ctx.arc(sx, sy, 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.shadowBlur = 6;
+          ctx.shadowOffsetY = 3;
+        }
       }
 
       if (enemy.kind === "core") {
-        // 阵眼：菱形+内三角，无底框
-        const pulse = 1 + Math.sin(this.elapsed * 5) * 0.12;
-        ctx.strokeStyle = enemy.marked ? "#ffffff" : "#e8d7ff";
-        ctx.lineWidth = 2.5;
-        ctx.save();
-        ctx.rotate(this.elapsed * 0.6);
-        ctx.beginPath();
-        ctx.moveTo(0, -14 * pulse);
-        ctx.lineTo(11 * pulse, 0);
-        ctx.lineTo(0, 14 * pulse);
-        ctx.lineTo(-11 * pulse, 0);
-        ctx.closePath();
-        if (enemy.marked) {
-          ctx.fillStyle = "rgba(232, 215, 255, 0.18)";
-          ctx.fill();
-        }
-        ctx.stroke();
-        ctx.restore();
+        // 阵眼：阵法文字列 + 亮字破阵
+        const formationId = enemy.formationId || (this.level.formationId ?? "snake");
+        const formation = FORMATIONS[formationId] || FORMATIONS.snake;
+        const chars = formation.chars;
+        const totalWidth = (chars.length - 1) * 24;
+        const startX = -totalWidth / 2;
+        const isLit = enemy.marked;
+        const litIndex = enemy.formationLitIndex ?? 0;
 
-        // 内三角
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(0, -9);
-        ctx.lineTo(9, 7);
-        ctx.lineTo(-9, 7);
-        ctx.closePath();
-        ctx.stroke();
+        for (let i = 0; i < chars.length; i++) {
+          const cx = startX + i * 24;
+          const cy = 0;
+          // 每个字的碰撞圆
+          const charRadius = 14;
+          const isThisLit = isLit && i === litIndex;
 
-        if (enemy.marked) {
-          ctx.strokeStyle = "#fff8d8";
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(0, 0, enemy.radius + 4, 0, Math.PI * 2);
-          ctx.stroke();
+          ctx.save();
+          ctx.translate(cx, cy);
+          // 亮字或普通
+          if (isThisLit) {
+            // 亮字：金紫高亮 + 脉冲 + 抖动
+            const pulse = 1 + Math.sin(this.elapsed * 8) * 0.12;
+            ctx.shadowColor = "#9b6dff";
+            ctx.shadowBlur = 18;
+            ctx.fillStyle = "#e8d7ff";
+            ctx.font = `800 ${Math.round(20 * pulse)}px "Microsoft YaHei", "SimHei", sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(chars[i], 0, 0);
+            ctx.shadowBlur = 0;
+            // 外发光圈
+            ctx.strokeStyle = "rgba(155, 109, 255, 0.6)";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(0, 0, 16, 0, Math.PI * 2);
+            ctx.stroke();
+          } else {
+            // 普通字：暗灰色
+            const alpha = enemy.marked ? 0.5 : 0.35;
+            ctx.fillStyle = `rgba(180, 160, 140, ${alpha})`;
+            ctx.font = `800 16px "Microsoft YaHei", "SimHei", sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(chars[i], 0, 0);
+          }
+
+          // 切错闪红
+          if (enemy.flash > 0 && i === litIndex && !isThisLit) {
+            ctx.fillStyle = "rgba(255, 60, 60, 0.4)";
+            ctx.beginPath();
+            ctx.arc(0, 0, charRadius + 2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          ctx.restore();
         }
+        // 阵名小字
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "rgba(155, 109, 255, 0.5)";
+        ctx.font = '10px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = "center";
+        ctx.fillText(formation.name, 0, -enemy.radius - 4);
+        // 切错计数
+        if (enemy.formationWrongHits && enemy.formationWrongHits > 0) {
+          ctx.fillStyle = "#ff7b6e";
+          ctx.font = '10px "Microsoft YaHei", sans-serif';
+          ctx.fillText(`容错 ${formation.maxWrongHits - enemy.formationWrongHits}/${formation.maxWrongHits}`, 0, enemy.radius + 6);
+        }
+        ctx.shadowBlur = 6;
+        ctx.shadowOffsetY = 3;
       }
 
       // ---- 精英怪渲染 ----

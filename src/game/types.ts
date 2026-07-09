@@ -89,6 +89,8 @@ export type LevelConfig = {
   eliteKind?: EliteKind;
   /** Boss ID，undefined=无Boss */
   bossId?: BossId;
+  /** 阵眼阵法ID */
+  formationId?: string;
 };
 
 export type Enemy = {
@@ -121,6 +123,14 @@ export type Enemy = {
   skillTimer?: number;
   /** Boss技能冷却 */
   skillCooldown?: number;
+  /** 阵眼阵法ID */
+  formationId?: string;
+  /** 当前亮字索引 */
+  formationLitIndex?: number;
+  /** 亮字切换计时器 */
+  formationLitTimer?: number;
+  /** 切错字次数 */
+  formationWrongHits?: number;
 };
 
 export type Pickup = {
