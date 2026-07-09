@@ -12,6 +12,7 @@ type MainMenuProps = {
   onLevels: () => void;
   onDailyChallenge: () => void;
   onHighYieldChallenge: () => void;
+  onFreeBurst: () => void;
   onUpgrades: () => void;
   onRestoreStamina: () => void;
   onClaimOffline: () => void;
@@ -79,6 +80,7 @@ export function MainMenu({
   onLevels,
   onDailyChallenge,
   onHighYieldChallenge,
+  onFreeBurst,
   onUpgrades,
   onRestoreStamina,
   onClaimOffline,
@@ -118,6 +120,11 @@ export function MainMenu({
           <button className="challenge-card-button" onClick={isFirstPlay ? onStart : onContinue}>
             {isFirstPlay ? "开始挑战" : "继续挑战"}
           </button>
+          {home.freeBurstAvailable && (
+            <button className="challenge-card-hint free-burst" onClick={onFreeBurst}>
+              🔥 今日满势可用 ×1（不耗粮）
+            </button>
+          )}
           {lowStamina && (
             <button className="challenge-card-hint" onClick={onRestoreStamina}>
               军粮不足，看广告恢复 10 点
@@ -136,8 +143,8 @@ export function MainMenu({
 
       <div className="menu-v6-footer">
         <button className="footer-icon" onClick={onLevels}>
-          <span className="footer-icon-symbol">◎</span>
-          <span>选关</span>
+          <span className="footer-icon-symbol">🏆</span>
+          <span>排行</span>
         </button>
         <button className="footer-icon" onClick={onUpgrades}>
           <span className="footer-icon-symbol">⚔</span>
@@ -153,7 +160,7 @@ export function MainMenu({
         </button>
       </div>
 
-      <small className="version-footer">V0708007</small>
+      <small className="version-footer">V0708008</small>
     </section>
   );
 }

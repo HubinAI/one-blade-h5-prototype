@@ -8,7 +8,7 @@ import { RUN_BUFFS, RUN_BUFF_BY_ID, ROUTE_COLORS, ROUTE_NAMES, ROUTE_BUFFS, getN
 import { REWARD_CONFIG } from "./config/rewards";
 import { getBladeTier, getTierConfig, consumeEnergyForSlash, recoverEnergy } from "./systems/bladeEnergySystem";
 import { isSharpTurn, segmentHitCircle } from "./systems/collisionSystem";
-import { paperBurst, ringParticle, sparkBurst } from "./systems/particleSystem";
+import { paperBurst, ringParticle, sparkBurst, glowParticle, explosionBurst, coreCollapseBurst } from "./systems/particleSystem";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers } from "./services/ProgressionService";
 import { logEvent } from "./services/Analytics";
 import { AudioService } from "./services/AudioService";
@@ -128,7 +128,7 @@ export class Game {
     this.onReviveOffer = onReviveOffer;
     this.maxHp = Math.min(level.hp + this.progressionModifiers.openingShield, BALANCE.player.maxHp + this.progressionModifiers.openingShield);
     this.hp = this.maxHp;
-    this.energy = clamp(level.initialEnergy + this.progressionModifiers.initialEnergyBonus, 0, BALANCE.swordEnergy.max);
+    this.energy = clamp(this.runContext.mode === "freeBurst" ? BALANCE.swordEnergy.max : level.initialEnergy + this.progressionModifiers.initialEnergyBonus, 0, BALANCE.swordEnergy.max);
     this.hintSeen = this.readSeenHints();
     this.discoveredEnemies.add("infantry");
     if (level.id === 1) {
@@ -415,25 +415,41 @@ export class Game {
     }
 
     if (trail.tier === "burst" && (trail.kills >= 8 || trail.coreCollapseCount > 0)) {
-      this.slowMoTimer = BALANCE.feedback.burstSlowMotionSeconds;
-      this.flash = Math.max(this.flash, 1);
-      this.screenShake = Math.max(this.screenShake, 0.78);
+      // 破阵锋大杀 = 更强慢镜头 + 全屏闪 + 重震
+      this.slowMoTimer = Math.max(this.slowMoTimer, trail.kills >= 12 ? 0.28 : trail.kills >= 8 ? 0.22 : BALANCE.feedback.burstSlowMotionSeconds);
+      this.flash = Math.max(this.flash, trail.kills >= 12 ? 1.2 : 1);
+      this.screenShake = Math.max(this.screenShake, trail.kills >= 12 ? 1.2 : 0.85);
+      // 收刀粒子爆发：更多纸片飘散
+      if (trail.kills >= 8 && last) {
+        this.particles.push(glowParticle(last, "#ffffff", 60));
+      }
+    } else if (trail.tier === "burst" && trail.kills >= 4) {
+      // 破阵锋中杀 = 轻慢镜
+      this.slowMoTimer = Math.max(this.slowMoTimer, 0.14);
+      this.flash = Math.max(this.flash, 0.75);
+      this.screenShake = Math.max(this.screenShake, 0.55);
+    } else if (trail.tier === "strong" && trail.kills >= 6) {
+      // 强锋高杀 = 微慢镜
+      this.slowMoTimer = Math.max(this.slowMoTimer, 0.1);
+      this.screenShake = Math.max(this.screenShake, 0.5);
     }
 
-    // ---- 路线收刀特效：路线专属闪光 ----
+    // ---- 路线收刀特效：路线专属闪光 + 粒子 ----
     if (this.selectedRoutes.length > 0) {
       const mainRoute = this.selectedRoutes[this.selectedRoutes.length - 1];
       const routeColor = ROUTE_COLORS[mainRoute];
       if (mainRoute === "scorch" && trail.kills > 0) {
-        this.flash = Math.max(this.flash, 0.42);
-        this.screenShake = Math.max(this.screenShake, 0.35);
+        this.flash = Math.max(this.flash, 0.55);
+        this.screenShake = Math.max(this.screenShake, 0.42);
+        if (trail.kills >= 5 && last) this.particles.push(glowParticle(last, routeColor, 45));
       }
       if (mainRoute === "pierce" && trail.coreCollapseCount > 0) {
-        this.flash = Math.max(this.flash, 0.35);
-        this.screenShake = Math.max(this.screenShake, 0.42);
+        this.flash = Math.max(this.flash, 0.5);
+        this.screenShake = Math.max(this.screenShake, 0.55);
+        if (trail.coreCollapseCount >= 2 && last) this.particles.push(glowParticle(last, routeColor, 50));
       }
       if (mainRoute === "ironWall" && trail.kills > 0) {
-        this.screenShake = Math.max(this.screenShake, 0.18);
+        this.screenShake = Math.max(this.screenShake, 0.28);
       }
     }
 
@@ -774,6 +790,8 @@ export class Game {
     const exploded = new Set<string>();
     const collapsed = new Set<string>();
     let guard = 0;
+    const tierMap: Record<string, number> = { weak: 0, normal: 1, strong: 2, burst: 3 };
+    const tierPower = tierMap[trail.tier] ?? 1;
 
     const enqueueExplosion = (enemy: Enemy) => {
       if (!exploded.has(enemy.id)) {
@@ -817,10 +835,9 @@ export class Game {
         AudioService.explosion();
 
         const radius = (ENEMY_BALANCE.powder.explosionRadius ?? 85) * stage.explosionRadiusMultiplier * this.getExplosionRadiusMultiplier();
-        this.particles.push(ringParticle(enemy, "#ffb15c", radius));
-        this.particles.push(...sparkBurst(enemy, 24, "#ffb15c"));
-        this.screenShake = Math.max(this.screenShake, 0.55);
-        this.flash = Math.max(this.flash, 0.42);
+        this.particles.push(...explosionBurst(enemy, tierPower, ["#ffb15c", "#d96c32", "#ffd67c"], "#ffd67c"));
+        this.screenShake = Math.max(this.screenShake, 0.65);
+        this.flash = Math.max(this.flash, 0.55);
 
         for (const target of this.enemies) {
           if (!target.alive || distance(target, enemy) > radius) continue;
@@ -851,11 +868,10 @@ export class Game {
         this.killEnemy(enemy, trail, true, "core");
         AudioService.coreCollapse();
         const radius = stage.canTriggerCoreCollapse ? stage.coreCollapseRadius * this.getCoreRadiusMultiplier() : 0;
-        this.particles.push(ringParticle(enemy, "#e8d7ff", radius));
-        this.particles.push(...paperBurst(enemy, 28, ["#e8d7ff", "#c7a7ff", "#5d4a8f"]));
+        this.particles.push(...coreCollapseBurst(enemy, radius, tierPower));
         this.addText(enemy.x, enemy.y - 30, trail.tier === "burst" ? "大阵崩散" : "阵崩", "#e8d7ff", 18);
-        this.screenShake = Math.max(this.screenShake, 0.62);
-        this.flash = Math.max(this.flash, 0.55);
+        this.screenShake = Math.max(this.screenShake, 0.78);
+        this.flash = Math.max(this.flash, 0.65);
 
         for (const target of this.enemies) {
           if (!target.alive || radius <= 0 || distance(target, enemy) > radius) continue;
@@ -912,8 +928,13 @@ export class Game {
     }
 
     const colors = source === "core" || source === "core_chain" ? ["#e8d7ff", "#5d4a8f", "#ead8a7"] : paperColors;
-    const stageBurstBoost = trail.tier === "burst" ? 8 : trail.tier === "strong" ? 4 : 0;
-    this.particles.push(...paperBurst(enemy, (enemy.kind === "shield" ? 20 : 15) + stageBurstBoost, colors));
+    const tierMap: Record<string, number> = { weak: 0, normal: 1, strong: 2, burst: 3 };
+    const tierPower = tierMap[trail.tier] ?? 1;
+    // 混合爆发特效：纸片 + 火花 + 光晕 + 冲击波环
+    this.particles.push(...explosionBurst(enemy, tierPower, colors, source === "core" || source === "core_chain" ? "#e8d7ff" : "#ffd67c"));
+    if (trail.tier === "burst") {
+      this.particles.push(...sparkBurst(enemy, 12, "#ffffff", 30));
+    }
     // 斩断闪光分割线
     const slashAngle = this.lastSlashAngle;
     const splitLen = enemy.radius * 2.2 + (trail.tier === "burst" ? 14 : trail.tier === "strong" ? 8 : 0);
@@ -1634,6 +1655,16 @@ export class Game {
       ctx.lineTo(b.x, b.y);
       ctx.stroke();
 
+      // 外发光层（第三层）：更大扩散范围的光晕
+      ctx.strokeStyle = `rgba(255, 180, 70, ${alpha * 0.28})`;
+      ctx.shadowColor = stage.color;
+      ctx.shadowBlur = (40 + stage.width * 1.2) * lowFade;
+      ctx.lineWidth = width * (1.3 + b.energyRatio * 0.8);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+
       ctx.strokeStyle = `rgba(255, 255, 238, ${alpha})`;
       ctx.shadowBlur = 8;
       ctx.lineWidth = Math.max(2, width * 0.36);
@@ -1697,11 +1728,11 @@ export class Game {
       ctx.rotate(particle.rotation);
 
       if (particle.kind === "ring") {
-        ctx.globalAlpha = alpha * 0.8;
+        ctx.globalAlpha = alpha * 0.7;
         ctx.strokeStyle = particle.color;
         ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.arc(0, 0, particle.size * t, 0, Math.PI * 2);
+        ctx.arc(0, 0, particle.size * (0.3 + t * 0.7), 0, Math.PI * 2);
         ctx.stroke();
       } else if (particle.kind === "spark") {
         ctx.strokeStyle = particle.color;
@@ -1710,6 +1741,16 @@ export class Game {
         ctx.moveTo(0, 0);
         ctx.lineTo(-particle.vx * 0.035, -particle.vy * 0.035);
         ctx.stroke();
+      } else if (particle.kind === "smoke") {
+        // 光晕粒子：半透明发光圆
+        ctx.globalAlpha = alpha * 0.45;
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = particle.color;
+        const r = particle.size * (0.5 + t * 0.5);
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalCompositeOperation = "source-over";
       } else {
         ctx.fillStyle = particle.color;
         ctx.fillRect(-particle.size / 2, -particle.size / 3, particle.size, particle.size * 0.66);

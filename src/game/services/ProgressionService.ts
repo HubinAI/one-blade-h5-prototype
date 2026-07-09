@@ -14,7 +14,7 @@ import { logEvent } from "./Analytics";
 
 const STORAGE_KEY = "one_blade_v04_progression";
 
-export type RunMode = "normal" | "dailyChallenge" | "highYield";
+export type RunMode = "normal" | "dailyChallenge" | "highYield" | "freeBurst";
 type DailyTaskId = (typeof DAILY_TASK_CONFIG)[number]["id"];
 
 type DailyTaskProgress = {
@@ -26,6 +26,7 @@ type DailyState = {
   date: string;
   firstWinClaimed: boolean;
   challengeCompleted: boolean;
+  freeBurstUsed: boolean;
   tasks: Record<DailyTaskId, DailyTaskProgress>;
 };
 
@@ -71,6 +72,7 @@ export type HomeSnapshot = {
   chestProgress: number;
   chestTarget: number;
   dailyFirstWinReady: boolean;
+  freeBurstAvailable: boolean;
   dailyChallengeName: string;
   dailyChallengeDescription: string;
   offlineCoins: number;
@@ -122,6 +124,7 @@ function createDailyState(date = todayKey()): DailyState {
     date,
     firstWinClaimed: false,
     challengeCompleted: false,
+    freeBurstUsed: false,
     tasks: createTaskState()
   };
 }
@@ -673,6 +676,7 @@ export function getHomeSnapshot(): HomeSnapshot {
     chestProgress: progress.chestProgress,
     chestTarget: REWARD_CONFIG.chest.target,
     dailyFirstWinReady: !progress.daily.firstWinClaimed,
+    freeBurstAvailable: !progress.daily.freeBurstUsed,
     dailyChallengeName: challenge.name,
     dailyChallengeDescription: challenge.description,
     offlineCoins: progress.offlineCoins,
@@ -712,4 +716,17 @@ export function getHomeSnapshot(): HomeSnapshot {
       };
     })
   };
+}
+
+/** 每日免费满势符是否可用 */
+export function isFreeBurstAvailable(): boolean {
+  const progress = readProgress();
+  return !progress.daily.freeBurstUsed;
+}
+
+/** 使用每日免费满势符 */
+export function useFreeBurst(): void {
+  const progress = readProgress();
+  progress.daily.freeBurstUsed = true;
+  writeProgress(progress);
 }

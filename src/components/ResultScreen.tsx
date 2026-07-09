@@ -89,6 +89,88 @@ export function ResultScreen({
   }
   const mainRoute = (Object.entries(routeCounts).sort((a, b) => b[1] - a[1])[0]?.[0]) as keyof typeof ROUTE_NAMES | undefined;
 
+  // ---- 分享功能 ----
+  function generateShareImage() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 420;
+    canvas.height = 640;
+    const ctx = canvas.getContext("2d")!;
+    // 背景
+    ctx.fillStyle = "#1a1210";
+    ctx.fillRect(0, 0, 420, 640);
+    const grad = ctx.createLinearGradient(0, 0, 0, 200);
+    grad.addColorStop(0, "#2d1f18");
+    grad.addColorStop(1, "#1a1210");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 420, 200);
+    // 评级
+    ctx.fillStyle = "#ffd35a";
+    ctx.font = 'bold 56px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = "center";
+    ctx.fillText(result.rating, 210, 90);
+    // 关卡
+    ctx.fillStyle = "#f6e7bd";
+    ctx.font = '22px "Microsoft YaHei", sans-serif';
+    ctx.fillText(`第${result.levelId}关 · ${result.levelTitle}`, 210, 140);
+    // 分割线
+    ctx.strokeStyle = "rgba(255,211,90,0.3)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(50, 170);
+    ctx.lineTo(370, 170);
+    ctx.stroke();
+    // 数据
+    ctx.textAlign = "left";
+    ctx.font = '16px "Microsoft YaHei", sans-serif';
+    const data = [
+      `击杀 ${result.kills}`,
+      `最大单刀 ${result.maxSingleBlade} 连杀`,
+      `用时 ${Math.round(result.duration)} 秒`,
+      `得分 ${result.score}`
+    ];
+    data.forEach((line, i) => {
+      ctx.fillStyle = i < 3 ? "#f6e7bd" : "#ffd35a";
+      ctx.fillText(line, 60, 220 + i * 40);
+    });
+    if (mainRoute) {
+      ctx.fillStyle = ROUTE_COLORS[mainRoute] || "#f6e7bd";
+      ctx.fillText(`主路线 ${ROUTE_NAMES[mainRoute]}`, 60, 390);
+    }
+    if (result.triggeredOneBlade) {
+      ctx.fillStyle = "#ff6a33";
+      ctx.font = 'bold 30px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = "center";
+      ctx.fillText("⚔ 一刀破阵 ⚔", 210, 470);
+    }
+    // 底部品牌
+    ctx.fillStyle = "rgba(246,231,189,0.5)";
+    ctx.font = '14px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = "center";
+    ctx.fillText("我只要一刀", 210, 580);
+    ctx.fillText("刀势越满，一刀越爽", 210, 605);
+    // 下载
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `我只要一刀_第${result.levelId}关_${result.rating}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  function copyBattleReport() {
+    const lines = [
+      `【我只要一刀】第${result.levelId}关 ${result.levelTitle}`,
+      `评级：${result.rating}  击杀：${result.kills}  最大单刀：${result.maxSingleBlade}连杀`,
+      `用时：${Math.round(result.duration)}秒  得分：${result.score}`
+    ];
+    if (mainRoute) lines.push(`主路线：${ROUTE_NAMES[mainRoute]}`);
+    if (result.triggeredOneBlade) lines.push("⚔ 触发了「一刀破阵」！");
+    navigator.clipboard.writeText(lines.join("\n")).catch(() => {});
+  }
+
   return (
     <section className="screen result-screen result-screen-v6">
       <div className="result-v6-header">
@@ -141,10 +223,12 @@ export function ResultScreen({
         <div className="result-v6-small-actions">
           <button className="text-button" onClick={onHome}>首页</button>
           <button className="text-button" onClick={onLevels}>选关</button>
+          <button className="text-button" onClick={copyBattleReport}>复制战绩</button>
+          <button className="text-button share-image-btn" onClick={generateShareImage}>📸 分享图</button>
         </div>
       </div>
 
-      <small className="version-footer">V0708007</small>
+      <small className="version-footer">V0708008</small>
     </section>
   );
 }

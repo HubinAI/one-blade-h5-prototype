@@ -19,10 +19,12 @@ import {
   claimDoubleReward,
   claimOfflineReward,
   getHomeSnapshot,
+  isFreeBurstAvailable,
   markInterstitialShown,
   registerRewardedAd,
   restoreStaminaByAd,
   spendStamina,
+  useFreeBurst,
   type RunMode
 } from "./game/services/ProgressionService";
 import { logEvent } from "./game/services/Analytics";
@@ -176,6 +178,14 @@ export default function App() {
     startLevel(level, "dailyChallenge");
   }, [startLevel, unlockedLevel]);
 
+  const handleFreeBurst = useCallback(() => {
+    if (!isFreeBurstAvailable()) return;
+    useFreeBurst();
+    const level = LEVELS[Math.max(0, Math.min(LEVELS.length - 1, unlockedLevel - 1))];
+    startLevel(level, "freeBurst");
+    refreshHome();
+  }, [startLevel, unlockedLevel, refreshHome]);
+
   const handleBuyUpgrade = useCallback(
     (id: UpgradeId) => {
       const result = buyUpgrade(id);
@@ -215,25 +225,14 @@ export default function App() {
           home={home}
           onStart={() => startLevel(LEVELS[0])}
           onContinue={() => startLevel(LEVELS[Math.max(0, unlockedLevel - 1)])}
-          onLevels={() => setScreen("levels")}
+          onLevels={() => setScreen("menu")}
           onDailyChallenge={handleDailyChallenge}
           onHighYieldChallenge={handleHighYieldChallenge}
+          onFreeBurst={handleFreeBurst}
           onUpgrades={() => setScreen("upgrades")}
           onRestoreStamina={handleRestoreStamina}
           onClaimOffline={handleClaimOffline}
           onClaimOfflineDouble={handleClaimOfflineDouble}
-        />
-      )}
-
-      {screen === "levels" && (
-        <LevelSelect
-          levels={LEVELS}
-          unlockedIds={unlockedMap}
-          onBack={() => {
-            refreshHome();
-            setScreen("menu");
-          }}
-          onSelect={(level) => startLevel(level)}
         />
       )}
 
@@ -305,7 +304,7 @@ export default function App() {
           hasNext={Boolean(nextLevel)}
           onRetry={handleRetry}
           onNext={handleNext}
-          onLevels={() => setScreen("levels")}
+          onLevels={() => setScreen("menu")}
           onHome={() => {
             refreshHome();
             setScreen("menu");
