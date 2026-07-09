@@ -9,11 +9,17 @@ type GameCanvasProps = {
   onReviveOffer?: (offer: ReviveOffer) => void;
   reviveSignal?: number;
   declineReviveSignal?: number;
+  paused?: boolean;
 };
 
-export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, declineReviveSignal = 0 }: GameCanvasProps) {
+export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, declineReviveSignal = 0, paused = false }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const gameRef = useRef<Game | null>(null);
+  const pausedRef = useRef(paused);
+
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -35,7 +41,9 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
     const tick = (now: number) => {
       const dt = (now - last) / 1000;
       last = now;
-      game.update(dt);
+      if (!pausedRef.current) {
+        game.update(dt);
+      }
       game.render(ctx);
       frame = requestAnimationFrame(tick);
     };

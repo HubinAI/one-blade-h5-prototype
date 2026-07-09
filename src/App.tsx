@@ -8,6 +8,7 @@ import { ResultScreen } from "./components/ResultScreen";
 import { AdOverlay } from "./components/AdOverlay";
 import { UpgradeScreen } from "./components/UpgradeScreen";
 import { PreBattleBriefing } from "./components/PreBattleBriefing";
+import { PauseOverlay } from "./components/PauseOverlay";
 import type { ReviveOffer } from "./game/Game";
 import { AdService } from "./game/services/AdService";
 import {
@@ -51,6 +52,7 @@ export default function App() {
   const [reviveOffer, setReviveOffer] = useState<ReviveOffer | null>(null);
   const [reviveSignal, setReviveSignal] = useState(0);
   const [declineReviveSignal, setDeclineReviveSignal] = useState(0);
+  const [paused, setPaused] = useState(false);
 
   const refreshHome = useCallback(() => setHome(getHomeSnapshot()), []);
 
@@ -191,6 +193,20 @@ export default function App() {
     if (success) setHome(claimOfflineReward(true));
   }, []);
 
+  const restartBattle = useCallback(() => {
+    setPaused(false);
+    setRunIndex(beginRun(currentLevel.id, "normal"));
+    setLastResult(null);
+    setReviveOffer(null);
+    refreshHome();
+  }, [currentLevel, refreshHome]);
+
+  const quitBattle = useCallback(() => {
+    setPaused(false);
+    refreshHome();
+    setScreen("menu");
+  }, [refreshHome]);
+
   return (
     <main className="app-shell">
       {screen === "menu" && (
@@ -248,7 +264,24 @@ export default function App() {
             onReviveOffer={setReviveOffer}
             reviveSignal={reviveSignal}
             declineReviveSignal={declineReviveSignal}
+            paused={paused || Boolean(reviveOffer)}
           />
+          {!reviveOffer && !paused && (
+            <button
+              className="battle-pause-btn"
+              onClick={() => setPaused(true)}
+              aria-label="暂停"
+            >
+              ❚❚
+            </button>
+          )}
+          {paused && !reviveOffer && (
+            <PauseOverlay
+              onResume={() => setPaused(false)}
+              onRestart={restartBattle}
+              onQuit={quitBattle}
+            />
+          )}
           {reviveOffer && (
             <div className="revive-overlay">
               <div className="revive-panel">

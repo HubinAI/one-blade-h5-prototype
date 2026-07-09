@@ -1,7 +1,8 @@
+import { LEVELS } from "../data/levels";
 import type { HomeSnapshot } from "../game/services/ProgressionService";
 import { getMiniRadarData, getRouteName } from "../game/services/SkillTracker";
 import { ROUTE_COLORS } from "../game/config/buffs";
-import type { SkillDimension, TacticalRoute } from "../game/types";
+import type { SkillDimension } from "../game/types";
 
 type MainMenuProps = {
   unlockedLevel: number;
@@ -17,10 +18,6 @@ type MainMenuProps = {
   onClaimOfflineDouble: () => void;
 };
 
-function percent(value: number, target: number) {
-  return `${Math.min(100, Math.round((value / Math.max(1, target)) * 100))}%`;
-}
-
 const DIMENSION_META: Record<SkillDimension, { label: string; color: string }> = {
   momentum: { label: "势", color: "#ff6a33" },
   precision: { label: "斩", color: "#ffd35a" },
@@ -31,11 +28,9 @@ const DIMENSION_META: Record<SkillDimension, { label: string; color: string }> =
 function MiniRadar() {
   const radarData = getMiniRadarData();
   const dims: SkillDimension[] = ["momentum", "precision", "shatter", "guard"];
-
   const cx = 50;
   const cy = 50;
-  const r = 36;
-
+  const r = 30;
   const angles: Record<SkillDimension, number> = {
     momentum: -90,
     precision: 0,
@@ -53,46 +48,24 @@ function MiniRadar() {
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ") + "Z";
 
   return (
-    <div className="mini-radar-container">
-      <div className="mini-radar-header">
-        <span>武道精进</span>
-        {radarData.mainRoute && (
-          <b style={{ color: ROUTE_COLORS[radarData.mainRoute] }}>
-            {getRouteName(radarData.mainRoute)}
-          </b>
-        )}
-      </div>
-      <svg viewBox="0 0 100 100" className="mini-radar-svg">
-        {[50, 100].map((level) => {
-          const gridPoints = dims.map((dim) => polarToXY(dim, level));
-          const gridPath = gridPoints.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ") + "Z";
-          return <path key={level} d={gridPath} fill="none" stroke="rgba(246,231,189,0.10)" strokeWidth="0.5" />;
-        })}
+    <div className="mini-radar-badge">
+      <svg viewBox="0 0 100 100" className="mini-radar-badge-svg">
         {dims.map((dim) => {
           const end = polarToXY(dim, 100);
-          return <line key={dim} x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="rgba(246,231,189,0.15)" strokeWidth="0.4" />;
+          return <line key={dim} x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="rgba(246,231,189,0.12)" strokeWidth="0.5" />;
         })}
-        <path d={pathD} fill="rgba(240,195,107,0.14)" stroke="#ffd35a" strokeWidth="1" />
+        <path d={pathD} fill="rgba(240,195,107,0.14)" stroke="#ffd35a" strokeWidth="1.2" />
         {dims.map((dim) => {
           const p = polarToXY(dim, radarData.scores[dim]);
-          const meta = DIMENSION_META[dim];
-          return <circle key={dim} cx={p.x} cy={p.y} r="2" fill={meta.color} />;
+          return <circle key={dim} cx={p.x} cy={p.y} r="2.5" fill={DIMENSION_META[dim].color} />;
         })}
       </svg>
-      <div className="mini-radar-bars">
-        {dims.map((dim) => {
-          const meta = DIMENSION_META[dim];
-          const score = radarData.scores[dim];
-          return (
-            <div key={dim} className="mini-radar-bar-row">
-              <span style={{ color: meta.color }}>{meta.label}</span>
-              <div className="mini-radar-bar-track">
-                <div className="mini-radar-bar-fill" style={{ width: `${score}%`, background: meta.color }} />
-              </div>
-              <b>{score}</b>
-            </div>
-          );
-        })}
+      <div className="mini-radar-badge-scores">
+        {dims.map((dim) => (
+          <span key={dim} style={{ color: DIMENSION_META[dim].color }}>
+            {DIMENSION_META[dim].label} {radarData.scores[dim]}
+          </span>
+        ))}
       </div>
     </div>
   );
@@ -111,98 +84,76 @@ export function MainMenu({
   onClaimOffline,
   onClaimOfflineDouble
 }: MainMenuProps) {
-  const firstFragment = home.fragments[0];
-  const activeTasks = home.dailyTasks.filter((task) => !task.claimed).slice(0, 3);
   const isFirstPlay = unlockedLevel <= 1 && home.coins === 0;
+  const currentLevel = LEVELS[Math.max(0, Math.min(LEVELS.length - 1, unlockedLevel - 1))];
+  const radarData = getMiniRadarData();
+  const hasRadar = !isFirstPlay && radarData.hasHistory;
+  const hasOffline = home.offlineCoins > 0;
+  const lowStamina = home.stamina < 5;
 
   return (
-    <section className="screen menu-screen menu-screen-v4">
-      <div className="home-topbar home-topbar-v5">
-        <span className="topbar-coin">金币 {home.coins}</span>
-        <span className="topbar-stamina">
-          军粮 {home.stamina}/{home.staminaMax}
-        </span>
+    <section className="screen menu-screen menu-screen-v6">
+      <div className="menu-v6-top">
+        <div className="menu-v6-currency">
+          <span className="currency-pill">
+            <b>金</b> {home.coins}
+          </span>
+          <span className="currency-pill stamina">
+            <b>粮</b> {home.stamina}/{home.staminaMax}
+          </span>
+        </div>
+        {hasRadar && <MiniRadar />}
       </div>
 
-      <div className="title-block title-block-v4">
-        <span className="seal">V0708005</span>
+      <div className="menu-v6-hero">
         <h1>我只要一刀</h1>
-        <p>随时能砍，但刀势越满越爽</p>
+        <p>刀势越满，一刀越爽</p>
       </div>
 
-      {/* 迷你雷达 */}
-      {!isFirstPlay && <MiniRadar />}
-
-      <div className="home-progress-panel home-progress-panel-v5">
-        <div className="home-progress-row">
-          <span>战功宝箱</span>
-          <b>
-            {home.chestProgress}/{home.chestTarget}
-          </b>
-          <i style={{ width: percent(home.chestProgress, home.chestTarget) }} />
-        </div>
-        {firstFragment && (
-          <div className="home-progress-row">
-            <span>{firstFragment.unlocked ? `${firstFragment.name} 已解锁` : firstFragment.name}</span>
-            <b>
-              {firstFragment.count}/{firstFragment.target}
-            </b>
-            <i style={{ width: percent(firstFragment.count, firstFragment.target) }} />
-          </div>
-        )}
-      </div>
-
-      <button className="daily-challenge-line" onClick={onDailyChallenge}>
-        <span>每日挑战</span>
-        <strong>{home.dailyChallengeName}</strong>
-        <b>进入</b>
-      </button>
-
-      {home.offlineCoins > 0 && (
-        <div className="offline-card">
-          <span>离线收益 {home.offlineCoins} 金币</span>
-          <div>
-            <button className="text-button" onClick={onClaimOffline}>
-              领取
-            </button>
-            <button className="text-button" onClick={onClaimOfflineDouble}>
-              广告 x2
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div className="menu-actions">
-        <button className="primary-button" onClick={isFirstPlay ? onStart : onContinue}>
-          {isFirstPlay ? "开始游戏" : `继续第 ${unlockedLevel} 关`}
-        </button>
-        <button className="ghost-button" onClick={onHighYieldChallenge}>
-          高收益挑战
-        </button>
-        <button className="ghost-button" onClick={onUpgrades}>
-          刀势升级
-        </button>
-        <button className="ghost-button" onClick={onLevels}>
-          选择关卡
-        </button>
-        {home.stamina < 5 && (
-          <button className="ad-button" onClick={onRestoreStamina}>
-            军粮不足，看广告恢复 10 点
+      <div className="menu-v6-center">
+        <div className="challenge-card">
+          <span className="challenge-card-tag">当前挑战</span>
+          <h2>{isFirstPlay ? "第一关" : `第 ${unlockedLevel} 关`}</h2>
+          <p>{currentLevel.title}</p>
+          <button className="challenge-card-button" onClick={isFirstPlay ? onStart : onContinue}>
+            {isFirstPlay ? "开始挑战" : "继续挑战"}
           </button>
+          {lowStamina && (
+            <button className="challenge-card-hint" onClick={onRestoreStamina}>
+              军粮不足，看广告恢复 10 点
+            </button>
+          )}
+        </div>
+
+        {hasOffline && (
+          <div className="offline-line">
+            <span>离线收益 {home.offlineCoins} 金币</span>
+            <button onClick={onClaimOffline}>领取</button>
+            <button onClick={onClaimOfflineDouble}>x2</button>
+          </div>
         )}
       </div>
 
-      {activeTasks.length > 0 && (
-        <div className="daily-task-strip">
-          {activeTasks.map((task) => (
-            <span key={task.id}>
-              {task.name} {task.progress}/{task.target}
-            </span>
-          ))}
-        </div>
-      )}
+      <div className="menu-v6-footer">
+        <button className="footer-icon" onClick={onLevels}>
+          <span className="footer-icon-symbol">◎</span>
+          <span>选关</span>
+        </button>
+        <button className="footer-icon" onClick={onUpgrades}>
+          <span className="footer-icon-symbol">⚔</span>
+          <span>升级</span>
+        </button>
+        <button className="footer-icon" onClick={onDailyChallenge}>
+          <span className="footer-icon-symbol">☀</span>
+          <span>每日</span>
+        </button>
+        <button className="footer-icon" onClick={onHighYieldChallenge}>
+          <span className="footer-icon-symbol">★</span>
+          <span>高收益</span>
+        </button>
+      </div>
 
-      <small className="stamina-note">{home.staminaNextText}</small>
+      <small className="version-footer">V0708006</small>
     </section>
   );
 }

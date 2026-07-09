@@ -193,7 +193,7 @@ export function checkMilestones(scores: SkillScores, data: {
 }
 
 /** 获取首页迷你雷达数据 */
-export function getMiniRadarData(): { scores: SkillScores; best: SkillScores; mainRoute: TacticalRoute | null } {
+export function getMiniRadarData(): { scores: SkillScores; best: SkillScores; mainRoute: TacticalRoute | null; hasHistory: boolean } {
   const last = getLastScores();
   const best = getHistoricalBest();
   const data = loadData();
@@ -201,7 +201,8 @@ export function getMiniRadarData(): { scores: SkillScores; best: SkillScores; ma
   return {
     scores: last ?? { momentum: 0, precision: 0, shatter: 0, guard: 0 },
     best,
-    mainRoute: lastEntry?.route ?? null
+    mainRoute: lastEntry?.route ?? null,
+    hasHistory: data.history.length > 0
   };
 }
 
