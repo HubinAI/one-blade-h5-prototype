@@ -110,8 +110,10 @@ export default function App() {
   }, []);
 
   const handleRetry = useCallback(async () => {
-    if (lastResult) logEvent("replay_click", { levelId: lastResult.levelId, reason: lastResult.win ? "high_score" : "failed" });
-    startLevel(currentLevel);
+    if (!lastResult) return;
+    logEvent("replay_click", { levelId: lastResult.levelId, reason: lastResult.win ? "high_score" : "failed" });
+    const target = LEVELS.find((l) => l.id === lastResult.levelId) ?? currentLevel;
+    startLevel(target);
   }, [currentLevel, lastResult, startLevel]);
 
   const handleNext = useCallback(async () => {

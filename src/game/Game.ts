@@ -357,7 +357,9 @@ export class Game {
     this.lastSlashAngle = this.angleFromWarrior(pos);
     logEvent("slash_start", { levelId: this.level.id, energy: lockedEnergy, stage: stage.name });
     AudioService.slashDraw(tier);
-    this.addText(pos.x, pos.y - 18, stage.prompt, stage.color, 16, BALANCE.feedback.stageTextLife);
+    if (!this.hasRecentText(stage.prompt, 1.2)) {
+      this.addText(pos.x, pos.y - 18, stage.prompt, stage.color, 16, BALANCE.feedback.stageTextLife);
+    }
     if (lockedEnergy < 25) {
       this.showHint("low-energy-slash", "刀势越满，刀芒越强", DESIGN_WIDTH / 2, 118, 2);
     }
@@ -452,7 +454,10 @@ export class Game {
       this.addText(last.x, last.y - 28, `${stage.scoreName} x${trail.kills}`, stage.color, 17);
       if (slashBonus > 0) this.addText(last.x, last.y - 46, `+${slashBonus}`, "#ffd67c", 13);
     } else {
-      this.addText(last.x, last.y - 22, reason, "#d9b45b", 14);
+      // 避免与startSlash的stage.prompt（如"残锋：应急"）重复显示
+      if (!this.hasRecentText(reason, 0.6)) {
+        this.addText(last.x, last.y - 22, reason, "#d9b45b", 14);
+      }
     }
 
     if (trail.tier === "burst" && (trail.kills >= 8 || trail.coreCollapseCount > 0)) {
@@ -1543,6 +1548,11 @@ export class Game {
       color,
       size
     });
+  }
+
+  /** 文字防抖：1秒内不显示重复文字 */
+  private hasRecentText(text: string, withinSec: number = 1): boolean {
+    return this.texts.some((t) => t.text === text && t.life > (t.maxLife - withinSec));
   }
 
   private clampPointer(pos: Vec2): Vec2 {

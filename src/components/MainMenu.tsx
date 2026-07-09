@@ -100,10 +100,12 @@ export function MainMenu({
       <div className="menu-v6-top">
         <div className="menu-v6-currency">
           <span className="currency-pill">
-            <b>金</b> {home.coins}
+            <span className="currency-icon coin-icon" />
+            {home.coins}
           </span>
           <span className="currency-pill stamina">
-            <b>粮</b> {home.stamina}/{home.staminaMax}
+            <span className="currency-icon bun-icon" />
+            {home.stamina}/{home.staminaMax}
           </span>
         </div>
         {hasRadar && <MiniRadar />}

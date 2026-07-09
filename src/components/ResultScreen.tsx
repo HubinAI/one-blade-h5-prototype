@@ -123,18 +123,20 @@ export function ResultScreen({
         </div>
         <div className="reward-icon">
           <span className="reward-icon-symbol">💎</span>
-          <span className="reward-icon-count">{result.rewards.shardName}+{result.rewards.shardCount}</span>
+          <span className="reward-icon-count">+{result.rewards.shardCount}</span>
         </div>
       </div>
 
       <div className="result-v7-actions">
         <button className="primary-button" onClick={primaryAction}>{primaryLabel}</button>
-        <div className="result-v7-sub-actions">
-          {showDouble && (
-            <button className="ad-button" onClick={onDoubleReward}>📺 广告翻倍</button>
-          )}
-          <button className="share-button" onClick={generateShareImage}>⚔ 分享</button>
-        </div>
+        {result.win && (
+          <div className="result-v7-sub-actions">
+            {showDouble && (
+              <button className="ad-button" onClick={onDoubleReward}>📺 广告翻倍</button>
+            )}
+            <button className="share-button" onClick={generateShareImage}>⚔ 分享</button>
+          </div>
+        )}
       </div>
 
       <small className="version-footer">V0709010</small>

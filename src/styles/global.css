@@ -1304,6 +1304,26 @@ h1 {
   color: #a8e6cf;
 }
 
+/* 货币图标（inline SVG） */
+.currency-icon {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.coin-icon {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><defs><radialGradient id='g' cx='35%25' cy='30%25'><stop offset='0%25' stop-color='%23fff7d0'/><stop offset='100%25' stop-color='%23b8860b'/></radialGradient></defs><circle cx='12' cy='12' r='10.5' fill='url(%23g)' stroke='%23ffd35a' stroke-width='1.2'/><circle cx='12' cy='12' r='7' fill='none' stroke='%23ffd35a' stroke-width='0.6' opacity='0.6'/><text x='12' y='16' text-anchor='middle' font-size='11' font-weight='900' fill='%237b3f00' font-family='Microsoft YaHei'>金</text></svg>");
+}
+
+.bun-icon {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><defs><linearGradient id='bg' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='%23f5d3a0'/><stop offset='1' stop-color='%23b07b4a'/></linearGradient></defs><path d='M4 13 C4 9 7 6 12 6 C17 6 20 9 20 13 L19 18 L5 18 Z' fill='url(%23bg)' stroke='%237b4a26' stroke-width='0.8'/><path d='M4 14 C3 14 2 15 2 17 C2 18 3 19 4 19 L4 14 Z' fill='%23a8e6cf' stroke='%235c8a72' stroke-width='0.6'/><path d='M20 14 C21 14 22 15 22 17 C22 18 21 19 20 19 L20 14 Z' fill='%23a8e6cf' stroke='%235c8a72' stroke-width='0.6'/><path d='M12 6 L12 5' stroke='%237b4a26' stroke-width='0.8' stroke-linecap='round'/><path d='M8 8 L9 9 M16 8 L15 9' stroke='%237b4a26' stroke-width='0.5' stroke-linecap='round' opacity='0.6'/></svg>");
+}
+
 /* 迷你雷达徽章 */
 .mini-radar-badge {
   display: flex;
@@ -1338,11 +1358,12 @@ h1 {
 }
 
 .menu-v6-hero h1 {
-  margin: 0;
+  margin: 0 auto;
   font-size: 42px;
   line-height: 1.1;
   color: #fff3c0;
-  text-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+  text-shadow: 0 0 18px rgba(0, 0, 0, 0.6);
+  display: table;
 }
 
 .menu-v6-hero p {
@@ -1722,28 +1743,33 @@ h1 {
 .result-v7-rewards {
   display: flex;
   justify-content: center;
-  gap: 18px;
+  align-items: center;
+  gap: 12px;
   margin: 0 8px;
 }
 
 .reward-icon {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 5px;
-  padding: 6px 10px;
-  border-radius: 999px;
+  justify-content: center;
+  gap: 4px;
+  min-width: 64px;
+  padding: 10px 12px;
+  border-radius: 12px;
   background: rgba(18, 16, 14, 0.6);
   border: 1px solid rgba(240, 195, 107, 0.2);
 }
 
 .reward-icon-symbol {
-  font-size: 16px;
+  font-size: 28px;
+  line-height: 1;
 }
 
 .reward-icon-count {
   color: #f6e7bd;
-  font-size: 13px;
-  font-weight: 800;
+  font-size: 16px;
+  font-weight: 900;
 }
 
 .result-v7-actions {
