@@ -224,6 +224,8 @@ export class Game {
     this.drawBackground(ctx);
     this.drawPickups(ctx);
     this.drawEnemies(ctx);
+    // 远景山间雾气遮罩（敌人从雾后现身）
+    this.drawTopMist(ctx);
     this.drawSlash(ctx);
     this.drawParticles(ctx);
     this.drawDefenseAndWarrior(ctx);
@@ -1075,8 +1077,12 @@ export class Game {
     const speedMultiplier = wave.speedMultiplier ?? 1;
 
     for (const spawn of wave.enemies) {
-      this.enemies.push(this.createEnemy(spawn.kind, spawn.x, BALANCE.battlefield.enemySpawnY - (spawn.yOffset ?? 0), speedMultiplier));
+      const spawnY = BALANCE.battlefield.enemySpawnY - (spawn.yOffset ?? 0);
+      this.enemies.push(this.createEnemy(spawn.kind, spawn.x, spawnY, speedMultiplier));
       this.discoveredEnemies.add(spawn.kind);
+      // 出生烟雾：淡淡尘土从山间喷出
+      this.particles.push(glowParticle({ x: spawn.x, y: spawnY }, "#5c4a3a", 14, 25));
+      this.particles.push(glowParticle({ x: spawn.x + randomRange(-10, 10), y: spawnY - 4 }, "#6b5a4a", 10, 18));
     }
     if (
       this.runContext.mode === "dailyChallenge" &&
@@ -1399,6 +1405,36 @@ export class Game {
     ctx.shadowBlur = 0;
   }
 
+  /** 远景山间雾气遮罩：画在敌人上方，让敌人从雾后现身 */
+  private drawTopMist(ctx: CanvasRenderingContext2D) {
+    // 下层：山峦剪影（敌人生成区遮罩）
+    ctx.fillStyle = "rgba(8, 6, 5, 0.50)";
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(28, 72);
+    ctx.lineTo(58, 36);
+    ctx.lineTo(96, 96);
+    ctx.lineTo(128, 28);
+    ctx.lineTo(168, 88);
+    ctx.lineTo(206, 44);
+    ctx.lineTo(244, 102);
+    ctx.lineTo(278, 52);
+    ctx.lineTo(320, 108);
+    ctx.lineTo(356, 62);
+    ctx.lineTo(390, 84);
+    ctx.lineTo(390, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    // 上层：雾气渐变（底部渐淡，与远处融合）
+    const fog = ctx.createLinearGradient(0, 0, 0, 130);
+    fog.addColorStop(0, "rgba(18, 12, 8, 0.65)");
+    fog.addColorStop(0.4, "rgba(18, 12, 8, 0.28)");
+    fog.addColorStop(1, "rgba(18, 12, 8, 0)");
+    ctx.fillStyle = fog;
+    ctx.fillRect(0, 0, DESIGN_WIDTH, 130);
+  }
+
   private drawHud(ctx: CanvasRenderingContext2D) {
     ctx.fillStyle = "rgba(18, 12, 8, 0.78)";
     ctx.fillRect(0, 0, DESIGN_WIDTH, HUD_HEIGHT);
@@ -1408,50 +1444,20 @@ export class Game {
     ctx.lineTo(DESIGN_WIDTH, HUD_HEIGHT);
     ctx.stroke();
 
+    // 中间：关名 + 波次（上下结构）
+    ctx.textAlign = "center";
     ctx.fillStyle = "#f6e7bd";
     ctx.font = '700 16px "Microsoft YaHei", sans-serif';
-    ctx.textAlign = "left";
-    ctx.fillText(`第${this.level.id}关 ${this.level.title}`, 16, 28);
-    ctx.font = '12px "Microsoft YaHei", sans-serif';
-    ctx.fillStyle = "rgba(246, 231, 189, 0.72)";
-    ctx.fillText(this.level.subtitle, 16, 49);
-
-    // 右侧区域：给暂停按钮（38px）留出空间，从x=332开始
-    const rightX = 332;
-    ctx.textAlign = "right";
-    ctx.fillStyle = "#f6e7bd";
-    ctx.font = '700 13px "Microsoft YaHei", sans-serif';
-    const remaining = Math.max(0, Math.ceil(this.level.durationSeconds - this.elapsed));
-    ctx.fillText(`${remaining}s`, rightX, 24);
-    ctx.fillStyle = "rgba(246, 231, 189, 0.72)";
+    ctx.fillText(`第${this.level.id}关 ${this.level.title}`, DESIGN_WIDTH / 2, 28);
     ctx.font = '11px "Microsoft YaHei", sans-serif';
-    ctx.fillText(`${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`, rightX, 42);
+    ctx.fillStyle = "rgba(246, 231, 189, 0.72)";
+    ctx.fillText(`波次 ${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`, DESIGN_WIDTH / 2, 48);
 
-    // 分数：数值+单位
+    // 右侧：分数
+    ctx.textAlign = "right";
     ctx.fillStyle = "#ffd35a";
-    ctx.font = '700 13px "Microsoft YaHei", sans-serif';
-    ctx.fillText(`${Math.floor(this.score)} 分`, rightX, 62);
-
-    ctx.textAlign = "center";
-    for (let i = 0; i < this.maxHp; i += 1) {
-      const x = 280 + i * 16;
-      ctx.fillStyle = i < this.hp ? "#d64b3b" : "rgba(214, 75, 59, 0.18)";
-      ctx.beginPath();
-      ctx.moveTo(x, 56);
-      ctx.lineTo(x + 6, 63);
-      ctx.lineTo(x, 70);
-      ctx.lineTo(x - 6, 63);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    if (this.runBuffs.size > 0) {
-      ctx.textAlign = "left";
-      ctx.fillStyle = "rgba(255, 211, 90, 0.86)";
-      ctx.font = '700 11px "Microsoft YaHei", sans-serif';
-      const labels = [...this.runBuffs].map((id) => RUN_BUFF_BY_ID[id].shortName).join(" / ");
-      ctx.fillText(`军令 ${labels}`, 16, 68);
-    }
+    ctx.font = '700 14px "Microsoft YaHei", sans-serif';
+    ctx.fillText(`${Math.floor(this.score)} 分`, DESIGN_WIDTH - 16, 36);
   }
 
   private drawEnemies(ctx: CanvasRenderingContext2D) {
@@ -1883,6 +1889,21 @@ export class Game {
     ctx.lineTo(60 + energyRatio * 24, -8 - energyRatio * 9);
     ctx.stroke();
     ctx.shadowBlur = 0;
+
+    // 头顶心形：显示当前生命
+    for (let i = 0; i < this.maxHp; i += 1) {
+      const hx = (i - (this.maxHp - 1) / 2) * 18;
+      const hy = -60;
+      ctx.fillStyle = i < this.hp ? "#d64b3b" : "rgba(214, 75, 59, 0.18)";
+      ctx.beginPath();
+      ctx.moveTo(hx, hy);
+      ctx.lineTo(hx + 6, hy + 7);
+      ctx.lineTo(hx, hy + 14);
+      ctx.lineTo(hx - 6, hy + 7);
+      ctx.closePath();
+      ctx.fill();
+    }
+
     ctx.restore();
 
     ctx.fillStyle = "#f6e7bd";
@@ -1932,7 +1953,6 @@ export class Game {
     for (let index = 0; index < this.buffChoiceOptions.length; index += 1) {
       const buff = RUN_BUFF_BY_ID[this.buffChoiceOptions[index]];
       const rect = this.getBuffCardRect(index);
-      const tierDots = "●".repeat(buff.tier);
       ctx.save();
       ctx.translate(rect.x, rect.y);
       ctx.fillStyle = "rgba(30, 18, 10, 0.94)";
@@ -1941,22 +1961,15 @@ export class Game {
       this.paperCard(ctx, 0, 0, rect.w, rect.h);
       ctx.fill();
       ctx.stroke();
-      // 左侧色条暗示路线
-      ctx.fillStyle = buff.color;
-      ctx.fillRect(4, 8, 3, rect.h - 16);
-      // tier 圆点
-      ctx.font = '10px "Microsoft YaHei", sans-serif';
-      ctx.textAlign = "left";
-      ctx.fillStyle = buff.color;
-      ctx.fillText(tierDots, 14, 22);
       // 名称（唯一主标题）
+      ctx.textAlign = "left";
       ctx.fillStyle = "#fff3c0";
       ctx.font = '800 18px "Microsoft YaHei", sans-serif';
-      ctx.fillText(buff.name, 14, 46);
+      ctx.fillText(buff.name, 14, 40);
       // 描述
       ctx.fillStyle = "rgba(246, 231, 189, 0.72)";
       ctx.font = '13px "Microsoft YaHei", sans-serif';
-      ctx.fillText(buff.description, 14, 70);
+      ctx.fillText(buff.description, 14, 68);
       ctx.restore();
     }
     ctx.restore();
@@ -2040,34 +2053,8 @@ export class Game {
   }
 
   private drawWaveProgress(ctx: CanvasRenderingContext2D) {
-    if (this.phase !== "playing") return;
-    const totalWaves = this.level.waves.length;
-    const currentWave = Math.min(this.wavesSpawned, totalWaves);
-    const progressRatio = currentWave / Math.max(1, totalWaves);
-
-    // 底部波次进度条（紧贴刀势文字上方）
-    const barY = 806;
-    const barHeight = 4;
-    const barLeft = 16;
-    const barWidth = DESIGN_WIDTH - 32;
-
-    ctx.save();
-    ctx.fillStyle = "rgba(246, 231, 189, 0.12)";
-    ctx.fillRect(barLeft, barY, barWidth, barHeight);
-
-    const waveColors = ["#d9b45b", "#ffe7a3", "#ffd35a", "#ffd35a"];
-    ctx.fillStyle = waveColors[Math.min(currentWave - 1, waveColors.length - 1)] || "#d9b45b";
-    ctx.fillRect(barLeft, barY, barWidth * progressRatio, barHeight);
-
-    // 阶段标记点
-    for (let i = 0; i < totalWaves; i += 1) {
-      const x = barLeft + barWidth * ((i + 1) / totalWaves);
-      ctx.fillStyle = i < currentWave ? "#fff3c0" : "rgba(246, 231, 189, 0.3)";
-      ctx.beginPath();
-      ctx.arc(x, barY + barHeight / 2, 2.5, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
+    // V0708008+ 屏蔽底部波次进度条（HUD 中已显示波次文本）
+    return;
   }
 
   private paperCard(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {

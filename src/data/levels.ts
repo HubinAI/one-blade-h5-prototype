@@ -40,10 +40,10 @@ export const LEVELS: LevelConfig[] = [
     buffTimes: [22],
     waves: [
       wave("爽感启动", 1, row("infantry", [0, 1, 2, 4, 5, 6])),
-      wave("斜排练刀", 8, diag("infantry", [0, 1, 2, 3, 4, 5, 6, 3])),
-      wave("第一军令", 22, mix([row("infantry", [1, 2, 3, 4, 5], 0), row("infantry", [2, 3, 4], 1), row("shield", [0, 6], 2)]), undefined, 0.95),
-      wave("少量盾兵", 38, mix([row("shield", [2, 4], 0), row("infantry", [0, 1, 3, 5, 6], 1), row("infantry", [2, 3, 4], 2)]), undefined, 1),
-      wave("一刀收束", 58, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("shield", [3], 2)]), undefined, 1.06)
+      wave("斜排练刀", 7, diag("infantry", [0, 1, 2, 3, 4, 5, 6, 3])),
+      wave("第一军令", 19, mix([row("infantry", [1, 2, 3, 4, 5], 0), row("infantry", [2, 3, 4], 1), row("shield", [0, 6], 2)]), undefined, 0.95),
+      wave("少量盾兵", 32, mix([row("shield", [2, 4], 0), row("infantry", [0, 1, 3, 5, 6], 1), row("infantry", [2, 3, 4], 2)]), undefined, 1),
+      wave("一刀收束", 49, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("shield", [3], 2)]), undefined, 1.06)
     ],
     briefing: {
       highlightEnemies: [{ kind: "infantry", label: "步兵纸兵", icon: "↑" }],
@@ -63,10 +63,10 @@ export const LEVELS: LevelConfig[] = [
     buffTimes: [24],
     waves: [
       wave("残锋救急", 1, mix([row("infantry", [0, 1, 3, 5, 6], 0), row("infantry", [2, 4, 3], 1)])),
-      wave("常锋横切", 11, mix([row("infantry", [0, 1, 2, 3, 4], 0), row("infantry", [2, 3, 4, 5, 6], 1)])),
-      wave("刀魂入刃", 24, mix([row("infantry", [0, 2, 3, 4, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("shield", [2, 4], 2)]), [pickup("soul", 3)]),
-      wave("等势多斩", 42, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("shield", [1, 5], 1), row("infantry", [0, 2, 3, 4, 6], 2)]), undefined, 1.06),
-      wave("高刀收场", 64, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("shield", [2, 4], 2)]), undefined, 1.10)
+      wave("常锋横切", 9, mix([row("infantry", [0, 1, 2, 3, 4], 0), row("infantry", [2, 3, 4, 5, 6], 1)])),
+      wave("刀魂入刃", 20, mix([row("infantry", [0, 2, 3, 4, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("shield", [2, 4], 2)]), [pickup("soul", 3)]),
+      wave("等势多斩", 36, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("shield", [1, 5], 1), row("infantry", [0, 2, 3, 4, 6], 2)]), undefined, 1.06),
+      wave("高刀收场", 54, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("shield", [2, 4], 2)]), undefined, 1.10)
     ],
     briefing: {
       highlightEnemies: [{ kind: "infantry", label: "步兵纸兵", icon: "↑" }],
@@ -86,10 +86,10 @@ export const LEVELS: LevelConfig[] = [
     buffTimes: [26, 65],
     waves: [
       wave("盾兵初现", 1, mix([row("shield", [2, 4], 0), row("infantry", [0, 1, 3, 5, 6], 1)])),
-      wave("盾后藏兵", 13, mix([row("shield", [0, 3, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("infantry", [0, 2, 4, 6], 2)])),
-      wave("军令破盾", 26, mix([row("shield", [1, 2, 4, 5], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1)]), [pickup("drum", 3)], 1.04),
-      wave("盾墙压近", 48, mix([row("shield", [0, 1, 2, 4, 5, 6], 0), row("shield", [2, 4], 1), row("infantry", [0, 1, 3, 5, 6], 2)]), undefined, 1.10),
-      wave("强锋检验", 72, mix([row("shield", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), row("shield", [1, 3, 5], 2)]), undefined, 1.16)
+      wave("盾后藏兵", 11, mix([row("shield", [0, 3, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("infantry", [0, 2, 4, 6], 2)])),
+      wave("军令破盾", 22, mix([row("shield", [1, 2, 4, 5], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1)]), [pickup("drum", 3)], 1.04),
+      wave("盾墙压近", 41, mix([row("shield", [0, 1, 2, 4, 5, 6], 0), row("shield", [2, 4], 1), row("infantry", [0, 1, 3, 5, 6], 2)]), undefined, 1.10),
+      wave("强锋检验", 61, mix([row("shield", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), row("shield", [1, 3, 5], 2)]), undefined, 1.16)
     ],
     briefing: {
       highlightEnemies: [{ kind: "shield", label: "盾兵防线", icon: "🛡" }],
@@ -109,11 +109,11 @@ export const LEVELS: LevelConfig[] = [
     buffTimes: [26, 62],
     waves: [
       wave("开场人群", 1, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 3, 5], 1)])),
-      wave("第一桶火", 14, mix([row("infantry", [0, 1, 2, 4, 5, 6], 0), row("powder", [3], 1), row("infantry", [1, 3, 5], 2)])),
-      wave("双火在人群", 28, mix([row("infantry", [0, 1, 3, 5, 6], 0), row("powder", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("oil", 1)], 1.06),
-      wave("盾前火后", 48, mix([row("shield", [1, 3, 5], 0), row("powder", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.14),
-      wave("三火连爆", 72, mix([row("powder", [1, 3, 5], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), row("shield", [2, 4], 2)]), [pickup("drum", 3)], 1.20),
-      wave("火线收束", 94, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("powder", [1, 2, 4, 5], 1), row("infantry", [0, 2, 3, 4, 6], 2)]), undefined, 1.26)
+      wave("第一桶火", 12, mix([row("infantry", [0, 1, 2, 4, 5, 6], 0), row("powder", [3], 1), row("infantry", [1, 3, 5], 2)])),
+      wave("双火在人群", 24, mix([row("infantry", [0, 1, 3, 5, 6], 0), row("powder", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("oil", 1)], 1.06),
+      wave("盾前火后", 41, mix([row("shield", [1, 3, 5], 0), row("powder", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.14),
+      wave("三火连爆", 61, mix([row("powder", [1, 3, 5], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), row("shield", [2, 4], 2)]), [pickup("drum", 3)], 1.20),
+      wave("火线收束", 80, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("powder", [1, 2, 4, 5], 1), row("infantry", [0, 2, 3, 4, 6], 2)]), undefined, 1.26)
     ],
     briefing: {
       highlightEnemies: [{ kind: "powder", label: "火药兵集群", icon: "🔥" }],
@@ -133,11 +133,11 @@ export const LEVELS: LevelConfig[] = [
     buffTimes: [26, 62],
     waves: [
       wave("步兵压近", 1, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("shield", [2, 4], 1)])),
-      wave("阵眼初现", 17, mix([row("infantry", [0, 1, 2, 4, 5, 6], 0), [enemy("core", 3, 1)], row("infantry", [1, 3, 5], 2)])),
-      wave("军令破阵", 32, mix([row("shield", [1, 5], 0), [enemy("core", 3, 1)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("soul", 0)], 1.08),
-      wave("火靠阵眼", 52, mix([row("powder", [2, 4], 0), [enemy("core", 3, 1)], row("shield", [1, 5], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), undefined, 1.16),
-      wave("双阵眼", 76, mix([row("shield", [0, 2, 4, 6], 0), row("core", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("drum", 3)], 1.22),
-      wave("破阵收束", 96, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), [enemy("core", 3, 1)], row("powder", [1, 5], 2), row("shield", [2, 4], 3)]), undefined, 1.28)
+      wave("阵眼初现", 14, mix([row("infantry", [0, 1, 2, 4, 5, 6], 0), [enemy("core", 3, 1)], row("infantry", [1, 3, 5], 2)])),
+      wave("军令破阵", 27, mix([row("shield", [1, 5], 0), [enemy("core", 3, 1)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("soul", 0)], 1.08),
+      wave("火靠阵眼", 44, mix([row("powder", [2, 4], 0), [enemy("core", 3, 1)], row("shield", [1, 5], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), undefined, 1.16),
+      wave("双阵眼", 65, mix([row("shield", [0, 2, 4, 6], 0), row("core", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("drum", 3)], 1.22),
+      wave("破阵收束", 82, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), [enemy("core", 3, 1)], row("powder", [1, 5], 2), row("shield", [2, 4], 3)]), undefined, 1.28)
     ],
     briefing: {
       highlightEnemies: [
@@ -160,11 +160,11 @@ export const LEVELS: LevelConfig[] = [
     buffTimes: [26, 62],
     waves: [
       wave("启动清场", 1, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 3, 5], 1)])),
-      wave("盾火试探", 14, mix([row("shield", [1, 5], 0), row("powder", [3], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)])),
-      wave("第一次变化", 28, mix([row("powder", [2, 4], 0), row("shield", [1, 3, 5], 1), row("infantry", [0, 2, 4, 6], 2)]), [pickup("soul", 3)], 1.06),
-      wave("混合压近", 50, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 4, 5, 6], 3)]), undefined, 1.16),
-      wave("第二军令", 70, mix([row("shield", [1, 3, 5], 0), row("core", [2, 4], 1), row("powder", [0, 6], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 3)], 1.24),
-      wave("Build收束", 92, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 4, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), undefined, 1.32)
+      wave("盾火试探", 12, mix([row("shield", [1, 5], 0), row("powder", [3], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)])),
+      wave("第一次变化", 24, mix([row("powder", [2, 4], 0), row("shield", [1, 3, 5], 1), row("infantry", [0, 2, 4, 6], 2)]), [pickup("soul", 3)], 1.06),
+      wave("混合压近", 42, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 4, 5, 6], 3)]), undefined, 1.16),
+      wave("第二军令", 60, mix([row("shield", [1, 3, 5], 0), row("core", [2, 4], 1), row("powder", [0, 6], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 3)], 1.24),
+      wave("Build收束", 78, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 4, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), undefined, 1.32)
     ],
     briefing: {
       highlightEnemies: [
@@ -187,11 +187,11 @@ export const LEVELS: LevelConfig[] = [
     buffTimes: [26, 62],
     waves: [
       wave("盾火开局", 1, mix([row("shield", [1, 5], 0), row("powder", [3], 1), row("infantry", [0, 1, 2, 4, 5, 6], 2)])),
-      wave("火药后排", 14, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 3, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)])),
-      wave("军令反击", 28, mix([row("shield", [1, 3, 5], 0), row("powder", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("oil", 3)], 1.10),
-      wave("盾火密阵", 50, mix([row("shield", [0, 1, 2, 4, 5, 6], 0), row("powder", [2, 3, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.20),
-      wave("阵眼插入", 72, mix([row("shield", [1, 5], 0), row("powder", [2, 4], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 3)], 1.30),
-      wave("火墙压城", 94, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 3, 4, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.38)
+      wave("火药后排", 12, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 3, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)])),
+      wave("军令反击", 24, mix([row("shield", [1, 3, 5], 0), row("powder", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("oil", 3)], 1.10),
+      wave("盾火密阵", 42, mix([row("shield", [0, 1, 2, 4, 5, 6], 0), row("powder", [2, 3, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.20),
+      wave("阵眼插入", 61, mix([row("shield", [1, 5], 0), row("powder", [2, 4], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 3)], 1.30),
+      wave("火墙压城", 80, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 3, 4, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.38)
     ],
     briefing: {
       highlightEnemies: [
@@ -214,11 +214,11 @@ export const LEVELS: LevelConfig[] = [
     buffTimes: [26, 62, 95],
     waves: [
       wave("左阵有盾", 1, mix([[enemy("core", 1, 0)], row("shield", [0, 2, 3], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)])),
-      wave("右阵藏火", 16, mix([[enemy("core", 5, 0)], row("powder", [4, 6], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2), row("shield", [1, 3], 3)])),
-      wave("第一次军令", 30, mix([row("shield", [2, 4], 0), [enemy("core", 3, 1)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("soul", 0)], 1.10),
-      wave("双盾护眼", 54, mix([row("shield", [1, 2, 4, 5], 0), row("core", [2, 4], 1), row("powder", [3], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), undefined, 1.22),
-      wave("火阵牵引", 78, mix([row("powder", [1, 5], 0), [enemy("core", 3, 1)], row("shield", [0, 2, 4, 6], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 3)], 1.32),
-      wave("斜切收束", 102, mix([row("shield", [0, 1, 5, 6], 0), row("core", [2, 4], 1), row("powder", [1, 3, 5], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), undefined, 1.42)
+      wave("右阵藏火", 14, mix([[enemy("core", 5, 0)], row("powder", [4, 6], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2), row("shield", [1, 3], 3)])),
+      wave("第一次军令", 26, mix([row("shield", [2, 4], 0), [enemy("core", 3, 1)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("soul", 0)], 1.10),
+      wave("双盾护眼", 46, mix([row("shield", [1, 2, 4, 5], 0), row("core", [2, 4], 1), row("powder", [3], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), undefined, 1.22),
+      wave("火阵牵引", 66, mix([row("powder", [1, 5], 0), [enemy("core", 3, 1)], row("shield", [0, 2, 4, 6], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 3)], 1.32),
+      wave("斜切收束", 87, mix([row("shield", [0, 1, 5, 6], 0), row("core", [2, 4], 1), row("powder", [1, 3, 5], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), undefined, 1.42)
     ],
     briefing: {
       highlightEnemies: [
@@ -241,11 +241,11 @@ export const LEVELS: LevelConfig[] = [
     buffTimes: [26, 62, 95],
     waves: [
       wave("战鼓催势", 1, mix([row("shield", [1, 3, 5], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1)]), [pickup("drum", 3)]),
-      wave("刀魂续锋", 15, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("shield", [2, 4], 1), row("infantry", [1, 3, 5], 2)]), [pickup("soul", 4)]),
-      wave("火油附刃", 32, mix([row("powder", [2, 4, 5], 0), row("shield", [1, 3, 6], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("oil", 1)], 1.14),
-      wave("补给破围", 54, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 3)], 1.26),
-      wave("高压混阵", 78, mix([row("powder", [1, 2, 4, 5], 0), row("shield", [0, 3, 6], 1), row("core", [2, 4], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("soul", 0)], 1.40),
-      wave("补给爆发", 100, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 3, 4, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("oil", 6)], 1.52)
+      wave("刀魂续锋", 13, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("shield", [2, 4], 1), row("infantry", [1, 3, 5], 2)]), [pickup("soul", 4)]),
+      wave("火油附刃", 27, mix([row("powder", [2, 4, 5], 0), row("shield", [1, 3, 6], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("oil", 1)], 1.14),
+      wave("补给破围", 46, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 3)], 1.26),
+      wave("高压混阵", 66, mix([row("powder", [1, 2, 4, 5], 0), row("shield", [0, 3, 6], 1), row("core", [2, 4], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("soul", 0)], 1.40),
+      wave("补给爆发", 85, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 3, 4, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("oil", 6)], 1.52)
     ],
     briefing: {
       highlightEnemies: [
@@ -269,11 +269,11 @@ export const LEVELS: LevelConfig[] = [
     buffTimes: [26, 62, 95],
     waves: [
       wave("步兵密集阵", 1, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), row("infantry", [1, 2, 3, 4, 5], 2)]), [pickup("soul", 3)]),
-      wave("盾兵前排", 16, mix([row("shield", [0, 1, 2, 3, 4, 5, 6], 0), row("shield", [1, 3, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.08),
-      wave("第一次军令", 30, mix([row("shield", [1, 3, 5], 0), row("powder", [0, 2, 4, 6], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("oil", 3)], 1.16),
-      wave("火药后排", 50, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 2, 4, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.26),
-      wave("阵眼居中", 72, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 0)], 1.36),
-      wave("第三军令", 94, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 4, 5], 1), row("core", [2, 4], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("soul", 6)], 1.48),
+      wave("盾兵前排", 14, mix([row("shield", [0, 1, 2, 3, 4, 5, 6], 0), row("shield", [1, 3, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.08),
+      wave("第一次军令", 26, mix([row("shield", [1, 3, 5], 0), row("powder", [0, 2, 4, 6], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("oil", 3)], 1.16),
+      wave("火药后排", 42, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 2, 4, 5], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.26),
+      wave("阵眼居中", 61, mix([row("shield", [0, 2, 4, 6], 0), row("powder", [1, 5], 1), [enemy("core", 3, 2)], row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("drum", 0)], 1.36),
+      wave("第三军令", 80, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 4, 5], 1), row("core", [2, 4], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3)]), [pickup("soul", 6)], 1.48),
       wave("一刀破阵",118, mix([row("shield", [0, 1, 5, 6], 0), row("powder", [1, 2, 3, 4, 5], 1), row("core", [2, 4], 2), row("infantry", [0, 1, 2, 3, 4, 5, 6], 3), row("infantry", [0, 1, 2, 3, 4, 5, 6], 4), row("powder", [2, 4], 5)]), [pickup("drum", 3)], 1.62)
     ],
     briefing: {

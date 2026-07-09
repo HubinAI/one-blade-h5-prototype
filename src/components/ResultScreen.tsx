@@ -1,5 +1,4 @@
-import type { BattleResult, SkillDimension } from "../game/types";
-import { ROUTE_NAMES, ROUTE_COLORS } from "../game/config/buffs";
+import type { BattleResult } from "../game/types";
 
 type ResultScreenProps = {
   result: BattleResult;
@@ -12,114 +11,48 @@ type ResultScreenProps = {
   onAdChest: () => void;
 };
 
-const DIMENSION_META: Record<SkillDimension, { label: string; color: string }> = {
-  momentum: { label: "势", color: "#ff6a33" },
-  precision: { label: "斩", color: "#ffd35a" },
-  shatter: { label: "破", color: "#9b6dff" },
-  guard: { label: "守", color: "#5b8db8" }
-};
-
-function SkillRadar({ scores }: { scores: BattleResult["skillScores"] }) {
-  const dims: SkillDimension[] = ["momentum", "precision", "shatter", "guard"];
-  const cx = 50;
-  const cy = 50;
-  const r = 38;
-  const angles: Record<SkillDimension, number> = {
-    momentum: -90,
-    precision: 0,
-    shatter: 90,
-    guard: 180
-  };
-
-  function polarToXY(dim: SkillDimension, value: number) {
-    const angleRad = (angles[dim] * Math.PI) / 180;
-    const dist = (value / 100) * r;
-    return { x: cx + dist * Math.cos(angleRad), y: cy + dist * Math.sin(angleRad) };
-  }
-
-  const points = dims.map((dim) => polarToXY(dim, scores[dim]));
-  const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ") + "Z";
-
-  return (
-    <div className="skill-radar-compact">
-      <svg viewBox="0 0 100 100" className="skill-radar-compact-svg">
-        {[50, 100].map((level) => {
-          const gridPoints = dims.map((dim) => polarToXY(dim, level));
-          const gridPath = gridPoints.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ") + "Z";
-          return <path key={level} d={gridPath} fill="none" stroke="rgba(246,231,189,0.10)" strokeWidth="0.5" />;
-        })}
-        {dims.map((dim) => {
-          const end = polarToXY(dim, 100);
-          return <line key={dim} x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="rgba(246,231,189,0.15)" strokeWidth="0.4" />;
-        })}
-        <path d={pathD} fill="rgba(240,195,107,0.14)" stroke="#ffd35a" strokeWidth="1" />
-        {dims.map((dim) => {
-          const p = polarToXY(dim, scores[dim]);
-          return <circle key={dim} cx={p.x} cy={p.y} r="2.5" fill={DIMENSION_META[dim].color} stroke="#fff" strokeWidth="0.5" />;
-        })}
-      </svg>
-      <div className="skill-radar-compact-labels">
-        {dims.map((dim) => (
-          <span key={dim} style={{ color: DIMENSION_META[dim].color }}>
-            {DIMENSION_META[dim].label} <b>{scores[dim]}</b>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export function ResultScreen({
   result,
   hasNext,
   onRetry,
   onNext,
-  onLevels,
-  onHome,
-  onDoubleReward,
-  onAdChest
+  onDoubleReward
 }: ResultScreenProps) {
-  const doubledCoins = result.rewards.coins * 2;
   const primaryAction = result.win && hasNext ? onNext : onRetry;
   const primaryLabel = result.win && hasNext ? "下一关" : "再来一局";
+  const showDouble = result.win && result.canDoubleReward && !result.rewards.doubled;
 
-  const routeCounts: Record<string, number> = {};
-  for (const route of result.selectedRoutes) {
-    routeCounts[route] = (routeCounts[route] ?? 0) + 1;
-  }
-  const mainRoute = (Object.entries(routeCounts).sort((a, b) => b[1] - a[1])[0]?.[0]) as keyof typeof ROUTE_NAMES | undefined;
-
-  // ---- 分享功能 ----
   function generateShareImage() {
     const canvas = document.createElement("canvas");
     canvas.width = 420;
     canvas.height = 640;
     const ctx = canvas.getContext("2d")!;
-    // 背景
+
     ctx.fillStyle = "#1a1210";
     ctx.fillRect(0, 0, 420, 640);
+
     const grad = ctx.createLinearGradient(0, 0, 0, 200);
     grad.addColorStop(0, "#2d1f18");
     grad.addColorStop(1, "#1a1210");
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 420, 200);
-    // 评级
-    ctx.fillStyle = "#ffd35a";
-    ctx.font = 'bold 56px "Microsoft YaHei", sans-serif';
+
+    ctx.fillStyle = result.win ? "#ffd35a" : "#d64b3b";
+    ctx.font = 'bold 46px "Microsoft YaHei", sans-serif';
     ctx.textAlign = "center";
-    ctx.fillText(result.rating, 210, 90);
-    // 关卡
+    ctx.fillText(result.win ? "破阵成功" : "防线失守", 210, 80);
+
     ctx.fillStyle = "#f6e7bd";
-    ctx.font = '22px "Microsoft YaHei", sans-serif';
-    ctx.fillText(`第${result.levelId}关 · ${result.levelTitle}`, 210, 140);
-    // 分割线
-    ctx.strokeStyle = "rgba(255,211,90,0.3)";
+    ctx.font = '18px "Microsoft YaHei", sans-serif';
+    ctx.fillText(`第${result.levelId}关 · ${result.levelTitle}`, 210, 120);
+
+    ctx.strokeStyle = "rgba(255,211,90,0.25)";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(50, 170);
-    ctx.lineTo(370, 170);
+    ctx.moveTo(60, 150);
+    ctx.lineTo(360, 150);
     ctx.stroke();
-    // 数据
+
     ctx.textAlign = "left";
     ctx.font = '16px "Microsoft YaHei", sans-serif';
     const data = [
@@ -129,26 +62,23 @@ export function ResultScreen({
       `得分 ${result.score}`
     ];
     data.forEach((line, i) => {
-      ctx.fillStyle = i < 3 ? "#f6e7bd" : "#ffd35a";
-      ctx.fillText(line, 60, 220 + i * 40);
+      ctx.fillStyle = i === 3 ? "#ffd35a" : "#f6e7bd";
+      ctx.fillText(line, 60, 190 + i * 40);
     });
-    if (mainRoute) {
-      ctx.fillStyle = ROUTE_COLORS[mainRoute] || "#f6e7bd";
-      ctx.fillText(`主路线 ${ROUTE_NAMES[mainRoute]}`, 60, 390);
-    }
+
     if (result.triggeredOneBlade) {
       ctx.fillStyle = "#ff6a33";
-      ctx.font = 'bold 30px "Microsoft YaHei", sans-serif';
+      ctx.font = 'bold 28px "Microsoft YaHei", sans-serif';
       ctx.textAlign = "center";
-      ctx.fillText("⚔ 一刀破阵 ⚔", 210, 470);
+      ctx.fillText("⚔ 一刀破阵 ⚔", 210, 400);
     }
-    // 底部品牌
+
     ctx.fillStyle = "rgba(246,231,189,0.5)";
     ctx.font = '14px "Microsoft YaHei", sans-serif';
     ctx.textAlign = "center";
-    ctx.fillText("我只要一刀", 210, 580);
-    ctx.fillText("刀势越满，一刀越爽", 210, 605);
-    // 下载
+    ctx.fillText("我只要一刀", 210, 560);
+    ctx.fillText("刀势越满，一刀越爽", 210, 585);
+
     canvas.toBlob((blob) => {
       if (!blob) return;
       const url = URL.createObjectURL(blob);
@@ -160,29 +90,14 @@ export function ResultScreen({
     });
   }
 
-  function copyBattleReport() {
-    const lines = [
-      `【我只要一刀】第${result.levelId}关 ${result.levelTitle}`,
-      `评级：${result.rating}  击杀：${result.kills}  最大单刀：${result.maxSingleBlade}连杀`,
-      `用时：${Math.round(result.duration)}秒  得分：${result.score}`
-    ];
-    if (mainRoute) lines.push(`主路线：${ROUTE_NAMES[mainRoute]}`);
-    if (result.triggeredOneBlade) lines.push("⚔ 触发了「一刀破阵」！");
-    navigator.clipboard.writeText(lines.join("\n")).catch(() => {});
-  }
-
   return (
-    <section className="screen result-screen result-screen-v6">
-      <div className="result-v6-header">
-        <div className={`result-v6-medal ${result.win ? "win" : "lost"} ${result.win && result.rating !== "C" ? "medal-pop" : ""}`}>
-          {result.rating}
-        </div>
-        {result.win && result.rating !== "C" && <div className="medal-glow-ring" />}
-        <h2>{result.win ? "破阵成功" : "防线失守"}</h2>
+    <section className="screen result-screen result-screen-v7">
+      <div className="result-v7-header">
+        <h1>{result.win ? "破阵成功" : "防线失守"}</h1>
         <p>第 {result.levelId} 关 · {result.levelTitle}</p>
       </div>
 
-      <div className="result-v6-stats">
+      <div className="result-v7-stats">
         <div>
           <span>击杀</span>
           <b>{result.kills}</b>
@@ -197,38 +112,32 @@ export function ResultScreen({
         </div>
       </div>
 
-      <div className="result-v6-radar">
-        <SkillRadar scores={result.skillScores} />
-        {mainRoute && (
-          <div className="result-v6-route" style={{ borderColor: ROUTE_COLORS[mainRoute], color: ROUTE_COLORS[mainRoute] }}>
-            主路线：{ROUTE_NAMES[mainRoute]}
-          </div>
-        )}
-      </div>
-
-      <div className="result-v6-rewards">
-        <span className="reward-pill reward-coins">{result.rewards.coins} 金币</span>
-        <span className="reward-pill reward-pass">{result.rewards.battlePass} 战功</span>
-        <span className="reward-pill reward-shard">{result.rewards.shardName} +{result.rewards.shardCount}</span>
-      </div>
-
-      <div className="result-v6-actions">
-        <button className="primary-button" onClick={primaryAction}>{primaryLabel}</button>
-        {result.win && result.canDoubleReward && !result.rewards.doubled && (
-          <button className="ad-button" onClick={onDoubleReward}>广告翻倍 · {doubledCoins} 金币</button>
-        )}
-        {result.rewards.chestOpened && !result.rewards.adChestOpened && (
-          <button className="ad-button" onClick={onAdChest}>广告额外宝箱</button>
-        )}
-        <div className="result-v6-small-actions">
-          <button className="text-button" onClick={onHome}>首页</button>
-          <button className="text-button" onClick={onLevels}>选关</button>
-          <button className="text-button" onClick={copyBattleReport}>复制战绩</button>
-          <button className="text-button share-image-btn" onClick={generateShareImage}>📸 分享图</button>
+      <div className="result-v7-rewards">
+        <div className="reward-icon">
+          <span className="reward-icon-symbol">🪙</span>
+          <span className="reward-icon-count">{result.rewards.coins}</span>
+        </div>
+        <div className="reward-icon">
+          <span className="reward-icon-symbol">⚔</span>
+          <span className="reward-icon-count">{result.rewards.battlePass}</span>
+        </div>
+        <div className="reward-icon">
+          <span className="reward-icon-symbol">💎</span>
+          <span className="reward-icon-count">{result.rewards.shardName}+{result.rewards.shardCount}</span>
         </div>
       </div>
 
-      <small className="version-footer">V0708008</small>
+      <div className="result-v7-actions">
+        <button className="primary-button" onClick={primaryAction}>{primaryLabel}</button>
+        <div className="result-v7-sub-actions">
+          {showDouble && (
+            <button className="ad-button" onClick={onDoubleReward}>📺 广告翻倍</button>
+          )}
+          <button className="share-button" onClick={generateShareImage}>⚔ 分享</button>
+        </div>
+      </div>
+
+      <small className="version-footer">V0708009</small>
     </section>
   );
 }
