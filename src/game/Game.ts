@@ -1336,7 +1336,8 @@ export class Game {
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
 
-    ctx.globalAlpha = 0.11;
+    // 微弱纹理线
+    ctx.globalAlpha = 0.08;
     ctx.strokeStyle = "#e7c27a";
     ctx.lineWidth = 1;
     for (let y = 0; y < DESIGN_HEIGHT; y += 18) {
@@ -1347,23 +1348,22 @@ export class Game {
     }
     ctx.globalAlpha = 1;
 
-    ctx.fillStyle = "rgba(12, 9, 8, 0.55)";
+    // 远山剪影（无旗帜）
+    ctx.fillStyle = "rgba(12, 9, 8, 0.45)";
     ctx.beginPath();
-    ctx.moveTo(0, 188);
-    ctx.lineTo(52, 144);
-    ctx.lineTo(120, 188);
-    ctx.lineTo(178, 126);
-    ctx.lineTo(244, 188);
-    ctx.lineTo(310, 136);
-    ctx.lineTo(390, 188);
+    ctx.moveTo(0, 200);
+    ctx.lineTo(60, 158);
+    ctx.lineTo(130, 200);
+    ctx.lineTo(200, 140);
+    ctx.lineTo(270, 200);
+    ctx.lineTo(330, 152);
+    ctx.lineTo(390, 200);
     ctx.lineTo(390, 270);
     ctx.lineTo(0, 270);
     ctx.closePath();
     ctx.fill();
 
-    this.drawBanner(ctx, 28, 112, "#77311d");
-    this.drawBanner(ctx, 356, 132, "#5c2c54");
-
+    // 防线
     const pressure = this.getDefensePressure();
     ctx.strokeStyle = pressure > 0 ? `rgba(255, 86, 68, ${0.22 + pressure * 0.58})` : "rgba(255, 214, 124, 0.22)";
     ctx.lineWidth = pressure > 0 ? 1.5 + pressure * 3 : 1;
@@ -1376,22 +1376,6 @@ export class Game {
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.shadowBlur = 0;
-  }
-
-  private drawBanner(ctx: CanvasRenderingContext2D, x: number, y: number, color: string) {
-    ctx.strokeStyle = "#19100d";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(x, y - 32);
-    ctx.lineTo(x, y + 70);
-    ctx.stroke();
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(x, y - 28);
-    ctx.lineTo(x + (x < DESIGN_WIDTH / 2 ? 34 : -34), y - 18);
-    ctx.lineTo(x, y + 4);
-    ctx.closePath();
-    ctx.fill();
   }
 
   private drawHud(ctx: CanvasRenderingContext2D) {
@@ -1411,19 +1395,25 @@ export class Game {
     ctx.fillStyle = "rgba(246, 231, 189, 0.72)";
     ctx.fillText(this.level.subtitle, 16, 49);
 
+    // 右侧区域：给暂停按钮（38px）留出空间，从x=332开始
+    const rightX = 332;
     ctx.textAlign = "right";
     ctx.fillStyle = "#f6e7bd";
     ctx.font = '700 13px "Microsoft YaHei", sans-serif';
     const remaining = Math.max(0, Math.ceil(this.level.durationSeconds - this.elapsed));
-    ctx.fillText(`${remaining}s  ${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`, 374, 24);
-    ctx.fillText(`分 ${Math.floor(this.score)}`, 374, 45);
-    ctx.fillStyle = "rgba(255, 211, 90, 0.68)";
-    ctx.font = '800 10px "Microsoft YaHei", sans-serif';
-    ctx.fillText("V0708006", 374, 66);
+    ctx.fillText(`${remaining}s`, rightX, 24);
+    ctx.fillStyle = "rgba(246, 231, 189, 0.72)";
+    ctx.font = '11px "Microsoft YaHei", sans-serif';
+    ctx.fillText(`${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`, rightX, 42);
+
+    // 分数：数值+单位
+    ctx.fillStyle = "#ffd35a";
+    ctx.font = '700 13px "Microsoft YaHei", sans-serif';
+    ctx.fillText(`${Math.floor(this.score)} 分`, rightX, 62);
 
     ctx.textAlign = "center";
     for (let i = 0; i < this.maxHp; i += 1) {
-      const x = 302 + i * 16;
+      const x = 280 + i * 16;
       ctx.fillStyle = i < this.hp ? "#d64b3b" : "rgba(214, 75, 59, 0.18)";
       ctx.beginPath();
       ctx.moveTo(x, 56);
@@ -1451,90 +1441,111 @@ export class Game {
       ctx.translate(enemy.x + wobbleX, enemy.y);
       ctx.rotate(Math.sin(enemy.wobble * 2) * 0.04);
       ctx.shadowColor = "rgba(0,0,0,0.45)";
-      ctx.shadowBlur = 8;
-      ctx.shadowOffsetY = 4;
+      ctx.shadowBlur = 6;
+      ctx.shadowOffsetY = 3;
 
-      ctx.fillStyle = enemy.flash > 0 ? "#fff1b8" : def.color;
-      ctx.strokeStyle = def.accent;
-      ctx.lineWidth = 2;
-      this.paperCard(ctx, -enemy.radius, -enemy.radius, enemy.radius * 2, enemy.radius * 2.25);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.shadowBlur = 0;
-      ctx.strokeStyle = def.accent;
-      ctx.fillStyle = def.accent;
-      ctx.lineWidth = 2.2;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
+      const baseColor = enemy.flash > 0 ? "#fff1b8" : def.color;
+      const accentColor = def.accent;
 
       if (enemy.kind === "infantry") {
-        // 步兵：简洁的矛头/箭头符号
+        // 步兵：向上的箭头/矛头，无底框
+        ctx.fillStyle = baseColor;
+        ctx.strokeStyle = accentColor;
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(0, -10);
-        ctx.lineTo(6, 2);
-        ctx.lineTo(0, 2);
-        ctx.lineTo(0, 10);
-        ctx.lineTo(0, 2);
-        ctx.lineTo(-6, 2);
+        ctx.moveTo(0, -enemy.radius + 2);
+        ctx.lineTo(8, 4);
+        ctx.lineTo(3, 4);
+        ctx.lineTo(3, enemy.radius - 2);
+        ctx.lineTo(-3, enemy.radius - 2);
+        ctx.lineTo(-3, 4);
+        ctx.lineTo(-8, 4);
         ctx.closePath();
         ctx.fill();
+        ctx.stroke();
       }
 
       if (enemy.kind === "shield") {
-        // 盾兵：盾牌轮廓
+        // 盾兵：盾牌形，无底框
+        ctx.fillStyle = baseColor;
+        ctx.strokeStyle = accentColor;
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.moveTo(0, -11);
-        ctx.quadraticCurveTo(9, -9, 9, 0);
-        ctx.quadraticCurveTo(9, 11, 0, 13);
-        ctx.quadraticCurveTo(-9, 11, -9, 0);
-        ctx.quadraticCurveTo(-9, -9, 0, -11);
+        ctx.moveTo(0, -enemy.radius + 2);
+        ctx.quadraticCurveTo(enemy.radius - 2, -enemy.radius + 4, enemy.radius - 2, 2);
+        ctx.quadraticCurveTo(enemy.radius - 2, enemy.radius - 2, 0, enemy.radius);
+        ctx.quadraticCurveTo(-(enemy.radius - 2), enemy.radius - 2, -(enemy.radius - 2), 2);
+        ctx.quadraticCurveTo(-(enemy.radius - 2), -enemy.radius + 4, 0, -enemy.radius + 2);
         ctx.closePath();
+        ctx.fill();
         ctx.stroke();
+        // 盾牌内纹
         if (enemy.hp < enemy.maxHp || enemy.shieldCrack > 0) {
           ctx.strokeStyle = "#f6e7bd";
           ctx.lineWidth = 1.6;
           ctx.beginPath();
-          ctx.moveTo(-3, -8);
-          ctx.lineTo(3, -1);
-          ctx.lineTo(-1, 8);
+          ctx.moveTo(-4, -8);
+          ctx.lineTo(4, 0);
+          ctx.lineTo(-2, 10);
+          ctx.stroke();
+        } else {
+          ctx.strokeStyle = "rgba(255,255,255,0.2)";
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(0, -10);
+          ctx.lineTo(0, enemy.radius - 6);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(-7, 0);
+          ctx.lineTo(7, 0);
           ctx.stroke();
         }
       }
 
       if (enemy.kind === "powder") {
-        // 火药兵：火焰符号
-        ctx.fillStyle = enemy.ignited ? "#ffd67c" : def.accent;
+        // 火药兵：火焰形，无底框
+        ctx.fillStyle = enemy.ignited ? "#ffd67c" : baseColor;
+        ctx.strokeStyle = enemy.ignited ? "#ff8833" : accentColor;
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(0, -11);
-        ctx.quadraticCurveTo(7, -6, 5, 2);
-        ctx.quadraticCurveTo(8, 4, 3, 10);
-        ctx.quadraticCurveTo(0, 6, -3, 10);
-        ctx.quadraticCurveTo(-8, 4, -5, 2);
-        ctx.quadraticCurveTo(-7, -6, 0, -11);
+        ctx.moveTo(0, -enemy.radius + 2);
+        ctx.quadraticCurveTo(8, -enemy.radius + 8, 6, 0);
+        ctx.quadraticCurveTo(10, 4, 4, enemy.radius - 4);
+        ctx.quadraticCurveTo(0, enemy.radius, 0, enemy.radius - 2);
+        ctx.quadraticCurveTo(0, enemy.radius, -4, enemy.radius - 4);
+        ctx.quadraticCurveTo(-10, 4, -6, 0);
+        ctx.quadraticCurveTo(-8, -enemy.radius + 8, 0, -enemy.radius + 2);
         ctx.closePath();
         ctx.fill();
+        ctx.stroke();
       }
 
       if (enemy.kind === "core") {
-        // 阵眼：旋转菱形 + 内三角
+        // 阵眼：菱形+内三角，无底框
+        const pulse = 1 + Math.sin(this.elapsed * 5) * 0.12;
         ctx.strokeStyle = enemy.marked ? "#ffffff" : "#e8d7ff";
-        const pulse = 1 + Math.sin(this.elapsed * 5) * 0.14;
+        ctx.lineWidth = 2.5;
         ctx.save();
         ctx.rotate(this.elapsed * 0.6);
         ctx.beginPath();
-        ctx.moveTo(0, -12 * pulse);
-        ctx.lineTo(10 * pulse, 0);
-        ctx.lineTo(0, 12 * pulse);
-        ctx.lineTo(-10 * pulse, 0);
+        ctx.moveTo(0, -14 * pulse);
+        ctx.lineTo(11 * pulse, 0);
+        ctx.lineTo(0, 14 * pulse);
+        ctx.lineTo(-11 * pulse, 0);
         ctx.closePath();
+        if (enemy.marked) {
+          ctx.fillStyle = "rgba(232, 215, 255, 0.18)";
+          ctx.fill();
+        }
         ctx.stroke();
         ctx.restore();
 
+        // 内三角
+        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(0, -9);
-        ctx.lineTo(8, 7);
-        ctx.lineTo(-8, 7);
+        ctx.lineTo(9, 7);
+        ctx.lineTo(-9, 7);
         ctx.closePath();
         ctx.stroke();
 
@@ -1542,17 +1553,18 @@ export class Game {
           ctx.strokeStyle = "#fff8d8";
           ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.arc(0, 0, 14, 0, Math.PI * 2);
+          ctx.arc(0, 0, enemy.radius + 4, 0, Math.PI * 2);
           ctx.stroke();
         }
       }
 
+      // 点燃/标记光环（保留）
       if (enemy.ignited || enemy.marked) {
-        ctx.globalAlpha = 0.62;
+        ctx.globalAlpha = 0.55;
         ctx.strokeStyle = enemy.ignited ? "#ffb15c" : "#e8d7ff";
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(0, 1, enemy.radius + 7 + Math.sin(this.elapsed * 10) * 2, 0, Math.PI * 2);
+        ctx.arc(0, 1, enemy.radius + 5 + Math.sin(this.elapsed * 10) * 2, 0, Math.PI * 2);
         ctx.stroke();
       }
 
@@ -1879,7 +1891,7 @@ export class Game {
     for (let index = 0; index < this.buffChoiceOptions.length; index += 1) {
       const buff = RUN_BUFF_BY_ID[this.buffChoiceOptions[index]];
       const rect = this.getBuffCardRect(index);
-      const tierLabels = ["壹", "贰", "叁"];
+      const tierDots = "●".repeat(buff.tier);
       ctx.save();
       ctx.translate(rect.x, rect.y);
       ctx.fillStyle = "rgba(30, 18, 10, 0.94)";
@@ -1888,34 +1900,22 @@ export class Game {
       this.paperCard(ctx, 0, 0, rect.w, rect.h);
       ctx.fill();
       ctx.stroke();
-      // 路线标签
+      // 左侧色条暗示路线
       ctx.fillStyle = buff.color;
-      ctx.font = '700 11px "Microsoft YaHei", sans-serif';
+      ctx.fillRect(4, 8, 3, rect.h - 16);
+      // tier 圆点
+      ctx.font = '10px "Microsoft YaHei", sans-serif';
       ctx.textAlign = "left";
-      ctx.fillText(`${ROUTE_NAMES[buff.route]} · ${tierLabels[buff.tier - 1]}`, 72, 18);
-      // 图标圆
-      ctx.fillStyle = "#17100d";
-      ctx.beginPath();
-      ctx.arc(34, 46, 24, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = buff.color;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(34, 46, 24, 0, Math.PI * 2);
-      ctx.stroke();
       ctx.fillStyle = buff.color;
-      ctx.font = '900 14px "Microsoft YaHei", sans-serif';
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(buff.shortName, 34, 46);
-      ctx.textBaseline = "alphabetic";
-      ctx.textAlign = "left";
+      ctx.fillText(tierDots, 14, 22);
+      // 名称（唯一主标题）
       ctx.fillStyle = "#fff3c0";
-      ctx.font = '800 17px "Microsoft YaHei", sans-serif';
-      ctx.fillText(buff.name, 72, 35);
-      ctx.fillStyle = "rgba(246, 231, 189, 0.78)";
+      ctx.font = '800 18px "Microsoft YaHei", sans-serif';
+      ctx.fillText(buff.name, 14, 46);
+      // 描述
+      ctx.fillStyle = "rgba(246, 231, 189, 0.72)";
       ctx.font = '13px "Microsoft YaHei", sans-serif';
-      ctx.fillText(buff.description, 72, 62);
+      ctx.fillText(buff.description, 14, 70);
       ctx.restore();
     }
     ctx.restore();

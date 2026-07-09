@@ -43,8 +43,8 @@ export const BALANCE = {
   },
 
   waves: {
-    firstWaveDelay: 0.45,
-    betweenWavesDelay: 2,
+    firstWaveDelay: 0.3,
+    betweenWavesDelay: 0.8,
     randomPickupLimit: 6
   },
 

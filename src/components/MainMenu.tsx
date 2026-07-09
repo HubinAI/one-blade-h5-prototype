@@ -153,7 +153,7 @@ export function MainMenu({
         </button>
       </div>
 
-      <small className="version-footer">V0708006</small>
+      <small className="version-footer">V0708007</small>
     </section>
   );
 }
