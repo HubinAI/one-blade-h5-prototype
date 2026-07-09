@@ -230,6 +230,26 @@ export const ENEMY_BALANCE: Record<
     energyReward: 10,
     behavior: "formation_core",
     collapseRadius: 120
+  },
+  elite: {
+    name: "精英",
+    hp: 8,
+    speed: 22,
+    radius: 28,
+    defenseDamage: 2,
+    score: 120,
+    energyReward: 15,
+    behavior: "elite"
+  },
+  boss: {
+    name: "Boss",
+    hp: 16,
+    speed: 20,
+    radius: 36,
+    defenseDamage: 2,
+    score: 200,
+    energyReward: 30,
+    behavior: "boss"
   }
 };
 

@@ -1,10 +1,14 @@
 import { LEVELS } from "../data/levels";
 import { ENEMY_DEFS } from "../data/enemies";
 import { PICKUP_DEFS } from "../data/pickups";
+import { ELITE_VISUAL_DEFS } from "../data/elites";
+import { BOSS_VISUAL_DEFS } from "../data/bosses";
 import { DESIGN_HEIGHT, DESIGN_WIDTH, HUD_HEIGHT, WALL_TOP_Y } from "./config/constants";
 import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID } from "./config/balance";
 import { AD_CONFIG } from "./config/ads";
 import { RUN_BUFFS, RUN_BUFF_BY_ID, ROUTE_COLORS, ROUTE_NAMES, ROUTE_BUFFS, getNextBuffInRoute, getBuffRoute } from "./config/buffs";
+import { BOSS_CONFIG, getBossPhase } from "./config/bosses";
+import { ELITE_CONFIG, ELITE_KINDS } from "./config/elites";
 import { REWARD_CONFIG } from "./config/rewards";
 import { getBladeTier, getTierConfig, consumeEnergyForSlash, recoverEnergy } from "./systems/bladeEnergySystem";
 import { isSharpTurn, segmentHitCircle } from "./systems/collisionSystem";
@@ -16,7 +20,9 @@ import { calculateSkillScores } from "./services/SkillTracker";
 import type {
   BattleResult,
   BattleStats,
+  BossId,
   BuffId,
+  EliteKind,
   Enemy,
   EnemyKind,
   FloatingText,
@@ -99,6 +105,29 @@ export class Game {
   private progressionModifiers = getUpgradeModifiers();
   private runContext = getCurrentRunContext();
 
+  // ---- 精英/Boss 系统 ----
+  private eliteSpawned = false;
+  private bossSpawned = false;
+  private bossIntroTimer = 0;
+  private eliteIntroTimer = 0;
+  private eliteIntroText = "";
+  private bossIntroText = "";
+  private killedElites: EliteKind[] = [];
+  private killedBoss: BossId | null = null;
+  // 逐波HP递增（每波+1，最多+5）
+  private waveHpBonus = 0;
+
+  // ---- 军令宝箱 ----
+  private chestDropTimer = 0;
+  private chestDropX = 0;
+  private chestDropY = 0;
+  private chestDropped = false;
+  private chestOpening = false;
+  private chestOpened = false;
+  private chestAnimTimer = 0;
+  private chestBuffResult: BuffId | null = null;
+  private chestBuffRevealed = false;
+
   private stats: BattleStats = {
     kills: 0,
     maxSingleBlade: 0,
@@ -119,7 +148,9 @@ export class Game {
     chainKillTotal: 0,
     defenseLineHits: 0,
     remainingHp: 0,
-    pickupCollectRate: 0
+    pickupCollectRate: 0,
+    killedElites: [],
+    killedBoss: null
   };
 
   constructor(level: LevelConfig, onFinish: FinishCallback, onReviveOffer?: ReviveOfferCallback) {
@@ -208,6 +239,11 @@ export class Game {
     this.updateParticles(scaledDt);
     this.updateTexts(scaledDt);
     this.updateWaves(scaledDt);
+    this.updateEliteSpawn();
+    this.updateBossSpawn();
+    this.updateEliteSkills(scaledDt);
+    this.updateBossSkills(scaledDt);
+    this.updateChestDrop(scaledDt);
     this.updateBuffChoiceTriggers();
     this.checkBattleEnd();
   }
@@ -233,6 +269,8 @@ export class Game {
     this.drawSplitFlashes(ctx);
     this.drawFloatingTexts(ctx);
     this.drawWaveProgress(ctx);
+    this.drawChestDrop(ctx);
+    this.drawIntroOverlay(ctx);
     this.drawDebugPanel(ctx);
     this.drawBuffChoice(ctx);
     this.drawRevivePause(ctx);
@@ -758,6 +796,61 @@ export class Game {
       }
     }
 
+    // ---- 精英怪：伤害处理 ----
+    if (enemy.kind === "elite" && enemy.eliteKind) {
+      const eliteConf = ELITE_CONFIG[enemy.eliteKind];
+      if (enemy.eliteKind === "fireRing") {
+        // 火环将：火焰碰刀芒会损耗刀势
+        const flameDist = 40; // 火焰旋转半径
+        const trailPoints = trail.points;
+        if (trailPoints.length > 1) {
+          const lastPoint = trailPoints[trailPoints.length - 1];
+          const distToEnemy = distance(lastPoint, enemy);
+          if (distToEnemy < flameDist) {
+            // 触碰火焰：损耗当前挥刀剩余势
+            trail.remainingPathLength = Math.max(0, trail.remainingPathLength - trail.maxPathLength * 0.5);
+            trail.remainingPower = trail.remainingPathLength;
+            trail.remainingDuration = trail.remainingDuration * 0.5;
+            this.addText(enemy.x, enemy.y - 24, "烈焰灼刀!", "#e67e22", 14);
+            this.particles.push(...sparkBurst(enemy, 10, "#e67e22"));
+            AudioService.defenseHit();
+          }
+        }
+      }
+      if (enemy.eliteKind === "aura") {
+        // 氛围将：护盾机制 - 需要先清掉周围小兵
+        const shieldValue = enemy.skillTimer ?? 2;
+        if (shieldValue > 0 && stage.damage <= 1) {
+          // 低伤刀打不穿护盾
+          enemy.flash = 0.15;
+          enemy.skillTimer = Math.max(0, shieldValue - 0.5); // 每刀削减0.5护盾
+          this.addText(enemy.x, enemy.y - 24, `护盾 ${Math.ceil(shieldValue)}`, "#8e44ad", 13);
+          this.particles.push(...sparkBurst(enemy, 6, "#8e44ad"));
+          return; // 不造成实际伤害
+        }
+      }
+      // 对精英造成伤害
+      this.damageEnemy(enemy, stage.damage, trail, false, "elite");
+    }
+
+    // ---- Boss：伤害处理 ----
+    if (enemy.kind === "boss" && enemy.bossId) {
+      const bossConf = BOSS_CONFIG[enemy.bossId];
+      const phase = bossConf.phases[enemy.bossPhase ?? 0];
+      const burstMultiplier = phase.burstDamageMultiplier;
+      const actualDamage = trail.tier === "burst" ? stage.damage * burstMultiplier : stage.damage;
+      this.addText(enemy.x, enemy.y - 30, `-${actualDamage}`, bossConf.color, 18);
+      this.damageEnemy(enemy, actualDamage, trail, false, "boss");
+      // 击退反弹
+      enemy.flash = 0.4;
+      AudioService.slashHit();
+
+      // 司马懿无敌阶段（Phase1：瞬移后闪白=无敌）
+      if (enemy.bossId === "simaYi" && (enemy.bossPhase === 0 || enemy.bossPhase === undefined)) {
+        // 没有无敌
+      }
+    }
+
     if (trail.hasOil && !trail.oilTriggeredIds.has(enemy.id)) {
       trail.oilTriggeredIds.add(enemy.id);
       this.triggerOilBurst(enemy, trail);
@@ -953,6 +1046,26 @@ export class Game {
     }
 
     this.chainKillTotal += chainKill ? 1 : 0;
+
+    // ---- 精英击杀：掉落军令宝箱 ----
+    if (enemy.kind === "elite" && enemy.eliteKind && !this.chestDropped) {
+      this.killedElites.push(enemy.eliteKind);
+      this.stats.killedElites = [...this.killedElites];
+      this.startChestDrop(enemy.x, enemy.y - 10);
+      this.particles.push(glowParticle(enemy, "#ffd35a", 25, 50));
+      this.addText(enemy.x, enemy.y - 40, "宝箱掉落！", "#ffd35a", 18, 1.6);
+    }
+
+    // ---- Boss击杀：追踪图鉴 ----
+    if (enemy.kind === "boss" && enemy.bossId) {
+      this.killedBoss = enemy.bossId;
+      this.stats.killedBoss = enemy.bossId;
+      this.flash = Math.max(this.flash, 1);
+      this.screenShake = Math.max(this.screenShake, 1.2);
+      this.addText(DESIGN_WIDTH / 2, 200, `${BOSS_CONFIG[enemy.bossId].name}·讨伐！`, "#ffd35a", 30, 2.5);
+      AudioService.victory();
+    }
+
     return true;
   }
 
@@ -1074,6 +1187,8 @@ export class Game {
     }
 
     this.wavesSpawned += 1;
+    // 每波HP递增（从第2波开始+1，最多+5）
+    this.waveHpBonus = Math.min(5, this.wavesSpawned);
     const speedMultiplier = wave.speedMultiplier ?? 1;
 
     for (const spawn of wave.enemies) {
@@ -1150,6 +1265,23 @@ export class Game {
       this.elapsed >= Math.max(0, this.level.durationSeconds - 8)
     ) {
       this.finish(true);
+    }
+
+    // Boss战超时保护：如果Boss还活着但时间已超过关卡时长+15秒，强制结束算胜利
+    if (this.bossSpawned && this.elapsed > this.level.durationSeconds + 15) {
+      const bossAlive = this.enemies.some(e => e.alive && e.kind === "boss");
+      if (bossAlive) {
+        // 强制结束Boss战（视作胜利，但扣1HP作为代价）
+        for (const e of this.enemies) {
+          if (e.kind === "boss") {
+            e.alive = false;
+            this.particles.push(...paperBurst(e, 20, ["#c0392b", "#f5b7b1"]));
+            this.flash = Math.max(this.flash, 0.8);
+            this.screenShake = Math.max(this.screenShake, 0.6);
+          }
+        }
+        this.enemies = this.enemies.filter((e) => e.alive);
+      }
     }
   }
 
@@ -1230,7 +1362,9 @@ export class Game {
       rating,
       ...rewardMeta,
       skillScores,
-      selectedRoutes: [...this.selectedRoutes]
+      selectedRoutes: [...this.selectedRoutes],
+      killedElites: [...this.killedElites],
+      killedBoss: this.killedBoss
     };
     logEvent("game_end", {
       levelId: this.level.id,
@@ -1247,14 +1381,17 @@ export class Game {
   private createEnemy(kind: EnemyKind, x: number, y: number, speedMultiplier = 1): Enemy {
     const balance = ENEMY_BALANCE[kind];
     const dailyShieldBonus = this.runContext.mode === "dailyChallenge" && this.runContext.dailyChallengeId === "hard_shield" && kind === "shield" ? 1 : 0;
+    // 逐波HP递增：每波+1，最多+5（仅对基础敌人生效，精英/Boss不受影响）
+    const isBasicEnemy = kind === "infantry" || kind === "shield" || kind === "powder" || kind === "core";
+    const hpBonus = isBasicEnemy ? this.waveHpBonus : 0;
     return {
       id: this.nextId("enemy"),
       kind,
       x,
       y,
       radius: balance.radius,
-      hp: balance.hp + dailyShieldBonus,
-      maxHp: balance.hp + dailyShieldBonus,
+      hp: balance.hp + dailyShieldBonus + hpBonus,
+      maxHp: balance.hp + dailyShieldBonus + hpBonus,
       speed: balance.speed * this.level.enemySpeed * speedMultiplier * randomRange(0.94, 1.08),
       hpDamage: balance.defenseDamage,
       score: balance.score,
@@ -1583,6 +1720,152 @@ export class Game {
           ctx.arc(0, 0, enemy.radius + 4, 0, Math.PI * 2);
           ctx.stroke();
         }
+      }
+
+      // ---- 精英怪渲染 ----
+      if (enemy.kind === "elite" && enemy.eliteKind) {
+        const visDef = ELITE_VISUAL_DEFS[enemy.eliteKind];
+        ctx.fillStyle = enemy.flash > 0 ? "#fff1b8" : visDef.color;
+        ctx.strokeStyle = visDef.accent;
+        ctx.lineWidth = 3;
+        // 六边形主体
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const angle = (Math.PI / 3) * i - Math.PI / 6;
+          const px = Math.cos(angle) * enemy.radius;
+          const py = Math.sin(angle) * enemy.radius;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        // 内六角星纹
+        ctx.strokeStyle = visDef.accent;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const angle = (Math.PI / 3) * i;
+          const px = Math.cos(angle) * enemy.radius * 0.5;
+          const py = Math.sin(angle) * enemy.radius * 0.5;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.stroke();
+
+        // 名称
+        ctx.fillStyle = "#fff3c0";
+        ctx.font = '700 11px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = "center";
+        ctx.fillText(visDef.name, 0, -enemy.radius - 10);
+
+        // 火环将：三团火焰
+        if (enemy.eliteKind === "fireRing") {
+          const flameAngle = (enemy.skillTimer ?? 0) * 3;
+          for (let i = 0; i < 3; i++) {
+            const a = flameAngle + (Math.PI * 2 / 3) * i;
+            const fx = Math.cos(a) * 40;
+            const fy = Math.sin(a) * 40;
+            ctx.fillStyle = "#e67e22";
+            ctx.shadowColor = "#f39c12";
+            ctx.shadowBlur = 12;
+            ctx.beginPath();
+            ctx.arc(fx, fy, 8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            // 火焰光晕
+            ctx.fillStyle = "rgba(230, 126, 34, 0.25)";
+            ctx.beginPath();
+            ctx.arc(fx, fy, 14, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+
+        // 回血将：绿光光圈
+        if (enemy.eliteKind === "heal") {
+          const pulse = 0.5 + Math.sin(this.elapsed * 3) * 0.5;
+          ctx.strokeStyle = `rgba(39, 174, 96, ${0.3 + pulse * 0.3})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, 0, enemy.radius + 6 + pulse * 4, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        // 氛围将：护盾指示
+        if (enemy.eliteKind === "aura") {
+          const shieldVal = enemy.skillTimer ?? 2;
+          ctx.strokeStyle = "#8e44ad";
+          ctx.lineWidth = 3;
+          ctx.globalAlpha = 0.3 + Math.min(0.7, shieldVal / 6);
+          ctx.beginPath();
+          ctx.arc(0, 0, enemy.radius + 4, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = "#d7bde2";
+          ctx.font = '700 12px "Microsoft YaHei", sans-serif';
+          ctx.textAlign = "center";
+          ctx.fillText(`护盾${Math.ceil(shieldVal)}`, 0, 4);
+        }
+      }
+
+      // ---- Boss渲染 ----
+      if (enemy.kind === "boss" && enemy.bossId) {
+        const visDef = BOSS_VISUAL_DEFS[enemy.bossId];
+        const phase = enemy.bossPhase ?? 0;
+        const phaseColors = ["#c0392b", "#e74c3c", "#922b21"];
+        const phaseColor = phaseColors[Math.min(phase, phaseColors.length - 1)];
+        const pulse = 1 + Math.sin(this.elapsed * 4) * 0.08;
+
+        ctx.fillStyle = enemy.flash > 0 ? "#fff" : visDef.color;
+        ctx.strokeStyle = phaseColor;
+        ctx.lineWidth = 3 + phase * 1.5;
+
+        // 大型双环
+        ctx.save();
+        ctx.scale(pulse, pulse);
+        ctx.beginPath();
+        ctx.arc(0, 0, enemy.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // 外环
+        ctx.strokeStyle = visDef.accent;
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.5 + Math.sin(this.elapsed * 5) * 0.3;
+        ctx.beginPath();
+        ctx.arc(0, 0, enemy.radius + 6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+
+        ctx.restore();
+
+        // Boss名称（大字）
+        ctx.shadowColor = visDef.color;
+        ctx.shadowBlur = 20;
+        ctx.fillStyle = "#fff3c0";
+        ctx.font = '700 16px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(visDef.name, 0, -enemy.radius - 14);
+        ctx.shadowBlur = 0;
+
+        // 血条（简短Boss血条）
+        const hpRatio = enemy.hp / enemy.maxHp;
+        ctx.fillStyle = "rgba(10, 7, 5, 0.7)";
+        ctx.fillRect(-enemy.radius - 4, -enemy.radius - 8, (enemy.radius + 4) * 2, 5);
+        ctx.fillStyle = hpRatio > 0.5 ? "#2ecc71" : hpRatio > 0.25 ? "#f39c12" : "#e74c3c";
+        ctx.fillRect(-enemy.radius - 4, -enemy.radius - 8, (enemy.radius + 4) * 2 * hpRatio, 5);
+
+        ctx.strokeStyle = "#fff3c0";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(-enemy.radius - 4, -enemy.radius - 8, (enemy.radius + 4) * 2, 5);
+
+        // 阶段标识
+        ctx.fillStyle = phaseColor;
+        ctx.font = '10px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = "center";
+        ctx.fillText(`P${phase + 1}`, 0, enemy.radius + 16);
       }
 
       // 点燃/标记光环（保留）
@@ -2055,6 +2338,448 @@ export class Game {
   private drawWaveProgress(ctx: CanvasRenderingContext2D) {
     // V0708008+ 屏蔽底部波次进度条（HUD 中已显示波次文本）
     return;
+  }
+
+  // ═══════════════════════════════════════════
+  // 新系统：精英怪 / Boss / 军令宝箱 / HP成长
+  // ═══════════════════════════════════════════
+
+  /** 精英怪生成 */
+  private updateEliteSpawn() {
+    if (this.eliteSpawned || !this.level.eliteSpawnAt || !this.level.eliteKind) return;
+    if (this.elapsed < this.level.eliteSpawnAt) return;
+    this.eliteSpawned = true;
+    const ek = this.level.eliteKind;
+    const conf = ELITE_CONFIG[ek];
+    // 在随机列生成
+    const lanes = [44, 92, 140, 188, 236, 284, 336];
+    const lane = lanes[Math.floor(Math.random() * lanes.length)];
+    const enemy = this.createElite(ek, lane, BALANCE.battlefield.enemySpawnY, conf);
+    this.enemies.push(enemy);
+    this.discoveredEnemies.add("elite");
+    // 出场播报
+    this.eliteIntroTimer = 2.5;
+    this.eliteIntroText = conf.introText;
+    // 出场特效
+    this.screenShake = Math.max(this.screenShake, 0.45);
+    this.flash = Math.max(this.flash, 0.35);
+    this.particles.push(glowParticle({ x: lane, y: BALANCE.battlefield.enemySpawnY }, conf.color, 30, 55));
+    logEvent("elite_spawn", { levelId: this.level.id, eliteKind: ek, time: this.elapsed });
+  }
+
+  /** Boss生成 */
+  private updateBossSpawn() {
+    if (this.bossSpawned || !this.level.bossId) return;
+    // Boss在最后一波之后才生成
+    if (this.wavesSpawned < this.level.waves.length) return;
+    if (this.elapsed < this.level.durationSeconds - 20) return;
+    this.bossSpawned = true;
+    const bid = this.level.bossId;
+    const enemy = this.createBoss(bid);
+    this.enemies.push(enemy);
+    this.discoveredEnemies.add("boss");
+    // 出场播报（带暂停效果）
+    this.bossIntroTimer = 3;
+    this.bossIntroText = BOSS_CONFIG[bid].introText;
+    this.phase = "playing"; // 确保不误用buffChoice
+    this.screenShake = Math.max(this.screenShake, 0.8);
+    this.flash = Math.max(this.flash, 0.65);
+    this.particles.push(glowParticle({ x: DESIGN_WIDTH / 2, y: BALANCE.battlefield.enemySpawnY }, BOSS_CONFIG[bid].color, 40, 80));
+    logEvent("boss_spawn", { levelId: this.level.id, bossId: bid, time: this.elapsed });
+  }
+
+  /** 精英怪技能更新 */
+  private updateEliteSkills(dt: number) {
+    for (const enemy of this.enemies) {
+      if (!enemy.alive || enemy.kind !== "elite" || !enemy.eliteKind) continue;
+      const conf = ELITE_CONFIG[enemy.eliteKind];
+
+      if (enemy.eliteKind === "fireRing") {
+        // 火环将：三团火焰环绕，自动伤害触碰的刀芒
+        // 实际判定在slash中处理，此处仅更新视觉计时器
+        enemy.skillTimer = (enemy.skillTimer ?? 0) + dt;
+      }
+
+      if (enemy.eliteKind === "heal") {
+        // 回血将：每3秒释放波纹
+        enemy.skillTimer = (enemy.skillTimer ?? 0) + dt;
+        if (enemy.skillTimer >= conf.skillCooldown) {
+          enemy.skillTimer = 0;
+          const radius = 120;
+          this.particles.push(ringParticle(enemy, conf.color, radius));
+          this.particles.push(...sparkBurst(enemy, 8, conf.color));
+          this.addText(enemy.x, enemy.y - 30, "续命波纹", conf.color, 14, 0.6);
+          // 回血范围内所有敌军
+          for (const target of this.enemies) {
+            if (!target.alive || target === enemy || distance(target, enemy) > radius) continue;
+            const originalHp = ENEMY_BALANCE[target.kind as EnemyKind]?.hp ?? 1;
+            target.hp = Math.min(target.hp + 1, originalHp);
+            target.flash = 0.2;
+          }
+        }
+      }
+
+      if (enemy.eliteKind === "aura") {
+        // 氛围将：实时计算护盾
+        const aliveOthers = this.enemies.filter(e => e.alive && e !== enemy && e.kind !== "elite" && e.kind !== "boss").length;
+        enemy.skillTimer = Math.min(6, 2 + aliveOthers); // 护盾值上限6
+      }
+    }
+  }
+
+  /** Boss技能更新 */
+  private updateBossSkills(dt: number) {
+    for (const enemy of this.enemies) {
+      if (!enemy.alive || enemy.kind !== "boss" || !enemy.bossId) continue;
+      const conf = BOSS_CONFIG[enemy.bossId];
+      const prevPhase = enemy.bossPhase ?? 0;
+      const newPhase = getBossPhase(conf, enemy.hp);
+
+      // 阶段切换检测
+      if (newPhase !== prevPhase) {
+        enemy.bossPhase = newPhase;
+        enemy.flash = 0.5;
+        this.screenShake = Math.max(this.screenShake, 0.6);
+        this.flash = Math.max(this.flash, 0.55);
+        this.addText(DESIGN_WIDTH / 2, 160, conf.phases[newPhase].announce, conf.color, 22, 2);
+        AudioService.oneBladeBreak(); // 借用
+      }
+
+      // 更新阶段属性
+      const phase = conf.phases[newPhase];
+      enemy.speed = conf.speed * phase.speedMultiplier;
+      enemy.hpDamage = phase.defenseDamage;
+
+      // 技能冷却
+      enemy.skillCooldown = (enemy.skillCooldown ?? 0) + dt;
+
+      if (enemy.bossId === "zhangFei") {
+        // 张飞：怒吼 — 碰到的刀芒损耗能量
+        if (enemy.skillCooldown >= conf.skill.cooldown) {
+          // 怒吼视觉
+          this.particles.push(ringParticle(enemy, conf.color, 80));
+          this.screenShake = Math.max(this.screenShake, 0.45);
+          enemy.skillCooldown = 0;
+        }
+      }
+
+      if (enemy.bossId === "simaYi") {
+        if (enemy.skillCooldown >= conf.skill.cooldown) {
+          enemy.skillCooldown = 0;
+          // 瞬移到随机列
+          const lanes = [44, 92, 140, 188, 236, 284, 336];
+          const newX = lanes[Math.floor(Math.random() * lanes.length)];
+          this.particles.push(glowParticle(enemy, conf.accentColor, 20, 40));
+          this.particles.push(...sparkBurst(enemy, 12, conf.accentColor));
+          enemy.x = newX;
+          this.particles.push(glowParticle({ x: newX, y: enemy.y }, conf.accentColor, 20, 40));
+          this.addText(enemy.x, enemy.y - 30, "隐遁", conf.accentColor, 16, 0.8);
+          // 绝命前无敌（标记为闪白）
+          if (newPhase === 0) enemy.flash = 0.5;
+        }
+      }
+
+      if (enemy.bossId === "zhenJi") {
+        if (enemy.skillCooldown >= conf.skill.cooldown) {
+          enemy.skillCooldown = 0;
+          // 释放花瓣小兵
+          const miniCount = newPhase === 0 ? 3 : newPhase === 1 ? 5 : 6;
+          for (let i = 0; i < miniCount; i++) {
+            const mx = enemy.x + (Math.random() - 0.5) * 120;
+            const my = enemy.y - 10 - Math.random() * 20;
+            const mini: Enemy = {
+              id: this.nextId("petal"),
+              kind: "infantry", // 标准步兵视觉
+              x: mx, y: my,
+              radius: 12,
+              hp: 1, maxHp: 1,
+              speed: 25,
+              hpDamage: 0, // 不给能量
+              score: 0,
+              energyGain: 0, // ❌ 不给能量
+              alive: true,
+              ignited: false,
+              marked: false,
+              shieldCrack: 0,
+              flash: 0.2,
+              wobble: Math.random() * Math.PI * 2,
+              slowedTimer: 0
+            };
+            this.enemies.push(mini);
+          }
+          this.particles.push(ringParticle(enemy, conf.accentColor, 80));
+          this.particles.push(...sparkBurst(enemy, 16, conf.accentColor));
+          this.addText(enemy.x, enemy.y - 30, "花葬", conf.accentColor, 18, 1);
+        }
+
+        // 花之殇最终阶段：触发百花葬
+        if (newPhase === 2 && enemy.skillTimer === undefined) {
+          enemy.skillTimer = 0; // 标记已触发
+          // 清空全场小兵
+          const cleared = this.enemies.filter(e => e.alive && e.kind === "infantry" && e.energyGain === 0);
+          for (const mini of cleared) {
+            mini.alive = false;
+            this.particles.push(...paperBurst(mini, 8, ["#fadbd8", "#e74c3c"]));
+          }
+          this.enemies = this.enemies.filter(e => e.alive);
+          this.flash = Math.max(this.flash, 1);
+          this.screenShake = Math.max(this.screenShake, 1);
+          this.addText(DESIGN_WIDTH / 2, 200, "百花葬！— 一刀清场", "#e74c3c", 28, 1.8);
+          AudioService.victory();
+        }
+      }
+    }
+  }
+
+  /** 创建精英怪 */
+  private createElite(kind: EliteKind, x: number, y: number, conf: import("./config/elites").EliteConfig): Enemy {
+    return {
+      id: this.nextId("elite"),
+      kind: "elite",
+      eliteKind: kind,
+      x, y,
+      radius: conf.radius,
+      hp: conf.maxHp,
+      maxHp: conf.maxHp,
+      speed: conf.speed,
+      hpDamage: conf.defenseDamage,
+      score: conf.score,
+      energyGain: conf.energyGain,
+      alive: true,
+      ignited: false,
+      marked: false,
+      shieldCrack: 0,
+      flash: 0.5,
+      wobble: 0,
+      slowedTimer: 0,
+      skillTimer: 0,
+      skillCooldown: 0
+    };
+  }
+
+  /** 创建Boss */
+  private createBoss(id: BossId): Enemy {
+    const conf = BOSS_CONFIG[id];
+    const cx = DESIGN_WIDTH / 2;
+    return {
+      id: this.nextId("boss"),
+      kind: "boss",
+      bossId: id,
+      x: cx,
+      y: BALANCE.battlefield.enemySpawnY,
+      radius: conf.radius,
+      hp: conf.maxHp,
+      maxHp: conf.maxHp,
+      speed: conf.speed,
+      hpDamage: conf.defenseDamage,
+      score: conf.score,
+      energyGain: conf.energyGain,
+      alive: true,
+      ignited: false,
+      marked: false,
+      shieldCrack: 0,
+      flash: 1,
+      wobble: 0,
+      slowedTimer: 0,
+      bossPhase: 0,
+      skillTimer: 0,
+      skillCooldown: 0
+    };
+  }
+
+  /** 军令宝箱：精英死亡后掉落 */
+  private startChestDrop(x: number, y: number) {
+    this.chestDropped = true;
+    this.chestDropX = x;
+    this.chestDropY = y;
+    this.chestDropTimer = 0;
+    this.chestOpening = false;
+    this.chestOpened = false;
+    this.chestAnimTimer = 0;
+    this.chestBuffResult = null;
+    this.chestBuffRevealed = false;
+    // 飘落宝箱粒子
+    this.particles.push(glowParticle({ x, y }, "#ffd35a", 20, 45));
+    this.addText(x, y - 22, "军令宝箱", "#ffd35a", 16, 1.6);
+  }
+
+  /** 随机抽取一个军令 */
+  private getRandomBuff(): BuffId {
+    const all = RUN_BUFFS.map(b => b.id);
+    return all[Math.floor(Math.random() * all.length)];
+  }
+
+  /** 应用军令 */
+  private applyChestBuff(id: BuffId) {
+    this.runBuffs.add(id);
+    const buff = RUN_BUFF_BY_ID[id];
+    this.selectedRoutes.push(buff.route);
+
+    // 堅城：HP+1
+    if (id === "fortress") {
+      this.maxHp = Math.min(BALANCE.player.maxHp + 1, this.maxHp + 1);
+      this.hp = Math.min(this.maxHp, this.hp + 1);
+    }
+
+    this.addText(DESIGN_WIDTH / 2, 148, `军令·${buff.name}`, buff.color, 22, 2);
+    this.flash = Math.max(this.flash, 0.6);
+    this.screenShake = Math.max(this.screenShake, 0.35);
+
+    logEvent("buff_chest", { levelId: this.level.id, time: this.elapsed, selectedBuff: id, route: buff.route });
+    AudioService.buffSelect();
+  }
+
+  /** 宝箱自动打开更新 */
+  private updateChestDrop(dt: number) {
+    if (!this.chestDropped) return;
+
+    if (!this.chestOpened) {
+      this.chestDropTimer += dt;
+      // 3秒后自动打开
+      if (this.chestDropTimer >= 3) {
+        this.chestOpening = true;
+        this.chestOpened = true;
+        this.chestAnimTimer = 0;
+        this.chestBuffResult = this.getRandomBuff();
+        this.chestBuffRevealed = false;
+        // 宝箱打开粒子效果
+        this.particles.push(glowParticle({ x: this.chestDropX, y: this.chestDropY }, "#ffd35a", 30, 60));
+        this.particles.push(...sparkBurst({ x: this.chestDropX, y: this.chestDropY }, 24, "#ffd35a"));
+        this.flash = Math.max(this.flash, 0.5);
+        AudioService.pickup();
+      }
+    }
+
+    if (this.chestOpened && !this.chestBuffRevealed) {
+      this.chestAnimTimer += dt;
+      // 0.8秒后揭示军令
+      if (this.chestAnimTimer >= 0.8) {
+        this.chestBuffRevealed = true;
+        if (this.chestBuffResult) {
+          this.applyChestBuff(this.chestBuffResult);
+          // 播放随机卷轴动画：卷轴在空中展开
+          const buff = RUN_BUFF_BY_ID[this.chestBuffResult];
+          const routeColor = ROUTE_COLORS[buff.route];
+          this.particles.push(ringParticle({ x: DESIGN_WIDTH / 2, y: 140 }, routeColor, 60));
+          this.addText(DESIGN_WIDTH / 2, 120, `${ROUTE_NAMES[buff.route]}·${buff.name}`, routeColor, 24, 2);
+          this.flash = Math.max(this.flash, 0.7);
+        }
+      }
+    }
+
+    // 3秒后清除宝箱状态
+    if (this.chestBuffRevealed && this.chestAnimTimer > 3) {
+      this.chestDropped = false;
+    }
+  }
+
+  /** 绘制军令宝箱 */
+  private drawChestDrop(ctx: CanvasRenderingContext2D) {
+    if (!this.chestDropped) return;
+    const cx = this.chestDropX;
+    const cy = this.chestDropY - (this.chestOpening ? 4 : 0);
+
+    ctx.save();
+    ctx.translate(cx, cy);
+
+    // 宝箱主体
+    const pulse = 1 + Math.sin(this.chestDropTimer * 3) * 0.06;
+    const alpha = this.chestOpened ? 0.6 : 1;
+    ctx.globalAlpha = alpha;
+
+    // 宝箱阴影
+    ctx.shadowColor = "#ffd35a";
+    ctx.shadowBlur = this.chestOpened ? 0 : 16;
+
+    if (!this.chestOpened) {
+      // 未打开：金色箱子
+      ctx.fillStyle = "#8b6914";
+      ctx.strokeStyle = "#ffd35a";
+      ctx.lineWidth = 2.5;
+      ctx.scale(pulse, pulse);
+      // 箱子体
+      ctx.fillRect(-14, -8, 28, 18);
+      ctx.strokeRect(-14, -8, 28, 18);
+      // 箱子盖
+      ctx.fillStyle = "#a07d1a";
+      ctx.beginPath();
+      ctx.moveTo(-15, -10);
+      ctx.lineTo(0, -18);
+      ctx.lineTo(15, -10);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // 锁扣
+      ctx.fillStyle = "#ffd35a";
+      ctx.fillRect(-3, -4, 6, 4);
+      // 倒计时
+      ctx.fillStyle = "#fff3c0";
+      ctx.font = '10px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = "center";
+      ctx.fillText(`${Math.ceil(3 - this.chestDropTimer)}s`, 0, 24);
+    } else {
+      // 已打开：卷轴 + 光效
+      ctx.fillStyle = "rgba(255, 211, 90, 0.25)";
+      ctx.beginPath();
+      ctx.arc(0, 0, 28, 0, Math.PI * 2);
+      ctx.fill();
+      // 卷轴
+      if (!this.chestBuffRevealed) {
+        // 卷轴旋转动画
+        const spinAngle = Math.min(this.chestAnimTimer * 4, Math.PI * 0.5);
+        ctx.save();
+        ctx.rotate(spinAngle);
+        ctx.fillStyle = "#d4a574";
+        ctx.fillRect(-8, -12, 16, 24);
+        ctx.strokeStyle = "#8b6914";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(-8, -12, 16, 24);
+        ctx.restore();
+        ctx.fillStyle = "#fff3c0";
+        ctx.font = '10px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = "center";
+        ctx.fillText("开", 0, 4);
+      }
+    }
+
+    ctx.restore();
+  }
+
+  /** 绘制精英/Boss出场播报 */
+  private drawIntroOverlay(ctx: CanvasRenderingContext2D) {
+    const timer = Math.max(this.eliteIntroTimer, this.bossIntroTimer);
+    if (timer <= 0) return;
+
+    const text = this.eliteIntroTimer > 0 ? this.eliteIntroText : this.bossIntroText;
+    const isBoss = this.bossIntroTimer > 0;
+    const alpha = Math.min(1, timer * 2);
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // 半透明暗色遮罩
+    ctx.fillStyle = "rgba(10, 7, 5, 0.35)";
+    ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    // 弹出版本文字（从下往上）
+    const slideY = 300 - (isBoss ? 20 : 10) * (1 - Math.min(1, timer * 3));
+
+    // 名称大字
+    ctx.shadowColor = isBoss ? "#c0392b" : "#d48c2a";
+    ctx.shadowBlur = isBoss ? 24 : 16;
+    ctx.fillStyle = isBoss ? "#f5b7b1" : "#f5d78a";
+    ctx.font = isBoss ? '800 32px "Microsoft YaHei", sans-serif' : '800 26px "Microsoft YaHei", sans-serif';
+    ctx.fillText(text, DESIGN_WIDTH / 2, slideY);
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(246, 231, 189, 0.72)";
+    ctx.font = '14px "Microsoft YaHei", sans-serif';
+    ctx.fillText(isBoss ? "Boss 参上！" : "精英 现身", DESIGN_WIDTH / 2, slideY + 36);
+
+    ctx.restore();
   }
 
   private paperCard(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {

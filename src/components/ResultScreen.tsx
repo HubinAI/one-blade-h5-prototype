@@ -137,7 +137,7 @@ export function ResultScreen({
         </div>
       </div>
 
-      <small className="version-footer">V0708009</small>
+      <small className="version-footer">V0709010</small>
     </section>
   );
 }

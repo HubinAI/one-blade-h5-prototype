@@ -9,6 +9,7 @@ import { AdOverlay } from "./components/AdOverlay";
 import { UpgradeScreen } from "./components/UpgradeScreen";
 import { PreBattleBriefing } from "./components/PreBattleBriefing";
 import { PauseOverlay } from "./components/PauseOverlay";
+import { Codex } from "./components/Codex";
 import type { ReviveOffer } from "./game/Game";
 import { AdService } from "./game/services/AdService";
 import {
@@ -23,6 +24,7 @@ import {
   markInterstitialShown,
   registerRewardedAd,
   restoreStaminaByAd,
+  saveCodexData,
   spendStamina,
   useFreeBurst,
   type RunMode
@@ -54,6 +56,7 @@ export default function App() {
   const [reviveOffer, setReviveOffer] = useState<ReviveOffer | null>(null);
   const [reviveSignal, setReviveSignal] = useState(0);
   const [declineReviveSignal, setDeclineReviveSignal] = useState(0);
+  const [showCodex, setShowCodex] = useState(false);
   const [paused, setPaused] = useState(false);
 
   const refreshHome = useCallback(() => setHome(getHomeSnapshot()), []);
@@ -83,6 +86,8 @@ export default function App() {
   const handleFinish = useCallback(
     (result: BattleResult) => {
       setLastResult(result);
+      // 保存图鉴数据
+      saveCodexData(result.killedElites, result.killedBoss);
       if (result.win) {
         setUnlockedLevel((current) => {
           const next = Math.max(current, Math.min(LEVELS.length, result.levelId + 1));
@@ -225,7 +230,7 @@ export default function App() {
           home={home}
           onStart={() => startLevel(LEVELS[0])}
           onContinue={() => startLevel(LEVELS[Math.max(0, unlockedLevel - 1)])}
-          onLevels={() => setScreen("menu")}
+          onLevels={() => setScreen("levels")}
           onDailyChallenge={handleDailyChallenge}
           onHighYieldChallenge={handleHighYieldChallenge}
           onFreeBurst={handleFreeBurst}
@@ -233,8 +238,11 @@ export default function App() {
           onRestoreStamina={handleRestoreStamina}
           onClaimOffline={handleClaimOffline}
           onClaimOfflineDouble={handleClaimOfflineDouble}
+          onCodex={() => setShowCodex(true)}
         />
       )}
+
+      {showCodex && <Codex onClose={() => setShowCodex(false)} />}
 
       {screen === "briefing" && (
         <PreBattleBriefing

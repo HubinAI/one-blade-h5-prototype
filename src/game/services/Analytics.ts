@@ -15,7 +15,10 @@ export type AnalyticsEvent =
   | "chest_open"
   | "daily_reward_claim"
   | "stamina_spend"
-  | "stamina_ad_restore";
+  | "stamina_ad_restore"
+  | "elite_spawn"
+  | "boss_spawn"
+  | "buff_chest";
 
 export function logEvent(event: AnalyticsEvent, params: Record<string, unknown> = {}) {
   console.log(`[analytics] ${event}`, {

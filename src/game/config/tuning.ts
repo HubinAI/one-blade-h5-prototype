@@ -92,6 +92,18 @@ export const ENEMY_TUNING: Record<EnemyKind, { radius: number; hpDamage: number;
     hpDamage: ENEMY_BALANCE.core.defenseDamage,
     score: ENEMY_BALANCE.core.score,
     energy: ENEMY_BALANCE.core.energyReward
+  },
+  elite: {
+    radius: ENEMY_BALANCE.elite.radius,
+    hpDamage: ENEMY_BALANCE.elite.defenseDamage,
+    score: ENEMY_BALANCE.elite.score,
+    energy: ENEMY_BALANCE.elite.energyReward
+  },
+  boss: {
+    radius: ENEMY_BALANCE.boss.radius,
+    hpDamage: ENEMY_BALANCE.boss.defenseDamage,
+    score: ENEMY_BALANCE.boss.score,
+    energy: ENEMY_BALANCE.boss.energyReward
   }
 };
 

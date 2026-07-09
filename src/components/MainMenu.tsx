@@ -17,6 +17,7 @@ type MainMenuProps = {
   onRestoreStamina: () => void;
   onClaimOffline: () => void;
   onClaimOfflineDouble: () => void;
+  onCodex: () => void;
 };
 
 const DIMENSION_META: Record<SkillDimension, { label: string; color: string }> = {
@@ -84,7 +85,8 @@ export function MainMenu({
   onUpgrades,
   onRestoreStamina,
   onClaimOffline,
-  onClaimOfflineDouble
+  onClaimOfflineDouble,
+  onCodex
 }: MainMenuProps) {
   const isFirstPlay = unlockedLevel <= 1 && home.coins === 0;
   const currentLevel = LEVELS[Math.max(0, Math.min(LEVELS.length - 1, unlockedLevel - 1))];
@@ -158,9 +160,13 @@ export function MainMenu({
           <span className="footer-icon-symbol">★</span>
           <span>高收益</span>
         </button>
+        <button className="footer-icon" onClick={onCodex}>
+          <span className="footer-icon-symbol">📖</span>
+          <span>图鉴</span>
+        </button>
       </div>
 
-      <small className="version-footer">V0708009</small>
+      <small className="version-footer">V0709010</small>
     </section>
   );
 }

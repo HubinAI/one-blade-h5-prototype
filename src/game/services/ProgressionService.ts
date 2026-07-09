@@ -9,7 +9,7 @@ import {
   getUpgradeCost,
   type UpgradeId
 } from "../config/rewards";
-import type { BattleResult, EnemyKind, RatingGrade, RunProgress, RunRewards } from "../types";
+import type { BattleResult, BossId, EliteKind, EnemyKind, RatingGrade, RunProgress, RunRewards } from "../types";
 import { logEvent } from "./Analytics";
 
 const STORAGE_KEY = "one_blade_v04_progression";
@@ -43,6 +43,8 @@ export type PlayerProgress = {
   fragments: Record<string, number>;
   upgrades: Record<UpgradeId, number>;
   codex: EnemyKind[];
+  codexElites: string[];
+  codexBosses: string[];
   rewardedStreak: number;
   lastInterstitialRun: number;
   lastInterstitialAt: number;
@@ -157,6 +159,8 @@ function createDefaultProgress(): PlayerProgress {
     fragments: createFragments(),
     upgrades: createUpgrades(),
     codex: ["infantry"],
+    codexElites: [],
+    codexBosses: [],
     rewardedStreak: 0,
     lastInterstitialRun: 0,
     lastInterstitialAt: 0,
@@ -490,6 +494,33 @@ export function applyBattleRewards(input: BattleRewardInput): Pick<BattleResult,
     nearMisses: buildNearMisses(input, progress),
     nextRatingHint: nextRatingHint(input)
   };
+}
+
+/** 保存精英/Boss图鉴解锁数据 */
+export function saveCodexData(killedElites: string[], killedBoss: string | null) {
+  const progress = readProgress();
+  let changed = false;
+  for (const ek of killedElites) {
+    if (!progress.codexElites.includes(ek)) {
+      progress.codexElites.push(ek);
+      changed = true;
+    }
+  }
+  if (killedBoss && !progress.codexBosses.includes(killedBoss)) {
+    progress.codexBosses.push(killedBoss);
+    changed = true;
+  }
+  if (changed) writeProgress(progress);
+}
+
+/** 获取已解锁的精英图鉴 */
+export function getCodexElites(): string[] {
+  return readProgress().codexElites;
+}
+
+/** 获取已解锁的Boss图鉴 */
+export function getCodexBosses(): string[] {
+  return readProgress().codexBosses;
 }
 
 function markRewardedWatched(progress: PlayerProgress, reason: string, levelId?: number) {

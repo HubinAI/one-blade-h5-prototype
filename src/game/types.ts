@@ -4,9 +4,11 @@ export type Vec2 = {
 };
 
 export type BladeTier = "weak" | "normal" | "strong" | "burst";
-export type EnemyKind = "infantry" | "shield" | "powder" | "core";
+export type EnemyKind = "infantry" | "shield" | "powder" | "core" | "elite" | "boss";
+export type EliteKind = "fireRing" | "heal" | "aura";
+export type BossId = "zhangFei" | "simaYi" | "zhenJi";
 export type PickupKind = "drum" | "soul" | "oil";
-export type GamePhase = "playing" | "buffChoice" | "revive" | "won" | "lost";
+export type GamePhase = "playing" | "buffChoice" | "revive" | "won" | "lost" | "chestOpen";
 export type RatingGrade = "C" | "B" | "A" | "S" | "SS" | "神之一刀";
 
 // ---- 战术指令路线系统 ----
@@ -81,6 +83,12 @@ export type LevelConfig = {
   buffTimes: number[];
   waves: WaveConfig[];
   briefing?: BriefingData;
+  /** 精英怪出现时间（秒），0=无 */
+  eliteSpawnAt?: number;
+  /** 精英怪子类型 */
+  eliteKind?: EliteKind;
+  /** Boss ID，undefined=无Boss */
+  bossId?: BossId;
 };
 
 export type Enemy = {
@@ -103,6 +111,16 @@ export type Enemy = {
   wobble: number;
   /** 鐵壁堅城buff：触线后减速 */
   slowedTimer: number;
+  /** 精英怪子类型 */
+  eliteKind?: EliteKind;
+  /** Boss ID */
+  bossId?: BossId;
+  /** Boss当前阶段 (0=phase1, 1=phase2, 2=phase3) */
+  bossPhase?: number;
+  /** 技能计时器 */
+  skillTimer?: number;
+  /** Boss技能冷却 */
+  skillCooldown?: number;
 };
 
 export type Pickup = {
@@ -195,6 +213,9 @@ export type BattleStats = {
   defenseLineHits: number;
   remainingHp: number;
   pickupCollectRate: number;
+  /** 本局击杀的精英/Boss（供图鉴追踪） */
+  killedElites: EliteKind[];
+  killedBoss: BossId | null;
 };
 
 export type RunRewards = {
@@ -250,4 +271,14 @@ export type BattleResult = {
   skillScores: SkillScores;
   /** 本局选择的路线（用于归因） */
   selectedRoutes: TacticalRoute[];
+  /** 本局击杀的精英/Boss（图鉴追踪） */
+  killedElites: EliteKind[];
+  killedBoss: BossId | null;
+};
+
+/** 图鉴条目 */
+export type CodexEntry = {
+  name: string;
+  description: string;
+  unlocked: boolean;
 };

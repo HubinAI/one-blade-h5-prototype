@@ -36,5 +36,19 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDefinition> = {
     hint: "切中后标记，收刀时带动阵型崩散。",
     color: "#5d4a8f",
     accent: "#e8d7ff"
+  },
+  elite: {
+    kind: "elite",
+    name: "精英",
+    hint: "精英敌军，拥有特殊技能。",
+    color: "#d48c2a",
+    accent: "#f5d78a"
+  },
+  boss: {
+    kind: "boss",
+    name: "Boss",
+    hint: "强力Boss，分阶段战斗。",
+    color: "#b03a2e",
+    accent: "#f0b0a0"
   }
 };
