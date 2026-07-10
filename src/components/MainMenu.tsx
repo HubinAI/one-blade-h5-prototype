@@ -1,73 +1,37 @@
-import { LEVELS } from "../data/levels";
+import { useState } from "react";
 import type { HomeSnapshot } from "../game/services/ProgressionService";
-import { getMiniRadarData, getRouteName } from "../game/services/SkillTracker";
-import { ROUTE_COLORS } from "../game/config/buffs";
-import type { SkillDimension } from "../game/types";
 
 type MainMenuProps = {
   unlockedLevel: number;
   home: HomeSnapshot;
   onStart: () => void;
   onContinue: () => void;
-  onLevels: () => void;
-  onDailyChallenge: () => void;
-  onHighYieldChallenge: () => void;
-  onFreeBurst: () => void;
-  onUpgrades: () => void;
   onRestoreStamina: () => void;
-  onClaimOffline: () => void;
-  onClaimOfflineDouble: () => void;
   onCodex: () => void;
+  onForge: () => void;
+  onRanking: () => void;
+  onIdle: () => void;
+  onChallenge: () => void;
+  onBag: () => void;
+  onDebug: () => void;
+  appVersion: string;
 };
 
-const DIMENSION_META: Record<SkillDimension, { label: string; color: string }> = {
-  momentum: { label: "势", color: "#ff6a33" },
-  precision: { label: "斩", color: "#ffd35a" },
-  shatter: { label: "破", color: "#9b6dff" },
-  guard: { label: "守", color: "#5b8db8" }
-};
-
-function MiniRadar() {
-  const radarData = getMiniRadarData();
-  const dims: SkillDimension[] = ["momentum", "precision", "shatter", "guard"];
-  const cx = 50;
-  const cy = 50;
-  const r = 30;
-  const angles: Record<SkillDimension, number> = {
-    momentum: -90,
-    precision: 0,
-    shatter: 90,
-    guard: 180
-  };
-
-  function polarToXY(dim: SkillDimension, value: number) {
-    const angleRad = (angles[dim] * Math.PI) / 180;
-    const dist = (value / 100) * r;
-    return { x: cx + dist * Math.cos(angleRad), y: cy + dist * Math.sin(angleRad) };
-  }
-
-  const points = dims.map((dim) => polarToXY(dim, radarData.scores[dim]));
-  const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ") + "Z";
-
+function CurrencyModal({ title, items, onClose }: { title: string; items: Array<{ title: string; desc: string; amount: string }>; onClose: () => void }) {
   return (
-    <div className="mini-radar-badge">
-      <svg viewBox="0 0 100 100" className="mini-radar-badge-svg">
-        {dims.map((dim) => {
-          const end = polarToXY(dim, 100);
-          return <line key={dim} x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="rgba(246,231,189,0.12)" strokeWidth="0.5" />;
-        })}
-        <path d={pathD} fill="rgba(240,195,107,0.14)" stroke="#ffd35a" strokeWidth="1.2" />
-        {dims.map((dim) => {
-          const p = polarToXY(dim, radarData.scores[dim]);
-          return <circle key={dim} cx={p.x} cy={p.y} r="2.5" fill={DIMENSION_META[dim].color} />;
-        })}
-      </svg>
-      <div className="mini-radar-badge-scores">
-        {dims.map((dim) => (
-          <span key={dim} style={{ color: DIMENSION_META[dim].color }}>
-            {DIMENSION_META[dim].label} {radarData.scores[dim]}
-          </span>
-        ))}
+    <div className="currency-modal-overlay" onClick={onClose}>
+      <div className="currency-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="currency-modal-title">{title}</div>
+        <div className="currency-modal-list">
+          {items.map((item, i) => (
+            <div key={i} className="currency-modal-item">
+              <div className="currency-modal-item-title">{item.title}</div>
+              <div className="currency-modal-item-desc">{item.desc}</div>
+              <div className="currency-modal-item-amount">{item.amount}</div>
+            </div>
+          ))}
+        </div>
+        <button className="currency-modal-close" onClick={onClose}>知道了</button>
       </div>
     </div>
   );
@@ -78,97 +42,125 @@ export function MainMenu({
   home,
   onStart,
   onContinue,
-  onLevels,
-  onDailyChallenge,
-  onHighYieldChallenge,
-  onFreeBurst,
-  onUpgrades,
   onRestoreStamina,
-  onClaimOffline,
-  onClaimOfflineDouble,
-  onCodex
+  onCodex,
+  onRanking,
+  onIdle,
+  onChallenge,
+  onBag,
+  onDebug,
+  appVersion,
 }: MainMenuProps) {
   const isFirstPlay = unlockedLevel <= 1 && home.coins === 0;
-  const currentLevel = LEVELS[Math.max(0, Math.min(LEVELS.length - 1, unlockedLevel - 1))];
-  const radarData = getMiniRadarData();
-  const hasRadar = !isFirstPlay && radarData.hasHistory;
-  const hasOffline = home.offlineCoins > 0;
-  const lowStamina = home.stamina < 5;
+  const [showCoinModal, setShowCoinModal] = useState(false);
+  const [showStaminaModal, setShowStaminaModal] = useState(false);
 
   return (
-    <section className="screen menu-screen menu-screen-v6">
-      <div className="menu-v6-top">
-        <div className="menu-v6-currency">
-          <span className="currency-pill">
-            <span className="currency-icon coin-icon" />
-            {home.coins}
-          </span>
-          <span className="currency-pill stamina">
-            <span className="currency-icon bun-icon" />
-            {home.stamina}/{home.staminaMax}
-          </span>
-        </div>
-        {hasRadar && <MiniRadar />}
+    <section className="screen menu-screen menu-screen-v7">
+      <div className="menu-v7-top">
+        <button className="currency-pill" onClick={() => setShowCoinModal(true)}>
+          <span className="currency-icon coin-icon" />
+          {home.coins}
+          <span className="currency-plus">+</span>
+        </button>
+        <button className="currency-pill stamina" onClick={() => setShowStaminaModal(true)}>
+          <span className="currency-icon bun-icon" />
+          {home.stamina}/{home.staminaMax}
+          <span className="currency-plus">+</span>
+        </button>
       </div>
 
-      <div className="menu-v6-hero">
+      <div className="menu-v7-hero">
         <h1>我只要一刀</h1>
         <p>刀势越满，一刀越爽</p>
       </div>
 
-      <div className="menu-v6-center">
-        <div className="challenge-card">
-          <span className="challenge-card-tag">当前挑战</span>
-          <h2>{isFirstPlay ? "第一关" : `第 ${unlockedLevel} 关`}</h2>
-          <p>{currentLevel.title}</p>
-          <button className="challenge-card-button" onClick={isFirstPlay ? onStart : onContinue}>
-            {isFirstPlay ? "开始挑战" : "继续挑战"}
-          </button>
-          {home.freeBurstAvailable && (
-            <button className="challenge-card-hint free-burst" onClick={onFreeBurst}>
-              🔥 今日满势可用 ×1（不耗粮）
-            </button>
-          )}
-          {lowStamina && (
-            <button className="challenge-card-hint" onClick={onRestoreStamina}>
-              军粮不足，看广告恢复 10 点
-            </button>
-          )}
-        </div>
-
-        {hasOffline && (
-          <div className="offline-line">
-            <span>离线收益 {home.offlineCoins} 金币</span>
-            <button onClick={onClaimOffline}>领取</button>
-            <button onClick={onClaimOfflineDouble}>x2</button>
+      {/* 中间：当前关卡（少文字多动画） */}
+      <div className="menu-v7-center">
+        <div className="level-card">
+          <span className="level-card-tag">当前关卡</span>
+          <h2 className="level-card-title">
+            {isFirstPlay ? "第一关" : `第 ${unlockedLevel} 关`}
+          </h2>
+          <div className="level-card-anim">
+            <span className="level-card-sword">⚔</span>
           </div>
-        )}
+        </div>
       </div>
 
-      <div className="menu-v6-footer">
-        <button className="footer-icon" onClick={onLevels}>
-          <span className="footer-icon-symbol">🏆</span>
+      {/* 挂机+挑战：放在关卡下方和开始游戏按钮之间，加底框 */}
+      <div className="menu-v7-row menu-v7-row-top">
+        <button className="menu-v7-action-btn" onClick={onIdle}>
+          <span className="menu-v7-action-icon">🛌</span>
+          <span>挂机收益</span>
+        </button>
+        <button className="menu-v7-action-btn" onClick={onChallenge}>
+          <span className="menu-v7-action-icon">⚔</span>
+          <span>挑战</span>
+        </button>
+      </div>
+
+      {/* 中间偏下：大大的开始游戏按钮 */}
+      <div className="menu-v7-row menu-v7-row-start">
+        <button className="menu-v7-start-btn" onClick={isFirstPlay ? onStart : onContinue}>
+          <span className="menu-v7-start-icon">⚡</span>
+          <span>开始游戏</span>
+        </button>
+        <span className="menu-v7-stamina-hint">⚡消耗 {5} 体力</span>
+      </div>
+
+      {/* 下方：排行+图鉴+武器背包 */}
+      <div className="menu-v7-row menu-v7-row-bottom">
+        <button className="menu-v7-bottom-btn" onClick={onRanking}>
+          <span className="menu-v7-bottom-icon">🏆</span>
           <span>排行</span>
         </button>
-        <button className="footer-icon" onClick={onUpgrades}>
-          <span className="footer-icon-symbol">⚔</span>
-          <span>升级</span>
-        </button>
-        <button className="footer-icon" onClick={onDailyChallenge}>
-          <span className="footer-icon-symbol">☀</span>
-          <span>每日</span>
-        </button>
-        <button className="footer-icon" onClick={onHighYieldChallenge}>
-          <span className="footer-icon-symbol">★</span>
-          <span>高收益</span>
-        </button>
-        <button className="footer-icon" onClick={onCodex}>
-          <span className="footer-icon-symbol">📖</span>
+        <button className="menu-v7-bottom-btn" onClick={onCodex}>
+          <span className="menu-v7-bottom-icon">📖</span>
           <span>图鉴</span>
+        </button>
+        <button className="menu-v7-bottom-btn" onClick={onBag}>
+          <span className="menu-v7-bottom-icon">🎒</span>
+          <span>武器背包</span>
         </button>
       </div>
 
-      <small className="version-footer">V0709010</small>
+      {home.stamina < 5 && (
+        <button className="menu-v7-stamina-btn" onClick={onRestoreStamina}>
+          ⚡体力不足，看广告恢复 10 点
+        </button>
+      )}
+
+      <small className="version-footer">{appVersion}</small>
+
+      <button className="debug-toggle" onClick={onDebug}>🛠</button>
+
+      {showCoinModal && (
+        <CurrencyModal
+          title="如何获得金币？"
+          onClose={() => setShowCoinModal(false)}
+          items={[
+            { title: "通关胜利", desc: "每关胜利基础40金币", amount: "40" },
+            { title: "击杀奖励", desc: "每击杀一个敌军获得1金币", amount: "1" },
+            { title: "评级加成", desc: "C→B→A→S→SS→神 0/20/50/100/180/300", amount: "0~300" },
+            { title: "挂机产出", desc: "离线最多24小时", amount: "20/h" },
+            { title: "广告翻倍", desc: "结算页看广告使奖励×2", amount: "×2" }
+          ]}
+        />
+      )}
+
+      {showStaminaModal && (
+        <CurrencyModal
+          title="如何获得体力？"
+          onClose={() => setShowStaminaModal(false)}
+          items={[
+            { title: "每日登录", desc: "首次登录自动补给10点", amount: "+10" },
+            { title: "自动恢复", desc: "每3分钟自动恢复1点", amount: "1/3分" },
+            { title: "看广告", desc: "看一次恢复广告获得10体力", amount: "+10" },
+            { title: "上限30", desc: "体力上限30点", amount: "30" }
+          ]}
+        />
+      )}
     </section>
   );
 }

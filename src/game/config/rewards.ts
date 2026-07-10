@@ -133,12 +133,13 @@ export const REWARD_CONFIG = {
   stamina: {
     max: 30,
     loginTopUp: 10,
-    challengeCost: 5,
-    regenMinutes: 10,
+    mainlineCost: 5,
+    challengeCost: 10,
+    regenMinutes: 3,
     adRestore: 10
   },
   offline: {
-    maxHours: 8,
+    maxHours: 24,
     coinsPerHour: 20
   },
   codexTotal: 8,

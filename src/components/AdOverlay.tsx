@@ -5,7 +5,7 @@ function reasonText(reason: AdRequest["reason"]) {
   if (reason === "revive") return "看广告复活，立即释放强锋反击";
   if (reason === "double_reward") return "看广告奖励翻倍";
   if (reason === "bonus_chest") return "看广告额外开启宝箱";
-  if (reason === "stamina_restore") return "看广告恢复 10 点军粮";
+  if (reason === "stamina_restore") return "看广告恢复 10 点体力";
   return "插屏广告，仅在结算后出现";
 }
 

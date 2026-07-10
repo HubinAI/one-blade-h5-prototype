@@ -7,9 +7,16 @@ import { LevelSelect } from "./components/LevelSelect";
 import { ResultScreen } from "./components/ResultScreen";
 import { AdOverlay } from "./components/AdOverlay";
 import { UpgradeScreen } from "./components/UpgradeScreen";
-import { PreBattleBriefing } from "./components/PreBattleBriefing";
 import { PauseOverlay } from "./components/PauseOverlay";
 import { Codex } from "./components/Codex";
+import { ForgeScreen } from "./components/ForgeScreen";
+import { ChallengeScreen } from "./components/ChallengeScreen";
+import { TeamScreen } from "./components/TeamScreen";
+import { RankingScreen } from "./components/RankingScreen";
+import { MerchantScreen } from "./components/MerchantScreen";
+import { IdleScreen } from "./components/IdleScreen";
+import { BladeBagScreen } from "./components/BladeBagScreen";
+import { DebugScreen } from "./components/DebugScreen";
 import type { ReviveOffer } from "./game/Game";
 import { AdService } from "./game/services/AdService";
 import {
@@ -19,6 +26,7 @@ import {
   claimAdChest,
   claimDoubleReward,
   claimOfflineReward,
+  earnShareStamina,
   getHomeSnapshot,
   isFreeBurstAvailable,
   markInterstitialShown,
@@ -27,12 +35,18 @@ import {
   saveCodexData,
   spendStamina,
   useFreeBurst,
+  getBossLevelConfig,
+  getCurrentRankId,
+  tryRankUp,
+  updateHighestFloor,
   type RunMode
 } from "./game/services/ProgressionService";
 import { logEvent } from "./game/services/Analytics";
 import type { UpgradeId } from "./game/config/rewards";
+import { REWARD_CONFIG } from "./game/config/rewards";
+import { createFloorLevelConfig } from "./game/config/synthesis";
 
-type Screen = "menu" | "levels" | "briefing" | "battle" | "result" | "upgrades";
+type Screen = "menu" | "battle" | "result" | "upgrades" | "forge" | "challenge" | "team" | "ranking" | "idle" | "bag" | "debug";
 
 const SAVE_KEY = "one_blade_v02_progress";
 
@@ -52,14 +66,18 @@ export default function App() {
   const [home, setHome] = useState(getHomeSnapshot);
   const [currentLevel, setCurrentLevel] = useState<LevelConfig>(LEVELS[0]);
   const [lastResult, setLastResult] = useState<BattleResult | null>(null);
+  const [appVersion] = useState("V0709012");
   const [runIndex, setRunIndex] = useState(0);
   const [reviveOffer, setReviveOffer] = useState<ReviveOffer | null>(null);
   const [reviveSignal, setReviveSignal] = useState(0);
   const [declineReviveSignal, setDeclineReviveSignal] = useState(0);
   const [showCodex, setShowCodex] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [showMerchant, setShowMerchant] = useState(false);
+  const [pendingMerchant, setPendingMerchant] = useState(false);
 
   const refreshHome = useCallback(() => setHome(getHomeSnapshot()), []);
+  const [currentMainlineFloor, setCurrentMainlineFloor] = useState(1);
 
   const unlockedMap = useMemo(() => {
     return new Set(LEVELS.filter((level) => level.id <= unlockedLevel).map((level) => level.id));
@@ -67,17 +85,37 @@ export default function App() {
 
   const startLevel = useCallback(
     (level: LevelConfig, mode: RunMode = "normal") => {
-      // 确保 AudioContext 在用户交互时激活（移动端需要用户手势触发）
+      // 确保 AudioContext 在用户交互时激活
       try { new AudioContext().close(); } catch { /* no-op */ }
+
+      // 消耗体力
+      if (mode !== "freeBurst") {
+        const cost = mode === "normal" ? REWARD_CONFIG.stamina.mainlineCost : REWARD_CONFIG.stamina.challengeCost;
+        if (!spendStamina(cost, `${mode}_run`)) {
+          alert("体力不足！看广告或等恢复后再来");
+          return;
+        }
+      } else {
+        useFreeBurst();
+      }
+
       setRunIndex(beginRun(level.id, mode));
       setCurrentLevel(level);
       setLastResult(null);
       setReviveOffer(null);
       refreshHome();
-      setScreen("briefing");
+      setScreen("battle"); // 跳过战前简报
     },
     [refreshHome]
   );
+
+  const startMainline = useCallback(() => {
+    const floor = Math.max(1, home.highestFloor);
+    setCurrentMainlineFloor(floor);
+    // 体力消耗在 startLevel 里统一处理
+    const level = createFloorLevelConfig(floor);
+    startLevel(level, "normal");
+  }, [home.highestFloor, startLevel]);
 
   const enterBattle = useCallback(() => {
     setScreen("battle");
@@ -89,6 +127,12 @@ export default function App() {
       // 保存图鉴数据
       saveCodexData(result.killedElites, result.killedBoss);
       if (result.win) {
+        // 更新主线层数
+        if (result.levelId >= 10000) {
+          const floor = result.levelId - 10000;
+          updateHighestFloor(floor + 1);
+          setCurrentMainlineFloor(floor + 1);
+        }
         setUnlockedLevel((current) => {
           const next = Math.max(current, Math.min(LEVELS.length, result.levelId + 1));
           writeUnlockedLevel(next);
@@ -96,7 +140,13 @@ export default function App() {
         });
       }
       refreshHome();
-      window.setTimeout(() => setScreen("result"), 180);
+      window.setTimeout(() => {
+        setScreen("result");
+        // 主线通关后标记，待返回首页时弹商店
+        if (result.win && result.levelId >= 10000) {
+          setPendingMerchant(true);
+        }
+      }, 180);
     },
     [refreshHome]
   );
@@ -112,15 +162,31 @@ export default function App() {
   const handleRetry = useCallback(async () => {
     if (!lastResult) return;
     logEvent("replay_click", { levelId: lastResult.levelId, reason: lastResult.win ? "high_score" : "failed" });
-    const target = LEVELS.find((l) => l.id === lastResult.levelId) ?? currentLevel;
-    startLevel(target);
+    if (lastResult.levelId >= 10000) {
+      // 主线模式：重新生成该层配置
+      const floor = lastResult.levelId - 10000;
+      setCurrentMainlineFloor(floor);
+      const level = createFloorLevelConfig(floor);
+      startLevel(level);
+    } else {
+      const target = LEVELS.find((l) => l.id === lastResult.levelId) ?? currentLevel;
+      startLevel(target);
+    }
   }, [currentLevel, lastResult, startLevel]);
 
   const handleNext = useCallback(async () => {
-    if (!nextLevel || !lastResult) return;
+    if (!lastResult) return;
     logEvent("next_level_click", { levelId: lastResult.levelId });
     await maybeShowInterstitial();
-    startLevel(nextLevel);
+    if (lastResult.levelId >= 10000) {
+      // 主线下一层
+      const floor = lastResult.levelId - 10000 + 1;
+      setCurrentMainlineFloor(floor);
+      const level = createFloorLevelConfig(floor);
+      startLevel(level);
+    } else if (nextLevel) {
+      startLevel(nextLevel);
+    }
   }, [lastResult, maybeShowInterstitial, nextLevel, startLevel]);
 
   const handleDoubleReward = useCallback(async () => {
@@ -159,18 +225,9 @@ export default function App() {
     setReviveOffer(null);
   }, [reviveOffer]);
 
-  const handleHighYieldChallenge = useCallback(async () => {
-    if (!spendStamina(5, "high_yield_challenge")) {
-      const success = await AdService.showRewardedAd("stamina_restore");
-      if (success) {
-        restoreStaminaByAd();
-        refreshHome();
-      }
-      return;
-    }
-    refreshHome();
+  const handleHighYieldChallenge = useCallback(() => {
     startLevel(LEVELS[Math.max(0, unlockedLevel - 1)], "highYield");
-  }, [refreshHome, startLevel, unlockedLevel]);
+  }, [startLevel, unlockedLevel]);
 
   const handleRestoreStamina = useCallback(async () => {
     const success = await AdService.showRewardedAd("stamina_restore");
@@ -192,6 +249,11 @@ export default function App() {
     startLevel(level, "freeBurst");
     refreshHome();
   }, [startLevel, unlockedLevel, refreshHome]);
+
+  const handleChallenge = useCallback((rankId: string) => {
+    const bossLevel = getBossLevelConfig(rankId as any);
+    startLevel(bossLevel, "challenge");
+  }, [startLevel]);
 
   const handleBuyUpgrade = useCallback(
     (id: UpgradeId) => {
@@ -218,11 +280,23 @@ export default function App() {
     refreshHome();
   }, [currentLevel, refreshHome]);
 
-  const quitBattle = useCallback(() => {
-    setPaused(false);
+  const goToMenu = useCallback(() => {
     refreshHome();
     setScreen("menu");
-  }, [refreshHome]);
+    // 回到首页时，如果有待触发的神秘商人，则弹窗
+    setTimeout(() => {
+      setShowMerchant(prev => {
+        if (pendingMerchant && !prev) return true;
+        return prev;
+      });
+      setPendingMerchant(false);
+    }, 200);
+  }, [refreshHome, pendingMerchant]);
+
+  const quitBattle = useCallback(() => {
+    setPaused(false);
+    goToMenu();
+  }, [goToMenu]);
 
   return (
     <main className="app-shell">
@@ -230,26 +304,27 @@ export default function App() {
         <MainMenu
           unlockedLevel={unlockedLevel}
           home={home}
-          onStart={() => startLevel(LEVELS[0])}
-          onContinue={() => startLevel(LEVELS[Math.max(0, unlockedLevel - 1)])}
-          onLevels={() => setScreen("levels")}
-          onDailyChallenge={handleDailyChallenge}
-          onHighYieldChallenge={handleHighYieldChallenge}
-          onFreeBurst={handleFreeBurst}
-          onUpgrades={() => setScreen("upgrades")}
+          onStart={startMainline}
+          onContinue={startMainline}
           onRestoreStamina={handleRestoreStamina}
-          onClaimOffline={handleClaimOffline}
-          onClaimOfflineDouble={handleClaimOfflineDouble}
           onCodex={() => setShowCodex(true)}
+          onForge={() => setScreen("bag")}
+          onRanking={() => setScreen("ranking")}
+          onIdle={() => setScreen("idle")}
+          onChallenge={() => setScreen("challenge")}
+          onBag={() => setScreen("bag")}
+          onDebug={() => setScreen("debug")}
+          appVersion={appVersion}
         />
       )}
 
       {showCodex && <Codex onClose={() => setShowCodex(false)} />}
 
-      {screen === "briefing" && (
-        <PreBattleBriefing
-          level={currentLevel}
-          onReady={enterBattle}
+      {showMerchant && (
+        <MerchantScreen
+          onClose={() => setShowMerchant(false)}
+          coins={home.coins}
+          onCoinChange={refreshHome}
         />
       )}
 
@@ -261,6 +336,39 @@ export default function App() {
             setScreen("menu");
           }}
           onBuy={handleBuyUpgrade}
+        />
+      )}
+
+      {screen === "forge" && (
+        <ForgeScreen onBack={() => { refreshHome(); setScreen("menu"); }} />
+      )}
+
+      {screen === "idle" && (
+        <IdleScreen onBack={() => { refreshHome(); setScreen("menu"); }} />
+      )}
+
+      {screen === "bag" && (
+        <BladeBagScreen onBack={() => { refreshHome(); setScreen("menu"); }} />
+      )}
+
+      {screen === "debug" && (
+        <DebugScreen onBack={() => setScreen("menu")} />
+      )}
+
+      {screen === "team" && (
+        <TeamScreen onBack={() => { refreshHome(); setScreen("menu"); }} />
+      )}
+
+      {screen === "ranking" && (
+        <RankingScreen onBack={() => { refreshHome(); setScreen("menu"); }} />
+      )}
+
+      {screen === "challenge" && (
+        <ChallengeScreen
+          highestFloor={home.highestFloor}
+          rankIndex={home.rankIndex}
+          onBack={() => { refreshHome(); setScreen("menu"); }}
+          onChallenge={handleChallenge}
         />
       )}
 
@@ -314,11 +422,8 @@ export default function App() {
           hasNext={Boolean(nextLevel)}
           onRetry={handleRetry}
           onNext={handleNext}
-          onLevels={() => setScreen("menu")}
-          onHome={() => {
-            refreshHome();
-            setScreen("menu");
-          }}
+          onLevels={goToMenu}
+          onHome={goToMenu}
           onDoubleReward={handleDoubleReward}
           onAdChest={handleAdChest}
         />

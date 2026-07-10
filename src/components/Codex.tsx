@@ -1,226 +1,160 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ELITE_CONFIG } from "../game/config/elites";
-import { BOSS_CONFIG } from "../game/config/bosses";
-import { getCodexElites, getCodexBosses } from "../game/services/ProgressionService";
+import { useState, useEffect, useMemo, useRef } from "react";
+import {
+  QUALITY_META,
+  QUALITY_ORDER,
+  BLADE_BASE_STATS,
+  AFFIX_CONFIG,
+  RANK_CONFIG,
+  RANK_ORDER,
+  type Quality,
+} from "../game/config/synthesis";
+import { getBladeInventory, getCurrentRankId } from "../game/services/ProgressionService";
 
-type CodexEntry = {
-  id: string;
-  name: string;
-  description: string;
-  status: "locked" | "unlocked";
-  color: string;
-};
-
-const ELITE_ENTRIES: CodexEntry[] = (Object.values(ELITE_CONFIG) as Array<{ kind: string; name: string; skillDescription: string; color: string }>).map(
-  (e) => ({
-    id: e.kind,
-    name: e.name,
-    description: e.skillDescription,
-    status: "locked" as const,
-    color: e.color
-  })
-);
-
-const BOSS_ENTRIES: CodexEntry[] = (Object.values(BOSS_CONFIG) as Array<{ id: string; name: string; introText: string; color: string }>).map(
-  (b) => ({
-    id: b.id,
-    name: b.name,
-    description: b.introText,
-    status: "locked" as const,
-    color: b.color
-  })
-);
-
-type Props = {
+type CodexProps = {
   onClose: () => void;
 };
 
-export function Codex({ onClose }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [elites, setElites] = useState<CodexEntry[]>([]);
-  const [bosses, setBosses] = useState<CodexEntry[]>([]);
+const QUALITY_ICONS: Record<Quality, string> = {
+  white: "🗡",
+  green: "🗡",
+  blue: "⚔",
+  purple: "⚔",
+  gold: "🗡",
+  darkGold: "🗡",
+  spirit: "🗡",
+  immortal: "🗡",
+  god: "🗡"
+};
+
+export function Codex({ onClose }: CodexProps) {
+  const [selectedBlade, setSelectedBlade] = useState<string | null>(null);
+  const [rankIndex, setRankIndex] = useState(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ y: number; top: number } | null>(null);
 
   useEffect(() => {
-    const unlockedElites = getCodexElites();
-    const unlockedBosses = getCodexBosses();
-    setElites(
-      ELITE_ENTRIES.map((e) => ({
-        ...e,
-        status: unlockedElites.includes(e.id) ? "unlocked" : "locked"
-      }))
-    );
-    setBosses(
-      BOSS_ENTRIES.map((b) => ({
-        ...b,
-        status: unlockedBosses.includes(b.id) ? "unlocked" : "locked"
-      }))
-    );
+    const rank = getCurrentRankId();
+    const idx = RANK_ORDER.indexOf(rank);
+    setRankIndex(idx >= 0 ? idx : 0);
   }, []);
 
-  const unlockedCount = [...elites, ...bosses].filter((e) => e.status === "unlocked").length;
-  const totalCount = ELITE_ENTRIES.length + BOSS_ENTRIES.length;
-
-  const drawRadar = useCallback(
-    (ctx: CanvasRenderingContext2D, entries: CodexEntry[], color: string, cx: number, cy: number, radius: number) => {
-      const unlocked = entries.filter((e) => e.status === "unlocked").length;
-      const total = entries.length;
-      const ratio = total > 0 ? unlocked / total : 0;
-      const startAngle = -Math.PI / 2;
-      const endAngle = startAngle + Math.PI * 2 * ratio;
-
-      ctx.save();
-      ctx.translate(cx, cy);
-
-      // 背景圆
-      ctx.strokeStyle = "rgba(255, 214, 124, 0.2)";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // 进度弧
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 4;
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 10;
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, startAngle, endAngle);
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-
-      // 中心文字
-      ctx.fillStyle = "#fff3c0";
-      ctx.font = '800 18px "Microsoft YaHei", sans-serif';
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(`${unlocked}/${total}`, 0, 0);
-
-      ctx.restore();
-    },
-    []
-  );
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = 350 * dpr;
-    canvas.height = 280 * dpr;
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, 350, 280);
-
-    // 背景
-    ctx.fillStyle = "rgba(10, 7, 5, 0.7)";
-    ctx.beginPath();
-    ctx.roundRect(0, 0, 350, 280, 12);
-    ctx.fill();
-
-    // 标题
-    ctx.fillStyle = "#ffd35a";
-    ctx.font = '800 18px "Microsoft YaHei", sans-serif';
-    ctx.textAlign = "center";
-    ctx.fillText("图鉴", 175, 30);
-
-    // 统计
-    ctx.fillStyle = "rgba(246, 231, 189, 0.72)";
-    ctx.font = '13px "Microsoft YaHei", sans-serif';
-    ctx.fillText(`已解锁 ${unlockedCount}/${totalCount}`, 175, 54);
-
-    // 精英区
-    ctx.fillStyle = "#f5d78a";
-    ctx.font = '700 13px "Microsoft YaHei", sans-serif';
-    ctx.textAlign = "left";
-    ctx.fillText("— 精英 —", 20, 82);
-    let ey = 102;
-    for (const e of elites) {
-      const isUnlocked = e.status === "unlocked";
-      ctx.fillStyle = isUnlocked ? e.color : "rgba(255,255,255,0.2)";
-      ctx.font = isUnlocked ? '700 12px "Microsoft YaHei", sans-serif' : '12px "Microsoft YaHei", sans-serif';
-      ctx.fillText(isUnlocked ? e.name : "???", 28, ey);
-      if (isUnlocked) {
-        ctx.fillStyle = "rgba(246, 231, 189, 0.6)";
-        ctx.font = '10px "Microsoft YaHei", sans-serif';
-        ctx.fillText(e.description.substring(0, 22), 100, ey);
-      }
-      ey += 20;
+  const inventory = useMemo(() => getBladeInventory(), []);
+  const groups = useMemo(() => {
+    const map: Record<string, typeof inventory> = {};
+    for (const b of inventory) {
+      if (!map[b.quality]) map[b.quality] = [];
+      map[b.quality].push(b);
     }
+    return map;
+  }, [inventory]);
 
-    // Boss区
-    ctx.fillStyle = "#f0b0a0";
-    ctx.font = '700 13px "Microsoft YaHei", sans-serif';
-    ctx.textAlign = "left";
-    ctx.fillText("— Boss —", 20, ey + 4);
-    ey += 24;
-    for (const b of bosses) {
-      const isUnlocked = b.status === "unlocked";
-      ctx.fillStyle = isUnlocked ? b.color : "rgba(255,255,255,0.2)";
-      ctx.font = isUnlocked ? '700 12px "Microsoft YaHei", sans-serif' : '12px "Microsoft YaHei", sans-serif';
-      ctx.fillText(isUnlocked ? b.name : "???", 28, ey);
-      if (isUnlocked) {
-        ctx.fillStyle = "rgba(246, 231, 189, 0.6)";
-        ctx.font = '10px "Microsoft YaHei", sans-serif';
-        ctx.fillText(b.description.substring(0, 22), 100, ey);
-      }
-      ey += 20;
-    }
+  // 已解锁品质数 = 当前段位 + 1 (含白品)
+  const unlockedCount = Math.max(1, rankIndex + 2);
+  // 仅展示：已解锁 + 下一个未解锁（半弹窗轻量化）
+  const displayRange = QUALITY_ORDER.slice(0, unlockedCount + 1);
 
-    // 进度环
-    drawRadar(ctx, elites, "#d48c2a", 300, 70, 28);
-    drawRadar(ctx, bosses, "#c0392b", 300, 110, 28);
-  }, [elites, bosses, drawRadar]);
+  // 拖动手势
+  function onPointerDown(e: React.PointerEvent) {
+    if (!scrollRef.current) return;
+    dragRef.current = { y: e.clientY, top: scrollRef.current.scrollTop };
+    (e.target as Element).setPointerCapture(e.pointerId);
+  }
+  function onPointerMove(e: React.PointerEvent) {
+    if (!dragRef.current || !scrollRef.current) return;
+    const dy = dragRef.current.y - e.clientY;
+    scrollRef.current.scrollTop = dragRef.current.top + dy;
+  }
 
   return (
-    <div
-      className="codex-overlay"
-      style={{
-        position: "fixed",
-        inset: 0,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 100
-      }}
-      onClick={onClose}
-    >
-      <div
-        className="codex-panel"
-        style={{
-          width: 370,
-          maxHeight: "80vh",
-          overflow: "auto",
-          position: "relative"
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <canvas
-          ref={canvasRef}
-          style={{
-            width: 350,
-            height: 280,
-            display: "block",
-            margin: "0 auto",
-            borderRadius: 12,
-            border: "1px solid rgba(255, 214, 124, 0.3)"
-          }}
-        />
-        <button
-          onClick={onClose}
-          style={{
-            display: "block",
-            margin: "12px auto 0",
-            padding: "8px 32px",
-            background: "rgba(255, 214, 124, 0.15)",
-            border: "1px solid rgba(255, 214, 124, 0.4)",
-            borderRadius: 8,
-            color: "#ffd35a",
-            fontSize: 14,
-            cursor: "pointer"
-          }}
+    <div className="codex-overlay" onClick={onClose}>
+      <div className="codex-panel codex-v2" onClick={(e) => e.stopPropagation()}>
+        <div className="codex-header">
+          <button className="codex-back" onClick={onClose}>×</button>
+          <h1>神兵图鉴</h1>
+        </div>
+
+        <div
+          className="codex-list"
+          ref={scrollRef}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
         >
-          关闭
-        </button>
+          {displayRange.map((q) => {
+            const meta = QUALITY_META[q];
+            const blades = groups[q] ?? [];
+            const stats = BLADE_BASE_STATS[q];
+            const isUnlocked = q !== QUALITY_ORDER[unlockedCount];
+            return (
+              <div key={q} className={`codex-quality-block ${isUnlocked ? "" : "locked"}`}>
+                <h2 className="codex-quality-heading" style={{ background: meta.color, color: "#1a100a" }}>
+                  {meta.label}武学
+                </h2>
+                {isUnlocked ? (
+                  blades.length === 0 ? (
+                    <p className="codex-empty">尚未获得此类刀</p>
+                  ) : (
+                    <>
+                      <div className="codex-blade-grid">
+                        {blades.map((blade) => {
+                          const isSelected = selectedBlade === blade.id;
+                          return (
+                            <div
+                              key={blade.id}
+                              className={`codex-blade-card ${isSelected ? "selected" : ""}`}
+                              style={{ borderColor: meta.color }}
+                              onClick={() => setSelectedBlade(isSelected ? null : blade.id)}
+                            >
+                              <span className="codex-blade-icon" style={{ background: meta.color }}>
+                                {QUALITY_ICONS[blade.quality]}
+                              </span>
+                              <span className="codex-blade-name">{blade.name}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="codex-quality-stats">
+                        <span>刀芒 ×{stats.bladeMultiplier.toFixed(1)}</span>
+                        <span>伤害 ×{stats.damageMultiplier.toFixed(1)}</span>
+                        <span>副刀 {stats.subSlashInterval.toFixed(1)}s</span>
+                      </div>
+                    </>
+                  )
+                ) : (
+                  <p className="codex-locked-cond">
+                    通过{RANK_CONFIG[RANK_ORDER[unlockedCount]]?.name ?? "下一段位"}后解锁
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {selectedBlade && (() => {
+          const blade = inventory.find(b => b.id === selectedBlade);
+          if (!blade) return null;
+          const meta = QUALITY_META[blade.quality];
+          const affix = blade.affix ? AFFIX_CONFIG[blade.affix] : null;
+          return (
+            <div className="codex-detail" onClick={(e) => e.stopPropagation()}>
+              <div className="codex-detail-panel" onClick={(e) => e.stopPropagation()}>
+                <div className="codex-detail-head" style={{ borderColor: meta.color }}>
+                  <span className="codex-detail-quality" style={{ background: meta.color }}>
+                    {meta.label}
+                  </span>
+                  <span className="codex-detail-name" style={{ color: meta.color }}>
+                    {blade.name}
+                  </span>
+                  <button className="codex-detail-close" onClick={() => setSelectedBlade(null)}>×</button>
+                </div>
+                <div className="codex-detail-body">
+                  <p className="codex-detail-row"><span>等级</span><b>Lv.{blade.level}</b></p>
+                  {affix && <p className="codex-detail-row"><span>词缀</span><b>{affix.name}</b></p>}
+                  {affix && <p className="codex-detail-desc">{affix.primaryEffect}</p>}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

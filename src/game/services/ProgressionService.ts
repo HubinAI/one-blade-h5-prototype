@@ -9,12 +9,16 @@ import {
   getUpgradeCost,
   type UpgradeId
 } from "../config/rewards";
-import type { BattleResult, BossId, EliteKind, EnemyKind, RatingGrade, RunProgress, RunRewards } from "../types";
+import type { BattleResult, BossId, EliteKind, EnemyKind, LevelConfig, RatingGrade, RunProgress, RunRewards } from "../types";
+import type { Quality, RankId } from "../config/synthesis";
+import { RANK_ORDER, RANK_CONFIG, QUALITY_ORDER, QUALITY_META } from "../config/synthesis";
+import { synthesizeBlades, addExpToBlade, generateBlade } from "./BladeService";
+import type { SynthesisResult, Blade } from "./BladeService";
 import { logEvent } from "./Analytics";
 
 const STORAGE_KEY = "one_blade_v04_progression";
 
-export type RunMode = "normal" | "dailyChallenge" | "highYield" | "freeBurst";
+export type RunMode = "normal" | "dailyChallenge" | "highYield" | "freeBurst" | "challenge";
 type DailyTaskId = (typeof DAILY_TASK_CONFIG)[number]["id"];
 
 type DailyTaskProgress = {
@@ -36,6 +40,7 @@ export type PlayerProgress = {
   stamina: number;
   lastStaminaAt: number;
   lastSeenAt: number;
+  lastShareAt: number;
   offlineCoins: number;
   chestProgress: number;
   chestOpened: number;
@@ -50,6 +55,19 @@ export type PlayerProgress = {
   lastInterstitialAt: number;
   currentRunMode: RunMode;
   daily: DailyState;
+  // ---- 修仙合成系统 ----
+  /** 刀库 */
+  blades: Blade[];
+  /** 玩家当前段位索引（0=练气） */
+  rankIndex: number;
+  /** 主线最高层数 */
+  highestFloor: number;
+  /** 当前装备的主刀ID */
+  equippedMainBladeId: string | null;
+  /** 当前装备的副刀ID列表 */
+  equippedSubBladeIds: string[];
+  /** 各品质合成失败计数 */
+  synFailCount: Record<string, number>;
 };
 
 export type BattleRewardInput = {
@@ -78,6 +96,9 @@ export type HomeSnapshot = {
   dailyChallengeName: string;
   dailyChallengeDescription: string;
   offlineCoins: number;
+  highestFloor: number;
+  rankIndex: number;
+  lastSeenAt: number;
   fragments: Array<{
     name: string;
     count: number;
@@ -152,6 +173,7 @@ function createDefaultProgress(): PlayerProgress {
     stamina: REWARD_CONFIG.stamina.max,
     lastStaminaAt: now,
     lastSeenAt: now,
+    lastShareAt: 0,
     offlineCoins: 0,
     chestProgress: 0,
     chestOpened: 0,
@@ -165,7 +187,13 @@ function createDefaultProgress(): PlayerProgress {
     lastInterstitialRun: 0,
     lastInterstitialAt: 0,
     currentRunMode: "normal",
-    daily: createDailyState()
+    daily: createDailyState(),
+    blades: [],
+    rankIndex: 0,
+    highestFloor: 1,
+    equippedMainBladeId: null,
+    equippedSubBladeIds: [],
+    synFailCount: {},
   };
 }
 
@@ -234,6 +262,12 @@ function applyTimeProgress(progress: PlayerProgress) {
       maxOfflineCoins,
       progress.offlineCoins + offlineHours * REWARD_CONFIG.offline.coinsPerHour
     );
+    // 离线产出白色刀（1~3小时1把）
+    const bladeCount = Math.floor(offlineHours / 2);
+    for (let i = 0; i < bladeCount; i++) {
+      const blade = generateBlade("white");
+      progress.blades.push(blade);
+    }
     progress.lastSeenAt = now;
     changed = true;
   }
@@ -253,7 +287,7 @@ export function readProgress(): PlayerProgress {
   }
 }
 
-function writeProgress(progress: PlayerProgress) {
+export function writeProgress(progress: PlayerProgress) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
 }
@@ -473,6 +507,21 @@ export function applyBattleRewards(input: BattleRewardInput): Pick<BattleResult,
 
   const chestOpened = openFreeChests(progress, fragmentName, "battle_reward");
   autoClaimDailyTasks(progress, fragmentName);
+
+  // ---- 修仙合成：战斗产出刀 ----
+  const currentRank = RANK_ORDER[progress.rankIndex] ?? RANK_ORDER[0];
+  const rankConfig = RANK_CONFIG[currentRank];
+  // 产出刀品质 = 段位可解锁的最低品质 / 或白色兜底
+  const baseQuality: Quality = rankConfig?.unlockQuality ?? "white";
+  const bladeQualityOrder: Quality[] = ["white", "green", "blue", "purple", "gold", "darkGold", "spirit", "immortal", "god"];
+  const baseIdx = bladeQualityOrder.indexOf(baseQuality);
+  // 胜利时可能出更好品质（+1），失败只出基础品质
+  const rewardQuality = input.win
+    ? bladeQualityOrder[Math.min(bladeQualityOrder.length - 1, baseIdx + (Math.random() < 0.15 ? 1 : 0))]
+    : bladeQualityOrder[Math.max(0, baseIdx)];
+  const newBlade = generateBlade(rewardQuality);
+  progress.blades.push(newBlade);
+
   progress.currentRunMode = "normal";
   writeProgress(progress);
 
@@ -649,7 +698,7 @@ export function buyUpgrade(id: UpgradeId) {
   return { ok: true, progress: getHomeSnapshot() };
 }
 
-export function spendStamina(amount = REWARD_CONFIG.stamina.challengeCost, reason = "high_yield_challenge") {
+export function spendStamina(amount: number, reason = "challenge_run") {
   const progress = readProgress();
   if (progress.stamina < amount) return false;
   progress.stamina -= amount;
@@ -657,6 +706,23 @@ export function spendStamina(amount = REWARD_CONFIG.stamina.challengeCost, reaso
   writeProgress(progress);
   logEvent("stamina_spend", { amount, reason, staminaLeft: progress.stamina });
   return true;
+}
+
+/** 分享获得体力（15分钟冷却） */
+export function earnShareStamina() {
+  const progress = readProgress();
+  const shareCD = 15 * 60 * 1000; // 15分钟
+  const now = Date.now();
+  const lastShare = progress.lastShareAt ?? 0;
+  if (now - lastShare < shareCD) {
+    const remaining = Math.ceil((shareCD - (now - lastShare)) / 60000);
+    return { ok: false, message: `冷却中，${remaining}分钟后可再分享`, stamina: progress.stamina };
+  }
+  progress.lastShareAt = now;
+  progress.stamina = Math.min(REWARD_CONFIG.stamina.max, progress.stamina + 5);
+  writeProgress(progress);
+  logEvent("stamina_restore", { amount: 5, reason: "share", stamina: progress.stamina });
+  return { ok: true, stamina: progress.stamina };
 }
 
 export function restoreStaminaByAd(reason = "stamina_restore") {
@@ -711,6 +777,9 @@ export function getHomeSnapshot(): HomeSnapshot {
     dailyChallengeName: challenge.name,
     dailyChallengeDescription: challenge.description,
     offlineCoins: progress.offlineCoins,
+    highestFloor: progress.highestFloor,
+    rankIndex: progress.rankIndex,
+    lastSeenAt: progress.lastSeenAt,
     fragments: FRAGMENT_CONFIG.map((item) => {
       const count = progress.fragments[item.name] ?? 0;
       return {
@@ -760,4 +829,312 @@ export function useFreeBurst(): void {
   const progress = readProgress();
   progress.daily.freeBurstUsed = true;
   writeProgress(progress);
+}
+
+// ════════════════════════════════════════════
+// 修仙合成系统 - 刀库管理
+// ════════════════════════════════════════════
+
+/** 获取刀库 */
+export function getBladeInventory(): Blade[] {
+  return readProgress().blades;
+}
+
+/** 添加一把刀到刀库 */
+export function addBlade(blade: Blade): void {
+  const progress = readProgress();
+  progress.blades.push(blade);
+  writeProgress(progress);
+}
+
+/** 从刀库移除刀（用作合成材料） */
+export function removeBlade(bladeId: string): boolean {
+  const progress = readProgress();
+  const idx = progress.blades.findIndex(b => b.id === bladeId);
+  if (idx < 0) return false;
+  progress.blades.splice(idx, 1);
+  writeProgress(progress);
+  return true;
+}
+
+/** 执行合成 */
+export function forgeBlades(mat1Id: string, mat2Id: string): SynthesisResult | null {
+  const progress = readProgress();
+  const b1 = progress.blades.find(b => b.id === mat1Id);
+  const b2 = progress.blades.find(b => b.id === mat2Id);
+  if (!b1 || !b2 || b1.quality !== b2.quality) return null;
+
+  const failCount = progress.synFailCount[b1.quality] ?? 0;
+  const result = synthesizeBlades(b1, b2, failCount);
+
+  // 移除材料
+  progress.blades = progress.blades.filter(b => b.id !== mat1Id && b.id !== mat2Id);
+
+  if (result.success && result.resultBlade) {
+    progress.blades.push(result.resultBlade);
+    progress.synFailCount[b1.quality] = 0;
+  } else {
+    // 失败：记录递增 + 经验自动加到第一把未锁的刀上
+    progress.synFailCount[b1.quality] = result.state.failCount;
+    const targetBlade = progress.blades.find(b => !b.locked);
+    if (targetBlade) {
+      addExpToBlade(targetBlade, result.expReward);
+    }
+  }
+
+  writeProgress(progress);
+  return result;
+}
+
+/** 获取当前段位ID */
+export function getCurrentRankId(): RankId {
+  const progress = readProgress();
+  return RANK_ORDER[progress.rankIndex] ?? RANK_ORDER[0];
+}
+
+/** 获取可解锁的最高段位（基于主线层数） */
+export function getAvailableRankIndex(highestFloor: number): number {
+  // 每50层可升一段
+  return Math.min(RANK_ORDER.length - 1, Math.floor(highestFloor / 50));
+}
+
+/** 尝试升段 */
+export function tryRankUp(): { ok: boolean; newRank?: RankId } {
+  const progress = readProgress();
+  const available = getAvailableRankIndex(progress.highestFloor);
+  if (progress.rankIndex < available) {
+    progress.rankIndex += 1;
+    writeProgress(progress);
+    return { ok: true, newRank: RANK_ORDER[progress.rankIndex] };
+  }
+  return { ok: false };
+}
+
+/** 更新主线最高层数 */
+export function updateHighestFloor(floor: number): void {
+  const progress = readProgress();
+  if (floor > progress.highestFloor) {
+    progress.highestFloor = floor;
+    writeProgress(progress);
+  }
+}
+
+/** 获取装备的刀 */
+export function getEquippedBlades(): { main: Blade | null; subs: Blade[] } {
+  const progress = readProgress();
+  const main = progress.blades.find(b => b.id === progress.equippedMainBladeId) ?? null;
+  const subs = progress.equippedSubBladeIds
+    .map(id => progress.blades.find(b => b.id === id))
+    .filter((b): b is Blade => b !== undefined);
+  return { main, subs };
+}
+
+/** 装备主刀 */
+export function equipMainBlade(bladeId: string | null): void {
+  const progress = readProgress();
+  progress.equippedMainBladeId = bladeId;
+  writeProgress(progress);
+}
+
+/** 装备副刀（替换指定槽位） */
+export function equipSubBlade(bladeId: string, slotIndex: number): void {
+  const progress = readProgress();
+  while (progress.equippedSubBladeIds.length <= slotIndex) {
+    progress.equippedSubBladeIds.push("");
+  }
+  progress.equippedSubBladeIds[slotIndex] = bladeId;
+  writeProgress(progress);
+}
+
+/** 卸下副刀 */
+export function unequipSubBlade(slotIndex: number): void {
+  const progress = readProgress();
+  if (slotIndex < progress.equippedSubBladeIds.length) {
+    progress.equippedSubBladeIds[slotIndex] = "";
+  }
+  writeProgress(progress);
+}
+
+export type EquippedBlades = { main: Blade | null; subs: Blade[] };
+export const setEquippedMainBlade = equipMainBlade;
+export const setEquippedSubBlade = equipSubBlade;
+export const removeEquippedSubBlade = unequipSubBlade;
+
+/** 第一次进入武器背包时确保有默认白刀 + 主刀已装备 */
+export function saveDefaultWhiteBlade(): void {
+  const progress = readProgress();
+  // 如果没有白刀，生成一把
+  if (!progress.blades.some(b => b.quality === "white")) {
+    import("../services/BladeService").then(({ generateBlade }) => {
+      const p = readProgress();
+      const w = generateBlade("white");
+      p.blades.push(w);
+      if (!p.equippedMainBladeId) p.equippedMainBladeId = w.id;
+      writeProgress(p);
+    });
+  } else if (!progress.equippedMainBladeId) {
+    // 有白刀但没装备，装备第一把
+    const firstWhite = progress.blades.find(b => b.quality === "white");
+    if (firstWhite) progress.equippedMainBladeId = firstWhite.id;
+    writeProgress(progress);
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════
+// 今日Buff 系统
+// ═════════════════════════════════════════════════════════════════
+const STORE_KEY_TODAY = "one_blade_today_buffs";
+
+export type OwnedBuff = {
+  buffId: string;
+  acquiredAt: number;
+};
+
+export type DailyBuffState = {
+  date: string; // YYYY-MM-DD
+  shopPoolIds: string[];   // 6个金币直购
+  drawPoolIds: string[];   // 6-7个广告抽奖
+  owned: OwnedBuff[];      // 玩家已购入的（最多5个）
+  drawCount: number;       // 今日已用广告抽奖次数（每日最多3次）
+  lastDrawAt: number;      // 上次抽奖时间（5分钟CD）
+};
+
+function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function readBuffState(): DailyBuffState {
+  try {
+    const raw = window.localStorage.getItem(STORE_KEY_TODAY);
+    if (raw) {
+      const data = JSON.parse(raw) as DailyBuffState;
+      if (data.date === todayStr()) return data;
+    }
+  } catch { /* ignore */ }
+  return createNewDailyState();
+}
+
+function writeBuffState(state: DailyBuffState) {
+  window.localStorage.setItem(STORE_KEY_TODAY, JSON.stringify(state));
+}
+
+import { rollTodayShopPool, rollTodayDrawPool, type TodayBuff } from "../config/synthesis";
+
+function createNewDailyState(): DailyBuffState {
+  const shop = rollTodayShopPool();
+  const draw = rollTodayDrawPool();
+  const state: DailyBuffState = {
+    date: todayStr(),
+    shopPoolIds: shop.map(b => b.id),
+    drawPoolIds: draw.map(b => b.id),
+    owned: [],
+    drawCount: 0,
+    lastDrawAt: 0,
+  };
+  writeBuffState(state);
+  return state;
+}
+
+export function getTodayBuffState(): DailyBuffState {
+  const state = readBuffState();
+  if (state.date !== todayStr()) {
+    return createNewDailyState();
+  }
+  return state;
+}
+
+export function getBuffById(id: string): TodayBuff | null {
+  return TODAY_BUFF_POOL_LOCAL.find(b => b.id === id) ?? null;
+}
+
+// 从synthesis导入的常量缓存引用（避免循环依赖）
+let TODAY_BUFF_POOL_LOCAL: TodayBuff[] = [];
+import { TODAY_BUFF_POOL as _TODAY_BUFF_POOL } from "../config/synthesis";
+TODAY_BUFF_POOL_LOCAL = _TODAY_BUFF_POOL;
+
+export function buyBuffFromShop(buffId: string): { ok: boolean; reason?: string; state?: DailyBuffState } {
+  const state = getTodayBuffState();
+  if (state.owned.length >= 5) return { ok: false, reason: "最多持有5个Buff" };
+  if (state.owned.some(b => b.buffId === buffId)) return { ok: false, reason: "已拥有该Buff" };
+  const buff = getBuffById(buffId);
+  if (!buff) return { ok: false, reason: "Buff不存在" };
+  if (!state.shopPoolIds.includes(buffId)) return { ok: false, reason: "该Buff不在今日商店" };
+  const progress = readProgress();
+  if (progress.coins < buff.price) return { ok: false, reason: "金币不足" };
+  progress.coins -= buff.price;
+  writeProgress(progress);
+  state.owned.push({ buffId, acquiredAt: Date.now() });
+  writeBuffState(state);
+  return { ok: true, state };
+}
+
+export function drawBuffFromDrawPool(buffId: string): { ok: boolean; reason?: string; state?: DailyBuffState; buff?: TodayBuff } {
+  const state = getTodayBuffState();
+  if (state.drawCount >= 3) return { ok: false, reason: "今日已用完3次抽奖" };
+  const now = Date.now();
+  if (state.lastDrawAt && now - state.lastDrawAt < 5 * 60 * 1000) {
+    return { ok: false, reason: `冷却中，还剩${Math.ceil((5 * 60 * 1000 - (now - state.lastDrawAt)) / 60000)}分钟` };
+  }
+  if (state.owned.length >= 5) return { ok: false, reason: "Buff已满5个，请先替换" };
+  if (state.owned.some(b => b.buffId === buffId)) return { ok: false, reason: "已拥有该Buff" };
+  const buff = getBuffById(buffId);
+  if (!buff) return { ok: false, reason: "Buff不存在" };
+  if (!state.drawPoolIds.includes(buffId)) return { ok: false, reason: "该Buff不在今日奖池" };
+  state.drawCount += 1;
+  state.lastDrawAt = now;
+  state.owned.push({ buffId, acquiredAt: now });
+  writeBuffState(state);
+  return { ok: true, state, buff };
+}
+
+export function replaceBuff(oldBuffId: string, newBuffId: string): { ok: boolean; reason?: string; state?: DailyBuffState } {
+  const state = getTodayBuffState();
+  if (!state.owned.some(b => b.buffId === oldBuffId)) return { ok: false, reason: "旧Buff不存在" };
+  if (state.owned.some(b => b.buffId === newBuffId)) return { ok: false, reason: "已拥有该Buff" };
+  if (!state.shopPoolIds.includes(newBuffId) && !state.drawPoolIds.includes(newBuffId)) {
+    return { ok: false, reason: "新Buff不在今日池" };
+  }
+  const newBuff = getBuffById(newBuffId);
+  if (!newBuff) return { ok: false, reason: "Buff不存在" };
+  const progress = readProgress();
+  if (progress.coins < newBuff.price) return { ok: false, reason: "金币不足" };
+  progress.coins -= newBuff.price;
+  writeProgress(progress);
+  state.owned = state.owned.filter(b => b.buffId !== oldBuffId);
+  state.owned.push({ buffId: newBuffId, acquiredAt: Date.now() });
+  writeBuffState(state);
+  return { ok: true, state };
+}
+
+/** 获取今日已购Buff的effect汇总（应用时调用） */
+export function getActiveBuffEffects(): TodayBuff[] {
+  const state = getTodayBuffState();
+  return state.owned.map(b => getBuffById(b.buffId)).filter((b): b is TodayBuff => b !== null);
+}
+
+/** 生成段位Boss关的LevelConfig */
+export function getBossLevelConfig(rankId: RankId): LevelConfig {
+  const rank = RANK_CONFIG[rankId];
+  const bossNames: Record<BossId, string> = { zhangFei: "张飞", simaYi: "司马懿", zhenJi: "甄宓" };
+  const bossName = rank ? bossNames[rank.bossId] ?? "Boss" : "Boss";
+  return {
+    id: 100 + RANK_ORDER.indexOf(rankId),
+    title: `${rank?.name ?? "练气"}突破`,
+    subtitle: `击败${bossName}，解锁${rank ? QUALITY_META[rank.unlockQuality]?.label ?? "" : ""}品质合成`,
+    initialEnergy: 80,
+    hp: 3,
+    enemySpeed: 1.2,
+    pickupChance: 0.05,
+    durationSeconds: 120,
+    buffTimes: [],
+    waves: [],
+    bossId: rank?.bossId ?? "zhangFei",
+    eliteSpawnAt: 0,
+    briefing: {
+      highlightEnemies: [{ kind: "boss", label: bossName, icon: "B" }],
+      tacticalHint: "蓄满刀势，一击破阵！Boss战不消耗体力以外的资源。",
+      initialBladeTier: "满势"
+    }
+  };
 }

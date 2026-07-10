@@ -19,6 +19,7 @@ export function ResultScreen({
   onDoubleReward
 }: ResultScreenProps) {
   const primaryAction = result.win && hasNext ? onNext : onRetry;
+  const displayId = result.levelId >= 10000 ? result.levelId - 10000 : result.levelId;
   const primaryLabel = result.win && hasNext ? "下一关" : "再来一局";
   const showDouble = result.win && result.canDoubleReward && !result.rewards.doubled;
 
@@ -44,7 +45,8 @@ export function ResultScreen({
 
     ctx.fillStyle = "#f6e7bd";
     ctx.font = '18px "Microsoft YaHei", sans-serif';
-    ctx.fillText(`第${result.levelId}关 · ${result.levelTitle}`, 210, 120);
+    const displayId = result.levelId >= 10000 ? result.levelId - 10000 : result.levelId;
+    ctx.fillText(`第${displayId}关 · ${result.levelTitle}`, 210, 120);
 
     ctx.strokeStyle = "rgba(255,211,90,0.25)";
     ctx.lineWidth = 1;
@@ -84,7 +86,7 @@ export function ResultScreen({
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `我只要一刀_第${result.levelId}关_${result.rating}.png`;
+      a.download = `我只要一刀_第${displayId}关_${result.rating}.png`;
       a.click();
       URL.revokeObjectURL(url);
     });
@@ -92,38 +94,40 @@ export function ResultScreen({
 
   return (
     <section className="screen result-screen result-screen-v7">
-      <div className="result-v7-header">
-        <h1>{result.win ? "破阵成功" : "防线失守"}</h1>
-        <p>第 {result.levelId} 关 · {result.levelTitle}</p>
-      </div>
+      <div className="result-v7-content">
+        <div className="result-v7-header">
+          <h1>{result.win ? "破阵成功" : "防线失守"}</h1>
+          <p>第 {displayId} 关 · {result.levelTitle}</p>
+        </div>
 
-      <div className="result-v7-stats">
-        <div>
-          <span>击杀</span>
-          <b>{result.kills}</b>
+        <div className="result-v7-stats">
+          <div>
+            <span>击杀</span>
+            <b>{result.kills}</b>
+          </div>
+          <div className="highlight">
+            <span>最大单刀</span>
+            <b>{result.maxSingleBlade}</b>
+          </div>
+          <div>
+            <span>用时</span>
+            <b>{Math.round(result.duration)}s</b>
+          </div>
         </div>
-        <div className="highlight">
-          <span>最大单刀</span>
-          <b>{result.maxSingleBlade}</b>
-        </div>
-        <div>
-          <span>用时</span>
-          <b>{Math.round(result.duration)}s</b>
-        </div>
-      </div>
 
-      <div className="result-v7-rewards">
-        <div className="reward-icon">
-          <span className="reward-icon-symbol">🪙</span>
-          <span className="reward-icon-count">{result.rewards.coins}</span>
-        </div>
-        <div className="reward-icon">
-          <span className="reward-icon-symbol">⚔</span>
-          <span className="reward-icon-count">{result.rewards.battlePass}</span>
-        </div>
-        <div className="reward-icon">
-          <span className="reward-icon-symbol">💎</span>
-          <span className="reward-icon-count">+{result.rewards.shardCount}</span>
+        <div className="result-v7-rewards">
+          <div className="reward-icon">
+            <span className="reward-icon-symbol">🪙</span>
+            <span className="reward-icon-count">{result.rewards.coins}</span>
+          </div>
+          <div className="reward-icon">
+            <span className="reward-icon-symbol">⚔</span>
+            <span className="reward-icon-count">{result.rewards.battlePass}</span>
+          </div>
+          <div className="reward-icon">
+            <span className="reward-icon-symbol">💎</span>
+            <span className="reward-icon-count">+{result.rewards.shardCount}</span>
+          </div>
         </div>
       </div>
 
@@ -139,7 +143,7 @@ export function ResultScreen({
         )}
       </div>
 
-      <small className="version-footer">V0709010</small>
+      <small className="version-footer">V0709011</small>
     </section>
   );
 }

@@ -14,7 +14,10 @@ import { REWARD_CONFIG } from "./config/rewards";
 import { getBladeTier, getTierConfig, consumeEnergyForSlash, recoverEnergy } from "./systems/bladeEnergySystem";
 import { isSharpTurn, segmentHitCircle } from "./systems/collisionSystem";
 import { paperBurst, ringParticle, sparkBurst, glowParticle, explosionBurst, coreCollapseBurst } from "./systems/particleSystem";
-import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers } from "./services/ProgressionService";
+import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades } from "./services/ProgressionService";
+import { BLADE_BASE_STATS, QUALITY_ORDER } from "./config/synthesis";
+import type { Blade } from "./services/BladeService";
+import type { Quality } from "./config/synthesis";
 import { logEvent } from "./services/Analytics";
 import { AudioService } from "./services/AudioService";
 import { calculateSkillScores } from "./services/SkillTracker";
@@ -38,7 +41,7 @@ import type {
   TacticalRoute,
   Vec2
 } from "./types";
-import { choose, clamp, distance, randomRange } from "../utils/math";
+import { choose, clamp, distance, distanceToSegment, randomRange } from "../utils/math";
 
 type FinishCallback = (result: BattleResult) => void;
 export type ReviveOffer = {
@@ -113,6 +116,13 @@ export class Game {
   private eliteIntroTimer = 0;
   private eliteIntroText = "";
   private bossIntroText = "";
+
+  // ---- 副刀自动AI ----
+  private subBlades: Blade[] = [];
+  private subBladeTimers: number[] = [];
+  private subBladeCooldowns: number[] = [];
+  // ---- 主刀品质 ----
+  private mainBladeQuality: Quality | null = null;
   private killedElites: EliteKind[] = [];
   private killedBoss: BossId | null = null;
   // 逐波HP递增（每波+1，最多+5）
@@ -166,6 +176,15 @@ export class Game {
     if (level.id === 1) {
       this.showHint("start-slash", "随时拖动挥刀", DESIGN_WIDTH / 2, 118, 2);
     }
+    // 初始化副刀
+    const equipped = getEquippedBlades();
+    this.mainBladeQuality = equipped.main?.quality ?? null;
+    this.subBlades = equipped.subs.filter(b => b && b.quality);
+    this.subBladeTimers = this.subBlades.map(() => 0);
+    this.subBladeCooldowns = this.subBlades.map((b) => {
+      const stats = BLADE_BASE_STATS[b.quality];
+      return stats ? stats.subSlashInterval : 5;
+    });
   }
 
   toggleDebugPanel() {
@@ -241,6 +260,7 @@ export class Game {
     this.updateTexts(scaledDt);
     this.updateWaves(scaledDt);
     this.updateEliteSpawn();
+    this.updateSubBlades(scaledDt);
     this.updateBossSpawn();
     this.updateEliteSkills(scaledDt);
     this.updateBossSkills(scaledDt);
@@ -541,7 +561,14 @@ export class Game {
   }
 
   private getPathLengthMultiplier() {
-    return this.progressionModifiers.pathLength;
+    const q = this.mainBladeQuality;
+    const bladeBonus = q ? (BLADE_BASE_STATS[q]?.bladeMultiplier ?? 1) : 1;
+    return this.progressionModifiers.pathLength * bladeBonus;
+  }
+
+  private getMainBladeDamageMultiplier(): number {
+    const q = this.mainBladeQuality;
+    return q ? (BLADE_BASE_STATS[q]?.damageMultiplier ?? 1) : 1;
   }
 
   private getPassiveRegenMultiplier() {
@@ -780,6 +807,7 @@ export class Game {
   private handleEnemyHit(enemy: Enemy, trail: SlashTrail) {
     const stage = SWORD_STAGE_BY_ID[trail.tier];
     enemy.flash = 0.25;
+    const bladeDmg = this.getMainBladeDamageMultiplier();
 
     if (enemy.kind === "infantry") {
       this.killEnemy(enemy, trail, false, "paper");
@@ -790,7 +818,7 @@ export class Game {
       if (stage.canBreakShield || (trail.tier === "normal" && this.hasBuff("pierceShield"))) {
         this.killEnemy(enemy, trail, false, "shield");
       } else if (trail.tier === "normal") {
-        this.damageEnemy(enemy, 1 * this.progressionModifiers.shieldDamageMultiplier, trail, false, "shield_crack");
+        this.damageEnemy(enemy, 1 * this.progressionModifiers.shieldDamageMultiplier * bladeDmg, trail, false, "shield_crack");
         if (enemy.alive) {
           enemy.shieldCrack = 1;
           this.addText(enemy.x, enemy.y - 18, "盾裂", "#ffd67c", 13);
@@ -878,19 +906,24 @@ export class Game {
         }
       }
       if (enemy.eliteKind === "aura") {
-        // 氛围将：护盾机制 - 需要先清掉周围小兵
+        // 氛围将：护盾机制 - 强锋以上可一次扣2护盾
         const shieldValue = enemy.skillTimer ?? 2;
         if (shieldValue > 0 && stage.damage <= 1) {
           // 低伤刀打不穿护盾
           enemy.flash = 0.15;
-          enemy.skillTimer = Math.max(0, shieldValue - 0.5); // 每刀削减0.5护盾
+          enemy.skillTimer = Math.max(0, shieldValue - 0.5);
           this.addText(enemy.x, enemy.y - 24, `护盾 ${Math.ceil(shieldValue)}`, "#8e44ad", 13);
           this.particles.push(...sparkBurst(enemy, 6, "#8e44ad"));
-          return; // 不造成实际伤害
+          return;
+        } else if (shieldValue > 0 && stage.damage >= 2) {
+          // 强锋/破阵锋：一次扣2护盾
+          enemy.skillTimer = Math.max(0, shieldValue - 2);
+          this.addText(enemy.x, enemy.y - 24, `护盾击穿 ${Math.ceil(shieldValue)}→${Math.max(0, shieldValue - 2)}`, "#8e44ad", 13);
+          this.particles.push(...sparkBurst(enemy, 8, "#8e44ad"));
         }
       }
       // 对精英造成伤害
-      this.damageEnemy(enemy, stage.damage, trail, false, "elite");
+      this.damageEnemy(enemy, stage.damage * bladeDmg, trail, false, "elite");
     }
 
     // ---- Boss：伤害处理 ----
@@ -898,7 +931,8 @@ export class Game {
       const bossConf = BOSS_CONFIG[enemy.bossId];
       const phase = bossConf.phases[enemy.bossPhase ?? 0];
       const burstMultiplier = phase.burstDamageMultiplier;
-      const actualDamage = trail.tier === "burst" ? stage.damage * burstMultiplier : stage.damage;
+      const baseDmg = stage.damage * bladeDmg;
+      const actualDamage = trail.tier === "burst" ? baseDmg * burstMultiplier : baseDmg;
       this.addText(enemy.x, enemy.y - 30, `-${actualDamage}`, bossConf.color, 18);
       this.damageEnemy(enemy, actualDamage, trail, false, "boss");
       // 击退反弹
@@ -1238,6 +1272,125 @@ export class Game {
     this.splitFlashes = this.splitFlashes.filter((sf) => sf.life > 0);
   }
 
+  /** 副刀自动攻击 - 两把副刀对称角度出刀（视觉拖影+伤害扫描） */
+  private updateSubBlades(dt: number) {
+    for (let i = 0; i < 2; i++) {
+      const blade = this.subBlades[i];
+      if (!blade) continue;
+      this.subBladeTimers[i] += dt;
+      if (this.subBladeTimers[i] < this.subBladeCooldowns[i]) continue;
+      this.subBladeTimers[i] = 0;
+      const stats = BLADE_BASE_STATS[blade.quality];
+      if (!stats) continue;
+
+      const cx = DESIGN_WIDTH / 2;
+      const cy = BALANCE.battlefield.warriorY;
+      // 两把副刀分别从左/右斜下方挥向斜上方
+      const angle = i === 0 ? -Math.PI * 0.6 : -Math.PI * 0.4;
+      const reach = 80 + (stats.bladeMultiplier - 1) * 30;
+      const tipX = cx + Math.cos(angle) * reach;
+      const tipY = cy + Math.sin(angle) * reach;
+      const tailX = cx - Math.cos(angle) * 30;
+      const tailY = cy - Math.sin(angle) * 30;
+
+      // 路径粒子（拖影）
+      for (let p = 0; p < 6; p++) {
+        const t = p / 6;
+        const px = tailX + (tipX - tailX) * t;
+        const py = tailY + (tipY - tailY) * t;
+        this.particles.push(ringParticle({ x: px, y: py }, "rgba(168, 230, 207, 0.6)", 12));
+      }
+
+      // 扫描路径上所有敌人
+      const hits: Enemy[] = [];
+      for (const enemy of this.enemies) {
+        if (!enemy.alive) continue;
+        // 检查到路径线段的距离
+        const dist = distanceToSegment(enemy, { x: tailX, y: tailY }, { x: tipX, y: tipY });
+        if (dist < enemy.radius + 22) hits.push(enemy);
+      }
+
+      // 应用伤害 + 词缀
+      const damage = stats.damageMultiplier;
+      let killedAny = false;
+      for (const target of hits) {
+        target.hp -= Math.ceil(damage);
+        target.flash = 0.18;
+        const killed = target.hp <= 0;
+        if (killed) {
+          target.alive = false;
+          this.score += target.score;
+          this.stats.kills += 1;
+          this.particles.push(...paperBurst(target, 6, ["#a8e6cf", "#f6e7bd"]));
+          killedAny = true;
+        }
+        this.particles.push(ringParticle({ x: target.x, y: target.y }, "#a8e6cf", 16));
+        if (blade.affix) {
+          this.applySubAffixEffect(blade.affix, target, killed);
+        }
+      }
+
+      if (hits.length > 0) {
+        // 命中统计
+      } else {
+        // 无敌人：恢复1点刀势
+        this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 1);
+      }
+    }
+  }
+
+  /** 副刀词缀效果 */
+  private applySubAffixEffect(affix: string, target: Vec2, killed: boolean) {
+    switch (affix) {
+      case "frost":
+        for (const e of this.enemies) {
+          if (!e.alive || distance(e, target) > 50) continue;
+          e.slowedTimer = 0.8;
+        }
+        this.addText(target.x, target.y - 34, "冰霜", "#9FE1CB", 12, 0.4);
+        this.particles.push(ringParticle(target, "#9FE1CB", 24));
+        break;
+      case "flame":
+        for (const e of this.enemies) {
+          if (!e.alive || distance(e, target) > 40) continue;
+          e.ignited = true;
+        }
+        this.addText(target.x, target.y - 34, "烈火", "#F0997B", 12, 0.4);
+        this.particles.push(...sparkBurst(target, 8, "#F0997B"));
+        break;
+      case "thunder":
+        this.addText(target.x, target.y - 34, "雷暴", "#AFA9EC", 12, 0.4);
+        this.flash = Math.max(this.flash, 0.35);
+        const chain = this.enemies.filter(e => e.alive && distance(e, target) < 70).slice(0, 3);
+        for (const ct of chain) {
+          ct.hp -= 1; ct.flash = 0.3;
+          this.particles.push(ringParticle(ct, "#AFA9EC", 16));
+          if (ct.hp <= 0) { ct.alive = false; this.score += ct.score; this.stats.kills += 1; }
+        }
+        break;
+      case "armorBreak":
+        for (const e of this.enemies) {
+          if (!e.alive || e.kind !== "shield" || distance(e, target) > 55) continue;
+          e.hp -= 1; e.flash = 0.2;
+        }
+        this.addText(target.x, target.y - 34, "破甲", "#85B7EB", 12, 0.4);
+        break;
+      case "vampire":
+        if (killed) {
+          this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 8);
+          this.addText(target.x, target.y - 34, "回春+"+Math.round(8), "#a8e6cf", 12, 0.4);
+        }
+        break;
+      case "phantom":
+        if (!killed) {
+          const p = this.enemies.find(e => e.alive && distance(e, target) < 45);
+          if (p) { p.hp -= 0.5; p.flash = 0.2; }
+          this.addText(target.x, target.y - 34, "幻影", "#EEEDFE", 12, 0.4);
+        }
+        break;
+    }
+  }
+
   private updateTexts(dt: number) {
     for (const text of this.texts) {
       text.life -= dt;
@@ -1265,12 +1418,18 @@ export class Game {
     const speedMultiplier = wave.speedMultiplier ?? 1;
 
     for (const spawn of wave.enemies) {
+      const cnt = Math.max(1, spawn.count ?? 1);
       const spawnY = BALANCE.battlefield.enemySpawnY - (spawn.yOffset ?? 0);
-      this.enemies.push(this.createEnemy(spawn.kind, spawn.x, spawnY, speedMultiplier));
-      this.discoveredEnemies.add(spawn.kind);
-      // 出生烟雾：淡淡尘土从山间喷出
-      this.particles.push(glowParticle({ x: spawn.x, y: spawnY }, "#5c4a3a", 14, 25));
-      this.particles.push(glowParticle({ x: spawn.x + randomRange(-10, 10), y: spawnY - 4 }, "#6b5a4a", 10, 18));
+      // 多只同品质敌人均匀分布在7条通道
+      const lanes = [44, 92, 140, 188, 236, 284, 336];
+      for (let k = 0; k < cnt; k++) {
+        const x = cnt > 1 ? lanes[Math.floor((k * lanes.length) / cnt)] : spawn.x;
+        const yJ = (k % 2) * 8 - 4;
+        this.enemies.push(this.createEnemy(spawn.kind, x, spawnY + yJ, speedMultiplier));
+        this.discoveredEnemies.add(spawn.kind);
+        // 出生烟雾
+        this.particles.push(glowParticle({ x, y: spawnY + yJ }, "#5c4a3a", 12, 20));
+      }
     }
     if (
       this.runContext.mode === "dailyChallenge" &&
@@ -1668,7 +1827,8 @@ export class Game {
     ctx.textAlign = "center";
     ctx.fillStyle = "#f6e7bd";
     ctx.font = '700 16px "Microsoft YaHei", sans-serif';
-    ctx.fillText(`第${this.level.id}关 ${this.level.title}`, DESIGN_WIDTH / 2, 28);
+    const displayFloor = this.level.id >= 10000 ? this.level.id - 10000 : this.level.id;
+    ctx.fillText(`第${displayFloor}关 ${this.level.title}`, DESIGN_WIDTH / 2, 28);
     ctx.font = '11px "Microsoft YaHei", sans-serif';
     ctx.fillStyle = "rgba(246, 231, 189, 0.72)";
     ctx.fillText(`波次 ${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`, DESIGN_WIDTH / 2, 48);
@@ -2232,14 +2392,7 @@ export class Game {
     ctx.restore();
 
     if (this.drumTimer > 0 || this.nextSoul || this.nextOil) {
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.font = '700 12px "Microsoft YaHei", sans-serif';
-      ctx.textAlign = "center";
-      ctx.fillStyle = this.nextOil ? "#f0a235" : this.nextSoul ? "#e9eef8" : "#ffb15c";
-      const buffText = [this.drumTimer > 0 ? "鼓" : "", this.nextSoul ? "魂" : "", this.nextOil ? "油" : ""].join("");
-      ctx.fillText(buffText, 0, -70);
-      ctx.restore();
+      // 顶部文字提示已迁移到右下角图标 — 此处保留空逻辑
     }
 
     ctx.translate(cx, cy);
@@ -2284,25 +2437,176 @@ export class Game {
     ctx.shadowBlur = 0;
 
     // 头顶心形：显示当前生命
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // 重置到屏幕坐标
     for (let i = 0; i < this.maxHp; i += 1) {
-      const hx = (i - (this.maxHp - 1) / 2) * 18;
-      const hy = -60;
-      ctx.fillStyle = i < this.hp ? "#d64b3b" : "rgba(214, 75, 59, 0.18)";
+      const hx = cx + (i - (this.maxHp - 1) / 2) * 20;
+      const hy = cy - 70;
+      const alive = i < this.hp;
+      const pulse = alive ? (1 + Math.sin(this.elapsed * 4 - i * 0.6) * 0.08) : 1;
+      // 心形
+      ctx.fillStyle = alive ? "#d64b3b" : "rgba(214, 75, 59, 0.18)";
+      ctx.strokeStyle = alive ? "#ffd35a" : "rgba(255, 211, 90, 0.18)";
+      ctx.lineWidth = 1;
+      const size = 6 * pulse;
       ctx.beginPath();
-      ctx.moveTo(hx, hy);
-      ctx.lineTo(hx + 6, hy + 7);
-      ctx.lineTo(hx, hy + 14);
-      ctx.lineTo(hx - 6, hy + 7);
+      // 用心形曲线（两个半圆 + V型）
+      const topY = hy;
+      ctx.moveTo(hx, topY + 2);
+      ctx.bezierCurveTo(hx - size * 1.4, topY - size * 0.8, hx - size * 1.4, topY + size * 0.4, hx, topY + size * 1.4);
+      ctx.bezierCurveTo(hx + size * 1.4, topY + size * 0.4, hx + size * 1.4, topY - size * 0.8, hx, topY + 2);
       ctx.closePath();
       ctx.fill();
+      ctx.stroke();
     }
+    ctx.restore();
 
     ctx.restore();
+
+    // 右下角临时效果图标（鼓/魂/油）— 含圆形倒计时
+    this.drawPickupBuffs(ctx);
+
+    // 副刀槽位（始终显示2个，未解锁显示🔒+条件，已装备显示冷却）
+    {
+      const startX = 20;
+      const y = 824;
+      ctx.textAlign = "left";
+      for (let i = 0; i < 2; i++) {
+        const ix = startX + i * 32;
+        const blade = this.subBlades[i] ?? null;
+        ctx.save();
+
+        if (!blade) {
+          // 未装备
+          ctx.fillStyle = "rgba(18, 16, 14, 0.6)";
+          ctx.beginPath();
+          ctx.arc(ix + 8, y + 6, 11, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "rgba(255, 211, 90, 0.3)";
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.fillStyle = "rgba(246, 231, 189, 0.5)";
+          ctx.font = '600 8px "Microsoft YaHei", sans-serif';
+          ctx.textAlign = "center";
+          ctx.fillText("空", ix + 8, y + 9);
+        } else {
+          const timer = this.subBladeTimers[i] ?? 0;
+          const cd = this.subBladeCooldowns[i] ?? 5;
+          const ratio = Math.min(1, timer / cd);
+          // 圆背景
+          ctx.fillStyle = "rgba(18, 16, 14, 0.7)";
+          ctx.beginPath();
+          ctx.arc(ix + 8, y + 6, 11, 0, Math.PI * 2);
+          ctx.fill();
+          if (ratio >= 1) {
+            ctx.strokeStyle = "#a8e6cf";
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.arc(ix + 8, y + 6, 10, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.fillStyle = "#a8e6cf";
+            ctx.font = '700 8px "Microsoft YaHei", sans-serif';
+            ctx.textAlign = "center";
+            ctx.fillText("⚔", ix + 8, y + 9);
+          } else {
+            // 冷却进度弧
+            const qualityColor = BLADE_BASE_STATS[blade.quality] ? "#ffd35a" : "rgba(168, 230, 207, 0.5)";
+            ctx.strokeStyle = qualityColor;
+            ctx.lineWidth = 2.2;
+            ctx.beginPath();
+            ctx.arc(ix + 8, y + 6, 10, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
+            ctx.stroke();
+            // 品质边框
+            ctx.strokeStyle = "rgba(240, 195, 107, 0.4)";
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.arc(ix + 8, y + 6, 10, 0, Math.PI * 2);
+            ctx.stroke();
+            // 数字
+            ctx.fillStyle = "#f6e7bd";
+            ctx.font = '600 9px "Microsoft YaHei", sans-serif';
+            ctx.textAlign = "center";
+            ctx.fillText(`${Math.ceil(cd - timer)}s`, ix + 8, y + 9);
+          }
+        }
+        ctx.restore();
+      }
+    }
 
     ctx.fillStyle = "#f6e7bd";
     ctx.font = '700 13px "Microsoft YaHei", sans-serif';
     ctx.textAlign = "center";
     ctx.fillText(`刀势 ${Math.floor(this.energy)}% ${stage.name}`, DESIGN_WIDTH / 2, 828);
+  }
+
+  /** 右下角临时效果图标：鼓/魂/油，含圆形旋转倒计时 */
+  private drawPickupBuffs(ctx: CanvasRenderingContext2D) {
+    const items: Array<{ key: string; label: string; color: string; ratio: number; active: boolean }> = [];
+    if (this.drumTimer > 0) {
+      const drumMax = PICKUP_BALANCE.drum.duration === "next_slash" ? 5 : Number(PICKUP_BALANCE.drum.duration) || 5;
+      items.push({ key: "鼓", label: "鼓", color: "#ffb15c", ratio: this.drumTimer / drumMax, active: true });
+    }
+    if (this.nextSoul) items.push({ key: "魂", label: "魂", color: "#e9eef8", ratio: 1, active: true });
+    if (this.nextOil) items.push({ key: "油", label: "油", color: "#f0a235", ratio: 1, active: true });
+
+    if (items.length === 0) return;
+
+    const itemSize = 36;
+    const gap = 8;
+    const startX = DESIGN_WIDTH - 16;
+    const startY = DESIGN_HEIGHT - 110;
+
+    ctx.save();
+    items.forEach((item, idx) => {
+      const ix = startX - itemSize - idx * (itemSize + gap);
+      const iy = startY;
+
+      // 暗色圆背景
+      ctx.fillStyle = "rgba(18, 16, 14, 0.78)";
+      ctx.beginPath();
+      ctx.arc(ix + itemSize / 2, iy + itemSize / 2, itemSize / 2, 0, Math.PI * 2);
+      ctx.fill();
+      // 边框
+      ctx.strokeStyle = item.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(ix + itemSize / 2, iy + itemSize / 2, itemSize / 2, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // 字符
+      ctx.fillStyle = item.color;
+      ctx.font = '800 16px "Microsoft YaHei", "SimHei", sans-serif';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.shadowColor = item.color;
+      ctx.shadowBlur = 6;
+      ctx.fillText(item.label, ix + itemSize / 2, iy + itemSize / 2);
+      ctx.shadowBlur = 0;
+
+      // 倒计时：旋转圆环
+      if (item.ratio < 1) {
+        const startAngle = -Math.PI / 2;
+        const endAngle = startAngle + Math.PI * 2 * item.ratio;
+        ctx.strokeStyle = item.color;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(ix + itemSize / 2, iy + itemSize / 2, itemSize / 2 + 3, startAngle, endAngle);
+        ctx.stroke();
+        // 剩余秒数
+        ctx.fillStyle = "#fff";
+        ctx.font = '700 10px "Microsoft YaHei", sans-serif';
+        ctx.fillText(`${Math.ceil(item.ratio * (PICKUP_BALANCE.drum.duration === "next_slash" ? 5 : Number(PICKUP_BALANCE.drum.duration) || 5))}`, ix + itemSize / 2, iy + itemSize + 8);
+      } else {
+        // 永续效果：脉动圆
+        const pulse = 0.6 + Math.sin(this.elapsed * 4) * 0.4;
+        ctx.strokeStyle = `rgba(${item.color.slice(1).match(/.{2}/g)?.map((h) => parseInt(h, 16)).join(", ") || "255,255,255"}, ${pulse * 0.5})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(ix + itemSize / 2, iy + itemSize / 2, itemSize / 2 + 4, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    });
+    ctx.restore();
   }
 
   private drawFloatingTexts(ctx: CanvasRenderingContext2D) {
@@ -2530,9 +2834,9 @@ export class Game {
       }
 
       if (enemy.eliteKind === "aura") {
-        // 氛围将：实时计算护盾
+        // 氛围将：实时计算护盾（降低难度：1+others/2, max 4）
         const aliveOthers = this.enemies.filter(e => e.alive && e !== enemy && e.kind !== "elite" && e.kind !== "boss").length;
-        enemy.skillTimer = Math.min(6, 2 + aliveOthers); // 护盾值上限6
+        enemy.skillTimer = Math.min(4, 1 + Math.floor(aliveOthers / 2));
       }
     }
   }

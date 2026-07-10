@@ -16,6 +16,7 @@ export type AnalyticsEvent =
   | "daily_reward_claim"
   | "stamina_spend"
   | "stamina_ad_restore"
+  | "stamina_restore"
   | "elite_spawn"
   | "boss_spawn"
   | "buff_chest";

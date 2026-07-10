@@ -47,6 +47,7 @@ export type EnemySpawn = {
   kind: EnemyKind;
   x: number;
   yOffset?: number;
+  count?: number;  // 数量，1 表示单只
 };
 
 export type PickupSpawn = {
