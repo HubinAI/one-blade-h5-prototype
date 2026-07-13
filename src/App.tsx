@@ -147,12 +147,6 @@ export default function App() {
         });
       }
       refreshHome();
-      // 同步解锁层级到 home.highestFloor
-      setUnlockedLevel((current) => {
-        const synced = Math.max(current, 10000 + home.highestFloor);
-        writeUnlockedLevel(synced);
-        return synced;
-      });
       window.setTimeout(() => {
         // 检测是否为突破战胜利
         const ctx = getCurrentRunContext();

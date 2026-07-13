@@ -183,7 +183,7 @@ export class Game {
     this.discoveredEnemies.add("infantry");
 
     // 首局教学检测
-    this.isFirstRun = level.id === 1 && !window.localStorage.getItem("one_blade_first_run_done");
+    this.isFirstRun = (level.id === 1 || level.id === 10001) && !window.localStorage.getItem("one_blade_first_run_done");
     if (this.isFirstRun) {
       this.overrideWithScriptedTutorial();
       this.showHint("drag-guide", "按住拖动，松手挥出一刀", DESIGN_WIDTH / 2, 118, 2.5);
