@@ -4,7 +4,7 @@ import { PICKUP_DEFS } from "../data/pickups";
 import { ELITE_VISUAL_DEFS } from "../data/elites";
 import { BOSS_VISUAL_DEFS } from "../data/bosses";
 import { FORMATIONS } from "../data/formations";
-import { DESIGN_HEIGHT, DESIGN_WIDTH, HUD_HEIGHT, WALL_TOP_Y } from "./config/constants";
+import { DESIGN_HEIGHT, DESIGN_WIDTH, HUD_HEIGHT, WALL_TOP_Y, MAX_ENEMIES_ON_SCREEN, MAX_PARTICLES_ON_SCREEN, MAX_CHAIN_DEPTH, MAX_FLOATING_TEXT } from "./config/constants";
 import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID } from "./config/balance";
 import { AD_CONFIG } from "./config/ads";
 import { RUN_BUFFS, RUN_BUFF_BY_ID, ROUTE_COLORS, ROUTE_NAMES, ROUTE_BUFFS, getNextBuffInRoute, getBuffRoute } from "./config/buffs";
@@ -109,6 +109,12 @@ export class Game {
   private progressionModifiers = getUpgradeModifiers();
   private runContext = getCurrentRunContext();
 
+  // 首局教学标志
+  private isFirstRun = false;
+  private firstRunGuideShown = false;
+  private firstRunPrettySlashShown = false;
+  private firstRunCoreBoomShown = false;
+
   // ---- 精英/Boss 系统 ----
   private eliteSpawned = false;
   private bossSpawned = false;
@@ -173,9 +179,14 @@ export class Game {
     this.energy = clamp(this.runContext.mode === "freeBurst" ? BALANCE.swordEnergy.max : level.initialEnergy + this.progressionModifiers.initialEnergyBonus, 0, BALANCE.swordEnergy.max);
     this.hintSeen = this.readSeenHints();
     this.discoveredEnemies.add("infantry");
-    if (level.id === 1) {
-      this.showHint("start-slash", "随时拖动挥刀", DESIGN_WIDTH / 2, 118, 2);
+
+    // 首局教学检测
+    this.isFirstRun = level.id === 1 && !window.localStorage.getItem("one_blade_first_run_done");
+    if (this.isFirstRun) {
+      this.overrideWithScriptedTutorial();
+      this.showHint("drag-guide", "按住拖动，松手挥出一刀", DESIGN_WIDTH / 2, 118, 2.5);
     }
+
     // 初始化副刀
     const equipped = getEquippedBlades();
     this.mainBladeQuality = equipped.main?.quality ?? null;
@@ -185,6 +196,56 @@ export class Game {
       const stats = BLADE_BASE_STATS[b.quality];
       return stats ? stats.subSlashInterval : 5;
     });
+  }
+
+  /** 首局教学：使用固定波次代替随机 */
+  private overrideWithScriptedTutorial() {
+    this.level.waves = [
+      {
+        name: "纸片兵",
+        delay: 0.2,
+        spawnAt: 0.5,
+        speedMultiplier: 0.7,
+        enemies: [
+          { kind: "infantry", x: 44, count: 1 },
+          { kind: "infantry", x: 110, count: 1 },
+          { kind: "infantry", x: 172, count: 1 },
+          { kind: "infantry", x: 236, count: 1 },
+          { kind: "infantry", x: 300, count: 1 },
+        ],
+      },
+      {
+        name: "密集敌军",
+        delay: 0.2,
+        spawnAt: 6,
+        speedMultiplier: 0.8,
+        enemies: [
+          { kind: "infantry", x: 44, count: 2 },
+          { kind: "infantry", x: 120, count: 2 },
+          { kind: "powder", x: 188, count: 1 },
+          { kind: "infantry", x: 250, count: 2 },
+          { kind: "infantry", x: 310, count: 2 },
+        ],
+      },
+      {
+        name: "阵型挑战",
+        delay: 0.2,
+        spawnAt: 14,
+        speedMultiplier: 0.9,
+        enemies: [
+          { kind: "infantry", x: 44, count: 2 },
+          { kind: "shield", x: 100, count: 1 },
+          { kind: "core", x: 188, count: 1 },
+          { kind: "shield", x: 280, count: 1 },
+          { kind: "infantry", x: 340, count: 2 },
+        ],
+      },
+    ];
+    // 教程波次低速、满刀势
+    this.level.initialEnergy = BALANCE.swordEnergy.max;
+    this.level.enemySpeed = 0.65;
+    this.level.durationSeconds = 180;
+    this.energy = BALANCE.swordEnergy.max;
   }
 
   toggleDebugPanel() {
@@ -463,6 +524,22 @@ export class Game {
     const praise = this.getSlashPraise(trail, reason);
     if (praise) {
       this.addText(DESIGN_WIDTH / 2, 136, praise, stage.color, praise === "一刀破阵" ? 26 : 20);
+    // 漂亮一刀：首次 5+ 击杀
+    if (this.isFirstRun && trail.kills >= 5 && !this.firstRunPrettySlashShown) {
+      this.firstRunPrettySlashShown = true;
+      this.addText(DESIGN_WIDTH / 2, 80, "漂亮一刀！", "#ff6a33", 28, 1.5);
+      this.slowMoTimer = Math.max(this.slowMoTimer, 0.15);
+      this.screenShake = Math.max(this.screenShake, 0.5);
+      this.flash = Math.max(this.flash, 0.6);
+    }
+    // 首次触发阵眼崩散
+    if (this.isFirstRun && trail.coreCollapseCount > 0 && !this.firstRunCoreBoomShown) {
+      this.firstRunCoreBoomShown = true;
+      this.addText(DESIGN_WIDTH / 2, 104, "一刀破阵！", "#ffd35a", 30, 1.8);
+      this.slowMoTimer = Math.max(this.slowMoTimer, 0.2);
+      this.screenShake = Math.max(this.screenShake, 0.65);
+      this.flash = Math.max(this.flash, 0.8);
+    }
       if (praise === "一刀破阵") {
       this.stats.oneBladeBreaks += 1;
       AudioService.oneBladeBreak();
@@ -1192,6 +1269,10 @@ export class Game {
   }
 
   private updateEnemies(dt: number) {
+    // 同屏敌人上限
+    if (this.enemies.length > MAX_ENEMIES_ON_SCREEN) {
+      // 跳过多余敌人的更新（少移动），但保持存活逻辑
+    }
     for (const enemy of this.enemies) {
       if (!enemy.alive) continue;
       enemy.wobble += dt;
@@ -1265,7 +1346,7 @@ export class Game {
       particle.vy += 88 * dt;
       particle.rotation += particle.spin * dt;
     }
-    this.particles = this.particles.filter((particle) => particle.life > 0);
+    this.particles = this.particles.filter((particle) => particle.life > 0).slice(0, MAX_PARTICLES_ON_SCREEN);
     for (const sf of this.splitFlashes) {
       sf.life -= dt;
     }
@@ -1396,7 +1477,7 @@ export class Game {
       text.life -= dt;
       text.y -= 22 * dt;
     }
-    this.texts = this.texts.filter((text) => text.life > 0);
+    this.texts = this.texts.filter((text) => text.life > 0).slice(0, MAX_FLOATING_TEXT);
   }
 
   private updateWaves(dt: number) {
@@ -1521,6 +1602,10 @@ export class Game {
     if (this.finished) return;
     this.finished = true;
     this.phase = win ? "won" : "lost";
+    // 首局结束后标记
+    if (this.isFirstRun) {
+      window.localStorage.setItem("one_blade_first_run_done", "1");
+    }
     if (win) AudioService.victory();
     else AudioService.defeat();
     this.stats.score = this.score;

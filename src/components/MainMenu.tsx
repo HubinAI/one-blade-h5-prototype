@@ -1,5 +1,9 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type { HomeSnapshot } from "../game/services/ProgressionService";
+import { getEquippedBlades } from "../game/services/ProgressionService";
+import { RANK_CONFIG, RANK_ORDER } from "../game/config/synthesis";
+import { QUALITY_META } from "../game/config/synthesis";
+import { showRewardedAdMock, incrementDailyAdCount } from "../game/services/AdService";
 
 type MainMenuProps = {
   unlockedLevel: number;
@@ -15,27 +19,9 @@ type MainMenuProps = {
   onBag: () => void;
   onDebug: () => void;
   appVersion: string;
+  onClaimOffline: () => void;
+  onClaimOfflineDouble: () => void;
 };
-
-function CurrencyModal({ title, items, onClose }: { title: string; items: Array<{ title: string; desc: string; amount: string }>; onClose: () => void }) {
-  return (
-    <div className="currency-modal-overlay" onClick={onClose}>
-      <div className="currency-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="currency-modal-title">{title}</div>
-        <div className="currency-modal-list">
-          {items.map((item, i) => (
-            <div key={i} className="currency-modal-item">
-              <div className="currency-modal-item-title">{item.title}</div>
-              <div className="currency-modal-item-desc">{item.desc}</div>
-              <div className="currency-modal-item-amount">{item.amount}</div>
-            </div>
-          ))}
-        </div>
-        <button className="currency-modal-close" onClick={onClose}>知道了</button>
-      </div>
-    </div>
-  );
-}
 
 export function MainMenu({
   unlockedLevel,
@@ -50,117 +36,129 @@ export function MainMenu({
   onBag,
   onDebug,
   appVersion,
+  onClaimOffline,
+  onClaimOfflineDouble,
 }: MainMenuProps) {
   const isFirstPlay = unlockedLevel <= 1 && home.coins === 0;
-  const [showCoinModal, setShowCoinModal] = useState(false);
-  const [showStaminaModal, setShowStaminaModal] = useState(false);
+  const [adState, setAdState] = useState<"idle" | "playing">("idle");
+
+  // 主刀信息
+  const equipped = useMemo(() => getEquippedBlades(), []);
+  const mainBlade = equipped.main;
+  const mainBladeLabel = mainBlade
+    ? `${QUALITY_META[mainBlade.quality]?.label ?? "凡品"}·${mainBlade.name}`
+    : "凡品·练习木刀";
+
+  // 今日目标：简化版，目标定为突破到筑基(索引1)
+  const goalRankIndex = 1; // 筑基
+  const currentRankId = RANK_ORDER[home.rankIndex] ?? RANK_ORDER[0];
+  const goalRankId = RANK_ORDER[goalRankIndex] ?? RANK_ORDER[1];
+  const goalReached = home.rankIndex >= goalRankIndex;
+  const goalText = goalReached
+    ? "今日目标已完成 🎉"
+    : `今日目标：突破到${RANK_CONFIG[goalRankId]?.name ?? "筑基"}`;
+
+  // 离线收益
+  const hasOffline = home.offlineCoins > 0;
+
+  const handleIdleDouble = async () => {
+    setAdState("playing");
+    const ok = await showRewardedAdMock("quick_idle_reward");
+    setAdState("idle");
+    if (ok) {
+      incrementDailyAdCount("quick_idle_reward");
+      onClaimOfflineDouble();
+    }
+  };
 
   return (
-    <section className="screen menu-screen menu-screen-v7">
-      <div className="menu-v7-top">
-        <button className="currency-pill" onClick={() => setShowCoinModal(true)}>
-          <span className="currency-icon coin-icon" />
-          {home.coins}
-          <span className="currency-plus">+</span>
-        </button>
-        <button className="currency-pill stamina" onClick={() => setShowStaminaModal(true)}>
-          <span className="currency-icon bun-icon" />
-          {home.stamina}/{home.staminaMax}
-          <span className="currency-plus">+</span>
-        </button>
-      </div>
-
-      <div className="menu-v7-hero">
+    <section className="screen menu-screen market-home-screen">
+      {/* 标题区 */}
+      <div className="market-home-title-section">
         <h1>我只要一刀</h1>
-        <p>刀势越满，一刀越爽</p>
+        <p className="market-home-subtitle">敌军压境，一刀破阵</p>
       </div>
 
-      {/* 中间：当前关卡（少文字多动画） */}
-      <div className="menu-v7-center">
-        <div className="level-card">
-          <span className="level-card-tag">当前关卡</span>
-          <h2 className="level-card-title">
-            {isFirstPlay ? "第一关" : `第 ${unlockedLevel} 关`}
-          </h2>
-          <div className="level-card-anim">
-            <span className="level-card-sword">⚔</span>
-          </div>
+      {/* 今日目标 */}
+      <div className={`market-home-goal ${goalReached ? "done" : ""}`}>
+        <span className="market-home-goal-icon">{goalReached ? "✅" : "🎯"}</span>
+        <span className="market-home-goal-text">{goalText}</span>
+      </div>
+
+      {/* 当前状态信息 */}
+      <div className="market-home-status-row">
+        <div className="market-home-status-item">
+          <span className="status-label">当前主刀</span>
+          <span className="status-value">{mainBladeLabel}</span>
+        </div>
+        <div className="market-home-status-item">
+          <span className="status-label">体力</span>
+          <span className="status-value stamina">{home.stamina}/{home.staminaMax}
+            {home.stamina < 5 && (
+              <button className="status-ad-btn" onClick={onRestoreStamina}>恢复</button>
+            )}
+          </span>
         </div>
       </div>
 
-      {/* 挂机+挑战：放在关卡下方和开始游戏按钮之间，加底框 */}
-      <div className="menu-v7-row menu-v7-row-top">
-        <button className="menu-v7-action-btn" onClick={onIdle}>
-          <span className="menu-v7-action-icon">🛌</span>
-          <span>挂机收益</span>
+      {/* 离线收益 */}
+      {hasOffline && (
+        <div className="market-home-offline-row">
+          <span className="offline-icon">🛌</span>
+          <span className="offline-text">离线收益可领取: {home.offlineCoins} 金币</span>
+          <div className="offline-actions">
+            <button className="offline-claim-btn small" onClick={onClaimOffline}>
+              领取
+            </button>
+            <button
+              className="offline-ad-btn small"
+              onClick={handleIdleDouble}
+              disabled={adState === "playing"}
+            >
+              📺 ×2
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 核心操作按钮 */}
+      <div className="market-home-actions">
+        <button
+          className="market-btn main-btn"
+          onClick={isFirstPlay ? onStart : onContinue}
+        >
+          <span className="main-btn-icon">⚡</span>
+          <span className="main-btn-text">继续闯关</span>
+          <span className="main-btn-sub">消耗5体力</span>
         </button>
-        <button className="menu-v7-action-btn" onClick={onChallenge}>
-          <span className="menu-v7-action-icon">⚔</span>
-          <span>挑战</span>
+
+        <button className="market-btn forge-btn" onClick={onBag}>
+          <span className="forge-btn-icon">⚔</span>
+          <span>炼器合成</span>
         </button>
       </div>
 
-      {/* 中间偏下：大大的开始游戏按钮 */}
-      <div className="menu-v7-row menu-v7-row-start">
-        <button className="menu-v7-start-btn" onClick={isFirstPlay ? onStart : onContinue}>
-          <span className="menu-v7-start-icon">⚡</span>
-          <span>开始游戏</span>
+      {/* 弱入口 */}
+      <div className="market-home-sub-actions">
+        <button className="sub-btn" onClick={onCodex}>
+          📖 图鉴
         </button>
-        <span className="menu-v7-stamina-hint">⚡消耗 {5} 体力</span>
-      </div>
-
-      {/* 下方：排行+图鉴+武器背包 */}
-      <div className="menu-v7-row menu-v7-row-bottom">
-        <button className="menu-v7-bottom-btn" onClick={onRanking}>
-          <span className="menu-v7-bottom-icon">🏆</span>
-          <span>排行</span>
+        <button className="sub-btn" onClick={onRanking}>
+          🏆 排行榜
         </button>
-        <button className="menu-v7-bottom-btn" onClick={onCodex}>
-          <span className="menu-v7-bottom-icon">📖</span>
-          <span>图鉴</span>
+        <button className="sub-btn" onClick={onIdle}>
+          🛌 挂机
         </button>
-        <button className="menu-v7-bottom-btn" onClick={onBag}>
-          <span className="menu-v7-bottom-icon">🎒</span>
-          <span>武器背包</span>
+        <button className="sub-btn" onClick={onChallenge}>
+          ⚔ 挑战
         </button>
       </div>
 
-      {home.stamina < 5 && (
-        <button className="menu-v7-stamina-btn" onClick={onRestoreStamina}>
-          ⚡体力不足，看广告恢复 10 点
-        </button>
-      )}
-
-      <small className="version-footer">{appVersion}</small>
-
-      <button className="debug-toggle" onClick={onDebug}>🛠</button>
-
-      {showCoinModal && (
-        <CurrencyModal
-          title="如何获得金币？"
-          onClose={() => setShowCoinModal(false)}
-          items={[
-            { title: "通关胜利", desc: "每关胜利基础40金币", amount: "40" },
-            { title: "击杀奖励", desc: "每击杀一个敌军获得1金币", amount: "1" },
-            { title: "评级加成", desc: "C→B→A→S→SS→神 0/20/50/100/180/300", amount: "0~300" },
-            { title: "挂机产出", desc: "离线最多24小时", amount: "20/h" },
-            { title: "广告翻倍", desc: "结算页看广告使奖励×2", amount: "×2" }
-          ]}
-        />
-      )}
-
-      {showStaminaModal && (
-        <CurrencyModal
-          title="如何获得体力？"
-          onClose={() => setShowStaminaModal(false)}
-          items={[
-            { title: "每日登录", desc: "首次登录自动补给10点", amount: "+10" },
-            { title: "自动恢复", desc: "每3分钟自动恢复1点", amount: "1/3分" },
-            { title: "看广告", desc: "看一次恢复广告获得10体力", amount: "+10" },
-            { title: "上限30", desc: "体力上限30点", amount: "30" }
-          ]}
-        />
-      )}
+      {/* 公告/版本 */}
+      <div className="market-home-footer">
+        <small className="version-footer">{appVersion}</small>
+        <button className="debug-toggle" onClick={onDebug}>🛠</button>
+      </div>
     </section>
   );
 }

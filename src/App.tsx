@@ -315,6 +315,8 @@ export default function App() {
           onBag={() => setScreen("bag")}
           onDebug={() => setScreen("debug")}
           appVersion={appVersion}
+          onClaimOffline={handleClaimOffline}
+          onClaimOfflineDouble={handleClaimOfflineDouble}
         />
       )}
 
@@ -426,6 +428,7 @@ export default function App() {
           onHome={goToMenu}
           onDoubleReward={handleDoubleReward}
           onAdChest={handleAdChest}
+          restartCurrentLevel={restartBattle}
         />
       )}
       <AdOverlay />

@@ -1,4 +1,7 @@
+import { useState } from "react";
 import type { BattleResult } from "../game/types";
+import { showRewardedAdMock, incrementDailyAdCount } from "../game/services/AdService";
+import { spendStamina } from "../game/services/ProgressionService";
 
 type ResultScreenProps = {
   result: BattleResult;
@@ -9,141 +12,167 @@ type ResultScreenProps = {
   onHome: () => void;
   onDoubleReward: () => void;
   onAdChest: () => void;
+  restartCurrentLevel: () => void;
 };
+
+/** 失败原因推测 */
+function getFailReason(result: BattleResult): string {
+  if (result.kills === 0) return "没有及时挥刀";
+  if (result.maxSingleBlade <= 3) return "单刀击杀过少，积蓄刀势再挥刀";
+  if (result.explosiveCount === 0) return "没有利用火药兵连锁爆炸";
+  return "双拳难敌四手，试试提升装备";
+}
 
 export function ResultScreen({
   result,
   hasNext,
   onRetry,
   onNext,
-  onDoubleReward
+  onHome,
+  onDoubleReward,
+  restartCurrentLevel,
 }: ResultScreenProps) {
-  const primaryAction = result.win && hasNext ? onNext : onRetry;
   const displayId = result.levelId >= 10000 ? result.levelId - 10000 : result.levelId;
-  const primaryLabel = result.win && hasNext ? "下一关" : "再来一局";
-  const showDouble = result.win && result.canDoubleReward && !result.rewards.doubled;
+  const [adState, setAdState] = useState<"idle" | "playing" | "done">("idle");
+  const [extraSlashUsed, setExtraSlashUsed] = useState(false);
 
-  function generateShareImage() {
-    const canvas = document.createElement("canvas");
-    canvas.width = 420;
-    canvas.height = 640;
-    const ctx = canvas.getContext("2d")!;
-
-    ctx.fillStyle = "#1a1210";
-    ctx.fillRect(0, 0, 420, 640);
-
-    const grad = ctx.createLinearGradient(0, 0, 0, 200);
-    grad.addColorStop(0, "#2d1f18");
-    grad.addColorStop(1, "#1a1210");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 420, 200);
-
-    ctx.fillStyle = result.win ? "#ffd35a" : "#d64b3b";
-    ctx.font = 'bold 46px "Microsoft YaHei", sans-serif';
-    ctx.textAlign = "center";
-    ctx.fillText(result.win ? "破阵成功" : "防线失守", 210, 80);
-
-    ctx.fillStyle = "#f6e7bd";
-    ctx.font = '18px "Microsoft YaHei", sans-serif';
-    const displayId = result.levelId >= 10000 ? result.levelId - 10000 : result.levelId;
-    ctx.fillText(`第${displayId}关 · ${result.levelTitle}`, 210, 120);
-
-    ctx.strokeStyle = "rgba(255,211,90,0.25)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(60, 150);
-    ctx.lineTo(360, 150);
-    ctx.stroke();
-
-    ctx.textAlign = "left";
-    ctx.font = '16px "Microsoft YaHei", sans-serif';
-    const data = [
-      `击杀 ${result.kills}`,
-      `最大单刀 ${result.maxSingleBlade} 连杀`,
-      `用时 ${Math.round(result.duration)} 秒`,
-      `得分 ${result.score}`
-    ];
-    data.forEach((line, i) => {
-      ctx.fillStyle = i === 3 ? "#ffd35a" : "#f6e7bd";
-      ctx.fillText(line, 60, 190 + i * 40);
-    });
-
-    if (result.triggeredOneBlade) {
-      ctx.fillStyle = "#ff6a33";
-      ctx.font = 'bold 28px "Microsoft YaHei", sans-serif';
-      ctx.textAlign = "center";
-      ctx.fillText("⚔ 一刀破阵 ⚔", 210, 400);
+  /** 失败页：看广告补一刀 */
+  const handleReviveSlash = async () => {
+    setAdState("playing");
+    const ok = await showRewardedAdMock("revive_extra_slash");
+    setAdState("idle");
+    if (ok) {
+      incrementDailyAdCount("revive_extra_slash");
+      setExtraSlashUsed(true);
+      // 补一刀后重开本局（用重启）
+      restartCurrentLevel();
     }
+  };
 
-    ctx.fillStyle = "rgba(246,231,189,0.5)";
-    ctx.font = '14px "Microsoft YaHei", sans-serif';
-    ctx.textAlign = "center";
-    ctx.fillText("我只要一刀", 210, 560);
-    ctx.fillText("刀势越满，一刀越爽", 210, 585);
+  /** 胜利页：看广告金币×2 */
+  const handleDoubleCoins = async () => {
+    setAdState("playing");
+    const ok = await showRewardedAdMock("double_coins");
+    setAdState("idle");
+    if (ok) {
+      onDoubleReward();
+    }
+  };
 
-    canvas.toBlob((blob) => {
-      if (!blob) return;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `我只要一刀_第${displayId}关_${result.rating}.png`;
-      a.click();
-      URL.revokeObjectURL(url);
-    });
-  }
+  const ratingStars: Record<string, string> = {
+    "C": "★★☆☆☆",
+    "B": "★★★☆☆",
+    "A": "★★★★☆",
+    "S": "★★★★★",
+    "SS": "★★★★★",
+    "神之一刀": "★★★★★",
+  };
+
+  const isFirstRun = !window.localStorage.getItem("one_blade_first_run_done");
 
   return (
-    <section className="screen result-screen result-screen-v7">
-      <div className="result-v7-content">
-        <div className="result-v7-header">
-          <h1>{result.win ? "破阵成功" : "防线失守"}</h1>
-          <p>第 {displayId} 关 · {result.levelTitle}</p>
-        </div>
+    <section className="screen result-screen market-result-screen">
+      {/* 顶部分数 */}
+      <div className="result-header-section">
+        <h1 className={`result-title ${result.win ? "win" : "lose"}`}>
+          {result.win ? "破阵成功！" : "防线被破"}
+        </h1>
+        <p className="result-level-info">第 {displayId} 关</p>
 
-        <div className="result-v7-stats">
-          <div>
-            <span>击杀</span>
-            <b>{result.kills}</b>
-          </div>
-          <div className="highlight">
-            <span>最大单刀</span>
-            <b>{result.maxSingleBlade}</b>
-          </div>
-          <div>
-            <span>用时</span>
-            <b>{Math.round(result.duration)}s</b>
-          </div>
-        </div>
-
-        <div className="result-v7-rewards">
-          <div className="reward-icon">
-            <span className="reward-icon-symbol">🪙</span>
-            <span className="reward-icon-count">{result.rewards.coins}</span>
-          </div>
-          <div className="reward-icon">
-            <span className="reward-icon-symbol">⚔</span>
-            <span className="reward-icon-count">{result.rewards.battlePass}</span>
-          </div>
-          <div className="reward-icon">
-            <span className="reward-icon-symbol">💎</span>
-            <span className="reward-icon-count">+{result.rewards.shardCount}</span>
-          </div>
+        <div className="result-rating-row">
+          <span className="result-rating-grade" style={{
+            color: result.rating === "SS" || result.rating === "神之一刀" ? "#ffd35a" : "#f6e7bd"
+          }}>
+            {result.rating}
+          </span>
+          <span className="result-rating-stars">{ratingStars[result.rating] ?? ""}</span>
         </div>
       </div>
 
-      <div className="result-v7-actions">
-        <button className="primary-button" onClick={primaryAction}>{primaryLabel}</button>
-        {result.win && (
-          <div className="result-v7-sub-actions">
-            {showDouble && (
-              <button className="ad-button" onClick={onDoubleReward}>📺 广告翻倍</button>
-            )}
-            <button className="share-button" onClick={generateShareImage}>⚔ 分享</button>
-          </div>
+      {/* 核心数据 */}
+      <div className="result-stats-section">
+        <div className="result-stat">
+          <span className="result-stat-label">最大单刀击杀</span>
+          <span className="result-stat-value">{result.maxSingleBlade}</span>
+        </div>
+        <div className="result-stat">
+          <span className="result-stat-label">最大连锁</span>
+          <span className="result-stat-value">{result.maxChain}</span>
+        </div>
+        <div className="result-stat">
+          <span className="result-stat-label">用时</span>
+          <span className="result-stat-value">{Math.round(result.duration)}s</span>
+        </div>
+      </div>
+
+      {/* 奖励 */}
+      <div className="result-rewards-section">
+        <div className="result-reward">
+          <span className="result-reward-icon">🪙</span>
+          <span className="result-reward-amount">+{result.rewards.coins}</span>
+        </div>
+        <div className="result-reward">
+          <span className="result-reward-icon">⚔</span>
+          <span className="result-reward-amount">+{result.rewards.battlePass}</span>
+        </div>
+        {result.triggeredOneBlade && (
+          <div className="result-reward special">⚔ 一刀破阵</div>
         )}
       </div>
 
-      <small className="version-footer">V0709011</small>
+      {/* 失败原因提示 */}
+      {!result.win && (
+        <div className="result-fail-reason">
+          💡 {getFailReason(result)}
+        </div>
+      )}
+
+      {/* 按钮区 */}
+      <div className="result-actions-section">
+        {result.win ? (
+          <>
+            {hasNext && (
+              <button className="result-btn primary-btn" onClick={onNext}>
+                下一关
+              </button>
+            )}
+            <button className="result-btn secondary-btn" onClick={onRetry}>
+              再来一局
+            </button>
+            {result.canDoubleReward && !result.rewards.doubled && (
+              <button
+                className="result-btn ad-btn"
+                onClick={handleDoubleCoins}
+                disabled={adState === "playing"}
+              >
+                📺 看广告 ×2
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            {!extraSlashUsed && (
+              <button
+                className="result-btn primary-btn"
+                onClick={handleReviveSlash}
+                disabled={adState === "playing"}
+              >
+                📺 看广告·补一刀
+              </button>
+            )}
+            <button className="result-btn secondary-btn" onClick={onRetry}>
+              再来一局
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* 返回按钮 */}
+      <div className="result-back-section">
+        <button className="result-btn ghost-btn" onClick={onHome}>
+          返回首页
+        </button>
+      </div>
     </section>
   );
 }
