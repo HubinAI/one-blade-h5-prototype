@@ -91,6 +91,8 @@ export class Game {
   private pointerDown = false;
   private pointerPos?: Vec2;
   private wavesSpawned = 0;
+  private wavesFinishedAt = 0; // 最后一波生成完成时 elapsed
+  private currentRunMode: "normal" | "challenge" | "dailyChallenge" | "freeBurst" | "highYield" = "normal";
   private nextWaveTimer: number = BALANCE.waves.firstWaveDelay;
   private screenShake = 0;
   private flash = 0;
@@ -181,6 +183,7 @@ export class Game {
     this.energy = clamp(this.runContext.mode === "freeBurst" ? BALANCE.swordEnergy.max : level.initialEnergy + this.progressionModifiers.initialEnergyBonus, 0, BALANCE.swordEnergy.max);
     this.hintSeen = this.readSeenHints();
     this.discoveredEnemies.add("infantry");
+    this.currentRunMode = this.runContext.mode;
 
     // 首局教学检测
     this.isFirstRun = (level.id === 1 || level.id === 10001) && !window.localStorage.getItem("one_blade_first_run_done");
@@ -1521,6 +1524,9 @@ export class Game {
   private spawnCurrentWave(wave: typeof this.level.waves[0]) {
     this._lastWaveElapsed = this.elapsed;
     this.wavesSpawned += 1;
+    if (this.wavesSpawned >= this.level.waves.length) {
+      this.wavesFinishedAt = this.elapsed;
+    }
     // 每波HP递增（从第2波开始+1，最多+5）
     this.waveHpBonus = Math.min(5, this.wavesSpawned);
     const speedMultiplier = wave.speedMultiplier ?? 1;
@@ -2946,9 +2952,12 @@ export class Game {
   /** Boss生成 */
   private updateBossSpawn() {
     if (this.bossSpawned || !this.level.bossId) return;
-    // Boss在最后一波之后才生成
+    // Boss在最后一波敌人出波完成后立刻生成 (不等待长时间)
     if (this.wavesSpawned < this.level.waves.length) return;
-    if (this.elapsed < this.level.durationSeconds - 20) return;
+    // 突破战(boss关)立刻出boss, 普通boss关在最后一波5秒后
+    const isChallengeBreakthrough = this.currentRunMode === "challenge";
+    const minDelay = isChallengeBreakthrough ? 2 : 5;
+    if (this.elapsed < this.wavesFinishedAt + minDelay) return;
     this.bossSpawned = true;
     const bid = this.level.bossId;
     const enemy = this.createBoss(bid);
