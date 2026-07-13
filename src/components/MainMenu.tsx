@@ -21,6 +21,8 @@ type MainMenuProps = {
   appVersion: string;
   onClaimOffline: () => void;
   onClaimOfflineDouble: () => void;
+  pendingGate?: { breakthroughName: string; unlockText: string; breakthroughId: string } | null;
+  onBreakthrough: () => void;
 };
 
 export function MainMenu({
@@ -38,6 +40,8 @@ export function MainMenu({
   appVersion,
   onClaimOffline,
   onClaimOfflineDouble,
+  pendingGate,
+  onBreakthrough,
 }: MainMenuProps) {
   const isFirstPlay = unlockedLevel <= 1 && home.coins === 0;
   const [adState, setAdState] = useState<"idle" | "playing">("idle");
@@ -123,14 +127,22 @@ export function MainMenu({
 
       {/* 核心操作按钮 */}
       <div className="market-home-actions">
-        <button
-          className="market-btn main-btn"
-          onClick={isFirstPlay ? onStart : onContinue}
-        >
-          <span className="main-btn-icon">⚡</span>
-          <span className="main-btn-text">继续闯关</span>
-          <span className="main-btn-sub">消耗5体力</span>
-        </button>
+        {pendingGate ? (
+          <button className="market-btn breakthrough-main-btn" onClick={onBreakthrough}>
+            <span className="breakthrough-icon-sm">✦</span>
+            <span className="main-btn-text">{pendingGate.breakthroughName}</span>
+            <span className="main-btn-sub">{pendingGate.unlockText}</span>
+          </button>
+        ) : (
+          <button
+            className="market-btn main-btn"
+            onClick={isFirstPlay ? onStart : onContinue}
+          >
+            <span className="main-btn-icon">⚡</span>
+            <span className="main-btn-text">继续闯关</span>
+            <span className="main-btn-sub">消耗5体力</span>
+          </button>
+        )}
 
         <button className="market-btn forge-btn" onClick={onBag}>
           <span className="forge-btn-icon">⚔</span>

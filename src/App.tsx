@@ -39,14 +39,17 @@ import {
   getCurrentRankId,
   tryRankUp,
   updateHighestFloor,
+  addClearedBreakthrough,
+  getCurrentRunContext,
+  getPendingGate,
   type RunMode
 } from "./game/services/ProgressionService";
 import { logEvent } from "./game/services/Analytics";
 import type { UpgradeId } from "./game/config/rewards";
 import { REWARD_CONFIG } from "./game/config/rewards";
-import { createFloorLevelConfig } from "./game/config/synthesis";
+import { createFloorLevelConfig, MAIN_STAGE_GATES, getCurrentGate, RANK_ORDER } from "./game/config/synthesis";
 
-type Screen = "menu" | "battle" | "result" | "upgrades" | "forge" | "challenge" | "team" | "ranking" | "idle" | "bag" | "debug";
+type Screen = "menu" | "battle" | "result" | "upgrades" | "forge" | "challenge" | "team" | "ranking" | "idle" | "bag" | "debug" | "breakthroughResult";
 
 const SAVE_KEY = "one_blade_v02_progress";
 
@@ -75,6 +78,8 @@ export default function App() {
   const [paused, setPaused] = useState(false);
   const [showMerchant, setShowMerchant] = useState(false);
   const [pendingMerchant, setPendingMerchant] = useState(false);
+  const [breakthroughResult, setBreakthroughResult] = useState<{ name: string; id: string; unlockText: string } | null>(null);
+  const pendingGate = useMemo(() => getPendingGate(), [home.highestFloor]);
 
   const refreshHome = useCallback(() => setHome(getHomeSnapshot()), []);
   const [currentMainlineFloor, setCurrentMainlineFloor] = useState(1);
@@ -141,6 +146,17 @@ export default function App() {
       }
       refreshHome();
       window.setTimeout(() => {
+        // 检测是否为突破战胜利
+        const ctx = getCurrentRunContext();
+        if (result.win && ctx.mode === "challenge") {
+          // 查找当前层数对应的突破门
+          const gate = getCurrentGate(home.highestFloor);
+          if (gate) {
+            setBreakthroughResult({ name: gate.breakthroughName, id: gate.breakthroughId, unlockText: gate.unlockText });
+            setScreen("breakthroughResult");
+            return;
+          }
+        }
         setScreen("result");
         // 主线通关后标记，待返回首页时弹商店
         if (result.win && result.levelId >= 10000) {
@@ -148,7 +164,7 @@ export default function App() {
         }
       }, 180);
     },
-    [refreshHome]
+    [refreshHome, home.highestFloor]
   );
 
   const nextLevel = LEVELS.find((level) => level.id === (lastResult?.levelId ?? 0) + 1);
@@ -237,6 +253,17 @@ export default function App() {
     }
   }, [refreshHome]);
 
+  /** 突破战：从卡点阶段起始层开始突破战 */
+  const handleBreakthrough = useCallback(() => {
+    if (!pendingGate) return;
+    // 找到突破对应的段位来开始Boss战
+    const rankIdx = Math.min(pendingGate.afterStage - 1, RANK_ORDER.length - 1);
+    if (rankIdx < 0) return;
+    const rankId = RANK_ORDER[rankIdx];
+    const bossLevel = getBossLevelConfig(rankId);
+    startLevel(bossLevel, "challenge");
+  }, [pendingGate, startLevel]);
+
   const handleDailyChallenge = useCallback(() => {
     const level = LEVELS[Math.max(0, Math.min(LEVELS.length - 1, unlockedLevel - 1))];
     startLevel(level, "dailyChallenge");
@@ -317,6 +344,8 @@ export default function App() {
           appVersion={appVersion}
           onClaimOffline={handleClaimOffline}
           onClaimOfflineDouble={handleClaimOfflineDouble}
+          pendingGate={pendingGate ? { breakthroughName: pendingGate.breakthroughName, unlockText: pendingGate.unlockText, breakthroughId: pendingGate.breakthroughId } : null}
+          onBreakthrough={handleBreakthrough}
         />
       )}
 
@@ -431,6 +460,31 @@ export default function App() {
           restartCurrentLevel={restartBattle}
         />
       )}
+
+      {screen === "breakthroughResult" && breakthroughResult && (
+        <section className="screen breakthrough-screen" onClick={() => {
+          // 记录突破完成
+          addClearedBreakthrough(breakthroughResult.id);
+          setBreakthroughResult(null);
+          goToMenu();
+        }}>
+          <div className="breakthrough-bg-light" />
+          <div className="breakthrough-icon">✦</div>
+          <h1 className="breakthrough-title">破境成功！</h1>
+          <p className="breakthrough-realm">你已突破至{breakthroughResult.name}</p>
+          <div className="breakthrough-unlock">{breakthroughResult.unlockText}</div>
+          <button className="breakthrough-btn" onClick={(e) => {
+            e.stopPropagation();
+            addClearedBreakthrough(breakthroughResult.id);
+            setBreakthroughResult(null);
+            goToMenu();
+          }}>
+            破境
+          </button>
+          <p className="breakthrough-tip">点击任意处或破境按钮继续</p>
+        </section>
+      )}
+
       <AdOverlay />
     </main>
   );
