@@ -2591,71 +2591,107 @@ export class Game {
     // 右下角临时效果图标（鼓/魂/油）— 含圆形倒计时
     this.drawPickupBuffs(ctx);
 
-    // 副刀槽位（始终显示2个，未解锁显示🔒+条件，已装备显示冷却）
+    // 副刀槽位（放大版：左下角大图标+CD数字+发光）
     {
-      const startX = 20;
-      const y = 824;
+      const startX = 16;
+      const y = 808;
+      const iconR = 22; // 44px 直径
       ctx.textAlign = "left";
       for (let i = 0; i < 2; i++) {
-        const ix = startX + i * 32;
+        const ix = startX + i * 56;
         const blade = this.subBlades[i] ?? null;
         ctx.save();
 
+        // 槽位底框
+        ctx.fillStyle = "rgba(18, 16, 14, 0.6)";
+        ctx.beginPath();
+        ctx.arc(ix + iconR, y + iconR, iconR + 2, 0, Math.PI * 2);
+        ctx.fill();
+
         if (!blade) {
-          // 未装备
-          ctx.fillStyle = "rgba(18, 16, 14, 0.6)";
-          ctx.beginPath();
-          ctx.arc(ix + 8, y + 6, 11, 0, Math.PI * 2);
-          ctx.fill();
+          // 空槽
           ctx.strokeStyle = "rgba(255, 211, 90, 0.3)";
           ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(ix + iconR, y + iconR, iconR, 0, Math.PI * 2);
           ctx.stroke();
-          ctx.fillStyle = "rgba(246, 231, 189, 0.5)";
-          ctx.font = '600 8px "Microsoft YaHei", sans-serif';
+          ctx.fillStyle = "rgba(246, 231, 189, 0.4)";
+          ctx.font = '600 10px "Microsoft YaHei", sans-serif';
           ctx.textAlign = "center";
-          ctx.fillText("空", ix + 8, y + 9);
+          ctx.fillText("空", ix + iconR, y + iconR + 4);
         } else {
           const timer = this.subBladeTimers[i] ?? 0;
           const cd = this.subBladeCooldowns[i] ?? 5;
           const ratio = Math.min(1, timer / cd);
-          // 圆背景
-          ctx.fillStyle = "rgba(18, 16, 14, 0.7)";
+          const ready = ratio >= 1;
+          // 品质背景
+          const qualityColor = BLADE_BASE_STATS[blade.quality] ? "#ffd35a" : "#a8e6cf";
+          ctx.fillStyle = "rgba(18, 16, 14, 0.85)";
           ctx.beginPath();
-          ctx.arc(ix + 8, y + 6, 11, 0, Math.PI * 2);
+          ctx.arc(ix + iconR, y + iconR, iconR, 0, Math.PI * 2);
           ctx.fill();
-          if (ratio >= 1) {
-            ctx.strokeStyle = "#a8e6cf";
-            ctx.lineWidth = 2.5;
+          // 冷却进度弧或发光
+          if (ready) {
+            // Ready: glowing ring + pulse
+            const pulse = 0.5 + Math.sin(this.elapsed * 4 + i * 2) * 0.5;
+            ctx.strokeStyle = qualityColor;
+            ctx.shadowColor = qualityColor;
+            ctx.shadowBlur = 10 + pulse * 8;
+            ctx.lineWidth = 3;
             ctx.beginPath();
-            ctx.arc(ix + 8, y + 6, 10, 0, Math.PI * 2);
+            ctx.arc(ix + iconR, y + iconR, iconR - 2, 0, Math.PI * 2);
             ctx.stroke();
-            ctx.fillStyle = "#a8e6cf";
-            ctx.font = '700 8px "Microsoft YaHei", sans-serif';
+            ctx.shadowBlur = 0;
+            // 图标
+            ctx.fillStyle = qualityColor;
+            ctx.font = '700 16px "Microsoft YaHei", sans-serif';
             ctx.textAlign = "center";
-            ctx.fillText("⚔", ix + 8, y + 9);
+            ctx.fillText("⚔", ix + iconR, y + iconR + 6);
           } else {
             // 冷却进度弧
-            const qualityColor = BLADE_BASE_STATS[blade.quality] ? "#ffd35a" : "rgba(168, 230, 207, 0.5)";
             ctx.strokeStyle = qualityColor;
-            ctx.lineWidth = 2.2;
+            ctx.lineWidth = 2.5;
             ctx.beginPath();
-            ctx.arc(ix + 8, y + 6, 10, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
+            ctx.arc(ix + iconR, y + iconR, iconR - 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
             ctx.stroke();
             // 品质边框
-            ctx.strokeStyle = "rgba(240, 195, 107, 0.4)";
+            ctx.strokeStyle = "rgba(240, 195, 107, 0.3)";
             ctx.lineWidth = 1.2;
             ctx.beginPath();
-            ctx.arc(ix + 8, y + 6, 10, 0, Math.PI * 2);
+            ctx.arc(ix + iconR, y + iconR, iconR - 2, 0, Math.PI * 2);
             ctx.stroke();
-            // 数字
+            // CD数字
             ctx.fillStyle = "#f6e7bd";
-            ctx.font = '600 9px "Microsoft YaHei", sans-serif';
+            ctx.font = '700 14px "Microsoft YaHei", sans-serif';
             ctx.textAlign = "center";
-            ctx.fillText(`${Math.ceil(cd - timer)}s`, ix + 8, y + 9);
+            ctx.fillText(`${Math.ceil(cd - timer)}`, ix + iconR, y + iconR + 5);
+            // "s" 小字
+            ctx.fillStyle = "rgba(246, 231, 189, 0.5)";
+            ctx.font = '600 8px "Microsoft YaHei", sans-serif';
+            ctx.fillText("s", ix + iconR + 10, y + iconR + 2);
           }
         }
         ctx.restore();
       }
+    }
+
+    // 右下角 Buff 展示
+    if (this.selectedRoutes.length > 0 || this.subBlades.length > 0) {
+      const bx = DESIGN_WIDTH - 88;
+      const by = 760;
+      ctx.save();
+      ctx.textAlign = "right";
+      ctx.fillStyle = "rgba(18, 16, 14, 0.6)";
+      ctx.fillRect(bx - 10, by - 4, 88, 44);
+      ctx.fill();
+      ctx.font = '700 9px "Microsoft YaHei", sans-serif';
+      ctx.fillStyle = "rgba(168, 230, 207, 0.7)";
+      ctx.textAlign = "right";
+      ctx.fillText("Buff", bx + 68, by + 12);
+      ctx.font = '600 8px "Microsoft YaHei", sans-serif';
+      ctx.fillStyle = "rgba(246, 231, 189, 0.5)";
+      ctx.fillText(`副刀×${this.subBlades.length}`, bx + 68, by + 30);
+      ctx.restore();
     }
 
     ctx.fillStyle = "#f6e7bd";

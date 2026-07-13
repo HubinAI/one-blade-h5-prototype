@@ -10,8 +10,8 @@ import {
   type UpgradeId
 } from "../config/rewards";
 import type { BattleResult, BossId, EliteKind, EnemyKind, LevelConfig, RatingGrade, RunProgress, RunRewards } from "../types";
-import type { Quality, RankId } from "../config/synthesis";
-import { RANK_ORDER, RANK_CONFIG, QUALITY_ORDER, QUALITY_META } from "../config/synthesis";
+import type { Quality, RankId, StageGate } from "../config/synthesis";
+import { RANK_ORDER, RANK_CONFIG, QUALITY_ORDER, QUALITY_META, MAIN_STAGE_GATES, getCurrentGate } from "../config/synthesis";
 import { synthesizeBlades, addExpToBlade, generateBlade } from "./BladeService";
 import type { SynthesisResult, Blade } from "./BladeService";
 import { logEvent } from "./Analytics";
@@ -68,6 +68,8 @@ export type PlayerProgress = {
   equippedSubBladeIds: string[];
   /** 各品质合成失败计数 */
   synFailCount: Record<string, number>;
+  /** 已完成的突破ID列表 */
+  clearedBreakthroughs: string[];
 };
 
 export type BattleRewardInput = {
@@ -194,6 +196,7 @@ function createDefaultProgress(): PlayerProgress {
     equippedMainBladeId: null,
     equippedSubBladeIds: [],
     synFailCount: {},
+    clearedBreakthroughs: [],
   };
 }
 
@@ -898,6 +901,36 @@ export function getAvailableRankIndex(highestFloor: number): number {
   return Math.min(RANK_ORDER.length - 1, Math.floor(highestFloor / 50));
 }
 
+/** 检查并添加突破完成记录 */
+export function addClearedBreakthrough(id: string): void {
+  const progress = readProgress();
+  if (!progress.clearedBreakthroughs.includes(id)) {
+    progress.clearedBreakthroughs.push(id);
+    writeProgress(progress);
+  }
+}
+
+/** 检查突破是否已完成 */
+export function hasClearedBreakthrough(id: string): boolean {
+  return readProgress().clearedBreakthroughs.includes(id);
+}
+
+/** 获取当前需要突破的门(如果有) */
+export function getPendingGate(): StageGate | null {
+  const progress = readProgress();
+  const gate = getCurrentGate(progress.highestFloor);
+  if (gate && !progress.clearedBreakthroughs.includes(gate.breakthroughId)) {
+    return gate;
+  }
+  // 没有精确卡点，检查是否在某个阶段的突破未完成
+  for (const g of MAIN_STAGE_GATES) {
+    if (progress.highestFloor >= g.afterStage && !progress.clearedBreakthroughs.includes(g.breakthroughId)) {
+      return g;
+    }
+  }
+  return null;
+}
+
 /** 尝试升段 */
 export function tryRankUp(): { ok: boolean; newRank?: RankId } {
   const progress = readProgress();
@@ -960,22 +993,44 @@ export const setEquippedMainBlade = equipMainBlade;
 export const setEquippedSubBlade = equipSubBlade;
 export const removeEquippedSubBlade = unequipSubBlade;
 
-/** 第一次进入武器背包时确保有默认白刀 + 主刀已装备 */
+/** 第一次进入武器背包时确保有默认白刀 + 主刀已装备 + 2把默认副刀 */
 export function saveDefaultWhiteBlade(): void {
   const progress = readProgress();
-  // 如果没有白刀，生成一把
+  // 如果没有白刀，生成一把+默认副刀
   if (!progress.blades.some(b => b.quality === "white")) {
-    import("../services/BladeService").then(({ generateBlade }) => {
+    import("../services/BladeService").then(({ generateBlade, createBlade }) => {
       const p = readProgress();
-      const w = generateBlade("white");
-      p.blades.push(w);
-      if (!p.equippedMainBladeId) p.equippedMainBladeId = w.id;
+      const main = generateBlade("white");
+      p.blades.push(main);
+      if (!p.equippedMainBladeId) p.equippedMainBladeId = main.id;
+      // 两把默认副刀
+      if (p.equippedSubBladeIds.length < 2) {
+        const sub1 = createBlade("木短刀", "white");
+        const sub2 = createBlade("铁短刀", "white");
+        p.blades.push(sub1, sub2);
+        p.equippedSubBladeIds = [sub1.id, sub2.id];
+      }
       writeProgress(p);
     });
   } else if (!progress.equippedMainBladeId) {
     // 有白刀但没装备，装备第一把
     const firstWhite = progress.blades.find(b => b.quality === "white");
     if (firstWhite) progress.equippedMainBladeId = firstWhite.id;
+    writeProgress(progress);
+  }
+  // 确保至少有1把副刀装备
+  if (progress.equippedSubBladeIds.length < 2) {
+    const existingSubs = progress.equippedSubBladeIds.filter(id =>
+      progress.blades.some(b => b.id === id)
+    );
+    const namePool = ["木短刀", "铁短刀"];
+    while (existingSubs.length < 2) {
+      const sub = generateBlade("white");
+      sub.name = namePool[existingSubs.length] ?? "副刀";
+      progress.blades.push(sub);
+      existingSubs.push(sub.id);
+    }
+    progress.equippedSubBladeIds = existingSubs;
     writeProgress(progress);
   }
 }

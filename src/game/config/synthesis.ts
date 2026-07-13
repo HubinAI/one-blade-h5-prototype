@@ -328,6 +328,45 @@ export function rollTodayShopPool(): TodayBuff[] {
   return out;
 }
 
+/** 主线阶段卡点配置 */
+export type StageGate = {
+  stageRange: [number, number];
+  afterStage: number;
+  breakthroughId: string;
+  breakthroughName: string;
+  nextUnlockFrom: number | null;
+  nextUnlockTo: number | null;
+  unlockText: string;
+};
+
+export const MAIN_STAGE_GATES: StageGate[] = [
+  { stageRange: [1, 5], afterStage: 5, breakthroughId: "breakthrough_lianqi", breakthroughName: "练气突破", nextUnlockFrom: 6, nextUnlockTo: 15, unlockText: "解锁主线第6-15关，开启精品刀掉落" },
+  { stageRange: [6, 15], afterStage: 15, breakthroughId: "breakthrough_zhuji", breakthroughName: "筑基突破", nextUnlockFrom: 16, nextUnlockTo: 30, unlockText: "解锁主线第16-30关，开启良品刀掉落" },
+  { stageRange: [16, 30], afterStage: 30, breakthroughId: "breakthrough_jiedan", breakthroughName: "结丹突破", nextUnlockFrom: 31, nextUnlockTo: 60, unlockText: "解锁主线第31-60关，开启上品刀掉落" },
+  { stageRange: [31, 60], afterStage: 60, breakthroughId: "breakthrough_yuanying", breakthroughName: "元婴突破", nextUnlockFrom: 61, nextUnlockTo: 120, unlockText: "解锁主线第61-120关，开启极品刀掉落" },
+  { stageRange: [61, 120], afterStage: 120, breakthroughId: "breakthrough_huashen", breakthroughName: "化神突破", nextUnlockFrom: 121, nextUnlockTo: 200, unlockText: "解锁主线第121-200关，开启灵器刀掉落" },
+  { stageRange: [121, 200], afterStage: 200, breakthroughId: "breakthrough_dacheng", breakthroughName: "大乘突破", nextUnlockFrom: 201, nextUnlockTo: 400, unlockText: "解锁主线第201-400关，开启仙器刀掉落" },
+  { stageRange: [201, 400], afterStage: 400, breakthroughId: "breakthrough_dujie", breakthroughName: "渡劫突破", nextUnlockFrom: 401, nextUnlockTo: 1000, unlockText: "解锁主线第401-1000关，开启神器刀掉落" },
+  { stageRange: [401, 1000], afterStage: 1000, breakthroughId: "breakthrough_xianren", breakthroughName: "仙人突破", nextUnlockFrom: null, nextUnlockTo: null, unlockText: "达成当前版本最高境界" },
+];
+
+/** 获取当前是否需要突破 */
+export function getCurrentGate(floor: number): StageGate | null {
+  for (const gate of MAIN_STAGE_GATES) {
+    if (floor === gate.afterStage) return gate;
+  }
+  return null;
+}
+
+/** 获取当前已通过的最高关卡所在阶段名称 */
+export function getStageNameByFloor(floor: number): string {
+  for (let i = MAIN_STAGE_GATES.length - 1; i >= 0; i--) {
+    const g = MAIN_STAGE_GATES[i];
+    if (g.stageRange[0] <= floor) return g.breakthroughName.replace("突破", "");
+  }
+  return "初入刀道";
+}
+
 /** 动态生成一局主线的完整LevelConfig */
 export function createFloorLevelConfig(floor: number): LevelConfig {
   const stats = getFloorStats(floor);
