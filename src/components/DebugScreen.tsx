@@ -50,8 +50,15 @@ export function DebugScreen({ onBack }: DebugScreenProps) {
 
   function resetProgress() {
     if (!confirm("确认重置所有进度？此操作不可恢复")) return;
-    window.localStorage.removeItem("one_blade_v04_progression");
-    window.localStorage.removeItem("one_blade_today_buffs");
+    const keys = [
+      "one_blade_v04_progression",
+      "one_blade_today_buffs",
+      "one_blade_v02_progress",
+      "one_blade_first_run_done",
+      "one_blade_v02_levels",
+      "one_blade_completion_today",
+    ];
+    for (const k of keys) window.localStorage.removeItem(k);
     show("已重置，刷新页面生效");
     setTimeout(() => window.location.reload(), 800);
   }
