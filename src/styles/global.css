@@ -656,6 +656,7 @@ h1 {
   content: "";
   position: absolute;
   inset: 0;
+  pointer-events: none;
   background:
     linear-gradient(rgba(12, 16, 17, 0.18), rgba(12, 16, 17, 0.52)),
     radial-gradient(ellipse at 50% 30%, rgba(240, 195, 107, 0.06), transparent 50%),
@@ -5754,4 +5755,27 @@ h1 {
 .result-back-section {
   width: 100%;
   max-width: 320px;
+}
+
+.result-btn.single-btn {
+  margin-top: 6px;
+  padding: 16px 0;
+  font-size: 18px;
+  box-shadow: 0 8px 20px rgba(74, 183, 183, 0.35);
+}
+
+.result-tap-tip {
+  margin-top: auto;
+  padding: 18px 0 4px;
+  font-size: 12px;
+  color: rgba(246, 231, 189, 0.4);
+  text-align: center;
+  letter-spacing: 2px;
+  animation: tapTipFade 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes tapTipFade {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.85; }
 }

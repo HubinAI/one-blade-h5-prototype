@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { BattleResult } from "../game/types";
 import { showRewardedAdMock, incrementDailyAdCount } from "../game/services/AdService";
-import { spendStamina } from "../game/services/ProgressionService";
 
 type ResultScreenProps = {
   result: BattleResult;
@@ -25,15 +24,12 @@ function getFailReason(result: BattleResult): string {
 
 export function ResultScreen({
   result,
-  hasNext,
-  onRetry,
-  onNext,
   onHome,
   onDoubleReward,
   restartCurrentLevel,
 }: ResultScreenProps) {
   const displayId = result.levelId >= 10000 ? result.levelId - 10000 : result.levelId;
-  const [adState, setAdState] = useState<"idle" | "playing" | "done">("idle");
+  const [adState, setAdState] = useState<"idle" | "playing">("idle");
   const [extraSlashUsed, setExtraSlashUsed] = useState(false);
 
   /** 失败页：看广告补一刀 */
@@ -44,7 +40,6 @@ export function ResultScreen({
     if (ok) {
       incrementDailyAdCount("revive_extra_slash");
       setExtraSlashUsed(true);
-      // 补一刀后重开本局（用重启）
       restartCurrentLevel();
     }
   };
@@ -68,29 +63,48 @@ export function ResultScreen({
     "神之一刀": "★★★★★",
   };
 
-  const isFirstRun = !window.localStorage.getItem("one_blade_first_run_done");
+  // 整个空白区域点击 → 返回首页
+  function handleBackgroundClick() {
+    onHome();
+  }
+
+  // 点击空白返回（不触发按钮的点击）
+  function stop(e: React.MouseEvent) {
+    e.stopPropagation();
+  }
 
   return (
-    <section className="screen result-screen market-result-screen">
+    <section
+      className="screen result-screen market-result-screen"
+      onClick={handleBackgroundClick}
+    >
       {/* 顶部分数 */}
-      <div className="result-header-section">
+      <div className="result-header-section" onClick={stop}>
         <h1 className={`result-title ${result.win ? "win" : "lose"}`}>
-          {result.win ? "破阵成功！" : "防线被破"}
+          {result.win ? "破阵成功！" : "失败"}
         </h1>
         <p className="result-level-info">第 {displayId} 关</p>
 
         <div className="result-rating-row">
-          <span className="result-rating-grade" style={{
-            color: result.rating === "SS" || result.rating === "神之一刀" ? "#ffd35a" : "#f6e7bd"
-          }}>
+          <span
+            className="result-rating-grade"
+            style={{
+              color:
+                result.rating === "SS" || result.rating === "神之一刀"
+                  ? "#ffd35a"
+                  : "#f6e7bd",
+            }}
+          >
             {result.rating}
           </span>
-          <span className="result-rating-stars">{ratingStars[result.rating] ?? ""}</span>
+          <span className="result-rating-stars">
+            {ratingStars[result.rating] ?? ""}
+          </span>
         </div>
       </div>
 
       {/* 核心数据 */}
-      <div className="result-stats-section">
+      <div className="result-stats-section" onClick={stop}>
         <div className="result-stat">
           <span className="result-stat-label">最大单刀击杀</span>
           <span className="result-stat-value">{result.maxSingleBlade}</span>
@@ -106,7 +120,7 @@ export function ResultScreen({
       </div>
 
       {/* 奖励 */}
-      <div className="result-rewards-section">
+      <div className="result-rewards-section" onClick={stop}>
         <div className="result-reward">
           <span className="result-reward-icon">🪙</span>
           <span className="result-reward-amount">+{result.rewards.coins}</span>
@@ -122,56 +136,39 @@ export function ResultScreen({
 
       {/* 失败原因提示 */}
       {!result.win && (
-        <div className="result-fail-reason">
+        <div className="result-fail-reason" onClick={stop}>
           💡 {getFailReason(result)}
         </div>
       )}
 
-      {/* 按钮区 */}
-      <div className="result-actions-section">
+      {/* 唯一按钮：看广告 */}
+      <div className="result-actions-section" onClick={stop}>
         {result.win ? (
-          <>
-            {hasNext && (
-              <button className="result-btn primary-btn" onClick={onNext}>
-                下一关
-              </button>
-            )}
-            <button className="result-btn secondary-btn" onClick={onRetry}>
-              再来一局
+          result.canDoubleReward && !result.rewards.doubled && (
+            <button
+              className="result-btn ad-btn single-btn"
+              onClick={handleDoubleCoins}
+              disabled={adState === "playing"}
+            >
+              📺 看广告 ×2
             </button>
-            {result.canDoubleReward && !result.rewards.doubled && (
-              <button
-                className="result-btn ad-btn"
-                onClick={handleDoubleCoins}
-                disabled={adState === "playing"}
-              >
-                📺 看广告 ×2
-              </button>
-            )}
-          </>
+          )
         ) : (
-          <>
-            {!extraSlashUsed && (
-              <button
-                className="result-btn primary-btn"
-                onClick={handleReviveSlash}
-                disabled={adState === "playing"}
-              >
-                📺 看广告·补一刀
-              </button>
-            )}
-            <button className="result-btn secondary-btn" onClick={onRetry}>
-              再来一局
+          !extraSlashUsed && (
+            <button
+              className="result-btn ad-btn single-btn"
+              onClick={handleReviveSlash}
+              disabled={adState === "playing"}
+            >
+              📺 看广告·补一刀
             </button>
-          </>
+          )
         )}
       </div>
 
-      {/* 返回按钮 */}
-      <div className="result-back-section">
-        <button className="result-btn ghost-btn" onClick={onHome}>
-          返回首页
-        </button>
+      {/* 底部提示：点击空白返回 */}
+      <div className="result-tap-tip" onClick={stop}>
+        · 点击空白处返回 ·
       </div>
     </section>
   );
