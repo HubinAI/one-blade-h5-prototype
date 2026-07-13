@@ -1952,8 +1952,9 @@ export class Game {
     ctx.textAlign = "center";
     ctx.fillStyle = "#f6e7bd";
     ctx.font = '700 16px "Microsoft YaHei", sans-serif';
-    const displayFloor = this.level.id >= 10000 ? this.level.id - 10000 : this.level.id;
-    ctx.fillText(`第${displayFloor}关 ${this.level.title}`, DESIGN_WIDTH / 2, 28);
+    const isBossLevel = this.level.id < 10000 && Boolean(this.level.bossId);
+    const displayFloor = isBossLevel ? null : (this.level.id >= 10000 ? this.level.id - 10000 : this.level.id);
+    ctx.fillText(displayFloor !== null ? `第${displayFloor}关 ${this.level.title}` : this.level.title, DESIGN_WIDTH / 2, 28);
     ctx.font = '11px "Microsoft YaHei", sans-serif';
     ctx.fillStyle = "rgba(246, 231, 189, 0.72)";
     ctx.fillText(`波次 ${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`, DESIGN_WIDTH / 2, 48);
