@@ -93,9 +93,11 @@ export default function App() {
       // 确保 AudioContext 在用户交互时激活
       try { new AudioContext().close(); } catch { /* no-op */ }
 
-      // 消耗体力
-      if (mode !== "freeBurst") {
-        const cost = mode === "normal" ? REWARD_CONFIG.stamina.mainlineCost : REWARD_CONFIG.stamina.challengeCost;
+      // 消耗体力 (突破战不消耗体力, 视为免费挑战)
+      if (mode === "challenge") {
+        // 突破战: 不消耗体力, 不需要 freeBurst
+      } else if (mode !== "freeBurst") {
+        const cost = REWARD_CONFIG.stamina.mainlineCost;
         if (!spendStamina(cost, `${mode}_run`)) {
           alert("体力不足！看广告或等恢复后再来");
           return;
