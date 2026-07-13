@@ -14,15 +14,15 @@ export const QUALITY_META: Record<Quality, {
   /** 刀名池（合成时随机抽取） */
   namePool: string[];
 }> = {
-  white: { label: "凡品", color: "#b4b2a9", next: "green", namePool: ["铁刃", "青锋", "钢骨", "霜铁", "黑曜"] },
-  green: { label: "精炼", color: "#85B7EB", next: "blue", namePool: ["灵霜", "赤焰", "紫电", "玄铁", "寒铁"] },
-  blue: { label: "玄品", color: "#534AB7", next: "purple", namePool: ["寒月", "烈阳", "天罡", "地煞", "飞鸿"] },
-  purple: { label: "灵品", color: "#7F77DD", next: "gold", namePool: ["碧血", "青虹", "紫郢", "霜华", "星陨"] },
-  gold: { label: "法宝", color: "#FAC775", next: "darkGold", namePool: ["干将", "莫邪", "太阿", "龙渊", "工布"] },
-  darkGold: { label: "仙器", color: "#D85A30", next: "spirit", namePool: ["斩天", "破虚", "灭世", "无极", "混沌"] },
-  spirit: { label: "灵器", color: "#A32D2D", next: "immortal", namePool: ["九霄", "苍穹", "太初", "归墟", "鸿蒙"] },
-  immortal: { label: "仙品", color: "#E24B4A", next: "god", namePool: ["天道", "轮回", "创世", "永恒", "虚无"] },
-  god: { label: "神器", color: "#FFD700", next: null, namePool: ["开天", "辟地", "造化", "无极"] },
+  white: { label: "凡品", color: "#FFFFFF", next: "green", namePool: ["铁刃", "青锋", "钢骨", "霜铁", "黑曜"] },
+  green: { label: "精炼", color: "#22C55E", next: "blue", namePool: ["灵霜", "赤焰", "紫电", "玄铁", "寒铁"] },
+  blue: { label: "玄品", color: "#3B82F6", next: "purple", namePool: ["寒月", "烈阳", "天罡", "地煞", "飞鸿"] },
+  purple: { label: "灵品", color: "#A855F7", next: "gold", namePool: ["碧血", "青虹", "紫郢", "霜华", "星陨"] },
+  gold: { label: "法宝", color: "#F97316", next: "darkGold", namePool: ["干将", "莫邪", "太阿", "龙渊", "工布"] },
+  darkGold: { label: "仙器", color: "#EF4444", next: "spirit", namePool: ["斩天", "破虚", "灭世", "无极", "混沌"] },
+  spirit: { label: "灵器", color: "#EAB308", next: "immortal", namePool: ["九霄", "苍穹", "太初", "归墟", "鸿蒙"] },
+  immortal: { label: "仙品", color: "#EC4899", next: "god", namePool: ["天道", "轮回", "创世", "永恒", "虚无"] },
+  god: { label: "神器", color: "rainbow-1", next: null, namePool: ["开天", "辟地", "造化", "无极"] },
 };
 
 // ════════════════════════════════════════════

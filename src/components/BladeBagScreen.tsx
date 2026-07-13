@@ -15,12 +15,13 @@ import { QUALITY_META, QUALITY_ORDER, type Quality } from "../game/config/synthe
 
 type BladeBagScreenProps = {
   onBack: () => void;
+  onOpenCodex?: () => void;
 };
 
 const SUB1_UNLOCK_FLOOR = 50; // 第1把副刀解锁需要50层
 const SUB2_UNLOCK_FLOOR = 100; // 第2把副刀解锁需要100层
 
-export function BladeBagScreen({ onBack }: BladeBagScreenProps) {
+export function BladeBagScreen({ onBack, onOpenCodex }: BladeBagScreenProps) {
   const [inventory, setInventory] = useState<Blade[]>(getBladeInventory());
   const [equipped, setEquipped] = useState<EquippedBlades>(getEquippedBlades());
   const [batchMode, setBatchMode] = useState(false);
@@ -125,6 +126,9 @@ export function BladeBagScreen({ onBack }: BladeBagScreenProps) {
         <div className="bag-header">
           <button className="bag-back" onClick={onBack}>×</button>
           <h1>武器背包</h1>
+          {onOpenCodex && (
+            <button className="bag-codex-btn" onClick={onOpenCodex}>📖 图鉴</button>
+          )}
         </div>
 
         {/* 出战编队 */}
@@ -224,9 +228,13 @@ export function BladeBagScreen({ onBack }: BladeBagScreenProps) {
               const items = grouped[q] ?? [];
               if (items.length === 0) return null;
               const meta = QUALITY_META[q];
+              const isGod = q === "god";
+              const colorStyle = isGod
+                ? { background: "linear-gradient(90deg, #ff3b8b, #ffb83b, #36e2ff, #b86bff)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text", color: "transparent" }
+                : { color: meta.color };
               return (
                 <div key={q} className="bag-quality-group">
-                  <h4 className="bag-quality-title" style={{ color: meta.color }}>
+                  <h4 className="bag-quality-title" style={colorStyle}>
                     {meta.label} ({items.length})
                   </h4>
                   <div className="bag-blade-grid">
@@ -235,15 +243,18 @@ export function BladeBagScreen({ onBack }: BladeBagScreenProps) {
                       return (
                         <div
                           key={blade.id}
-                          className={`bag-blade ${isDragging ? "dragging" : ""}`}
-                          style={{ borderColor: meta.color }}
+                          className={`bag-blade ${isDragging ? "dragging" : ""} ${isGod ? "god-quality" : ""}`}
+                          style={{ borderColor: isGod ? "#ffb83b" : meta.color }}
                           draggable
                           onDragStart={() => setDraggingBlade(blade)}
                           onDragEnd={() => { setDraggingBlade(null); setDragOverSlot(null); }}
                           onDragOver={(e) => e.preventDefault()}
                           onDrop={() => handleDropOnBlade(blade)}
                         >
-                          <span className="bag-blade-name">{blade.name}</span>
+                          <span className={`bag-blade-name ${isGod ? "god-quality-name" : ""}`}
+                            style={isGod ? undefined : { color: meta.color }}>
+                            {blade.name}
+                          </span>
                           <span className="bag-blade-lv">Lv.{blade.level}</span>
                         </div>
                       );

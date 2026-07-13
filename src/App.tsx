@@ -334,10 +334,7 @@ export default function App() {
           onStart={startMainline}
           onContinue={startMainline}
           onRestoreStamina={handleRestoreStamina}
-          onCodex={() => setShowCodex(true)}
-          onForge={() => setScreen("bag")}
           onRanking={() => setScreen("ranking")}
-          onIdle={() => setScreen("idle")}
           onChallenge={() => setScreen("challenge")}
           onBag={() => setScreen("bag")}
           onDebug={() => setScreen("debug")}
@@ -379,7 +376,10 @@ export default function App() {
       )}
 
       {screen === "bag" && (
-        <BladeBagScreen onBack={() => { refreshHome(); setScreen("menu"); }} />
+        <BladeBagScreen
+          onBack={() => { refreshHome(); setScreen("menu"); }}
+          onOpenCodex={() => setShowCodex(true)}
+        />
       )}
 
       {screen === "debug" && (

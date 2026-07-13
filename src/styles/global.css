@@ -5092,6 +5092,17 @@ h1 {
   color: #ffd35a;
 }
 
+.bag-codex-btn {
+  padding: 4px 10px;
+  background: rgba(255, 211, 90, 0.1);
+  border: 1px solid rgba(255, 211, 90, 0.3);
+  border-radius: 4px;
+  color: #ffd35a;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .bag-back {
   width: 28px;
   height: 28px;
@@ -5292,6 +5303,33 @@ h1 {
   text-overflow: ellipsis;
   white-space: nowrap;
   width: 100%;
+}
+
+.bag-blade.god-quality {
+  background: linear-gradient(90deg, rgba(255, 59, 139, 0.12), rgba(255, 184, 59, 0.12), rgba(54, 226, 255, 0.12), rgba(184, 107, 255, 0.12));
+  position: relative;
+}
+
+.bag-blade.god-quality::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(90deg, #ff3b8b, #ffb83b, #36e2ff, #b86bff);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.god-quality-name {
+  background: linear-gradient(90deg, #ff3b8b, #ffb83b, #36e2ff, #b86bff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 900;
+  filter: brightness(1.1);
 }
 
 .bag-blade-lv {
@@ -5585,6 +5623,384 @@ h1 {
   margin-top: auto;
   padding-top: 8px;
 }
+
+/* ═══════════════════════════════════════════════════ */
+/* 赵云与阿斗风格首页 (zhao-yun-style)                    */
+/* ═══════════════════════════════════════════════════ */
+
+.zhao-yun-style {
+  display: flex;
+  flex-direction: column;
+  padding: 36px 22px 16px;
+  gap: 12px;
+  overflow-y: auto;
+  position: relative;
+  background:
+    radial-gradient(ellipse at 50% 30%, rgba(255, 215, 100, 0.06), transparent 60%),
+    radial-gradient(ellipse at 50% 80%, rgba(150, 60, 30, 0.1), transparent 50%);
+}
+
+.zys-top {
+  text-align: center;
+  padding: 4px 0 2px;
+}
+
+.zys-title {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 900;
+  color: #fff3c0;
+  text-shadow: 0 0 18px rgba(255, 200, 80, 0.4), 0 2px 4px rgba(0,0,0,0.5);
+  letter-spacing: 4px;
+}
+
+.zys-subtitle {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: rgba(246, 231, 189, 0.55);
+  letter-spacing: 2px;
+}
+
+.zys-goal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 211, 90, 0.06);
+  border: 1px solid rgba(255, 211, 90, 0.2);
+  border-radius: 8px;
+}
+
+.zys-goal.done {
+  background: rgba(168, 230, 207, 0.08);
+  border-color: rgba(168, 230, 207, 0.4);
+}
+
+.zys-goal-icon {
+  font-size: 16px;
+}
+
+.zys-goal-text {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f6e7bd;
+}
+
+.zys-status-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: rgba(20, 14, 8, 0.4);
+  border: 1px solid rgba(255, 211, 90, 0.1);
+  border-radius: 10px;
+}
+
+.zys-status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.zys-status-label {
+  font-size: 12px;
+  color: rgba(246, 231, 189, 0.6);
+  font-weight: 700;
+}
+
+.zys-status-value {
+  font-size: 13px;
+  font-weight: 800;
+  color: #fff3c0;
+}
+
+.zys-status-value.stamina {
+  color: #a8e6cf;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.zys-stamina-btn {
+  padding: 1px 6px;
+  background: rgba(255, 211, 90, 0.1);
+  border: 1px solid rgba(255, 211, 90, 0.3);
+  border-radius: 3px;
+  color: #ffd35a;
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.zys-offline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  background: linear-gradient(90deg, rgba(245, 184, 64, 0.18), rgba(255, 211, 90, 0.04));
+  border: 1px solid rgba(245, 184, 64, 0.35);
+  border-radius: 8px;
+  animation: zysOfflinePulse 2s ease-in-out infinite;
+}
+
+@keyframes zysOfflinePulse {
+  0%, 100% { border-color: rgba(245, 184, 64, 0.35); }
+  50% { border-color: rgba(245, 184, 64, 0.8); }
+}
+
+.zys-offline-icon {
+  font-size: 16px;
+}
+
+.zys-offline-text {
+  flex: 1;
+  font-size: 11px;
+  color: #f6e7bd;
+  font-weight: 700;
+}
+
+.zys-offline-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.zys-offline-claim,
+.zys-offline-ad {
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.zys-offline-claim {
+  background: linear-gradient(180deg, #ffba48, #d97810);
+  border: 1px solid #b8800c;
+  color: #fff;
+}
+
+.zys-offline-ad {
+  background: linear-gradient(180deg, #4ab7b7, #2d7878);
+  border: 1px solid #1a5252;
+  color: #fff;
+}
+
+.zys-offline-ad:disabled {
+  background: rgba(0,0,0,0.4);
+  color: rgba(246, 231, 189, 0.4);
+}
+
+/* 中央大按钮区域 */
+.zys-main-button-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 0 8px;
+  min-height: 130px;
+  position: relative;
+}
+
+/* 背景装饰圆 - 仿赵云与阿斗 */
+.zys-main-button-area::before {
+  content: "";
+  position: absolute;
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  background: radial-gradient(circle at center, rgba(255, 220, 100, 0.18), transparent 60%);
+  pointer-events: none;
+  animation: zysOrbBreath 4s ease-in-out infinite;
+}
+
+@keyframes zysOrbBreath {
+  0%, 100% { transform: scale(0.9); opacity: 0.6; }
+  50% { transform: scale(1.1); opacity: 1; }
+}
+
+.zys-start-btn {
+  width: 80%;
+  max-width: 280px;
+  height: 70px;
+  background:
+    linear-gradient(180deg, #d9a52a 0%, #b87a30 50%, #7a4a18 100%);
+  border: 2px solid #8a5a1c;
+  border-radius: 14px;
+  color: #fff3c0;
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  box-shadow:
+    0 8px 22px rgba(180, 100, 30, 0.5),
+    inset 0 1px 0 rgba(255, 220, 130, 0.4),
+    inset 0 -3px 0 rgba(60, 20, 0, 0.3);
+  position: relative;
+  z-index: 1;
+  transition: transform 0.12s;
+}
+
+.zys-start-btn::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 16px;
+  height: 16px;
+  background: #c8c8d8;
+  border: 1px solid #6a6a78;
+  border-radius: 2px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+}
+
+.zys-start-btn:active {
+  transform: scale(0.97);
+}
+
+.zys-start-icon {
+  font-size: 20px;
+  color: #c8c8d8;
+  text-shadow: 0 0 6px rgba(200, 200, 220, 0.6);
+}
+
+.zys-start-text {
+  flex: 1;
+  text-align: center;
+}
+
+.zys-start-stamina {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 243, 192, 0.7);
+  letter-spacing: 1px;
+}
+
+/* 突破按钮(替换主按钮) */
+.zys-breakthrough-btn {
+  width: 80%;
+  max-width: 280px;
+  height: 70px;
+  background: linear-gradient(180deg, #ffd35a 0%, #d9a520 50%, #b87a30 100%);
+  border: 2px solid #b87a30;
+  border-radius: 14px;
+  color: #2a1410;
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  box-shadow: 0 10px 30px rgba(255, 211, 90, 0.5), inset 0 -3px 0 rgba(80, 30, 0, 0.2);
+  position: relative;
+  z-index: 1;
+  animation: zysBreakthroughPulse 1.8s ease-in-out infinite;
+  transition: transform 0.12s;
+}
+
+.zys-breakthrough-btn:active {
+  transform: scale(0.97);
+}
+
+@keyframes zysBreakthroughPulse {
+  0%, 100% { box-shadow: 0 10px 30px rgba(255, 211, 90, 0.4); }
+  50% { box-shadow: 0 10px 50px rgba(255, 211, 90, 0.8); }
+}
+
+.zys-breakthrough-icon {
+  font-size: 22px;
+}
+
+.zys-breakthrough-name {
+  font-size: 18px;
+}
+
+.zys-breakthrough-sub {
+  font-size: 9px;
+  font-weight: 600;
+  color: rgba(42, 20, 16, 0.7);
+  letter-spacing: 1px;
+}
+
+/* 底部左右入口 */
+.zys-bottom-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px 4px;
+  gap: 16px;
+}
+
+.zys-side-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: rgba(20, 14, 8, 0.5);
+  border: 1px solid rgba(255, 211, 90, 0.15);
+  border-radius: 12px;
+  padding: 10px 12px 8px;
+  min-width: 100px;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.zys-side-btn:active {
+  transform: scale(0.95);
+}
+
+.zys-side-icon {
+  font-size: 32px;
+  line-height: 1;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.4);
+}
+
+.zys-side-icon.forge-icon {
+  color: #ff9c3a;
+  text-shadow: 0 0 10px rgba(255, 156, 58, 0.5);
+}
+
+.zys-side-label {
+  font-size: 11px;
+  color: rgba(246, 231, 189, 0.7);
+  font-weight: 700;
+}
+
+/* 隐藏入口 */
+.zys-hidden-actions {
+  display: flex;
+  gap: 4px;
+  padding: 4px 0 0;
+  justify-content: center;
+}
+
+.zys-mini-btn {
+  padding: 4px 8px;
+  background: rgba(20, 14, 8, 0.3);
+  border: 1px solid rgba(255, 211, 90, 0.08);
+  border-radius: 4px;
+  color: rgba(246, 231, 189, 0.4);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.zys-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+/* 兼容旧版 */
+.breakthrough-main-btn { display: none; }
 
 /* ═══════════════════════════════════════════════════ */
 /* 微信小游戏市场优化 — 结算页 (market-result-screen)    */

@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import type { HomeSnapshot } from "../game/services/ProgressionService";
 import { getEquippedBlades } from "../game/services/ProgressionService";
-import { RANK_CONFIG, RANK_ORDER } from "../game/config/synthesis";
+import { RANK_CONFIG, RANK_ORDER, getStageNameByFloor } from "../game/config/synthesis";
 import { QUALITY_META } from "../game/config/synthesis";
 import { showRewardedAdMock, incrementDailyAdCount } from "../game/services/AdService";
 
@@ -11,10 +11,7 @@ type MainMenuProps = {
   onStart: () => void;
   onContinue: () => void;
   onRestoreStamina: () => void;
-  onCodex: () => void;
-  onForge: () => void;
   onRanking: () => void;
-  onIdle: () => void;
   onChallenge: () => void;
   onBag: () => void;
   onDebug: () => void;
@@ -31,9 +28,7 @@ export function MainMenu({
   onStart,
   onContinue,
   onRestoreStamina,
-  onCodex,
   onRanking,
-  onIdle,
   onChallenge,
   onBag,
   onDebug,
@@ -53,7 +48,7 @@ export function MainMenu({
     ? `${QUALITY_META[mainBlade.quality]?.label ?? "凡品"}·${mainBlade.name}`
     : "凡品·练习木刀";
 
-  // 今日目标：简化版，目标定为突破到筑基(索引1)
+  // 今日目标：动态根据阶段卡点
   const goalRankIndex = 1; // 筑基
   const currentRankId = RANK_ORDER[home.rankIndex] ?? RANK_ORDER[0];
   const goalRankId = RANK_ORDER[goalRankIndex] ?? RANK_ORDER[1];
@@ -61,6 +56,9 @@ export function MainMenu({
   const goalText = goalReached
     ? "今日目标已完成 🎉"
     : `今日目标：突破到${RANK_CONFIG[goalRankId]?.name ?? "筑基"}`;
+
+  // 关卡动画信息
+  const stageName = getStageNameByFloor(Math.max(1, home.highestFloor));
 
   // 离线收益
   const hasOffline = home.offlineCoins > 0;
@@ -76,30 +74,31 @@ export function MainMenu({
   };
 
   return (
-    <section className="screen menu-screen market-home-screen">
-      {/* 标题区 */}
-      <div className="market-home-title-section">
-        <h1>我只要一刀</h1>
-        <p className="market-home-subtitle">敌军压境，一刀破阵</p>
+    <section className="screen menu-screen market-home-screen zhao-yun-style">
+      {/* 顶部:游戏标题 + 金币/体力 */}
+      <div className="zys-top">
+        <h1 className="zys-title">我只要一刀</h1>
+        <p className="zys-subtitle">敌军压境，一刀破阵</p>
       </div>
 
       {/* 今日目标 */}
-      <div className={`market-home-goal ${goalReached ? "done" : ""}`}>
-        <span className="market-home-goal-icon">{goalReached ? "✅" : "🎯"}</span>
-        <span className="market-home-goal-text">{goalText}</span>
+      <div className={`zys-goal ${goalReached ? "done" : ""}`}>
+        <span className="zys-goal-icon">{goalReached ? "🎉" : "🎯"}</span>
+        <span className="zys-goal-text">{goalText}</span>
       </div>
 
-      {/* 当前状态信息 */}
-      <div className="market-home-status-row">
-        <div className="market-home-status-item">
-          <span className="status-label">当前主刀</span>
-          <span className="status-value">{mainBladeLabel}</span>
+      {/* 主刀 + 体力 状态行 */}
+      <div className="zys-status-row">
+        <div className="zys-status-item">
+          <span className="zys-status-label">当前主刀</span>
+          <span className="zys-status-value">{mainBladeLabel}</span>
         </div>
-        <div className="market-home-status-item">
-          <span className="status-label">体力</span>
-          <span className="status-value stamina">{home.stamina}/{home.staminaMax}
+        <div className="zys-status-item">
+          <span className="zys-status-label">体力</span>
+          <span className="zys-status-value stamina">
+            {home.stamina}/{home.staminaMax}
             {home.stamina < 5 && (
-              <button className="status-ad-btn" onClick={onRestoreStamina}>恢复</button>
+              <button className="zys-stamina-btn" onClick={onRestoreStamina}>恢复</button>
             )}
           </span>
         </div>
@@ -107,15 +106,15 @@ export function MainMenu({
 
       {/* 离线收益 */}
       {hasOffline && (
-        <div className="market-home-offline-row">
-          <span className="offline-icon">🛌</span>
-          <span className="offline-text">离线收益可领取: {home.offlineCoins} 金币</span>
-          <div className="offline-actions">
-            <button className="offline-claim-btn small" onClick={onClaimOffline}>
+        <div className="zys-offline-row">
+          <span className="zys-offline-icon">🛌</span>
+          <span className="zys-offline-text">离线收益可领取: {home.offlineCoins} 金币</span>
+          <div className="zys-offline-actions">
+            <button className="zys-offline-claim small" onClick={onClaimOffline}>
               领取
             </button>
             <button
-              className="offline-ad-btn small"
+              className="zys-offline-ad small"
               onClick={handleIdleDouble}
               disabled={adState === "playing"}
             >
@@ -125,52 +124,54 @@ export function MainMenu({
         </div>
       )}
 
-      {/* 核心操作按钮 */}
-      <div className="market-home-actions">
+      {/* 中央偏下:大主按钮(继续闯关/突破) + 体力消耗 */}
+      <div className="zys-main-button-area">
         {pendingGate ? (
-          <button className="market-btn breakthrough-main-btn" onClick={onBreakthrough}>
-            <span className="breakthrough-icon-sm">✦</span>
-            <span className="main-btn-text">{pendingGate.breakthroughName}</span>
-            <span className="main-btn-sub">{pendingGate.unlockText}</span>
+          <button className="zys-breakthrough-btn" onClick={onBreakthrough}>
+            <span className="zys-breakthrough-icon">✦</span>
+            <span className="zys-breakthrough-name">{pendingGate.breakthroughName}</span>
+            <span className="zys-breakthrough-sub">{pendingGate.unlockText}</span>
           </button>
         ) : (
           <button
-            className="market-btn main-btn"
+            className="zys-start-btn"
             onClick={isFirstPlay ? onStart : onContinue}
           >
-            <span className="main-btn-icon">⚡</span>
-            <span className="main-btn-text">继续闯关</span>
-            <span className="main-btn-sub">消耗5体力</span>
+            <span className="zys-start-icon">⚔</span>
+            <span className="zys-start-text">开始游戏</span>
+            <span className="zys-start-stamina">消耗 {REWARD_CONFIG_STAMINA} 体力</span>
           </button>
         )}
+      </div>
 
-        <button className="market-btn forge-btn" onClick={onBag}>
-          <span className="forge-btn-icon">⚔</span>
-          <span>炼器合成</span>
+      {/* 底部左右:排行 + 炼器合成 */}
+      <div className="zys-bottom-row">
+        <button className="zys-side-btn" onClick={onRanking}>
+          <div className="zys-side-icon">🏯</div>
+          <div className="zys-side-label">排行榜</div>
+        </button>
+        <button className="zys-side-btn" onClick={onBag}>
+          <div className="zys-side-icon forge-icon">⚒</div>
+          <div className="zys-side-label">炼器合成</div>
         </button>
       </div>
 
-      {/* 弱入口 */}
-      <div className="market-home-sub-actions">
-        <button className="sub-btn" onClick={onCodex}>
-          📖 图鉴
-        </button>
-        <button className="sub-btn" onClick={onRanking}>
-          🏆 排行榜
-        </button>
-        <button className="sub-btn" onClick={onIdle}>
-          🛌 挂机
-        </button>
-        <button className="sub-btn" onClick={onChallenge}>
-          ⚔ 挑战
-        </button>
-      </div>
+      {/* 隐藏的 weak 入口(仅挑战/挂机,通过长按 debug 按钮触发) */}
+      {pendingGate === null && (
+        <div className="zys-hidden-actions">
+          <button className="zys-mini-btn" onClick={onChallenge}>⚔ 挑战</button>
+          <button className="zys-mini-btn" onClick={onBag}>🛌 挂机</button>
+        </div>
+      )}
 
-      {/* 公告/版本 */}
-      <div className="market-home-footer">
+      {/* 版本 + debug */}
+      <div className="zys-footer">
         <small className="version-footer">{appVersion}</small>
         <button className="debug-toggle" onClick={onDebug}>🛠</button>
       </div>
     </section>
   );
 }
+
+// 暴露的常量,避免再 import 全套配置
+const REWARD_CONFIG_STAMINA = 5;
