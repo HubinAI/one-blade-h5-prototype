@@ -334,20 +334,21 @@ export type StageGate = {
   afterStage: number;
   breakthroughId: string;
   breakthroughName: string;
+  rankId: RankId;
   nextUnlockFrom: number | null;
   nextUnlockTo: number | null;
   unlockText: string;
 };
 
 export const MAIN_STAGE_GATES: StageGate[] = [
-  { stageRange: [1, 5], afterStage: 5, breakthroughId: "breakthrough_lianqi", breakthroughName: "练气突破", nextUnlockFrom: 6, nextUnlockTo: 15, unlockText: "解锁主线第6-15关，开启精品刀掉落" },
-  { stageRange: [6, 15], afterStage: 15, breakthroughId: "breakthrough_zhuji", breakthroughName: "筑基突破", nextUnlockFrom: 16, nextUnlockTo: 30, unlockText: "解锁主线第16-30关，开启良品刀掉落" },
-  { stageRange: [16, 30], afterStage: 30, breakthroughId: "breakthrough_jiedan", breakthroughName: "结丹突破", nextUnlockFrom: 31, nextUnlockTo: 60, unlockText: "解锁主线第31-60关，开启上品刀掉落" },
-  { stageRange: [31, 60], afterStage: 60, breakthroughId: "breakthrough_yuanying", breakthroughName: "元婴突破", nextUnlockFrom: 61, nextUnlockTo: 120, unlockText: "解锁主线第61-120关，开启极品刀掉落" },
-  { stageRange: [61, 120], afterStage: 120, breakthroughId: "breakthrough_huashen", breakthroughName: "化神突破", nextUnlockFrom: 121, nextUnlockTo: 200, unlockText: "解锁主线第121-200关，开启灵器刀掉落" },
-  { stageRange: [121, 200], afterStage: 200, breakthroughId: "breakthrough_dacheng", breakthroughName: "大乘突破", nextUnlockFrom: 201, nextUnlockTo: 400, unlockText: "解锁主线第201-400关，开启仙器刀掉落" },
-  { stageRange: [201, 400], afterStage: 400, breakthroughId: "breakthrough_dujie", breakthroughName: "渡劫突破", nextUnlockFrom: 401, nextUnlockTo: 1000, unlockText: "解锁主线第401-1000关，开启神器刀掉落" },
-  { stageRange: [401, 1000], afterStage: 1000, breakthroughId: "breakthrough_xianren", breakthroughName: "仙人突破", nextUnlockFrom: null, nextUnlockTo: null, unlockText: "达成当前版本最高境界" },
+  { stageRange: [1, 5], afterStage: 5, breakthroughId: "breakthrough_lianqi", breakthroughName: "练气突破", rankId: "qiRefining", nextUnlockFrom: 6, nextUnlockTo: 15, unlockText: "解锁主线第6-15关，开启精品刀掉落" },
+  { stageRange: [6, 15], afterStage: 15, breakthroughId: "breakthrough_zhuji", breakthroughName: "筑基突破", rankId: "foundation", nextUnlockFrom: 16, nextUnlockTo: 30, unlockText: "解锁主线第16-30关，开启良品刀掉落" },
+  { stageRange: [16, 30], afterStage: 30, breakthroughId: "breakthrough_jiedan", breakthroughName: "结丹突破", rankId: "coreFormation", nextUnlockFrom: 31, nextUnlockTo: 60, unlockText: "解锁主线第31-60关，开启上品刀掉落" },
+  { stageRange: [31, 60], afterStage: 60, breakthroughId: "breakthrough_yuanying", breakthroughName: "元婴突破", rankId: "nascentSoul", nextUnlockFrom: 61, nextUnlockTo: 120, unlockText: "解锁主线第61-120关，开启极品刀掉落" },
+  { stageRange: [61, 120], afterStage: 120, breakthroughId: "breakthrough_huashen", breakthroughName: "化神突破", rankId: "divineTransformation", nextUnlockFrom: 121, nextUnlockTo: 200, unlockText: "解锁主线第121-200关，开启灵器刀掉落" },
+  { stageRange: [121, 200], afterStage: 200, breakthroughId: "breakthrough_dacheng", breakthroughName: "大乘突破", rankId: "greatVehicle", nextUnlockFrom: 201, nextUnlockTo: 400, unlockText: "解锁主线第201-400关，开启仙器刀掉落" },
+  { stageRange: [201, 400], afterStage: 400, breakthroughId: "breakthrough_dujie", breakthroughName: "渡劫突破", rankId: "tribulation", nextUnlockFrom: 401, nextUnlockTo: 1000, unlockText: "解锁主线第401-1000关，开启神器刀掉落" },
+  { stageRange: [401, 1000], afterStage: 1000, breakthroughId: "breakthrough_xianren", breakthroughName: "仙人突破", rankId: "tribulation", nextUnlockFrom: null, nextUnlockTo: null, unlockText: "达成当前版本最高境界" },
 ];
 
 /** 获取当前是否需要突破 */

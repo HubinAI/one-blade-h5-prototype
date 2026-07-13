@@ -145,12 +145,22 @@ export default function App() {
         });
       }
       refreshHome();
+      // 同步解锁层级到 home.highestFloor
+      setUnlockedLevel((current) => {
+        const synced = Math.max(current, 10000 + home.highestFloor);
+        writeUnlockedLevel(synced);
+        return synced;
+      });
       window.setTimeout(() => {
         // 检测是否为突破战胜利
         const ctx = getCurrentRunContext();
         if (result.win && ctx.mode === "challenge") {
-          // 查找当前层数对应的突破门
-          const gate = getCurrentGate(home.highestFloor);
+          // 突破战胜利：根据 result.levelId 找对应 rankId
+          // result.levelId = 100 + rankIdx
+          const rankIdx = Math.max(0, result.levelId - 100);
+          const rankId = RANK_ORDER[rankIdx];
+          // 找到对应 gate
+          const gate = MAIN_STAGE_GATES.find(g => g.rankId === rankId);
           if (gate) {
             setBreakthroughResult({ name: gate.breakthroughName, id: gate.breakthroughId, unlockText: gate.unlockText });
             setScreen("breakthroughResult");
@@ -256,11 +266,7 @@ export default function App() {
   /** 突破战：从卡点阶段起始层开始突破战 */
   const handleBreakthrough = useCallback(() => {
     if (!pendingGate) return;
-    // 找到突破对应的段位来开始Boss战
-    const rankIdx = Math.min(pendingGate.afterStage - 1, RANK_ORDER.length - 1);
-    if (rankIdx < 0) return;
-    const rankId = RANK_ORDER[rankIdx];
-    const bossLevel = getBossLevelConfig(rankId);
+    const bossLevel = getBossLevelConfig(pendingGate.rankId);
     startLevel(bossLevel, "challenge");
   }, [pendingGate, startLevel]);
 

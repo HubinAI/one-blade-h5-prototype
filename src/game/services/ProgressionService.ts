@@ -1173,17 +1173,33 @@ export function getBossLevelConfig(rankId: RankId): LevelConfig {
   const rank = RANK_CONFIG[rankId];
   const bossNames: Record<BossId, string> = { zhangFei: "张飞", simaYi: "司马懿", zhenJi: "甄宓" };
   const bossName = rank ? bossNames[rank.bossId] ?? "Boss" : "Boss";
+  const rankIdx = RANK_ORDER.indexOf(rankId);
+  const hpBonus = rankIdx * 2; // 越往后Boss战时间越长
   return {
-    id: 100 + RANK_ORDER.indexOf(rankId),
+    id: 100 + rankIdx,
     title: `${rank?.name ?? "练气"}突破`,
     subtitle: `击败${bossName}，解锁${rank ? QUALITY_META[rank.unlockQuality]?.label ?? "" : ""}品质合成`,
     initialEnergy: 80,
     hp: 3,
     enemySpeed: 1.2,
     pickupChance: 0.05,
-    durationSeconds: 120,
+    durationSeconds: 60 + hpBonus,
     buffTimes: [],
-    waves: [],
+    // Boss战: 1波士兵热身 + Boss
+    waves: [
+      {
+        name: "Boss护卫",
+        delay: 0.2,
+        spawnAt: 0.5,
+        speedMultiplier: 1.0,
+        enemies: [
+          { kind: "infantry", x: 60, count: 2 },
+          { kind: "infantry", x: 140, count: 2 },
+          { kind: "infantry", x: 220, count: 2 },
+          { kind: "infantry", x: 300, count: 2 },
+        ],
+      },
+    ],
     bossId: rank?.bossId ?? "zhangFei",
     eliteSpawnAt: 0,
     briefing: {

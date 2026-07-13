@@ -6192,8 +6192,8 @@ h1 {
 .v3-idle-tree-area {
   position: relative;
   margin: 4px 18px;
-  flex: 1;
-  min-height: 200px;
+  height: 180px;
+  flex-shrink: 0;
   background: linear-gradient(180deg, rgba(20, 30, 20, 0.4), rgba(40, 20, 10, 0.4));
   border: 1px solid rgba(120, 80, 50, 0.4);
   border-radius: 10px;
@@ -6235,8 +6235,8 @@ h1 {
 
 .idle-tree {
   position: relative;
-  width: 70px;
-  height: 130px;
+  width: 60px;
+  height: 110px;
   margin-bottom: 6px;
   transform-origin: bottom center;
   transition: transform 0.4s ease-in;
@@ -6278,11 +6278,11 @@ h1 {
   top: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: 70px;
-  height: 70px;
+  width: 60px;
+  height: 60px;
   background: radial-gradient(ellipse at 40% 40%, #4a7c4e, #2c4a2e);
   border-radius: 50% 50% 45% 45%;
-  box-shadow: 0 0 12px rgba(74, 124, 78, 0.4);
+  box-shadow: 0 0 10px rgba(74, 124, 78, 0.4);
 }
 
 .idle-tree-trunk {
@@ -6290,8 +6290,8 @@ h1 {
   bottom: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: 16px;
-  height: 60px;
+  width: 14px;
+  height: 50px;
   background: linear-gradient(90deg, #5c3a20, #8a5a30, #5c3a20);
   border-radius: 2px;
 }
