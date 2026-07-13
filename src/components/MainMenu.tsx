@@ -1,9 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { HomeSnapshot } from "../game/services/ProgressionService";
 import { getEquippedBlades } from "../game/services/ProgressionService";
-import { RANK_CONFIG, RANK_ORDER, getStageNameByFloor } from "../game/config/synthesis";
-import { QUALITY_META } from "../game/config/synthesis";
-import { showRewardedAdMock, incrementDailyAdCount } from "../game/services/AdService";
+import { getStageNameByFloor, MAIN_STAGE_GATES, getCurrentGate } from "../game/config/synthesis";
+import { IdleTreeAnimation, IdleRewardIcon, FlyingReward, useRandomTip } from "./IdleTreeAnimation";
 
 type MainMenuProps = {
   unlockedLevel: number;
@@ -12,12 +11,9 @@ type MainMenuProps = {
   onContinue: () => void;
   onRestoreStamina: () => void;
   onRanking: () => void;
-  onChallenge: () => void;
   onBag: () => void;
   onDebug: () => void;
   appVersion: string;
-  onClaimOffline: () => void;
-  onClaimOfflineDouble: () => void;
   pendingGate?: { breakthroughName: string; unlockText: string; breakthroughId: string } | null;
   onBreakthrough: () => void;
 };
@@ -29,149 +25,120 @@ export function MainMenu({
   onContinue,
   onRestoreStamina,
   onRanking,
-  onChallenge,
   onBag,
   onDebug,
   appVersion,
-  onClaimOffline,
-  onClaimOfflineDouble,
   pendingGate,
   onBreakthrough,
 }: MainMenuProps) {
   const isFirstPlay = unlockedLevel <= 1 && home.coins === 0;
-  const [adState, setAdState] = useState<"idle" | "playing">("idle");
+  const randomTip = useRandomTip();
 
-  // 主刀信息
-  const equipped = useMemo(() => getEquippedBlades(), []);
-  const mainBlade = equipped.main;
-  const mainBladeLabel = mainBlade
-    ? `${QUALITY_META[mainBlade.quality]?.label ?? "凡品"}·${mainBlade.name}`
-    : "凡品·练习木刀";
-
-  // 今日目标：动态根据阶段卡点
-  const goalRankIndex = 1; // 筑基
-  const currentRankId = RANK_ORDER[home.rankIndex] ?? RANK_ORDER[0];
-  const goalRankId = RANK_ORDER[goalRankIndex] ?? RANK_ORDER[1];
-  const goalReached = home.rankIndex >= goalRankIndex;
-  const goalText = goalReached
-    ? "今日目标已完成 🎉"
-    : `今日目标：突破到${RANK_CONFIG[goalRankId]?.name ?? "筑基"}`;
-
-  // 关卡动画信息
+  // 关卡信息
   const stageName = getStageNameByFloor(Math.max(1, home.highestFloor));
+  const floor = Math.max(1, home.highestFloor);
 
-  // 离线收益
-  const hasOffline = home.offlineCoins > 0;
+  // 挂机奖励计数（每分钟加1，最多60个=1小时）
+  const [idleRewardCount, setIdleRewardCount] = useState(0);
+  const [flyTrigger, setFlyTrigger] = useState(0);
 
-  const handleIdleDouble = async () => {
-    setAdState("playing");
-    const ok = await showRewardedAdMock("quick_idle_reward");
-    setAdState("idle");
-    if (ok) {
-      incrementDailyAdCount("quick_idle_reward");
-      onClaimOfflineDouble();
-    }
+  useEffect(() => {
+    // 初始化：根据离线时间计算已累积
+    const lastSeen = home.lastSeenAt ?? Date.now();
+    const elapsedMin = Math.min(60, Math.floor((Date.now() - lastSeen) / 60000));
+    setIdleRewardCount(Math.min(60, Math.max(0, elapsedMin)));
+  }, [home.lastSeenAt]);
+
+  useEffect(() => {
+    if (idleRewardCount >= 60) return;
+    const timer = setInterval(() => {
+      setIdleRewardCount(c => Math.min(60, c + 1));
+      setFlyTrigger(t => t + 1);
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, [idleRewardCount]);
+
+  const handleClickReward = () => {
+    setIdleRewardCount(0);
+    setFlyTrigger(t => t + 1);
   };
 
   return (
-    <section className="screen menu-screen market-home-screen zhao-yun-style">
-      {/* 顶部:游戏标题 + 金币/体力 */}
-      <div className="zys-top">
-        <h1 className="zys-title">我只要一刀</h1>
-        <p className="zys-subtitle">敌军压境，一刀破阵</p>
-      </div>
-
-      {/* 今日目标 */}
-      <div className={`zys-goal ${goalReached ? "done" : ""}`}>
-        <span className="zys-goal-icon">{goalReached ? "🎉" : "🎯"}</span>
-        <span className="zys-goal-text">{goalText}</span>
-      </div>
-
-      {/* 主刀 + 体力 状态行 */}
-      <div className="zys-status-row">
-        <div className="zys-status-item">
-          <span className="zys-status-label">当前主刀</span>
-          <span className="zys-status-value">{mainBladeLabel}</span>
+    <section className="screen menu-screen v3-home-screen">
+      {/* 1. 货币栏(顶部) */}
+      <div className="v3-currency-bar">
+        <div className="v3-currency-pill">
+          <span className="v3-currency-icon coin-icon" />
+          <span className="v3-currency-num">{home.coins}</span>
+          <span className="v3-currency-plus">+</span>
         </div>
-        <div className="zys-status-item">
-          <span className="zys-status-label">体力</span>
-          <span className="zys-status-value stamina">
-            {home.stamina}/{home.staminaMax}
-            {home.stamina < 5 && (
-              <button className="zys-stamina-btn" onClick={onRestoreStamina}>恢复</button>
-            )}
-          </span>
+        <div className="v3-currency-pill stamina" onClick={home.stamina < 5 ? onRestoreStamina : undefined}>
+          <span className="v3-currency-icon bun-icon" />
+          <span className="v3-currency-num">{home.stamina}/{home.staminaMax}</span>
+          {home.stamina < 5 && <span className="v3-currency-plus">+</span>}
         </div>
       </div>
 
-      {/* 离线收益 */}
-      {hasOffline && (
-        <div className="zys-offline-row">
-          <span className="zys-offline-icon">🛌</span>
-          <span className="zys-offline-text">离线收益可领取: {home.offlineCoins} 金币</span>
-          <div className="zys-offline-actions">
-            <button className="zys-offline-claim small" onClick={onClaimOffline}>
-              领取
-            </button>
-            <button
-              className="zys-offline-ad small"
-              onClick={handleIdleDouble}
-              disabled={adState === "playing"}
-            >
-              📺 ×2
-            </button>
-          </div>
-        </div>
-      )}
+      {/* 2. 游戏名 + 随机tips */}
+      <div className="v3-title-section">
+        <h1 className="v3-title">我只要一刀</h1>
+        <p className="v3-tip" key={randomTip}>💡 {randomTip}</p>
+      </div>
 
-      {/* 中央偏下:大主按钮(继续闯关/突破) + 体力消耗 */}
-      <div className="zys-main-button-area">
+      {/* 3. 当前关卡信息 */}
+      <div className="v3-stage-card">
+        <span className="v3-stage-tag">当前挑战</span>
+        <h2 className="v3-stage-name">第 {floor} 关</h2>
+        <span className="v3-stage-subtitle">{stageName}·火药连爆</span>
+        <div className="v3-stage-sword-anim">⚔</div>
+      </div>
+
+      {/* 4. 挂机砍树动画区 */}
+      <div className="v3-idle-tree-area">
+        <IdleTreeAnimation />
+        <div className="v3-idle-reward-corner">
+          <IdleRewardIcon count={idleRewardCount} onClick={handleClickReward} />
+        </div>
+        <FlyingReward trigger={flyTrigger} />
+      </div>
+
+      {/* 5. 开始游戏 / 突破按钮 */}
+      <div className="v3-start-area">
         {pendingGate ? (
-          <button className="zys-breakthrough-btn" onClick={onBreakthrough}>
-            <span className="zys-breakthrough-icon">✦</span>
-            <span className="zys-breakthrough-name">{pendingGate.breakthroughName}</span>
-            <span className="zys-breakthrough-sub">{pendingGate.unlockText}</span>
+          <button className="v3-breakthrough-btn" onClick={onBreakthrough}>
+            <span className="v3-breakthrough-icon">✦</span>
+            <span className="v3-breakthrough-name">{pendingGate.breakthroughName}</span>
+            <span className="v3-breakthrough-sub">{pendingGate.unlockText}</span>
           </button>
         ) : (
           <button
-            className="zys-start-btn"
+            className="v3-start-btn"
             onClick={isFirstPlay ? onStart : onContinue}
           >
-            <span className="zys-start-icon">⚔</span>
-            <span className="zys-start-text">开始游戏</span>
-            <span className="zys-start-stamina">消耗 {REWARD_CONFIG_STAMINA} 体力</span>
+            <span className="v3-start-sword">⚔</span>
+            <span className="v3-start-text">开始游戏</span>
+            <span className="v3-start-stamina">消耗 5 体力</span>
           </button>
         )}
       </div>
 
-      {/* 底部左右:排行 + 炼器合成 */}
-      <div className="zys-bottom-row">
-        <button className="zys-side-btn" onClick={onRanking}>
-          <div className="zys-side-icon">🏯</div>
-          <div className="zys-side-label">排行榜</div>
+      {/* 6. 底部左右双入口 */}
+      <div className="v3-bottom-row">
+        <button className="v3-side-btn" onClick={onRanking}>
+          <div className="v3-side-icon">🏯</div>
+          <div className="v3-side-label">排行榜</div>
         </button>
-        <button className="zys-side-btn" onClick={onBag}>
-          <div className="zys-side-icon forge-icon">⚒</div>
-          <div className="zys-side-label">炼器合成</div>
+        <button className="v3-side-btn" onClick={onBag}>
+          <div className="v3-side-icon forge-icon">⚒</div>
+          <div className="v3-side-label">炼器合成</div>
         </button>
       </div>
 
-      {/* 隐藏的 weak 入口(仅挑战/挂机,通过长按 debug 按钮触发) */}
-      {pendingGate === null && (
-        <div className="zys-hidden-actions">
-          <button className="zys-mini-btn" onClick={onChallenge}>⚔ 挑战</button>
-          <button className="zys-mini-btn" onClick={onBag}>🛌 挂机</button>
-        </div>
-      )}
-
-      {/* 版本 + debug */}
-      <div className="zys-footer">
+      {/* 调试入口 + 版本 */}
+      <div className="v3-footer">
         <small className="version-footer">{appVersion}</small>
         <button className="debug-toggle" onClick={onDebug}>🛠</button>
       </div>
     </section>
   );
 }
-
-// 暴露的常量,避免再 import 全套配置
-const REWARD_CONFIG_STAMINA = 5;

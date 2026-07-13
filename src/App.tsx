@@ -335,12 +335,9 @@ export default function App() {
           onContinue={startMainline}
           onRestoreStamina={handleRestoreStamina}
           onRanking={() => setScreen("ranking")}
-          onChallenge={() => setScreen("challenge")}
           onBag={() => setScreen("bag")}
           onDebug={() => setScreen("debug")}
           appVersion={appVersion}
-          onClaimOffline={handleClaimOffline}
-          onClaimOfflineDouble={handleClaimOfflineDouble}
           pendingGate={pendingGate ? { breakthroughName: pendingGate.breakthroughName, unlockText: pendingGate.unlockText, breakthroughId: pendingGate.breakthroughId } : null}
           onBreakthrough={handleBreakthrough}
         />

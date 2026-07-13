@@ -6003,6 +6003,572 @@ h1 {
 .breakthrough-main-btn { display: none; }
 
 /* ═══════════════════════════════════════════════════ */
+/* V3 首页布局 (重新设计)                                   */
+/* ═══════════════════════════════════════════════════ */
+
+.v3-home-screen {
+  display: flex;
+  flex-direction: column;
+  padding: 0 0 12px;
+  gap: 10px;
+  overflow-y: auto;
+  background:
+    radial-gradient(ellipse at 50% 20%, rgba(255, 215, 100, 0.08), transparent 60%),
+    radial-gradient(ellipse at 50% 90%, rgba(80, 40, 20, 0.3), transparent 50%);
+}
+
+/* 1. 货币栏 */
+.v3-currency-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px 8px;
+}
+
+.v3-currency-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  background: rgba(20, 14, 8, 0.6);
+  border: 1px solid rgba(255, 211, 90, 0.25);
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #fff3c0;
+  cursor: pointer;
+}
+
+.v3-currency-pill.stamina {
+  background: linear-gradient(90deg, rgba(168, 230, 207, 0.12), rgba(74, 183, 183, 0.08));
+  border-color: rgba(168, 230, 207, 0.4);
+  color: #a8e6cf;
+}
+
+.v3-currency-icon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}
+
+.v3-currency-icon.coin-icon {
+  background: radial-gradient(circle at 35% 35%, #fff090, #d9a520);
+  box-shadow: 0 0 4px rgba(255, 200, 60, 0.6);
+}
+
+.v3-currency-icon.bun-icon {
+  background: radial-gradient(circle at 35% 35%, #fff5e0, #d9a070);
+  box-shadow: 0 0 4px rgba(255, 180, 100, 0.5);
+}
+
+.v3-currency-num {
+  font-size: 13px;
+}
+
+.v3-currency-plus {
+  font-size: 14px;
+  color: rgba(255, 211, 90, 0.7);
+  margin-left: 2px;
+}
+
+/* 2. 标题区 */
+.v3-title-section {
+  text-align: center;
+  padding: 4px 0 4px;
+}
+
+.v3-title {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 900;
+  color: #fff3c0;
+  letter-spacing: 6px;
+  text-shadow: 0 0 20px rgba(255, 200, 80, 0.4), 0 2px 4px rgba(0,0,0,0.5);
+}
+
+.v3-tip {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: rgba(246, 231, 189, 0.6);
+  font-weight: 600;
+  animation: v3TipFade 0.4s ease-out;
+}
+
+@keyframes v3TipFade {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 3. 关卡卡片 */
+.v3-stage-card {
+  position: relative;
+  margin: 4px 18px;
+  padding: 14px 16px 12px;
+  background: linear-gradient(180deg, rgba(40, 28, 18, 0.6), rgba(20, 14, 8, 0.4));
+  border: 1px solid rgba(255, 211, 90, 0.25);
+  border-radius: 12px;
+  text-align: center;
+  overflow: hidden;
+}
+
+.v3-stage-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 100%, rgba(255, 211, 90, 0.15), transparent 70%);
+  pointer-events: none;
+}
+
+.v3-stage-tag {
+  display: inline-block;
+  padding: 2px 10px;
+  background: rgba(255, 211, 90, 0.15);
+  border: 1px solid rgba(255, 211, 90, 0.4);
+  border-radius: 4px;
+  font-size: 9px;
+  color: #ffd35a;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.v3-stage-name {
+  margin: 6px 0 4px;
+  font-size: 24px;
+  font-weight: 900;
+  color: #fff3c0;
+  text-shadow: 0 0 12px rgba(255, 211, 90, 0.3);
+  position: relative;
+  z-index: 1;
+}
+
+.v3-stage-subtitle {
+  display: block;
+  font-size: 11px;
+  color: rgba(255, 156, 58, 0.9);
+  font-weight: 700;
+  letter-spacing: 2px;
+  position: relative;
+  z-index: 1;
+}
+
+.v3-stage-sword-anim {
+  position: absolute;
+  top: 6px;
+  right: 14px;
+  font-size: 22px;
+  color: #ff9c3a;
+  text-shadow: 0 0 12px rgba(255, 156, 58, 0.5);
+  animation: v3SwordSpin 4s ease-in-out infinite;
+  z-index: 1;
+}
+
+@keyframes v3SwordSpin {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  50% { transform: rotate(360deg) scale(1.2); }
+}
+
+/* 4. 挂机砍树动画区 */
+.v3-idle-tree-area {
+  position: relative;
+  margin: 4px 18px;
+  height: 130px;
+  background: linear-gradient(180deg, rgba(20, 30, 20, 0.4), rgba(40, 20, 10, 0.4));
+  border: 1px solid rgba(120, 80, 50, 0.4);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.idle-tree-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.idle-tree-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, transparent 60%, rgba(60, 40, 20, 0.6) 100%),
+    repeating-linear-gradient(45deg, rgba(100, 70, 50, 0.06) 0 1px, transparent 1px 8px);
+}
+
+.idle-tree-glow {
+  position: absolute;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 220, 100, 0.2), transparent 70%);
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  animation: treeGlow 4s ease-in-out infinite alternate;
+}
+
+@keyframes treeGlow {
+  0%, 100% { transform: translateX(-50%) scale(0.9); opacity: 0.5; }
+  50% { transform: translateX(-50%) scale(1.1); opacity: 0.8; }
+}
+
+.idle-tree {
+  position: relative;
+  width: 50px;
+  height: 90px;
+  margin-bottom: 4px;
+  transform-origin: bottom center;
+  transition: transform 0.4s ease-in;
+}
+
+.idle-tree.stand {
+  transform: rotate(0deg);
+}
+
+.idle-tree.swing {
+  transform: rotate(0deg);
+  animation: treeShake 0.1s ease-in-out infinite;
+}
+
+.idle-tree.falling {
+  transform: rotate(75deg);
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+.idle-tree.fallen {
+  transform: rotate(75deg);
+  opacity: 0.4;
+  transition: all 0.2s ease-in;
+}
+
+.idle-tree.growing {
+  transform: rotate(0deg) scale(0.1);
+  opacity: 0.3;
+  transition: all 0.4s ease-out;
+}
+
+@keyframes treeShake {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(2px); }
+}
+
+.idle-tree-crown {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 46px;
+  height: 50px;
+  background: radial-gradient(ellipse at 40% 40%, #4a7c4e, #2c4a2e);
+  border-radius: 50% 50% 45% 45%;
+  box-shadow: 0 0 8px rgba(74, 124, 78, 0.3);
+}
+
+.idle-tree-trunk {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 12px;
+  height: 40px;
+  background: linear-gradient(90deg, #5c3a20, #8a5a30, #5c3a20);
+  border-radius: 2px;
+}
+
+.idle-tree-axe {
+  position: absolute;
+  width: 30px;
+  height: 6px;
+  bottom: 0;
+  right: 30%;
+  transition: transform 0.2s ease-out;
+  transform-origin: 80% 50%;
+  z-index: 2;
+}
+
+.axe-handle {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 3px;
+  background: #6a3a18;
+  border-radius: 1px;
+}
+
+.axe-head {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 12px;
+  background: linear-gradient(180deg, #c8c8d8, #6a6a78);
+  border-radius: 0 2px 2px 0;
+}
+
+.idle-tree-chips {
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.chip {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  background: #c8956a;
+  border-radius: 50%;
+  animation: chipFly 0.6s ease-out forwards;
+}
+
+.chip-0 { left: 0; top: 0; }
+.chip-1 { left: 6px; top: -4px; animation-delay: 0.05s; }
+.chip-2 { left: -6px; top: -2px; animation-delay: 0.1s; }
+.chip-3 { left: 4px; top: 4px; animation-delay: 0.15s; }
+.chip-4 { left: -4px; top: 2px; animation-delay: 0.2s; }
+.chip-5 { left: 0; top: -6px; animation-delay: 0.25s; }
+
+@keyframes chipFly {
+  to { transform: translate(var(--tx, 0), var(--ty, -20px)); opacity: 0; }
+}
+
+.chip-0 { --tx: -12px; --ty: -8px; }
+.chip-1 { --tx: 14px; --ty: -14px; }
+.chip-2 { --tx: -16px; --ty: -2px; }
+.chip-3 { --tx: 10px; --ty: 4px; }
+.chip-4 { --tx: -8px; --ty: 8px; }
+.chip-5 { --tx: 6px; --ty: -18px; }
+
+.v3-idle-reward-corner {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  z-index: 3;
+}
+
+.idle-reward-icon {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.idle-reward-bag {
+  font-size: 32px;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
+  animation: bagBounce 2s ease-in-out infinite;
+}
+
+@keyframes bagBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+.idle-reward-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  background: #ef4444;
+  border: 1px solid #fff;
+  border-radius: 9px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+}
+
+.flying-reward-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.flying-reward-item {
+  position: absolute;
+  font-size: 18px;
+  filter: drop-shadow(0 0 6px rgba(255, 220, 100, 0.6));
+  animation: flyToReward 1.4s ease-in forwards;
+}
+
+@keyframes flyToReward {
+  0% { transform: translate(0, 0) scale(1); opacity: 1; }
+  100% { transform: translate(120px, 40px) scale(0.3); opacity: 0; }
+}
+
+/* 5. 开始游戏按钮区 */
+.v3-start-area {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.v3-start-btn {
+  position: relative;
+  width: 75%;
+  max-width: 260px;
+  height: 60px;
+  background: linear-gradient(180deg, #ffba48 0%, #d97810 50%, #8a4a08 100%);
+  border: 2px solid #8a4a08;
+  border-radius: 12px;
+  color: #fff3c0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  box-shadow:
+    0 6px 20px rgba(217, 120, 16, 0.4),
+    inset 0 1px 0 rgba(255, 220, 130, 0.4),
+    inset 0 -3px 0 rgba(60, 20, 0, 0.3);
+  transition: transform 0.12s;
+}
+
+.v3-start-btn::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 14px;
+  height: 14px;
+  background: linear-gradient(135deg, #d8d8e0 0%, #8a8a98 50%, #d8d8e0 100%);
+  border: 1px solid #5a5a68;
+  border-radius: 2px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+}
+
+.v3-start-btn::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 2px;
+  height: 12px;
+  background: #8a5a30;
+  z-index: 1;
+}
+
+.v3-start-btn:active {
+  transform: scale(0.97);
+}
+
+.v3-start-sword {
+  font-size: 18px;
+  color: #c8c8d8;
+  text-shadow: 0 0 6px rgba(200, 200, 220, 0.6);
+  z-index: 2;
+}
+
+.v3-start-text {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  flex: 1;
+  text-align: center;
+  z-index: 2;
+}
+
+.v3-start-stamina {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255, 243, 192, 0.7);
+  z-index: 2;
+  text-align: right;
+}
+
+/* 突破按钮 */
+.v3-breakthrough-btn {
+  width: 75%;
+  max-width: 260px;
+  height: 60px;
+  background: linear-gradient(180deg, #ffd35a 0%, #d9a520 50%, #b87a30 100%);
+  border: 2px solid #b87a30;
+  border-radius: 12px;
+  color: #2a1410;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(255, 211, 90, 0.4), inset 0 -3px 0 rgba(80, 30, 0, 0.2);
+  animation: v3BreakthroughPulse 1.8s ease-in-out infinite;
+  transition: transform 0.12s;
+}
+
+.v3-breakthrough-btn:active { transform: scale(0.97); }
+
+@keyframes v3BreakthroughPulse {
+  0%, 100% { box-shadow: 0 6px 20px rgba(255, 211, 90, 0.4); }
+  50% { box-shadow: 0 6px 40px rgba(255, 211, 90, 0.8); }
+}
+
+.v3-breakthrough-icon { font-size: 20px; }
+.v3-breakthrough-name { font-size: 18px; font-weight: 900; letter-spacing: 3px; }
+.v3-breakthrough-sub { font-size: 9px; font-weight: 600; color: rgba(42, 20, 16, 0.7); letter-spacing: 1px; }
+
+/* 6. 底部双入口 */
+.v3-bottom-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 28px 4px;
+  gap: 12px;
+}
+
+.v3-side-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: rgba(20, 14, 8, 0.5);
+  border: 1px solid rgba(255, 211, 90, 0.15);
+  border-radius: 12px;
+  padding: 10px 18px 8px;
+  min-width: 96px;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.v3-side-btn:active { transform: scale(0.95); }
+
+.v3-side-icon {
+  font-size: 28px;
+  line-height: 1;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.4);
+}
+
+.v3-side-icon.forge-icon {
+  color: #ff9c3a;
+  text-shadow: 0 0 10px rgba(255, 156, 58, 0.5);
+}
+
+.v3-side-label {
+  font-size: 11px;
+  color: rgba(246, 231, 189, 0.7);
+  font-weight: 700;
+}
+
+.v3-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  margin-top: auto;
+}
+
+/* ═══════════════════════════════════════════════════ */
 /* 微信小游戏市场优化 — 结算页 (market-result-screen)    */
 /* ═══════════════════════════════════════════════════ */
 
