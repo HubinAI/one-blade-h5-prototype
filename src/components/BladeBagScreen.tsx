@@ -125,7 +125,7 @@ export function BladeBagScreen({ onBack, onOpenCodex }: BladeBagScreenProps) {
       <div className="bag-popup" onClick={(e) => e.stopPropagation()}>
         <div className="bag-header">
           <button className="bag-back" onClick={onBack}>×</button>
-          <h1>武器背包</h1>
+          <h1>炼器合成</h1>
           {onOpenCodex && (
             <button className="bag-codex-btn" onClick={onOpenCodex}>📖 图鉴</button>
           )}
