@@ -6132,6 +6132,19 @@ h1 {
   overflow: hidden;
 }
 
+.v3-stage-card-breakthrough {
+  background: linear-gradient(180deg, rgba(80, 60, 20, 0.7), rgba(50, 35, 10, 0.5));
+  border-color: rgba(255, 211, 90, 0.5);
+}
+
+.v3-stage-card-breakthrough::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 100%, rgba(255, 211, 90, 0.25), transparent 70%);
+  pointer-events: none;
+}
+
 .v3-stage-card::before {
   content: "";
   position: absolute;
@@ -6453,6 +6466,12 @@ h1 {
     inset 0 1px 0 rgba(255, 220, 130, 0.4),
     inset 0 -3px 0 rgba(60, 20, 0, 0.3);
   transition: transform 0.12s;
+}
+
+.v3-start-btn.is-breakthrough {
+  background: linear-gradient(180deg, #ffd35a 0%, #d9a520 50%, #b87a30 100%);
+  border-color: #b87a30;
+  animation: v3BreakthroughPulse 1.8s ease-in-out infinite;
 }
 
 .v3-start-btn::before {

@@ -85,13 +85,22 @@ export function MainMenu({
         <p className="v3-tip" key={randomTip}>💡 {randomTip}</p>
       </div>
 
-      {/* 3. 当前关卡信息 */}
-      <div className="v3-stage-card">
-        <span className="v3-stage-tag">当前挑战</span>
-        <h2 className="v3-stage-name">第 {floor} 关</h2>
-        <span className="v3-stage-subtitle">{stageName}·火药连爆</span>
-        <div className="v3-stage-sword-anim">⚔</div>
-      </div>
+      {/* 3. 当前关卡信息 / 突破信息 (互斥) */}
+      {pendingGate ? (
+        <div className="v3-stage-card v3-stage-card-breakthrough">
+          <span className="v3-stage-tag">境界突破</span>
+          <h2 className="v3-stage-name">{pendingGate.breakthroughName}</h2>
+          <span className="v3-stage-subtitle">{pendingGate.unlockText}</span>
+          <div className="v3-stage-sword-anim">✦</div>
+        </div>
+      ) : (
+        <div className="v3-stage-card">
+          <span className="v3-stage-tag">当前挑战</span>
+          <h2 className="v3-stage-name">第 {floor} 关</h2>
+          <span className="v3-stage-subtitle">{stageName}·火药连爆</span>
+          <div className="v3-stage-sword-anim">⚔</div>
+        </div>
+      )}
 
       {/* 4. 挂机砍树动画区 */}
       <div className="v3-idle-tree-area">
@@ -102,24 +111,18 @@ export function MainMenu({
         <FlyingReward trigger={flyTrigger} />
       </div>
 
-      {/* 5. 开始游戏 / 突破按钮 */}
+      {/* 5. 开始游戏按钮 (统一显示,根据模式内部切换) */}
       <div className="v3-start-area">
-        {pendingGate ? (
-          <button className="v3-breakthrough-btn" onClick={onBreakthrough}>
-            <span className="v3-breakthrough-icon">✦</span>
-            <span className="v3-breakthrough-name">{pendingGate.breakthroughName}</span>
-            <span className="v3-breakthrough-sub">{pendingGate.unlockText}</span>
-          </button>
-        ) : (
-          <button
-            className="v3-start-btn"
-            onClick={isFirstPlay ? onStart : onContinue}
-          >
-            <span className="v3-start-sword">⚔</span>
-            <span className="v3-start-text">开始游戏</span>
-            <span className="v3-start-stamina">消耗 5 体力</span>
-          </button>
-        )}
+        <button
+          className="v3-start-btn"
+          onClick={pendingGate ? onBreakthrough : (isFirstPlay ? onStart : onContinue)}
+        >
+          <span className="v3-start-sword">{pendingGate ? "✦" : "⚔"}</span>
+          <span className="v3-start-text">开始游戏</span>
+          <span className="v3-start-stamina">
+            {pendingGate ? "突破关卡" : "消耗 5 体力"}
+          </span>
+        </button>
       </div>
 
       {/* 6. 底部左右双入口 */}
