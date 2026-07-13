@@ -108,6 +108,8 @@ export class Game {
   private discoveredEnemies = new Set<EnemyKind>();
   private progressionModifiers = getUpgradeModifiers();
   private runContext = getCurrentRunContext();
+  private _lastWaveElapsed = 0;
+  private _victoryPendingAt: number | undefined = undefined;
 
   // 首局教学标志
   private isFirstRun = false;
@@ -198,53 +200,73 @@ export class Game {
     });
   }
 
-  /** 首局教学：使用固定波次代替随机 */
+  /** 首局教学：使用固定密集波次代替随机 */
   private overrideWithScriptedTutorial() {
     this.level.waves = [
       {
-        name: "纸片兵",
+        name: "第一波·横切",
         delay: 0.2,
         spawnAt: 0.5,
         speedMultiplier: 0.7,
         enemies: [
           { kind: "infantry", x: 44, count: 1 },
-          { kind: "infantry", x: 110, count: 1 },
-          { kind: "infantry", x: 172, count: 1 },
-          { kind: "infantry", x: 236, count: 1 },
-          { kind: "infantry", x: 300, count: 1 },
+          { kind: "infantry", x: 88, count: 1 },
+          { kind: "infantry", x: 132, count: 1 },
+          { kind: "infantry", x: 176, count: 1 },
+          { kind: "infantry", x: 220, count: 1 },
+          { kind: "infantry", x: 264, count: 1 },
+          { kind: "infantry", x: 308, count: 1 },
         ],
       },
       {
-        name: "密集敌军",
+        name: "第二波·双排",
         delay: 0.2,
-        spawnAt: 6,
+        spawnAt: 4.0,
         speedMultiplier: 0.8,
         enemies: [
           { kind: "infantry", x: 44, count: 2 },
-          { kind: "infantry", x: 120, count: 2 },
-          { kind: "powder", x: 188, count: 1 },
-          { kind: "infantry", x: 250, count: 2 },
-          { kind: "infantry", x: 310, count: 2 },
+          { kind: "infantry", x: 108, count: 2 },
+          { kind: "infantry", x: 172, count: 2 },
+          { kind: "infantry", x: 236, count: 2 },
+          { kind: "infantry", x: 300, count: 2 },
         ],
       },
       {
-        name: "阵型挑战",
+        name: "第三波·密集阵",
         delay: 0.2,
-        spawnAt: 14,
+        spawnAt: 9.0,
+        speedMultiplier: 0.85,
+        enemies: [
+          { kind: "infantry", x: 44, count: 3 },
+          { kind: "infantry", x: 92, count: 3 },
+          { kind: "infantry", x: 140, count: 3 },
+          { kind: "infantry", x: 188, count: 3 },
+          { kind: "infantry", x: 236, count: 3 },
+          { kind: "infantry", x: 284, count: 3 },
+          { kind: "infantry", x: 332, count: 2 },
+        ],
+      },
+      {
+        name: "第四波·火药连锁",
+        delay: 0.2,
+        spawnAt: 15.0,
         speedMultiplier: 0.9,
         enemies: [
-          { kind: "infantry", x: 44, count: 2 },
-          { kind: "shield", x: 100, count: 1 },
-          { kind: "core", x: 188, count: 1 },
-          { kind: "shield", x: 280, count: 1 },
-          { kind: "infantry", x: 340, count: 2 },
+          { kind: "infantry", x: 44, count: 3 },
+          { kind: "infantry", x: 92, count: 2 },
+          { kind: "powder", x: 120, count: 1 },
+          { kind: "infantry", x: 150, count: 3 },
+          { kind: "powder", x: 188, count: 1 },
+          { kind: "infantry", x: 220, count: 3 },
+          { kind: "infantry", x: 268, count: 2 },
+          { kind: "infantry", x: 316, count: 2 },
         ],
       },
     ];
-    // 教程波次低速、满刀势
+    // 教程波次：快速冷却、满刀势
     this.level.initialEnergy = BALANCE.swordEnergy.max;
     this.level.enemySpeed = 0.65;
-    this.level.durationSeconds = 180;
+    this.level.durationSeconds = 180; // 不用这个判断了，保留作为fallback
     this.energy = BALANCE.swordEnergy.max;
   }
 
@@ -1484,15 +1506,20 @@ export class Game {
     if (this.wavesSpawned >= this.level.waves.length) return;
     const wave = this.level.waves[this.wavesSpawned];
 
-    if (wave.spawnAt !== undefined) {
-      if (this.elapsed < wave.spawnAt) return;
-    } else {
-      if (this.enemies.length > 0) return;
-      this.nextWaveTimer -= dt;
-      if (this.nextWaveTimer > 0) return;
-      this.nextWaveTimer = wave.delay;
-    }
+    // 双重判断：到达 spawnAt 时间 或 场上敌人已少、立即刷下一波
+    const reachedSpawnAt = wave.spawnAt !== undefined && this.elapsed >= wave.spawnAt;
+    const aliveCount = this.enemies.filter(e => e.alive).length;
+    const enoughGap = this.elapsed - (this._lastWaveElapsed ?? 0) >= 1.6;
+    const fewEnemiesLeft = aliveCount <= 3 && enoughGap;
 
+    if (reachedSpawnAt || fewEnemiesLeft) {
+      this.spawnCurrentWave(wave);
+    }
+  }
+
+
+  private spawnCurrentWave(wave: typeof this.level.waves[0]) {
+    this._lastWaveElapsed = this.elapsed;
     this.wavesSpawned += 1;
     // 每波HP递增（从第2波开始+1，最多+5）
     this.waveHpBonus = Math.min(5, this.wavesSpawned);
@@ -1539,6 +1566,14 @@ export class Game {
     this.addText(DESIGN_WIDTH / 2, 96, wave.name, "#f6e7bd", 16);
   }
 
+  /** 判定是否应立刻胜利结算 */
+  private shouldFinishVictory(): boolean {
+    const allWavesDone = this.wavesSpawned >= this.level.waves.length;
+    const noAliveEnemies = !this.enemies.some(e => e.alive);
+    const notResolving = !this.currentSlash;
+    return allWavesDone && noAliveEnemies && notResolving;
+  }
+
   private checkBattleEnd() {
     if (this.hp <= 0) {
       // ---- 魂返(soulReturn)buff：首次HP归零自动复活 ----
@@ -1572,12 +1607,17 @@ export class Game {
     }
 
     if (
-      this.wavesSpawned >= this.level.waves.length &&
-      this.enemies.length === 0 &&
-      !this.currentSlash &&
-      this.elapsed >= Math.max(0, this.level.durationSeconds - 8)
+      this.shouldFinishVictory()
     ) {
-      this.finish(true);
+      // 胜利结算延迟0.6秒，让最后的粒子动画播完
+      if (this._victoryPendingAt === undefined) {
+        this._victoryPendingAt = this.elapsed + 0.6;
+      }
+      if (this.elapsed >= this._victoryPendingAt) {
+        this.finish(true);
+      }
+    } else {
+      this._victoryPendingAt = undefined;
     }
 
     // Boss战超时保护：如果Boss还活着但时间已超过关卡时长+15秒，强制结束算胜利

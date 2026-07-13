@@ -202,11 +202,11 @@ export type WaveTemplate = {
 };
 
 export const WAVE_TEMPLATES: WaveTemplate[] = [
-  { id: "infantry_3", name: "散修波", unlockFloor: 0,  enemies: [{ kind: "infantry", count: 3 }] },
-  { id: "mixed_12",   name: "妖卫波", unlockFloor: 0,  enemies: [{ kind: "infantry", count: 2 }, { kind: "shield", count: 1 }] },
-  { id: "powder_12",  name: "火修波", unlockFloor: 0,  enemies: [{ kind: "infantry", count: 1 }, { kind: "powder", count: 2 }] },
-  { id: "core_21",    name: "阵法波", unlockFloor: 50, enemies: [{ kind: "shield", count: 2 }, { kind: "core", count: 1 }] },
-  { id: "elite_21",   name: "精英波", unlockFloor: 100,enemies: [{ kind: "elite", count: 1 }, { kind: "infantry", count: 2 }] },
+  { id: "infantry_3", name: "散修波", unlockFloor: 0,  enemies: [{ kind: "infantry", count: 4 }] },
+  { id: "mixed_12",   name: "妖卫波", unlockFloor: 0,  enemies: [{ kind: "infantry", count: 3 }, { kind: "shield", count: 2 }] },
+  { id: "powder_12",  name: "火修波", unlockFloor: 0,  enemies: [{ kind: "infantry", count: 2 }, { kind: "powder", count: 2 }] },
+  { id: "core_21",    name: "阵法波", unlockFloor: 50, enemies: [{ kind: "shield", count: 4 }, { kind: "core", count: 2 }] },
+  { id: "elite_21",   name: "精英波", unlockFloor: 100,enemies: [{ kind: "elite", count: 2 }, { kind: "infantry", count: 4 }] },
 ];
 
 /** 根据当前层数和可用模板生成一局的波次列表 */
@@ -333,8 +333,8 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
   const stats = getFloorStats(floor);
   const waveTemplates = generateFloorWaves(floor);
 
-  // 兵数量随层数大幅递增：1层=2-3个，10层=4-6个，30层=8-12个，100层=15-25个
-  const countMul = 1 + Math.floor(floor / 4);
+  // 兵数量随层数递增：1层=4-5个起步
+  const countMul = 2 + Math.floor(floor / 3);
 
   const waves: WaveConfig[] = waveTemplates.map((tpl, idx) => {
     const lane = (idx * 3 + 1) % LANES.length;
@@ -349,8 +349,8 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
     });
     return {
       name: tpl.name,
-      delay: idx === 0 ? 0.2 : 0.3,
-      spawnAt: idx * 5, // 每5秒一波（节奏紧凑）
+      delay: idx === 0 ? 0.2 : 0.2,
+      spawnAt: idx * 3.5, // 每3.5秒一波（紧凑节奏）
       speedMultiplier: 1 + floor * 0.005,
       enemies,
     };
