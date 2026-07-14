@@ -468,7 +468,8 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
   // 决定精英出场时机（每关必出1个，通过 updateEliteSpawn 系统）
   const eliteKinds = ["fireRing", "heal", "aura"];
   const eKind = eliteKinds[floor % eliteKinds.length] as any;
-  const eliteSpawnAt = waves.length * 3; // 中场时段（约一半时出现）
+  // 精英约在第3波时段出现（足够早，玩家击杀后有时间体验宝箱）
+  const eliteSpawnAt = Math.max(8, waves.length * 1.8);
 
   return {
     id: 10000 + floor,

@@ -3572,12 +3572,12 @@ export class Game {
     ctx.fill();
     ctx.stroke();
 
-    // 段位色彩分层（极淡的色块作为背景刻度）
+    // 段位色彩分层（极淡的色块作为背景刻度，仅作为视觉参考）
     const segColors = [
-      { x0: 0, x1: 0.10, color: "rgba(192, 208, 224, 0.08)" },
-      { x0: 0.10, x1: 0.40, color: "rgba(192, 208, 224, 0.16)" },
-      { x0: 0.40, x1: 0.90, color: "rgba(91, 192, 255, 0.16)" },
-      { x0: 0.90, x1: 1.00, color: "rgba(255, 211, 90, 0.20)" },
+      { x0: 0, x1: 0.10, color: "rgba(192, 208, 224, 0.04)" },
+      { x0: 0.10, x1: 0.40, color: "rgba(192, 208, 224, 0.06)" },
+      { x0: 0.40, x1: 0.90, color: "rgba(91, 192, 255, 0.06)" },
+      { x0: 0.90, x1: 1.00, color: "rgba(255, 211, 90, 0.08)" },
     ];
     for (const seg of segColors) {
       ctx.fillStyle = seg.color;
@@ -3728,20 +3728,18 @@ export class Game {
 
     ctx.save();
 
-    // 槽位底框（圆形背景）
-    ctx.fillStyle = "rgba(18, 16, 14, 0.75)";
+    // 槽位底框（实心填充圆盘，区别于老版本的"半填充"）
+    ctx.fillStyle = "rgba(18, 16, 14, 0.92)";
     ctx.beginPath();
-    ctx.arc(x + iconR, y + iconR, iconR + 2, 0, Math.PI * 2);
+    ctx.arc(x + iconR, y + iconR, iconR + 1, 0, Math.PI * 2);
     ctx.fill();
 
-    // 边框（统一样式）
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.arc(x + iconR, y + iconR, iconR, 0, Math.PI * 2);
-    ctx.stroke();
-
     if (!blade) {
+      ctx.strokeStyle = "rgba(255, 211, 90, 0.25)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(x + iconR, y + iconR, iconR, 0, Math.PI * 2);
+      ctx.stroke();
       ctx.fillStyle = "rgba(246, 231, 189, 0.35)";
       ctx.font = '600 10px "Microsoft YaHei", sans-serif';
       ctx.textAlign = "center";
@@ -3753,7 +3751,7 @@ export class Game {
       const ready = ratio >= 1;
 
       if (ready) {
-        // Ready: 完整光环 + 中心色点
+        // Ready: 完整光环 + 中心单字（蓄势=斩/破点=破）
         const pulse = 0.5 + Math.sin(this.elapsed * 6 + slotIndex * 2) * 0.5;
         ctx.strokeStyle = colorStr;
         ctx.shadowColor = colorStr;
@@ -3763,33 +3761,33 @@ export class Game {
         ctx.arc(x + iconR, y + iconR, iconR - 1, 0, Math.PI * 2);
         ctx.stroke();
         ctx.shadowBlur = 0;
-        // 中心icon（统一风格）
+        // 中心单字（不同于CD数字，用"斩"/"破"单字标识槽位职责）
         ctx.fillStyle = colorStr;
-        ctx.font = '900 16px "Microsoft YaHei", sans-serif';
+        ctx.font = '900 18px "Microsoft YaHei", "SimHei", sans-serif';
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(slotTypeIcon, x + iconR, y + iconR + 1);
       } else {
-        // 冷却中：未填充圆 + 进度弧（统一风格）
-        // 底圈
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
-        ctx.lineWidth = 3.5;
+        // 冷却中：薄底圈 + 弧形进度 + 中心CD数字
+        // 底圈（细线，不抢戏）
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.arc(x + iconR, y + iconR, iconR - 1, 0, Math.PI * 2);
+        ctx.arc(x + iconR, y + iconR, iconR - 2, 0, Math.PI * 2);
         ctx.stroke();
-        // 进度弧
+        // 进度弧（粗一些，更明显是"刻度盘"）
         ctx.strokeStyle = colorStr;
-        ctx.lineWidth = 3.5;
+        ctx.lineWidth = 4;
         ctx.lineCap = "round";
         ctx.beginPath();
-        ctx.arc(x + iconR, y + iconR, iconR - 1, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
+        ctx.arc(x + iconR, y + iconR, iconR - 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
         ctx.stroke();
-        // CD数字（中心）
-        ctx.fillStyle = "#f6e7bd";
-        ctx.font = '700 14px "Microsoft YaHei", sans-serif';
+        // CD数字（中心，醒目）
+        ctx.fillStyle = "#fff3c0";
+        ctx.font = '800 16px "Microsoft YaHei", sans-serif';
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(`${Math.ceil(cd - timer)}`, x + iconR, y + iconR);
+        ctx.fillText(`${Math.ceil(cd - timer)}`, x + iconR, y + iconR + 1);
       }
     }
     ctx.restore();

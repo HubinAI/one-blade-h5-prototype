@@ -477,7 +477,6 @@ export default function App() {
                   </div>
                   <h2 className="buff-modal-name" style={{ color: buff.color }}>{buff.name}</h2>
                   <p className="buff-modal-desc">{buff.description}</p>
-                  <p className="buff-modal-feedback">{buff.feedback}</p>
                   <button className="buff-modal-btn" onClick={handleConfirmBuff} style={{ background: buff.color }}>
                     收下军令
                   </button>
