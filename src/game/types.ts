@@ -148,6 +148,19 @@ export type Enemy = {
   snakeSwayOriginY?: number;
   /** 蛇形兵已经过时间（秒） */
   snakeSwayT?: number;
+  /** 快速入场阶段：从顶端到中场 y=240 的加速段 */
+  entryPhase?: {
+    active: boolean;
+    endY: number;
+    speedMultiplier: number;
+    maxDuration: number;
+    elapsed: number;
+    completed: boolean;
+  };
+  /** 中场特性是否已激活（y>=260后激活一次） */
+  midfieldActivated?: boolean;
+  /** 中场视觉/行为状态 */
+  visualState?: 'normal' | 'powder_armed' | 'core_revealed' | 'shield_ready' | 'charging_warning' | 'elite_warning';
 };
 
 export type Pickup = {

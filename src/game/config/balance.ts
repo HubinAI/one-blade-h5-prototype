@@ -83,6 +83,27 @@ export const BALANCE = {
   }
 } as const;
 
+/** 战斗纵向区域定义 */
+export const BATTLEFIELD_ZONES = {
+  spawnTopY: -60,
+  spawnVisibleY: 80,
+  entryEndY: 240,
+  midfieldStartY: 260,
+  midfieldCenterY: 360,
+  midfieldEndY: 520,
+  harvestStartY: 520,
+  defenseLineY: 720
+} as const;
+
+/** 快速入场阶段配置 */
+export const ENTRY_PHASE_CONFIG = {
+  defaultMultiplier: 1.8,
+  earlyStageMultiplier: 2.0,
+  lateStageMultiplier: 1.7,
+  defaultEndY: 240,
+  defaultMaxDuration: 0.9
+} as const;
+
 export type SwordStage = {
   id: BladeTier;
   name: string;

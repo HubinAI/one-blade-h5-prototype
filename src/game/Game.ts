@@ -109,6 +109,8 @@ export class Game {
   private lastSlashAngle = -Math.PI / 2;
   private debugEnabled = false;
   private hintSeen: Set<string>;
+  /** 中场提示冷却计时器（秒） */
+  private _midfieldHintTimer = 0;
   private reviveOfferSent = false;
   private buffChoiceOptions: BuffId[] = [];
   private buffChoicePause = 0;
@@ -433,6 +435,7 @@ export class Game {
     this.updateSubSpawnQueue();
     this.updateEliteSpawn();
     this.updateSubBlades(scaledDt);
+    this.updateMidfieldHints(scaledDt);
     this.updateBossSpawn();
     this.updateEliteSkills(scaledDt);
     this.updateBossSkills(scaledDt);
@@ -1502,6 +1505,22 @@ export class Game {
       const statusSlow = enemy.ignited || enemy.marked ? 0.54 : 1;
       const fortressSlow = enemy.slowedTimer > 0 ? 0.4 : 1;
 
+      // ── 快速入场阶段 entryPhase：所有敌人生成后统一加速入场 ──
+      if (enemy.entryPhase?.active && !enemy.entryPhase.completed) {
+        const e = enemy.entryPhase;
+        e.elapsed += dt;
+        const reachedEnd = enemy.y >= e.endY;
+        const timeout = e.elapsed >= e.maxDuration;
+        if (reachedEnd || timeout) {
+          e.completed = true;
+          e.active = false;
+        }
+        // 入场期间速度倍率由 entryPhase.speedMultiplier 决定
+        // 后续 normal/rush 逻辑中使用 entryMultiplier
+      }
+      const ep = enemy.entryPhase;
+      const entryMultiplier = ep && ep.active && !ep.completed ? ep.speedMultiplier : 1;
+
       // ── 蛇形兵 sine_sway：横向正弦摆动 ──
       if (enemy.snakeSwayT !== undefined) {
         enemy.snakeSwayT += dt;
@@ -1561,12 +1580,18 @@ export class Game {
       // 正常下落（未蓄力时或冲刺后）
       const isCharging = enemy.chargeTimer !== undefined && enemy.chargeTimer >= 0;
       if (!isCharging) {
-        enemy.y += enemy.speed * rushMultiplier * statusSlow * fortressSlow * dt;
+        enemy.y += enemy.speed * entryMultiplier * rushMultiplier * statusSlow * fortressSlow * dt;
       } else {
         // 蓄力时略微闪红光
         if (Math.sin(this.elapsed * 20) > 0) {
           enemy.flash = Math.max(enemy.flash, 0.2);
         }
+      }
+
+      // ── 中场特性激活：y>=260 后激活特殊怪的中场表现 ──
+      if (enemy.y >= 260 && !enemy.midfieldActivated) {
+        enemy.midfieldActivated = true;
+        this.activateMidfieldTrait(enemy);
       }
 
       if (enemy.y >= BALANCE.battlefield.bottomDefenseY) {
@@ -1625,6 +1650,26 @@ export class Game {
       sf.life -= dt;
     }
     this.splitFlashes = this.splitFlashes.filter((sf) => sf.life > 0);
+  }
+
+  /** 中场提示：强斩时机 + 破阵良机（4秒冷却） */
+  private updateMidfieldHints(dt: number) {
+    this._midfieldHintTimer = Math.max(0, this._midfieldHintTimer - dt);
+    if (this._midfieldHintTimer > 0) return;
+    // 计数中场敌人（y>=260）
+    const enemiesInMidfield = this.enemies.filter(e => e.alive && e.y >= 260 && e.y < 520).length;
+    if (this.energy >= 90 && enemiesInMidfield > 0) {
+      // 检查是否有高价值目标
+      const hasHighValue = this.enemies.some(e => e.alive && e.y >= 260 && e.y < 520 &&
+        (e.kind === "powder" || e.kind === "core" || e.kind === "elite"));
+      if (hasHighValue) {
+        this.addText(DESIGN_WIDTH / 2, 252, "破阵良机", "#ffd35a", 14, 0.8);
+        this._midfieldHintTimer = 4;
+      }
+    } else if (this.energy >= 40 && enemiesInMidfield >= 6) {
+      this.addText(DESIGN_WIDTH / 2, 252, "强斩时机", "#5bc0ff", 14, 0.8);
+      this._midfieldHintTimer = 4;
+    }
   }
 
   /** 副刀自动攻击 - 蓄势横扫(槽0) + 破点追击(槽1) */
@@ -2466,7 +2511,16 @@ export class Game {
       formationWrongHits: 0,
       // 30% 步兵是急冲兵；15% 步兵/盾兵是蛇形兵
       rushTimer: kind === "infantry" && Math.random() < 0.3 ? 0.8 : undefined,
-      snakeSwayT: (kind === "infantry" || kind === "shield") && Math.random() < 0.15 ? 0 : undefined
+      snakeSwayT: (kind === "infantry" || kind === "shield") && Math.random() < 0.15 ? 0 : undefined,
+      // 快速入场阶段：所有基础敌人生成时激活（急冲兵用 rushTimer 覆盖）
+      entryPhase: isBasicEnemy && !(kind === "infantry" && Math.random() < 0.3) ? {
+        active: true,
+        endY: 240,
+        speedMultiplier: 1.8,
+        maxDuration: 0.9,
+        elapsed: 0,
+        completed: false
+      } : undefined
     };
   }
 
@@ -3717,6 +3771,28 @@ export class Game {
       }
     });
     ctx.restore();
+  }
+
+  /** 中场特性激活：敌人进入 y>=260 后触发特殊表现 */
+  private activateMidfieldTrait(enemy: Enemy) {
+    switch (enemy.kind) {
+      case "powder":
+        enemy.visualState = "powder_armed";
+        enemy.flash = Math.max(enemy.flash, 0.1);
+        break;
+      case "core":
+        enemy.visualState = "core_revealed";
+        enemy.flash = Math.max(enemy.flash, 0.15);
+        break;
+      case "shield":
+        enemy.visualState = "shield_ready";
+        break;
+      case "elite":
+        enemy.visualState = "elite_warning";
+        // 精英出场已在 updateEliteSpawn 中处理，此处增加进入中场后的光晕
+        this.particles.push(glowParticle(enemy, "#ffd35a", 8, 4));
+        break;
+    }
   }
 
   /** 副刀槽位渲染（战士左右侧） */
