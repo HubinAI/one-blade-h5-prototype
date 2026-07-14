@@ -338,6 +338,7 @@ export default function App() {
           onRestoreStamina={handleRestoreStamina}
           onRanking={() => setScreen("ranking")}
           onBag={() => setScreen("bag")}
+          onIdle={() => setScreen("idle")}
           onDebug={() => setScreen("debug")}
           appVersion={appVersion}
           pendingGate={pendingGate ? { breakthroughName: pendingGate.breakthroughName, unlockText: pendingGate.unlockText, breakthroughId: pendingGate.breakthroughId } : null}

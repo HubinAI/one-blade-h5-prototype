@@ -35,8 +35,8 @@ export type SynthesisRule = {
 };
 
 export const SYNTHESIS_RULES: Partial<Record<Quality, SynthesisRule>> = {
-  white:  { baseChance: 100, increment: 0,   maxAttempts: 1 },  // 白→绿 100%
-  green:  { baseChance: 100, increment: 0,   maxAttempts: 1 },  // 绿→蓝 100%
+  white:  { baseChance: 80,  increment: 0,   maxAttempts: 1 },  // 白→绿 80%
+  green:  { baseChance: 80,  increment: 0,   maxAttempts: 1 },  // 绿→蓝 80%
   blue:   { baseChance: 20,  increment: 20,  maxAttempts: 5 },  // 蓝→紫 20%递增 5次保底
   purple: { baseChance: 15,  increment: 15,  maxAttempts: 7 },  // 紫→金 15%递增 7次保底
   gold:   { baseChance: 15,  increment: 15,  maxAttempts: 7 },
@@ -64,6 +64,13 @@ export function getExpCostForLevel(level: number): number {
   return 3;
 }
 
+/** 算出该品质刀当前合成成功率（考虑失败递增） */
+export function getSynthesisChance(quality: Quality, failCount: number = 0): number {
+  const rule = SYNTHESIS_RULES[quality];
+  if (!rule) return 0;
+  return Math.min(100, rule.baseChance + failCount * rule.increment);
+}
+
 // ════════════════════════════════════════════
 // 词缀系统（机制效果）
 // ════════════════════════════════════════════
@@ -73,12 +80,18 @@ export type AffixConfig = {
   id: AffixId;
   name: string;
   description: string;
-  minQuality: Quality;  // 最低出现品质
-  maxQuality: Quality;  // 最高出现品质
+  minQuality: Quality;
+  maxQuality: Quality;
   /** 主刀效果 */
   primaryEffect: string;
-  /** 副刀效果 */
+  /** 副刀通用效果（旧字段） */
   subEffect: string;
+  /** 装入蓄势横扫槽效果 */
+  momentumEffect: string;
+  /** 装入破点追击槽效果 */
+  weakpointEffect: string;
+  /** 推荐槽位 */
+  recommendedSlot: 'momentum_sweep' | 'weakpoint_chase' | 'universal';
 };
 
 export const AFFIX_CONFIG: Record<AffixId, AffixConfig> = {
@@ -86,39 +99,80 @@ export const AFFIX_CONFIG: Record<AffixId, AffixConfig> = {
     id: "frost", name: "冰霜", description: "寒冰之力冻结敌人",
     minQuality: "white", maxQuality: "purple",
     primaryEffect: "挥刀路径留冰痕，敌人减速30%持续1.5秒",
-    subEffect: "副刀攻击附带冰霜减速"
+    subEffect: "副刀攻击附带冰霜减速",
+    momentumEffect: "横扫命中区域减速1.5秒",
+    weakpointEffect: "锁定目标冻结1秒，周围小范围减速",
+    recommendedSlot: 'momentum_sweep'
   },
   flame: {
     id: "flame", name: "烈火", description: "烈焰灼烧持续伤害",
     minQuality: "green", maxQuality: "gold",
     primaryEffect: "斩中敌人持续燃烧，2秒额外30%伤害",
-    subEffect: "副刀攻击附带燃烧"
+    subEffect: "副刀攻击附带燃烧",
+    momentumEffect: "横扫路径点燃敌人，范围广",
+    weakpointEffect: "点燃高血量目标，持续伤害更高",
+    recommendedSlot: 'weakpoint_chase'
   },
   thunder: {
     id: "thunder", name: "雷暴", description: "雷霆万钧闪电链",
     minQuality: "purple", maxQuality: "god",
     primaryEffect: "收刀时召唤3道闪电链自动追踪",
-    subEffect: "副刀每3秒自动释放1道闪电"
+    subEffect: "副刀每3秒自动释放1道闪电",
+    momentumEffect: "横扫后30%概率触发链雷",
+    weakpointEffect: "追击后30%概率雷击周围2个敌人",
+    recommendedSlot: 'universal'
   },
   armorBreak: {
     id: "armorBreak", name: "破甲", description: "斩破敌军防御",
     minQuality: "white", maxQuality: "blue",
     primaryEffect: "斩中敌人防御降低50%持续2秒",
-    subEffect: "副刀攻击附带破甲"
+    subEffect: "副刀攻击附带破甲",
+    momentumEffect: "横扫命中敌人防御-30%持续2秒",
+    weakpointEffect: "对精英/盾兵/Boss防御-50%持续2秒",
+    recommendedSlot: 'weakpoint_chase'
   },
   vampire: {
     id: "vampire", name: "回春", description: "击杀回春",
     minQuality: "green", maxQuality: "purple",
     primaryEffect: "每击杀1个敌人回复2%刀势",
-    subEffect: "副刀击杀回复主刀1%刀势"
+    subEffect: "副刀击杀回复主刀1%刀势",
+    momentumEffect: "横扫击杀每个敌人额外+1%刀势",
+    weakpointEffect: "击杀高价值目标额外+8%刀势",
+    recommendedSlot: 'momentum_sweep'
   },
   phantom: {
     id: "phantom", name: "幻影", description: "残影连击",
     minQuality: "purple", maxQuality: "gold",
     primaryEffect: "挥刀路径留下残影，0.5秒后二次伤害",
-    subEffect: "副刀攻击20%概率双倍"
+    subEffect: "副刀攻击20%概率双倍",
+    momentumEffect: "25%概率追加一次较弱横扫",
+    weakpointEffect: "25%概率追加一次追击",
+    recommendedSlot: 'universal'
   }
 };
+
+/** 获取词缀装入各槽位的效果描述 */
+export function getAffixSlotEffect(affixId: AffixId, slotIndex: number): string {
+  const affix = AFFIX_CONFIG[affixId];
+  if (!affix) return '';
+  return slotIndex === 0 ? affix.momentumEffect : affix.weakpointEffect;
+}
+
+/** 获取推荐槽位名称 */
+export function getRecommendedSlotLabel(affixId: AffixId | null): string {
+  if (!affixId) return '通用';
+  const affix = AFFIX_CONFIG[affixId];
+  if (!affix || affix.recommendedSlot === 'universal') return '通用';
+  return affix.recommendedSlot === 'momentum_sweep' ? '蓄势副刀' : '破点副刀';
+}
+
+/** 获取推荐槽位原因 */
+export function getRecommendedSlotReason(affixId: AffixId | null): string {
+  if (!affixId || affixId === 'thunder' || affixId === 'phantom') return '两个槽位均可发挥效果';
+  if (affixId === 'frost' || affixId === 'vampire') return '横扫命中多，范围收益高';
+  if (affixId === 'armorBreak' || affixId === 'flame') return '点杀高价值目标收益更高';
+  return '';
+}
 
 /** 从品质匹配的词缀池中随机抽1个 */
 export function getRandomAffixForQuality(quality: Quality): AffixId | null {
@@ -147,13 +201,13 @@ export type RankConfig = {
 };
 
 export const RANK_CONFIG: Record<RankId, RankConfig> = {
-  qiRefining:       { id: "qiRefining",       name: "练气", unlockQuality: "green",  bossId: "zhangFei" },
-  foundation:       { id: "foundation",       name: "筑基", unlockQuality: "blue",   bossId: "zhangFei" },
-  coreFormation:    { id: "coreFormation",    name: "结丹", unlockQuality: "purple", bossId: "simaYi" },
-  nascentSoul:      { id: "nascentSoul",      name: "元婴", unlockQuality: "gold",   bossId: "zhenJi" },
-  divineTransformation: { id: "divineTransformation", name: "化神", unlockQuality: "darkGold", bossId: "zhenJi" },
-  greatVehicle:     { id: "greatVehicle",     name: "大乘", unlockQuality: "spirit", bossId: "zhenJi" },
-  tribulation:      { id: "tribulation",      name: "渡劫", unlockQuality: "immortal", bossId: "zhenJi" },
+  qiRefining:       { id: "qiRefining",       name: "练气", unlockQuality: "green",  bossId: "yaoWang" },
+  foundation:       { id: "foundation",       name: "筑基", unlockQuality: "blue",   bossId: "yaoWang" },
+  coreFormation:    { id: "coreFormation",    name: "结丹", unlockQuality: "purple", bossId: "moXiu" },
+  nascentSoul:      { id: "nascentSoul",      name: "元婴", unlockQuality: "gold",   bossId: "huaYao" },
+  divineTransformation: { id: "divineTransformation", name: "化神", unlockQuality: "darkGold", bossId: "huaYao" },
+  greatVehicle:     { id: "greatVehicle",     name: "大乘", unlockQuality: "spirit", bossId: "huaYao" },
+  tribulation:      { id: "tribulation",      name: "渡劫", unlockQuality: "immortal", bossId: "huaYao" },
 };
 
 export const RANK_ORDER: RankId[] = Object.keys(RANK_CONFIG) as RankId[];
@@ -210,11 +264,11 @@ export const WAVE_TEMPLATES: WaveTemplate[] = [
 ];
 
 /** 根据当前层数和可用模板生成一局的波次列表 */
-export function generateFloorWaves(floor: number, templateCount: number = 5): WaveTemplate[] {
+export function generateFloorWaves(floor: number, templateCount?: number): WaveTemplate[] {
   const available = WAVE_TEMPLATES.filter(t => floor >= t.unlockFloor);
   if (available.length === 0) return [WAVE_TEMPLATES[0]];
-  
-  const count = Math.min(templateCount, 4 + Math.floor(floor / 10));
+
+  const count = templateCount ?? (5 + Math.floor(floor / 8)); // V0709018: 5+floor/8
   const waves: WaveTemplate[] = [];
   for (let i = 0; i < count; i++) {
     const idx = Math.floor(Math.random() * available.length);
@@ -230,7 +284,7 @@ export function getFloorStats(floor: number) {
     enemySpeed: 42 + floor * 0.3,
     enemyCount: 4 + Math.floor(floor / 8),
     eliteProbability: Math.min(0.3, floor * 0.005),
-    waveCount: 4 + Math.floor(floor / 10),
+    waveCount: 5 + Math.floor(floor / 8), // V0709018: 5+floor/8, 第1关5波, 第50关10波
   };
 }
 
@@ -256,7 +310,9 @@ export type BuffEffectType =
   | "main_sword_path" | "main_sword_damage" | "main_sword_initial"
   | "sub_cooldown" | "sub_damage"
   | "syn_blue_rate" | "syn_purple_rate" | "syn_gold_rate"
-  | "coin_gain" | "stamina_cost" | "run_exp";
+  | "coin_gain" | "stamina_cost" | "run_exp"
+  // 刀势循环定制Buff
+  | "momentum_refund" | "sub_momentum_double" | "break_extra_sub" | "momentum_regen" | "third_sub_slot" | "weakness_bonus";
 
 export type TodayBuff = {
   id: string;
@@ -270,31 +326,31 @@ export type TodayBuff = {
 
 export const TODAY_BUFF_POOL: TodayBuff[] = [
   // ═══════ 白色 100金 ═══════
-  { id: "b_quench",   name: "淬炼符",  desc: "今日合成失败获得经验+1",          quality: "white", price: 100, effectType: "run_exp",         effectValue: 1 },
-  { id: "b_march",    name: "疾行符",  desc: "今日主线初始刀势+20",             quality: "white", price: 100, effectType: "main_sword_initial", effectValue: 20 },
-  { id: "b_body",     name: "强体符",  desc: "今日主线生命+1",                  quality: "white", price: 100, effectType: "main_sword_initial", effectValue: 0 }, // 用hp字段
-  { id: "b_gold1",    name: "聚财符",  desc: "今日每局金币+30",                 quality: "white", price: 100, effectType: "coin_gain",       effectValue: 30 },
-  { id: "b_light",    name: "轻身符",  desc: "今日主线体力消耗-1（最低1）",      quality: "white", price: 100, effectType: "stamina_cost",     effectValue: 1 },
-  { id: "b_breath",   name: "吐纳符",  desc: "今日刀势恢复速度+15%",            quality: "white", price: 100, effectType: "main_sword_path",  effectValue: 0 }, // 简化
+  { id: "b_quench",   name: "淬炼符",  desc: "今日合成失败获得经验+1",              quality: "white", price: 80, effectType: "run_exp",             effectValue: 1 },
+  { id: "b_breath",   name: "蓄势加速", desc: "今日自然刀势恢复+25%",               quality: "white", price: 80, effectType: "momentum_regen",     effectValue: 25 },
+  { id: "b_march",    name: "疾行符",  desc: "今日主线初始刀势+20",                 quality: "white", price: 80, effectType: "main_sword_initial",  effectValue: 20 },
+  { id: "b_gold1",    name: "聚财符",  desc: "今日每局金币+30",                     quality: "white", price: 80, effectType: "coin_gain",          effectValue: 30 },
+  { id: "b_light",    name: "轻身符",  desc: "今日主线体力消耗-1（最低1）",         quality: "white", price: 80, effectType: "stamina_cost",        effectValue: 1 },
+  { id: "b_body",     name: "强体符",  desc: "今日主线生命+1",                      quality: "white", price: 80, effectType: "main_sword_initial",  effectValue: 0 },
 
   // ═══════ 蓝色 250金 ═══════
-  { id: "b_syn_blue", name: "炼器精通", desc: "今日蓝→紫合成概率×1.5",          quality: "blue",  price: 250, effectType: "syn_blue_rate",   effectValue: 1.5 },
-  { id: "b_sword",    name: "刀芒符",  desc: "今日主刀刀芒长度+15%",            quality: "blue",  price: 250, effectType: "main_sword_path", effectValue: 15 },
-  { id: "b_iron",     name: "铁壁符",  desc: "今日副刀攻击间隔-15%",            quality: "blue",  price: 250, effectType: "sub_cooldown",   effectValue: 15 },
-  { id: "b_aura",     name: "聚灵符",  desc: "今日副刀伤害+20%",                quality: "blue",  price: 250, effectType: "sub_damage",     effectValue: 20 },
-  { id: "b_trail",    name: "识途符",  desc: "今日每局经验+1",                  quality: "blue",  price: 250, effectType: "run_exp",        effectValue: 1 },
+  { id: "b_syn_blue", name: "炼器精通", desc: "今日蓝→紫合成概率×1.5",             quality: "blue",  price: 200, effectType: "syn_blue_rate",    effectValue: 1.5 },
+  { id: "b_sword",    name: "刀芒符",  desc: "今日主刀刀芒长度+15%",               quality: "blue",  price: 200, effectType: "main_sword_path",  effectValue: 15 },
+  { id: "b_iron",     name: "铁壁符",  desc: "今日副刀攻击间隔-15%",               quality: "blue",  price: 200, effectType: "sub_cooldown",     effectValue: 15 },
+  { id: "b_break",    name: "破阵连携", desc: "今日破阵斩后副刀立即各攻击一次",      quality: "blue",  price: 200, effectType: "break_extra_sub",  effectValue: 1 },
+  { id: "b_weakup",   name: "破点强化", desc: "今日主刀命中破绽目标返还+10%",        quality: "blue",  price: 200, effectType: "weakness_bonus",   effectValue: 10 },
 
   // ═══════ 紫色 500金 ═══════
-  { id: "b_syn_pur",  name: "大师铸炼", desc: "今日紫→金合成概率×1.5",          quality: "purple", price: 500, effectType: "syn_purple_rate", effectValue: 1.5 },
-  { id: "b_flood",    name: "刀势泉涌", desc: "今日刀势恢复速度+30%",            quality: "purple", price: 500, effectType: "main_sword_path", effectValue: 30 },
-  { id: "b_gold2",    name: "金币洪流", desc: "今日金币收益×2",                  quality: "purple", price: 500, effectType: "coin_gain",       effectValue: 2 },
-  { id: "b_sub_echo", name: "副刀共鸣", desc: "今日副刀伤害+35%",                quality: "purple", price: 500, effectType: "sub_damage",       effectValue: 35 },
+  { id: "b_syn_pur",  name: "大师铸炼", desc: "今日紫→金合成概率×1.5",             quality: "purple", price: 400, effectType: "syn_purple_rate", effectValue: 1.5 },
+  { id: "b_flood",    name: "刀势沸腾", desc: "今日主刀击杀返还刀势+30%",           quality: "purple", price: 400, effectType: "momentum_refund",   effectValue: 30 },
+  { id: "b_gold2",    name: "金币洪流", desc: "今日金币收益×2",                     quality: "purple", price: 400, effectType: "coin_gain",         effectValue: 2 },
+  { id: "b_sub_echo", name: "副刀共鸣", desc: "今日副刀击杀回刀势效果翻倍",        quality: "purple", price: 400, effectType: "sub_momentum_double", effectValue: 1 },
 
   // ═══════ 金色 800金 ═══════
-  { id: "b_syn_first", name: "炼器神符", desc: "今日首次合成必成",                quality: "gold", price: 800, effectType: "syn_gold_rate", effectValue: 1 },
-  { id: "b_fullblade", name: "无双刀势", desc: "今日初始刀势100（满势）",          quality: "gold", price: 800, effectType: "main_sword_initial", effectValue: 100 },
-  { id: "b_gold3",     name: "万金之躯", desc: "今日金币收益×3",                  quality: "gold", price: 800, effectType: "coin_gain", effectValue: 3 },
-  { id: "b_tri_sub",   name: "三刀流",  desc: "今日可装备3把副刀",                quality: "gold", price: 800, effectType: "sub_damage", effectValue: 0 }, // 标记特殊
+  { id: "b_syn_first", name: "炼器神符", desc: "今日首次合成必成",                  quality: "gold", price: 800, effectType: "syn_gold_rate",   effectValue: 1 },
+  { id: "b_fullblade", name: "无双刀势", desc: "今日初始刀势100（满势）",            quality: "gold", price: 800, effectType: "main_sword_initial", effectValue: 100 },
+  { id: "b_tri_sub",   name: "三刀流",  desc: "今日可装备3把副刀",                  quality: "gold", price: 800, effectType: "third_sub_slot",   effectValue: 1 },
+  { id: "b_gold3",     name: "万金之躯", desc: "今日金币收益×3",                     quality: "gold", price: 800, effectType: "coin_gain",         effectValue: 3 },
 ];
 
 /** 抽3个白(权重60), 2个蓝(25), 1个紫(12) — 总计6个抽奖位 */
@@ -373,13 +429,13 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
   const stats = getFloorStats(floor);
   const waveTemplates = generateFloorWaves(floor);
 
-  // 兵数量随层数递增：1层=4-5个起步
-  const countMul = 2 + Math.floor(floor / 3);
+  // 兵数量随层数递增：每sub-spawn 3~5只, 1层起步2倍
+  const countMul = 2 + Math.floor(floor / 4);
 
   const waves: WaveConfig[] = waveTemplates.map((tpl, idx) => {
     const lane = (idx * 3 + 1) % LANES.length;
     const enemies: EnemySpawn[] = tpl.enemies.map((e, ei) => {
-      const cnt = Math.max(1, e.count * countMul);
+      const cnt = Math.max(1, Math.min(5, e.count * Math.max(1, Math.floor(countMul / 2))));
       return {
         kind: e.kind as any,
         count: cnt,
@@ -387,28 +443,32 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
         yOffset: ei * 6,
       } as any;
     });
+    // 方案B中场事件：精英前蓄冲 + 精英后聚阵
+    const waveCount = waveTemplates.length;
+    // 蓄冲：在波次40%位置（精英前4-6秒预警）
+    const chargeIdx = Math.max(1, Math.floor(waveCount * 0.4));
+    // 聚阵：最后一波（精英死后残敌收尾）
+    const gatherIdx = waveCount - 1;
+    let midfieldEventType: 'none' | 'gather' | 'charge_pause' | undefined = undefined;
+    if (idx === chargeIdx && chargeIdx < gatherIdx) {
+      midfieldEventType = 'charge_pause';
+    } else if (idx === gatherIdx) {
+      midfieldEventType = 'gather';
+    }
     return {
       name: tpl.name,
       delay: idx === 0 ? 0.2 : 0.2,
-      spawnAt: idx * 3.5, // 每3.5秒一波（紧凑节奏）
+      spawnAt: idx * 5.5,
       speedMultiplier: 1 + floor * 0.005,
       enemies,
+      midfieldEventType,
     };
   });
 
-  // 决定是否有精英（随层数递增）
-  if (floor >= 5 && Math.random() < stats.eliteProbability * 1.5) {
-    const eliteKinds = ["fireRing", "heal", "aura"];
-    const eKind = eliteKinds[floor % eliteKinds.length] as any;
-    const eliteWave: WaveConfig = {
-      name: "精英督战",
-      delay: 0.3,
-      spawnAt: waves.length > 0 ? (waves.length * 5) : 0,
-      enemies: [{ kind: "elite", count: 1, x: LANES[3], yOffset: 0 } as any],
-    };
-    (eliteWave.enemies[0] as any).eliteKind = eKind;
-    waves.push(eliteWave);
-  }
+  // 决定精英出场时机（每关必出1个，通过 updateEliteSpawn 系统）
+  const eliteKinds = ["fireRing", "heal", "aura"];
+  const eKind = eliteKinds[floor % eliteKinds.length] as any;
+  const eliteSpawnAt = waves.length * 3; // 中场时段（约一半时出现）
 
   return {
     id: 10000 + floor,
@@ -421,5 +481,7 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
     durationSeconds: Math.min(360, 120 + floor * 0.8),
     buffTimes: [],
     waves,
+    eliteSpawnAt,
+    eliteKind: eKind,
   };
 }

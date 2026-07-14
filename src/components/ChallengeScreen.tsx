@@ -10,7 +10,7 @@ type ChallengeScreenProps = {
 };
 
 const BOSS_NAMES: Record<string, string> = {
-  zhangFei: "张飞", simaYi: "司马懿", zhenJi: "甄宓"
+  yaoWang: "练气大妖", moXiu: "筑基魔修", huaYao: "灵月圣女"
 };
 
 export function ChallengeScreen({ highestFloor, rankIndex, onBack, onChallenge }: ChallengeScreenProps) {

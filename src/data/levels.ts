@@ -90,7 +90,6 @@ export const LEVELS: LevelConfig[] = [
     buffTimes: [],
     eliteSpawnAt: 20,
     eliteKind: "fireRing",
-    bossId: "zhangFei",
     waves: [
       wave("盾兵初现", 1, mix([row("shield", [2, 4], 0), row("infantry", [0, 1, 3, 5, 6], 1)])),
       wave("盾后藏兵", 11, mix([row("shield", [0, 3, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("infantry", [0, 2, 4, 6], 2)])),
@@ -116,7 +115,6 @@ export const LEVELS: LevelConfig[] = [
     buffTimes: [],
     eliteSpawnAt: 35,
     eliteKind: "fireRing",
-    bossId: "zhangFei",
     waves: [
       wave("开场人群", 1, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 3, 5], 1)])),
       wave("第一桶火", 12, mix([row("infantry", [0, 1, 2, 4, 5, 6], 0), row("powder", [3], 1), row("infantry", [1, 3, 5], 2)])),
@@ -173,7 +171,6 @@ export const LEVELS: LevelConfig[] = [
     buffTimes: [],
     eliteSpawnAt: 40,
     eliteKind: "aura",
-    bossId: "simaYi",
     formationId: "three",
     waves: [
       wave("启动清场", 1, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 3, 5], 1)])),
@@ -204,7 +201,6 @@ export const LEVELS: LevelConfig[] = [
     buffTimes: [],
     eliteSpawnAt: 40,
     eliteKind: "fireRing",
-    bossId: "simaYi",
     formationId: "four",
     waves: [
       wave("盾火开局", 1, mix([row("shield", [1, 5], 0), row("powder", [3], 1), row("infantry", [0, 1, 2, 4, 5, 6], 2)])),
@@ -296,7 +292,6 @@ export const LEVELS: LevelConfig[] = [
     buffTimes: [],
     eliteSpawnAt: 55,
     eliteKind: "fireRing",
-    bossId: "zhenJi",
     formationId: "eight",
     waves: [
       wave("步兵密集阵", 1, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), row("infantry", [1, 2, 3, 4, 5], 2)]), [pickup("soul", 3)]),

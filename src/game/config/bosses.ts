@@ -40,10 +40,10 @@ export type BossConfig = {
 };
 
 export const BOSS_CONFIG: Record<BossId, BossConfig> = {
-  zhangFei: {
-    id: "zhangFei",
-    name: "张飞",
-    title: "燕人张翼德",
+  yaoWang: {
+    id: "yaoWang",
+    name: "练气大妖",
+    title: "荒野妖兽·练气",
     maxHp: 16,
     speed: 20,
     radius: 36,
@@ -52,35 +52,35 @@ export const BOSS_CONFIG: Record<BossId, BossConfig> = {
     energyGain: 30,
     color: "#c0392b",
     accentColor: "#f5b7b1",
-    introText: "燕人张翼德在此！谁敢一战？",
+    introText: "吼——区区散修，也敢犯我领地？",
     phases: [
       {
         hpRatioTrigger: 0.5,
-        name: "怒目",
-        announce: "张飞·怒目 — 刀势不足寸步难行",
+        name: "暴怒",
+        announce: "大妖·暴怒 — 刀势不足寸步难行",
         speedMultiplier: 1,
         defenseDamage: 2,
         burstDamageMultiplier: 1
       },
       {
         hpRatioTrigger: 0,
-        name: "狂暴",
-        announce: "张飞·狂暴 — 破阵锋方能斩之！",
+        name: "狂化",
+        announce: "大妖·狂化 — 破阵锋方能斩之！",
         speedMultiplier: 1.2,
         defenseDamage: 4,
         burstDamageMultiplier: 2
       }
     ],
     skill: {
-      name: "怒吼",
+      name: "妖吼",
       cooldown: 7,
-      description: "武将咆哮，令80px内敌军/玩家晕眩0.3s"
+      description: "妖兽咆哮，令80px内敌军/玩家晕眩0.3s"
     }
   },
-  simaYi: {
-    id: "simaYi",
-    name: "司马懿",
-    title: "冢虎司马懿",
+  moXiu: {
+    id: "moXiu",
+    name: "筑基魔修",
+    title: "魔道散人·筑基",
     maxHp: 20,
     speed: 24,
     radius: 34,
@@ -89,12 +89,12 @@ export const BOSS_CONFIG: Record<BossId, BossConfig> = {
     energyGain: 40,
     color: "#7d3c98",
     accentColor: "#d2b4de",
-    introText: "高平陵变，天下归心！",
+    introText: "区区凡人，也配与魔修争锋？",
     phases: [
       {
         hpRatioTrigger: 0.7,
-        name: "稳健",
-        announce: "司马懿·稳健 — 瞬步无影",
+        name: "诡步",
+        announce: "魔修·诡步 — 瞬步无影",
         speedMultiplier: 1,
         defenseDamage: 1,
         burstDamageMultiplier: 1
@@ -102,7 +102,7 @@ export const BOSS_CONFIG: Record<BossId, BossConfig> = {
       {
         hpRatioTrigger: 0.35,
         name: "乱序",
-        announce: "司马懿·乱序 — 分身匿迹",
+        announce: "魔修·乱序 — 分身匿迹",
         speedMultiplier: 1.1,
         defenseDamage: 1,
         burstDamageMultiplier: 1.2
@@ -110,7 +110,7 @@ export const BOSS_CONFIG: Record<BossId, BossConfig> = {
       {
         hpRatioTrigger: 0,
         name: "绝命",
-        announce: "司马懿·绝命 — 暗影弹横飞",
+        announce: "魔修·绝命 — 暗影弹横飞",
         speedMultiplier: 0.9,
         defenseDamage: 1,
         burstDamageMultiplier: 1.5
@@ -122,10 +122,10 @@ export const BOSS_CONFIG: Record<BossId, BossConfig> = {
       description: "瞬移到随机位置，绝命前无敌2秒"
     }
   },
-  zhenJi: {
-    id: "zhenJi",
-    name: "甄宓",
-    title: "洛神甄宓",
+  huaYao: {
+    id: "huaYao",
+    name: "元婴仙子",
+    title: "灵月圣女·元婴",
     maxHp: 26,
     speed: 26,
     radius: 32,
@@ -139,7 +139,7 @@ export const BOSS_CONFIG: Record<BossId, BossConfig> = {
       {
         hpRatioTrigger: 0.62,
         name: "花之舞",
-        announce: "甄宓·花之舞 — 花瓣飘散",
+        announce: "仙子·花之舞 — 花瓣飘散",
         speedMultiplier: 1,
         defenseDamage: 1,
         burstDamageMultiplier: 1
@@ -147,7 +147,7 @@ export const BOSS_CONFIG: Record<BossId, BossConfig> = {
       {
         hpRatioTrigger: 0.31,
         name: "花之怒",
-        announce: "甄宓·花之怒 — 花刺暗藏",
+        announce: "仙子·花之怒 — 花刺暗藏",
         speedMultiplier: 1.08,
         defenseDamage: 1,
         burstDamageMultiplier: 1.2
@@ -155,7 +155,7 @@ export const BOSS_CONFIG: Record<BossId, BossConfig> = {
       {
         hpRatioTrigger: 0,
         name: "花之殇",
-        announce: "甄宓·花之殇 — 百花葬！",
+        announce: "仙子·花之殇 — 百花葬！",
         speedMultiplier: 0.85,
         defenseDamage: 2,
         burstDamageMultiplier: 1.8

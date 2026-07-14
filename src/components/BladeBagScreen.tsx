@@ -5,33 +5,34 @@ import {
   setEquippedMainBlade,
   setEquippedSubBlade,
   removeEquippedSubBlade,
-  forgeBlades,
   saveDefaultWhiteBlade,
   getCurrentRankId,
+  batchForgeAll,
+  getExpOrbInventory,
   type EquippedBlades,
+  type ExpOrbEntry,
 } from "../game/services/ProgressionService";
 import type { Blade } from "../game/services/BladeService";
-import { QUALITY_META, QUALITY_ORDER, type Quality } from "../game/config/synthesis";
+import { QUALITY_META, QUALITY_ORDER, getSynthesisChance, type Quality } from "../game/config/synthesis";
 
 type BladeBagScreenProps = {
   onBack: () => void;
   onOpenCodex?: () => void;
 };
 
-const SUB1_UNLOCK_FLOOR = 50; // 第1把副刀解锁需要50层
-const SUB2_UNLOCK_FLOOR = 100; // 第2把副刀解锁需要100层
-
 export function BladeBagScreen({ onBack, onOpenCodex }: BladeBagScreenProps) {
   const [inventory, setInventory] = useState<Blade[]>(getBladeInventory());
   const [equipped, setEquipped] = useState<EquippedBlades>(getEquippedBlades());
-  const [batchMode, setBatchMode] = useState(false);
+  const [expOrbs, setExpOrbs] = useState<ExpOrbEntry[]>(getExpOrbInventory());
   const [highestFloor, setHighestFloor] = useState(1);
   const [draggingBlade, setDraggingBlade] = useState<Blade | null>(null);
   const [dragOverSlot, setDragOverSlot] = useState<"main" | "sub1" | "sub2" | null>(null);
+  const [hoverBlade, setHoverBlade] = useState<Blade | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const [showReward, setShowReward] = useState<{ name: string; quality: Quality; success: boolean } | null>(null);
 
   useEffect(() => {
-    // 第一次进入时确保有默认白刀+装备
+    // 第一次进入时确保有默认绿刀+装备
     saveDefaultWhiteBlade();
     refresh();
     const home = JSON.parse(window.localStorage.getItem("one_blade_v04_progression") ?? "{}");
@@ -41,18 +42,21 @@ export function BladeBagScreen({ onBack, onOpenCodex }: BladeBagScreenProps) {
   function refresh() {
     setInventory(getBladeInventory());
     setEquipped(getEquippedBlades());
+    setExpOrbs(getExpOrbInventory());
   }
 
-  // 主刀为空时自动装备第一把白刀
-  const mainBlade = equipped.main;
+  // 飘字提示（不弹窗）
+  function showToast(text: string) {
+    setToast(text);
+    setTimeout(() => setToast((t) => (t === text ? null : t)), 2200);
+  }
 
+  const mainBlade = equipped.main;
   const sub1Blade = equipped.subs[0] ?? null;
   const sub2Blade = equipped.subs[1] ?? null;
-  const sub1Unlocked = highestFloor >= SUB1_UNLOCK_FLOOR;
-  const sub2Unlocked = highestFloor >= SUB2_UNLOCK_FLOOR;
 
-  // 排序
-  const sorted = useMemo(() => {
+  // 排序：品质从高到低（god排最前），同品质按exp
+  const sortedBlades = useMemo(() => {
     return [...inventory].sort((a, b) => {
       const qa = QUALITY_ORDER.indexOf(a.quality);
       const qb = QUALITY_ORDER.indexOf(b.quality);
@@ -61,26 +65,40 @@ export function BladeBagScreen({ onBack, onOpenCodex }: BladeBagScreenProps) {
     });
   }, [inventory]);
 
-  const grouped = useMemo(() => {
-    const groups: Record<string, Blade[]> = {};
-    for (const b of sorted) {
-      if (!groups[b.quality]) groups[b.quality] = [];
-      groups[b.quality].push(b);
-    }
-    return groups;
-  }, [sorted]);
+  // 经验球排序：从god降序到white
+  const sortedOrbs = useMemo(() => {
+    return [...expOrbs].sort((a, b) => {
+      const qa = QUALITY_ORDER.indexOf(a.quality);
+      const qb = QUALITY_ORDER.indexOf(b.quality);
+      return qb - qa;
+    });
+  }, [expOrbs]);
 
-  // 槽位可接受拖动的高亮
+  // 槽位可接受拖动
   function isSlotDropable(slot: "main" | "sub1" | "sub2"): boolean {
-    if (slot === "main") return true;
-    if (slot === "sub1") return sub1Unlocked;
-    if (slot === "sub2") return sub2Unlocked;
-    return false;
+    return true; // V0709017 后2个副刀槽默认开启
   }
+
+  // 当前拖动刀的成功率
+  const currentChance = useMemo(() => {
+    if (!draggingBlade) return null;
+    const failCount = (() => {
+      try {
+        const p = JSON.parse(window.localStorage.getItem("one_blade_v04_progression") ?? "{}");
+        return p.synFailCount?.[draggingBlade.quality] ?? 0;
+      } catch { return 0; }
+    })();
+    return getSynthesisChance(draggingBlade.quality, failCount);
+  }, [draggingBlade]);
 
   // 拖动到槽位
   function handleDropOnSlot(slot: "main" | "sub1" | "sub2") {
     if (!draggingBlade) return;
+    if (draggingBlade.quality === "white") {
+      showToast("凡品（白色）刀不可装备，请用于合成炼器");
+      setDraggingBlade(null);
+      return;
+    }
     if (!isSlotDropable(slot)) return;
     if (slot === "main") {
       setEquippedMainBlade(draggingBlade.id);
@@ -91,6 +109,7 @@ export function BladeBagScreen({ onBack, onOpenCodex }: BladeBagScreenProps) {
     }
     setDraggingBlade(null);
     setDragOverSlot(null);
+    setHoverBlade(null);
     refresh();
   }
 
@@ -100,23 +119,32 @@ export function BladeBagScreen({ onBack, onOpenCodex }: BladeBagScreenProps) {
     refresh();
   }
 
-  // 拖动合成：拖一把到另一把同品质上
+  // 拖动合成：拖到同品质刀 → 批量二合
   function handleDropOnBlade(target: Blade) {
     if (!draggingBlade) return;
     if (draggingBlade.id === target.id) {
       setDraggingBlade(null);
+      setHoverBlade(null);
       return;
     }
     if (draggingBlade.quality !== target.quality) {
+      showToast("只能同品质刀合成");
       setDraggingBlade(null);
+      setHoverBlade(null);
       return;
     }
-    const result = forgeBlades(draggingBlade.id, target.id);
-    if (result && result.success && result.resultBlade) {
-      setShowReward({ name: result.resultBlade.name, quality: result.resultBlade.quality, success: true });
-      setTimeout(() => setShowReward(null), 1800);
+    // 默认批量：把背包所有该品质刀两两配对二合
+    const result = batchForgeAll(draggingBlade.quality);
+    if (result) {
+      showToast(`批量合成：成功 ${result.successCount} 把 / 失败 ${result.failCount} 次`);
+      if (result.successCount > 0) {
+        // 显示最后一把合成成功的刀
+        setShowReward({ name: result.firstSuccessName ?? "新刀", quality: draggingBlade.quality, success: true });
+        setTimeout(() => setShowReward(null), 1800);
+      }
     }
     setDraggingBlade(null);
+    setHoverBlade(null);
     refresh();
   }
 
@@ -146,86 +174,97 @@ export function BladeBagScreen({ onBack, onOpenCodex }: BladeBagScreenProps) {
                   <span className="bag-team-quality" style={{ color: QUALITY_META[mainBlade.quality]?.color }}>
                     {QUALITY_META[mainBlade.quality]?.label}
                   </span>
-                  <span className="bag-team-name">{mainBlade.name}</span>
+                  <span className="bag-team-name" style={{ color: QUALITY_META[mainBlade.quality]?.color }}>
+                    {mainBlade.name}
+                  </span>
                   <span className="bag-team-lv">Lv.{mainBlade.level}</span>
                 </>
               ) : (
-                <span className="bag-team-empty">主刀</span>
+                <span className="bag-team-empty">主刀槽</span>
               )}
             </div>
             <div
-              className={`bag-team-slot sub ${sub1Blade ? "filled" : ""} ${!sub1Unlocked ? "locked" : ""} ${dragOverSlot === "sub1" ? "hover" : ""}`}
-              onDragOver={(e) => { if (sub1Unlocked) { e.preventDefault(); setDragOverSlot("sub1"); } }}
+              className={`bag-team-slot sub ${sub1Blade ? "filled" : ""} ${dragOverSlot === "sub1" ? "hover" : ""}`}
+              onDragOver={(e) => { e.preventDefault(); setDragOverSlot("sub1"); }}
               onDragLeave={() => setDragOverSlot(null)}
               onDrop={() => handleDropOnSlot("sub1")}
             >
-              {sub1Unlocked ? (
-                sub1Blade ? (
-                  <>
-                    <span className="bag-team-quality" style={{ color: QUALITY_META[sub1Blade.quality]?.color }}>
-                      {QUALITY_META[sub1Blade.quality]?.label}
-                    </span>
-                    <span className="bag-team-name">{sub1Blade.name}</span>
-                    <button className="bag-team-remove" onClick={() => handleUnequipSub(0)}>卸</button>
-                  </>
-                ) : (
-                  <span className="bag-team-add">+</span>
-                )
-              ) : (
+              {sub1Blade ? (
                 <>
-                  <span className="bag-team-lock">🔒</span>
-                  <span className="bag-team-cond">第{SUB1_UNLOCK_FLOOR}层解锁</span>
+                  <span className="bag-team-quality" style={{ color: QUALITY_META[sub1Blade.quality]?.color }}>
+                    {QUALITY_META[sub1Blade.quality]?.label}
+                  </span>
+                  <span className="bag-team-name" style={{ color: QUALITY_META[sub1Blade.quality]?.color }}>
+                    {sub1Blade.name}
+                  </span>
+                  <span className="bag-team-lv">Lv.{sub1Blade.level}</span>
+                  <button className="bag-team-remove" onClick={() => handleUnequipSub(0)}>卸</button>
                 </>
+              ) : (
+                <span className="bag-team-empty">蓄势副刀槽</span>
               )}
             </div>
             <div
-              className={`bag-team-slot sub ${sub2Blade ? "filled" : ""} ${!sub2Unlocked ? "locked" : ""} ${dragOverSlot === "sub2" ? "hover" : ""}`}
-              onDragOver={(e) => { if (sub2Unlocked) { e.preventDefault(); setDragOverSlot("sub2"); } }}
+              className={`bag-team-slot sub ${sub2Blade ? "filled" : ""} ${dragOverSlot === "sub2" ? "hover" : ""}`}
+              onDragOver={(e) => { e.preventDefault(); setDragOverSlot("sub2"); }}
               onDragLeave={() => setDragOverSlot(null)}
               onDrop={() => handleDropOnSlot("sub2")}
             >
-              {sub2Unlocked ? (
-                sub2Blade ? (
-                  <>
-                    <span className="bag-team-quality" style={{ color: QUALITY_META[sub2Blade.quality]?.color }}>
-                      {QUALITY_META[sub2Blade.quality]?.label}
-                    </span>
-                    <span className="bag-team-name">{sub2Blade.name}</span>
-                    <button className="bag-team-remove" onClick={() => handleUnequipSub(1)}>卸</button>
-                  </>
-                ) : (
-                  <span className="bag-team-add">+</span>
-                )
-              ) : (
+              {sub2Blade ? (
                 <>
-                  <span className="bag-team-lock">🔒</span>
-                  <span className="bag-team-cond">第{SUB2_UNLOCK_FLOOR}层解锁</span>
+                  <span className="bag-team-quality" style={{ color: QUALITY_META[sub2Blade.quality]?.color }}>
+                    {QUALITY_META[sub2Blade.quality]?.label}
+                  </span>
+                  <span className="bag-team-name" style={{ color: QUALITY_META[sub2Blade.quality]?.color }}>
+                    {sub2Blade.name}
+                  </span>
+                  <span className="bag-team-lv">Lv.{sub2Blade.level}</span>
+                  <button className="bag-team-remove" onClick={() => handleUnequipSub(1)}>卸</button>
                 </>
+              ) : (
+                <span className="bag-team-empty">破点副刀槽</span>
               )}
             </div>
           </div>
         </div>
 
-        {/* 批量合成开关 */}
-        <div className="bag-batch-row">
-          <label className="bag-batch-toggle">
-            <input
-              type="checkbox"
-              checked={batchMode}
-              onChange={(e) => setBatchMode(e.target.checked)}
-            />
-            <span>勾选后批量合成</span>
-          </label>
-        </div>
+        {/* 经验球区（堆叠显示） */}
+        {sortedOrbs.length > 0 && (
+          <div className="bag-orbs">
+            <h3 className="bag-section-title">经验球 ({sortedOrbs.reduce((s, o) => s + o.count, 0)})</h3>
+            <div className="bag-orbs-grid">
+              {sortedOrbs.map((orb) => {
+                const meta = QUALITY_META[orb.quality];
+                return (
+                  <div
+                    key={orb.quality}
+                    className="bag-orb"
+                    style={{ borderColor: meta.color, color: meta.color }}
+                    title={`${meta.label}经验球 - 拖动到同品质刀上喂食`}
+                    draggable
+                    onDragStart={() => {
+                      // 简化：暂不实现拖动喂食（Phase4 再说）
+                    }}
+                  >
+                    <span className="bag-orb-name" style={{ color: meta.color }}>
+                      {meta.label}球
+                    </span>
+                    <span className="bag-orb-count">×{orb.count}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* 背包仓库 */}
         <div className="bag-inventory">
           <h3 className="bag-section-title">背包仓库 ({inventory.length})</h3>
-          {inventory.length === 0 ? (
-            <p className="bag-empty">刀库为空</p>
+          {sortedBlades.length === 0 ? (
+            <div className="bag-empty">背包为空</div>
           ) : (
             QUALITY_ORDER.map((q) => {
-              const items = grouped[q] ?? [];
+              const items = sortedBlades.filter((b) => b.quality === q);
               if (items.length === 0) return null;
               const meta = QUALITY_META[q];
               const isGod = q === "god";
@@ -240,22 +279,31 @@ export function BladeBagScreen({ onBack, onOpenCodex }: BladeBagScreenProps) {
                   <div className="bag-blade-grid">
                     {items.map((blade) => {
                       const isDragging = draggingBlade?.id === blade.id;
+                      const isHover = hoverBlade?.id === blade.id;
+                      const sameQuality = draggingBlade && draggingBlade.quality === blade.quality && draggingBlade.id !== blade.id;
                       return (
                         <div
                           key={blade.id}
-                          className={`bag-blade ${isDragging ? "dragging" : ""} ${isGod ? "god-quality" : ""}`}
+                          className={`bag-blade ${isDragging ? "dragging" : ""} ${isGod ? "god-quality" : ""} ${isHover ? "hover-target" : ""} ${sameQuality ? "valid-target" : ""}`}
                           style={{ borderColor: isGod ? "#ffb83b" : meta.color }}
                           draggable
                           onDragStart={() => setDraggingBlade(blade)}
-                          onDragEnd={() => { setDraggingBlade(null); setDragOverSlot(null); }}
-                          onDragOver={(e) => e.preventDefault()}
+                          onDragEnd={() => { setDraggingBlade(null); setHoverBlade(null); }}
+                          onDragOver={(e) => { e.preventDefault(); setHoverBlade(blade); }}
+                          onDragLeave={() => setHoverBlade((b) => (b?.id === blade.id ? null : b))}
                           onDrop={() => handleDropOnBlade(blade)}
                         >
+                          {isHover && sameQuality && currentChance !== null && (
+                            <div className="bag-blade-chance" style={{ background: meta.color }}>
+                              成功率 {currentChance}%
+                            </div>
+                          )}
                           <span className={`bag-blade-name ${isGod ? "god-quality-name" : ""}`}
                             style={isGod ? undefined : { color: meta.color }}>
                             {blade.name}
                           </span>
                           <span className="bag-blade-lv">Lv.{blade.level}</span>
+                          {blade.quality === "white" && <span className="bag-blade-tag">合成材料</span>}
                         </div>
                       );
                     })}
@@ -266,14 +314,17 @@ export function BladeBagScreen({ onBack, onOpenCodex }: BladeBagScreenProps) {
           )}
         </div>
 
+        {/* 飘字提示 */}
+        {toast && (
+          <div className="bag-toast">{toast}</div>
+        )}
+
+        {/* 合成成功弹窗 */}
         {showReward && (
-          <div className="bag-reward-anim">
-            <div className="bag-reward-anim-card">
-              <div className="bag-reward-anim-light" />
-              <h3>合成成功！</h3>
-              <span style={{ color: QUALITY_META[showReward.quality]?.color }}>
-                {QUALITY_META[showReward.quality]?.label} {showReward.name}
-              </span>
+          <div className="bag-reward-modal">
+            <div className="bag-reward-card">
+              <h3 style={{ color: QUALITY_META[showReward.quality]?.color }}>合成成功！</h3>
+              <p>获得 <strong style={{ color: QUALITY_META[showReward.quality]?.color }}>{showReward.name}</strong></p>
             </div>
           </div>
         )}

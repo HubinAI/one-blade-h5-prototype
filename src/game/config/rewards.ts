@@ -92,7 +92,7 @@ export const DAILY_TASK_CONFIG = [
 ] as const;
 
 export const REWARD_CONFIG = {
-  baseClearCoins: 40,
+  baseClearCoins: 50,
   failCoins: 12,
   killCoin: 1,
   highYieldMultiplier: 1.6,
@@ -140,7 +140,7 @@ export const REWARD_CONFIG = {
   },
   offline: {
     maxHours: 24,
-    coinsPerHour: 20
+    coinsPerHour: 30
   },
   codexTotal: 8,
   oneBladeChallengeTarget: 3,

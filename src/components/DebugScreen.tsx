@@ -71,6 +71,35 @@ export function DebugScreen({ onBack }: DebugScreenProps) {
     refresh();
   }
 
+  function clearCache() {
+    if (!confirm("确认清理所有缓存？\n\n会清除：\n- 进度存档\n- 今日BUFF\n- 图鉴\n- 关卡完成记录\n- 缓存数据\n\n（确认后刷新页面）")) return;
+    const keys = [
+      "one_blade_v04_progression",
+      "one_blade_today_buffs",
+      "one_blade_v02_progress",
+      "one_blade_first_run_done",
+      "one_blade_v02_levels",
+      "one_blade_completion_today",
+    ];
+    let removed = 0;
+    for (const k of keys) {
+      if (window.localStorage.getItem(k) !== null) {
+        window.localStorage.removeItem(k);
+        removed++;
+      }
+    }
+    // 清理所有以 one_blade 开头的 key（兜底）
+    const allKeys = Object.keys(window.localStorage);
+    for (const k of allKeys) {
+      if (k.startsWith("one_blade") && !keys.includes(k)) {
+        window.localStorage.removeItem(k);
+        removed++;
+      }
+    }
+    show(`已清理 ${removed} 项缓存，1秒后刷新`);
+    setTimeout(() => window.location.reload(), 1000);
+  }
+
   return (
     <div className="debug-overlay" onClick={onBack}>
       <div className="debug-popup" onClick={(e) => e.stopPropagation()}>
@@ -103,7 +132,10 @@ export function DebugScreen({ onBack }: DebugScreenProps) {
 
         <div className="debug-section">
           <h3>危险操作</h3>
-          <button className="debug-btn danger" onClick={resetProgress}>重置所有进度</button>
+          <div className="debug-btn-grid">
+            <button className="debug-btn" onClick={clearCache}>🧹 清理全部缓存</button>
+            <button className="debug-btn danger" onClick={resetProgress}>重置所有进度</button>
+          </div>
         </div>
 
         {message && <div className="debug-toast">{message}</div>}

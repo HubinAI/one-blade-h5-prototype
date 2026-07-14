@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import type { Blade } from "../game/services/BladeService";
-import { getBladeInventory, equipMainBlade, equipSubBlade, unequipSubBlade, getEquippedBlades } from "../game/services/ProgressionService";
-import { QUALITY_META, BLADE_BASE_STATS, AFFIX_CONFIG } from "../game/config/synthesis";
+import { getBladeInventory, equipMainBlade, equipSubBlade, unequipSubBlade, getEquippedBlades, canManageSubBlades } from "../game/services/ProgressionService";
+import { QUALITY_META, BLADE_BASE_STATS, AFFIX_CONFIG, getAffixSlotEffect, getRecommendedSlotLabel, getRecommendedSlotReason } from "../game/config/synthesis";
 import type { Quality } from "../game/config/synthesis";
 
 type TeamScreenProps = {
@@ -10,8 +10,8 @@ type TeamScreenProps = {
 
 const SLOTS = [
   { id: "main", label: "主刀", desc: "玩家操控" },
-  { id: "sub1", label: "副刀·壹", desc: "自动攻击" },
-  { id: "sub2", label: "副刀·贰", desc: "自动攻击" },
+  { id: "sub1", label: "蓄势副刀", desc: "横扫清兵·击杀回势" },
+  { id: "sub2", label: "破点副刀", desc: "追击高价值·标记破绽" },
 ];
 
 export function TeamScreen({ onBack }: TeamScreenProps) {
@@ -25,6 +25,10 @@ export function TeamScreen({ onBack }: TeamScreenProps) {
   }
 
   function handleSelectSlot(slot: string) {
+    if (slot !== "main" && !canManageSubBlades()) {
+      alert("通关第4关后才能更换副刀，当前为自动战斗模式");
+      return;
+    }
     setSelectingSlot(slot);
     setShowStats(null);
   }
@@ -80,6 +84,7 @@ export function TeamScreen({ onBack }: TeamScreenProps) {
               {blade ? (
                 <div className="team-slot-blade">
                   <span className="team-slot-label">{slot.label}</span>
+                  <span className="team-slot-role-desc">{slot.desc}</span>
                   <span className="team-slot-quality" style={{ color: QUALITY_META[blade.quality]?.color }}>
                     {QUALITY_META[blade.quality]?.label}
                   </span>
@@ -95,7 +100,7 @@ export function TeamScreen({ onBack }: TeamScreenProps) {
               ) : (
                 <div className="team-slot-empty">
                   <span className="team-slot-label">{slot.label}</span>
-                  <span className="team-slot-placeholder">点击装备</span>
+                  <span className="team-slot-placeholder">{slot.id !== "main" && !canManageSubBlades() ? "自动战斗中" : "点击装备"}</span>
                   <span className="team-slot-desc">{slot.desc}</span>
                 </div>
               )}
@@ -112,7 +117,14 @@ export function TeamScreen({ onBack }: TeamScreenProps) {
             <span>品质：{showStats.quality}</span>
             <span>刀芒倍率：×{stats[showStats.quality]?.bladeMultiplier?.toFixed(2)}</span>
             <span>伤害倍率：×{stats[showStats.quality]?.damageMultiplier?.toFixed(2)}</span>
-            {showStats.affix && <span>词缀：{AFFIX_CONFIG[showStats.affix]?.name} — {AFFIX_CONFIG[showStats.affix]?.description}</span>}
+            {showStats.affix && (
+              <>
+                <span>词缀：{AFFIX_CONFIG[showStats.affix]?.name} — {AFFIX_CONFIG[showStats.affix]?.description}</span>
+                <span className="team-stats-slot-effect">▸ 蓄势副刀：{getAffixSlotEffect(showStats.affix, 0)}</span>
+                <span className="team-stats-slot-effect">▸ 破点副刀：{getAffixSlotEffect(showStats.affix, 1)}</span>
+                <span className="team-stats-recommend">推荐：{getRecommendedSlotLabel(showStats.affix)} — {getRecommendedSlotReason(showStats.affix)}</span>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -134,6 +146,9 @@ export function TeamScreen({ onBack }: TeamScreenProps) {
                     <span className="team-select-name">{blade.name}</span>
                     <span className="team-select-lv">Lv.{blade.level}</span>
                     {blade.affix && <span className="team-select-affix">{AFFIX_CONFIG[blade.affix]?.name}</span>}
+                    {blade.affix && (
+                      <span className="team-select-recommend">推荐：{getRecommendedSlotLabel(blade.affix)}</span>
+                    )}
                   </div>
                 );
               })}

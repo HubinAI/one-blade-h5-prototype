@@ -97,8 +97,8 @@ export function synthesizeBlades(
     const blade = createBlade(name, nextQuality);
     return { success: true, resultBlade: blade, expReward: 0, expQuality: material1.quality, state };
   } else {
-    // 失败补偿：经验球
-    const expReward = material1.quality === "white" || material1.quality === "green" ? 1 : 2;
+    // 失败补偿：1个经验球（统一数量）
+    const expReward = 1;
     return { success: false, expReward, expQuality: material1.quality, state };
   }
 }

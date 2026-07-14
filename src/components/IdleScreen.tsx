@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { getHomeSnapshot, claimOfflineReward, type HomeSnapshot } from "../game/services/ProgressionService";
+import { getHomeSnapshot, claimOfflineReward, useFastIdle, claimFastIdle, type HomeSnapshot } from "../game/services/ProgressionService";
 import { QUALITY_META, QUALITY_ORDER } from "../game/config/synthesis";
 
 type IdleScreenProps = {
@@ -7,8 +7,8 @@ type IdleScreenProps = {
 };
 
 const STAMINA_DURATION_MS = 24 * 60 * 60 * 1000; // 24小时
-const STAMINA_PER_HOUR = 20;
-const BLADE_PER_HOUR = 0.5; // 每2小时1把白刀
+const STAMINA_PER_HOUR = 30; // 金币30/h
+const BLADE_PER_HOUR = 2;   // 白刀2/h（48把/天）
 const EXP_PER_HOUR = 30;
 const DAILY_FAST_LIMIT = 4;
 
@@ -16,6 +16,7 @@ export function IdleScreen({ onBack }: IdleScreenProps) {
   const [home, setHome] = useState<HomeSnapshot>(getHomeSnapshot());
   const [showRewardAnim, setShowRewardAnim] = useState(false);
   const [animCount, setAnimCount] = useState(0);
+  const [fastIdleRemaining, setFastIdleRemaining] = useState(useFastIdle().remaining);
 
   useEffect(() => {
     setHome(getHomeSnapshot());
@@ -41,7 +42,7 @@ export function IdleScreen({ onBack }: IdleScreenProps) {
   const currentPhase = Math.floor((currentFloor - 1) / 4) % 3;
 
   // 每日挂机收益（按当前关卡）
-  const dailyCoins = (currentFloor * 20 + 100);
+  const dailyCoins = (currentFloor * 50 + 300);
   const dailyExp = EXP_PER_HOUR * 24;
   const dailyBlades = Math.floor(BLADE_PER_HOUR * 24);
 
@@ -54,9 +55,15 @@ export function IdleScreen({ onBack }: IdleScreenProps) {
   };
 
   const handleFastIdle = () => {
-    // 模拟看广告快速挂机1小时
+    // 看广告快速挂机：4h回报（8把白刀）
+    if (!claimFastIdle()) {
+      alert("今日快速挂机已达上限（4次）");
+      return;
+    }
+    setFastIdleRemaining(prev => Math.max(0, prev - 1));
+    const bladeCount = Math.round(BLADE_PER_HOUR * 4); // 8把白刀
     setShowRewardAnim(true);
-    setAnimCount(60);
+    setAnimCount(bladeCount);
     setTimeout(() => setShowRewardAnim(false), 1500);
   };
 
@@ -122,8 +129,8 @@ export function IdleScreen({ onBack }: IdleScreenProps) {
 
       <div className="idle-fast-row">
         <span className="idle-fast-icon">📦</span>
-        <span className="idle-fast-text">快速挂机: 0 / {DAILY_FAST_LIMIT}</span>
-        <button className="idle-fast-btn" onClick={handleFastIdle}>▶</button>
+        <span className="idle-fast-text">快速挂机: {4 - fastIdleRemaining} / {DAILY_FAST_LIMIT} (广告×8白刀)</span>
+        <button className="idle-fast-btn" onClick={handleFastIdle} disabled={fastIdleRemaining <= 0}>▶</button>
       </div>
 
       <button className="idle-claim-btn" onClick={handleClaim} disabled={pendingCoins <= 0}>
@@ -132,7 +139,7 @@ export function IdleScreen({ onBack }: IdleScreenProps) {
 
       {showRewardAnim && (
         <div className="idle-reward-anim">
-          <span>+{animCount} 金币</span>
+          <span>+{animCount} 白刀</span>
         </div>
       )}
     </section>

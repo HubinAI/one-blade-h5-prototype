@@ -6,7 +6,7 @@ export type Vec2 = {
 export type BladeTier = "weak" | "normal" | "strong" | "burst";
 export type EnemyKind = "infantry" | "shield" | "powder" | "core" | "elite" | "boss";
 export type EliteKind = "fireRing" | "heal" | "aura";
-export type BossId = "zhangFei" | "simaYi" | "zhenJi";
+export type BossId = "yaoWang" | "moXiu" | "huaYao";
 export type PickupKind = "drum" | "soul" | "oil";
 export type GamePhase = "playing" | "buffChoice" | "revive" | "won" | "lost" | "chestOpen";
 export type RatingGrade = "C" | "B" | "A" | "S" | "SS" | "神之一刀";
@@ -56,6 +56,8 @@ export type PickupSpawn = {
   yOffset?: number;
 };
 
+export type MidfieldEventType = 'none' | 'gather' | 'charge_pause';
+
 export type WaveConfig = {
   name: string;
   delay: number;
@@ -63,6 +65,8 @@ export type WaveConfig = {
   speedMultiplier?: number;
   enemies: EnemySpawn[];
   pickups?: PickupSpawn[];
+  midfieldEventType?: MidfieldEventType;
+  eventTitle?: string;
 };
 
 // ---- 战术简报数据 ----
@@ -132,6 +136,14 @@ export type Enemy = {
   formationLitTimer?: number;
   /** 切错字次数 */
   formationWrongHits?: number;
+  /** 中场聚阵：原始x坐标（归位用） */
+  homeX?: number;
+  /** 蓄冲倒计时器：>0表示正在蓄力，-1表示已冲刺完毕 */
+  chargeTimer?: number;
+  /** 中场事件波及标记（只有本波敌人受影响） */
+  spawnedWithEvent?: 'gather' | 'charge_pause';
+  /** 急冲兵：出生后0.8s速度×2.2，之后×0.8 */
+  rushTimer?: number;
 };
 
 export type Pickup = {

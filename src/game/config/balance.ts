@@ -7,11 +7,38 @@ export const BALANCE = {
 
   swordEnergy: {
     max: 100,
-    passiveRegenPerSecond: 11,
+    passiveRegenPerSecond: 12,
     regenDelayAfterSlash: 0.25,
-    consumeAllOnSlashStart: true,
-    applyKillEnergyAfterSlash: true,
-    maxEnergyGainPerSlash: 45
+    /** 最低挥刀门槛（0-9%不可挥刀） */
+    minSlashEnergy: 10,
+    /** 消耗倍率: [轻斩, 强斩, 破阵斩] 消耗当前刀势的比例 */
+    consumeRatio: { light: 0.6, strong: 0.75, break: 0.5 } as const,
+    /** 单次挥刀返还上限 */
+    maxRefund: 55,
+    /** 阶梯返还: [击杀门槛, 返还量] */
+    refundTiers: [
+      [5, 8],
+      [8, 15],
+      [12, 25]
+    ] as Array<[number, number]>,
+    /** 破阵斩的阶梯返还更高 */
+    breakRefundTiers: [
+      [5, 20],
+      [8, 35],
+      [12, 50]
+    ] as Array<[number, number]>,
+    /** 命中返还（每命中1个敌人）+1% */
+    hitRefund: 1,
+    /** 击杀返还（每击杀1个敌人）+2% */
+    killRefund: 2,
+    /** 火药引爆返还 +5%（上限+20%） */
+    powderRefund: 5,
+    /** 阵眼崩散返还 +15% */
+    coreRefund: 15,
+    /** 保留旧字段以防引用，实际逻辑由 bladeEnergySystem.ts 接管 */
+    consumeAllOnSlashStart: false,
+    applyKillEnergyAfterSlash: false,
+    maxEnergyGainPerSlash: 55
   },
 
   slash: {
@@ -81,87 +108,87 @@ export type SwordStage = {
 export const SWORD_STAGES: SwordStage[] = [
   {
     id: "weak",
-    name: "残锋",
+    name: "蓄势",
     minEnergy: 0,
-    maxEnergy: 24,
-    duration: 0.32,
-    maxPathLength: 135,
-    width: 5,
-    damage: 1,
+    maxEnergy: 9,
+    duration: 0.2,
+    maxPathLength: 60,
+    width: 3,
+    damage: 0,
     canBreakShield: false,
     canTriggerCoreCollapse: false,
-    explosionRadiusMultiplier: 0.75,
+    explosionRadiusMultiplier: 0.5,
     coreCollapseRadius: 0,
-    killEnergyMultiplier: 0.8,
-    brightness: 0.44,
-    visualLength: 48,
-    color: "#d9b45b",
-    glowColor: "rgba(217, 180, 91, 0.42)",
-    scoreName: "应急斩",
-    prompt: "残锋：应急"
+    killEnergyMultiplier: 0.5,
+    brightness: 0.3,
+    visualLength: 30,
+    color: "#666666",
+    glowColor: "rgba(102, 102, 102, 0.25)",
+    scoreName: "蓄势中",
+    prompt: "蓄势"
   },
   {
     id: "normal",
-    name: "常锋",
-    minEnergy: 25,
-    maxEnergy: 59,
-    duration: 0.58,
-    maxPathLength: 260,
-    width: 9,
+    name: "轻斩",
+    minEnergy: 10,
+    maxEnergy: 39,
+    duration: 0.45,
+    maxPathLength: 180,
+    width: 7,
     damage: 1,
     canBreakShield: false,
-    canTriggerCoreCollapse: true,
-    explosionRadiusMultiplier: 1,
-    coreCollapseRadius: 75,
-    killEnergyMultiplier: 1,
-    brightness: 0.72,
-    visualLength: 72,
-    color: "#ffe7a3",
-    glowColor: "rgba(255, 231, 163, 0.52)",
-    scoreName: "顺势斩",
-    prompt: "常锋：可斩"
+    canTriggerCoreCollapse: false,
+    explosionRadiusMultiplier: 0.7,
+    coreCollapseRadius: 0,
+    killEnergyMultiplier: 0.7,
+    brightness: 0.55,
+    visualLength: 55,
+    color: "#c0d0e0",
+    glowColor: "rgba(192, 208, 224, 0.4)",
+    scoreName: "轻斩",
+    prompt: "轻斩"
   },
   {
     id: "strong",
-    name: "强锋",
-    minEnergy: 60,
+    name: "强斩",
+    minEnergy: 40,
     maxEnergy: 89,
-    duration: 0.82,
-    maxPathLength: 390,
-    width: 15,
+    duration: 0.7,
+    maxPathLength: 340,
+    width: 13,
     damage: 2,
     canBreakShield: true,
     canTriggerCoreCollapse: true,
-    explosionRadiusMultiplier: 1.2,
-    coreCollapseRadius: 115,
-    killEnergyMultiplier: 1.15,
-    brightness: 0.98,
-    visualLength: 104,
-    color: "#ffd35a",
-    glowColor: "rgba(255, 211, 90, 0.68)",
-    scoreName: "强锋破甲",
-    prompt: "强锋：可破盾"
+    explosionRadiusMultiplier: 1.1,
+    coreCollapseRadius: 100,
+    killEnergyMultiplier: 1.1,
+    brightness: 0.85,
+    visualLength: 90,
+    color: "#5bc0ff",
+    glowColor: "rgba(91, 192, 255, 0.6)",
+    scoreName: "强斩",
+    prompt: "强斩"
   },
   {
     id: "burst",
-    name: "破阵锋",
+    name: "破阵斩",
     minEnergy: 90,
     maxEnergy: 100,
-    duration: 1.02,
-    maxPathLength: 520,
-    width: 22,
+    duration: 1.0,
+    maxPathLength: 500,
+    width: 20,
     damage: 3,
     canBreakShield: true,
     canTriggerCoreCollapse: true,
-    explosionRadiusMultiplier: 1.45,
-    coreCollapseRadius: 155,
+    explosionRadiusMultiplier: 1.4,
+    coreCollapseRadius: 150,
     killEnergyMultiplier: 1.3,
-    brightness: 1.25,
-    visualLength: 132,
-    color: "#fff8d8",
-    glowColor: "rgba(255, 230, 108, 0.86)",
-    scoreName: "一刀破阵",
-    prompt: "破阵锋：一刀破阵"
+    brightness: 1.2,
+    visualLength: 130,
+    color: "#fff4a0",
+    glowColor: "rgba(255, 244, 160, 0.85)",
+    scoreName: "破阵斩",
+    prompt: "破阵斩"
   }
 ];
 
@@ -188,7 +215,7 @@ export const ENEMY_BALANCE: Record<
   }
 > = {
   infantry: {
-    name: "步兵",
+    name: "散修",
     hp: 1,
     speed: 42,
     radius: 18,
@@ -198,7 +225,7 @@ export const ENEMY_BALANCE: Record<
     behavior: "straight_down"
   },
   shield: {
-    name: "盾兵",
+    name: "妖卫",
     hp: 2,
     speed: 34,
     radius: 21,
@@ -209,7 +236,7 @@ export const ENEMY_BALANCE: Record<
     requireStageToKill: "strong"
   },
   powder: {
-    name: "火药兵",
+    name: "火修",
     hp: 1,
     speed: 38,
     radius: 19,
@@ -221,7 +248,7 @@ export const ENEMY_BALANCE: Record<
     explosionDamage: 1
   },
   core: {
-    name: "阵眼兵",
+    name: "阵法核心",
     hp: 1,
     speed: 32,
     radius: 20,
@@ -232,7 +259,7 @@ export const ENEMY_BALANCE: Record<
     collapseRadius: 120
   },
   elite: {
-    name: "精英",
+    name: "精英护法",
     hp: 8,
     speed: 22,
     radius: 28,
@@ -242,7 +269,7 @@ export const ENEMY_BALANCE: Record<
     behavior: "elite"
   },
   boss: {
-    name: "Boss",
+    name: "大妖",
     hp: 16,
     speed: 20,
     radius: 36,

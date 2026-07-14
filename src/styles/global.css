@@ -2720,6 +2720,13 @@ h1 {
   color: rgba(246, 231, 189, 0.3);
 }
 
+.team-slot-role-desc {
+  font-size: 10px;
+  color: rgba(91, 192, 255, 0.6);
+  display: block;
+  margin-top: 2px;
+}
+
 /* 属性预览 */
 .team-stats-preview {
   padding: 12px;
@@ -2739,6 +2746,29 @@ h1 {
   gap: 4px;
   font-size: 12px;
   color: rgba(246, 231, 189, 0.7);
+}
+
+.team-stats-slot-effect {
+  font-size: 11px;
+  color: rgba(91, 192, 255, 0.75);
+  display: block;
+  margin-top: 2px;
+}
+
+.team-stats-recommend {
+  font-size: 11px;
+  color: rgba(255, 211, 90, 0.85);
+  display: block;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 211, 90, 0.15);
+}
+
+.team-select-recommend {
+  font-size: 9px;
+  color: rgba(255, 211, 90, 0.6);
+  display: block;
+  margin-top: 2px;
 }
 
 /* 选择面板 */
@@ -2910,11 +2940,12 @@ h1 {
 .ranking-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 6px;
+  padding: 8px 8px;
   background: rgba(18, 16, 14, 0.6);
   border: 1px solid rgba(240, 195, 107, 0.1);
   border-radius: 8px;
+  font-size: 12px;
 }
 
 .ranking-row.me {
@@ -2923,32 +2954,53 @@ h1 {
 }
 
 .ranking-pos {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 900;
   color: rgba(246, 231, 189, 0.6);
-  width: 28px;
+  width: 24px;
+  flex-shrink: 0;
+  text-align: center;
 }
 
 .ranking-name {
   flex: 1;
-  font-size: 13px;
+  min-width: 0;
+  font-size: 12px;
   font-weight: 800;
   color: #f6e7bd;
-}
-
-.ranking-floor {
-  font-size: 13px;
-  font-weight: 800;
-  color: #ffd35a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ranking-rank-tag {
-  font-size: 10px;
-  padding: 2px 6px;
+  font-size: 9px;
+  padding: 2px 5px;
   background: rgba(155, 109, 255, 0.14);
   border: 1px solid rgba(155, 109, 255, 0.3);
   color: #e8d7ff;
   border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.ranking-score {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  flex-shrink: 0;
+  min-width: 56px;
+}
+
+.ranking-score-num {
+  font-size: 12px;
+  font-weight: 900;
+  color: #ffd35a;
+}
+
+.ranking-stars {
+  font-size: 8px;
+  color: rgba(255, 211, 90, 0.7);
 }
 
 .ranking-ad-section {
@@ -2980,24 +3032,25 @@ h1 {
 .ranking-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.6);
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
   z-index: 200;
+  padding: 12px;
 }
 
 .ranking-popup {
   width: 100%;
-  max-height: 70vh;
+  max-width: 430px;
+  max-height: 80vh;
   background: linear-gradient(180deg, #2a1c10 0%, #1a100a 100%);
   border: 1px solid rgba(255, 211, 90, 0.3);
-  border-top-left-radius: 16px;
-  border-top-right-radius: 16px;
-  padding: 14px 12px 16px;
+  border-radius: 14px;
+  padding: 12px 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   overflow-y: auto;
   animation: rankingSlideUp 0.25s ease-out;
 }
@@ -6442,90 +6495,76 @@ h1 {
 /* 5. 开始游戏按钮区 */
 .v3-start-area {
   display: flex;
-  justify-content: center;
-  padding: 8px 0 6px;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 16px 4px;
   flex-shrink: 0;
+  gap: 4px;
 }
 
 .v3-start-btn {
   position: relative;
-  width: 75%;
-  max-width: 260px;
-  height: 60px;
-  background: linear-gradient(180deg, #ffba48 0%, #d97810 50%, #8a4a08 100%);
-  border: 2px solid #8a4a08;
-  border-radius: 12px;
-  color: #fff3c0;
+  width: 100%;
+  max-width: 320px;
+  min-height: 64px;
+  background: linear-gradient(180deg, #ffcb54 0%, #f2a930 50%, #c97810 100%);
+  border: 1.5px solid #8a4a08;
+  border-radius: 32px;
+  color: #3a1e08;
   cursor: pointer;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
+  justify-content: center; /* 居中 */
+  padding: 0 18px;
+  gap: 12px;
   box-shadow:
-    0 6px 20px rgba(217, 120, 16, 0.4),
-    inset 0 1px 0 rgba(255, 220, 130, 0.4),
-    inset 0 -3px 0 rgba(60, 20, 0, 0.3);
+    0 4px 14px rgba(217, 120, 16, 0.35),
+    inset 0 1px 0 rgba(255, 240, 200, 0.55),
+    inset 0 -2px 0 rgba(120, 60, 10, 0.18);
   transition: transform 0.12s;
 }
 
 .v3-start-btn.is-breakthrough {
-  background: linear-gradient(180deg, #ffd35a 0%, #d9a520 50%, #b87a30 100%);
+  background: linear-gradient(180deg, #ffd35a 0%, #f7b020 50%, #c97810 100%);
   border-color: #b87a30;
   animation: v3BreakthroughPulse 1.8s ease-in-out infinite;
 }
 
-.v3-start-btn::before {
-  content: "";
-  position: absolute;
-  top: -6px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 14px;
-  height: 14px;
-  background: linear-gradient(135deg, #d8d8e0 0%, #8a8a98 50%, #d8d8e0 100%);
-  border: 1px solid #5a5a68;
-  border-radius: 2px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.4);
-}
-
-.v3-start-btn::after {
-  content: "";
-  position: absolute;
-  top: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 2px;
-  height: 12px;
-  background: #8a5a30;
-  z-index: 1;
-}
+.v3-start-btn::before,
+.v3-start-btn::after { content: none; }
 
 .v3-start-btn:active {
   transform: scale(0.97);
 }
 
-.v3-start-sword {
-  font-size: 18px;
-  color: #c8c8d8;
-  text-shadow: 0 0 6px rgba(200, 200, 220, 0.6);
-  z-index: 2;
+.v3-start-lightning {
+  font-size: 22px;
+  line-height: 1;
+  color: #2a1604;
+  filter: drop-shadow(0 0 4px rgba(255, 230, 130, 0.7));
+  flex-shrink: 0;
 }
 
 .v3-start-text {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 900;
   letter-spacing: 4px;
-  flex: 1;
-  text-align: center;
-  z-index: 2;
+  color: #2a1604;
+  line-height: 1;
+  text-shadow: 0 1px 0 rgba(255, 240, 200, 0.6);
+}
+
+.v3-start-stamina-line {
+  display: flex;
+  justify-content: center;
 }
 
 .v3-start-stamina {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
-  color: rgba(255, 243, 192, 0.7);
-  z-index: 2;
-  text-align: right;
+  color: #f6c860;
+  letter-spacing: 0.5px;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
 }
 
 /* 突破按钮 */
@@ -6936,4 +6975,192 @@ h1 {
   color: rgba(246, 231, 189, 0.4);
   z-index: 1;
   animation: tapTipFade 2.4s ease-in-out infinite;
+}
+
+/* 货币栏+号可点击 */
+.v3-currency-pill { cursor: pointer; }
+.v3-currency-pill .v3-currency-plus { transition: transform 0.1s; }
+.v3-currency-pill:active .v3-currency-plus { transform: scale(0.9); }
+
+/* 体力获取弹窗 */
+.stamina-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+
+.stamina-modal {
+  position: relative;
+  width: 100%;
+  max-width: 280px;
+  background: linear-gradient(180deg, #2a1f15, #1a1208);
+  border: 2px solid #ffd35a;
+  border-radius: 14px;
+  padding: 20px 20px 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.stamina-modal-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: transparent;
+  border: none;
+  font-size: 22px;
+  color: rgba(246, 231, 189, 0.5);
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  line-height: 1;
+}
+
+.stamina-modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffd35a;
+  margin: 0;
+}
+
+.stamina-modal-icon-big {
+  font-size: 36px;
+  color: #ffd35a;
+  filter: drop-shadow(0 0 8px rgba(255, 211, 90, 0.5));
+}
+
+.stamina-modal-count {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff3c0;
+}
+
+.stamina-modal-status {
+  font-size: 12px;
+  color: #a8e6cf;
+}
+
+.stamina-modal-actions {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.stamina-modal-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.stamina-modal-btn.ad {
+  background: linear-gradient(180deg, #ffd35a, #f59e0b);
+  color: #1a1208;
+}
+
+.stamina-modal-btn.share {
+  background: linear-gradient(180deg, #a8e6cf, #4ab7b7);
+  color: #1a1208;
+}
+
+.stamina-modal-btn-icon {
+  font-size: 16px;
+}
+
+/* ════════════════════════════════════════════
+   通用文本飘字（屏幕正中+淡入淡出）
+   ════════════════════════════════════════════ */
+.bag-toast {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(20, 14, 8, 0.92);
+  color: #ffd35a;
+  padding: 12px 22px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  z-index: 9999;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6), 0 0 12px rgba(255, 211, 90, 0.15);
+  border: 1px solid rgba(255, 211, 90, 0.3);
+  animation: bag-toast-fade 2.0s ease-in-out forwards;
+  letter-spacing: 0.5px;
+}
+
+@keyframes bag-toast-fade {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.85); }
+  15% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
+}
+
+/* 砍树区右下角：挂机收益按钮 */
+.v3-idle-reward-btn {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px;
+  background: rgba(20, 14, 8, 0.7);
+  border: 1.5px solid rgba(255, 211, 90, 0.4);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.1s;
+  min-width: 56px;
+}
+
+.v3-idle-reward-btn:active {
+  transform: scale(0.95);
+  background: rgba(255, 211, 90, 0.15);
+}
+
+.v3-idle-reward-icon {
+  font-size: 18px;
+  filter: drop-shadow(0 0 4px rgba(255, 211, 90, 0.4));
+}
+
+.v3-idle-reward-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: rgba(246, 231, 189, 0.85);
+  letter-spacing: 0.5px;
+}
+
+.v3-idle-reward-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  background: #ef4444;
+  color: #fff;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.5);
+  line-height: 1;
 }

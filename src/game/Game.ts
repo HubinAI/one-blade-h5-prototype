@@ -11,10 +11,10 @@ import { RUN_BUFFS, RUN_BUFF_BY_ID, ROUTE_COLORS, ROUTE_NAMES, ROUTE_BUFFS, getN
 import { BOSS_CONFIG, getBossPhase } from "./config/bosses";
 import { ELITE_CONFIG, ELITE_KINDS } from "./config/elites";
 import { REWARD_CONFIG } from "./config/rewards";
-import { getBladeTier, getTierConfig, consumeEnergyForSlash, recoverEnergy } from "./systems/bladeEnergySystem";
+import { getBladeTier, getBladeTierName, getTierConfig, canSlash, consumeEnergyByTier, calculateMomentumRefund, getSubBladeCDReduction, recoverEnergy } from "./systems/bladeEnergySystem";
 import { isSharpTurn, segmentHitCircle } from "./systems/collisionSystem";
 import { paperBurst, ringParticle, sparkBurst, glowParticle, explosionBurst, coreCollapseBurst } from "./systems/particleSystem";
-import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades } from "./services/ProgressionService";
+import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
 import { BLADE_BASE_STATS, QUALITY_ORDER } from "./config/synthesis";
 import type { Blade } from "./services/BladeService";
 import type { Quality } from "./config/synthesis";
@@ -87,6 +87,12 @@ export class Game {
   private texts: FloatingText[] = [];
   private splitFlashes: { x: number; y: number; angle: number; length: number; life: number; maxLife: number }[] = [];
   private currentSlash?: SlashTrail;
+  // 副刀cd已好，等待下一帧释放（光圈提示用）
+  private subReadyPing: { slot: number; life: number; maxLife: number }[] = [];
+  /** 副刀符阵（方案B）：攻击前0.3s的旋转符文提示 */
+  private subRune: { x: number; y: number; color: string; life: number; maxLife: number }[] = [];
+  // 多波多次刷新队列：每个子刷新有时间戳，到时间就spawn
+  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number }[] = [];
 
   private pointerDown = false;
   private pointerPos?: Vec2;
@@ -118,6 +124,30 @@ export class Game {
   private firstRunGuideShown = false;
   private firstRunPrettySlashShown = false;
   private firstRunCoreBoomShown = false;
+  /** 破阵就绪提示是否已触发（每局仅1次） */
+  private _breakReadyNotified = false;
+  /** 三幕制：15s 满势时刻 */
+  private _act1Triggered = false;
+  /** 三幕制：30s 副刀共鸣 */
+  private _act2Triggered = false;
+  /** 三幕制：45s 一刀斩模式 */
+  private _act3Triggered = false;
+  /** 一刀斩模式剩余时间：>0时下次挥刀威力×2 */
+  private oneBladeModeTimer = 0;
+  /** 当前挥刀的"一刀斩"倍率（1.0或2.0），在 startSlash 时设置 */
+  private _slashOneBladeBoost = 1.0;
+  /** 本局已触发的事件波类型（同局不重复） */
+  private _usedEvents: Set<string> = new Set();
+  /** 当前事件波生效剩余时间（秒） */
+  private _activeEventTimer = 0;
+  /** 减速雨：主刀路径减速倍率 */
+  private _slowRainMultiplier = 1;
+  /** 当前事件波类型 */
+  private _currentEventType: string | null = null;
+  /** 中场激活事件 */
+  private _midfieldEvent: { type: string; timer: number; duration: number } | null = null;
+  /** 当前波次对应的中场事件（仅作用于本波敌人生效） */
+  private _currentWaveEvent: 'gather' | 'charge_pause' | null = null;
 
   // ---- 精英/Boss 系统 ----
   private eliteSpawned = false;
@@ -131,6 +161,10 @@ export class Game {
   private subBlades: Blade[] = [];
   private subBladeTimers: number[] = [];
   private subBladeCooldowns: number[] = [];
+  // 当前副刀挥击轨迹
+  private subSlash: { x1: number; y1: number; x2: number; y2: number; color: string; life: number; maxLife: number; bladeIdx: number; damaged: boolean; slotType: 'momentum_sweep' | 'weakpoint_chase'; lockOnEnemyId?: string; }[] = [];
+  // 破绽标记系统：enemyId → 剩余时间
+  private weakpointMarks: Map<string, number> = new Map();
   // ---- 主刀品质 ----
   private mainBladeQuality: Quality | null = null;
   private killedElites: EliteKind[] = [];
@@ -192,15 +226,25 @@ export class Game {
       this.showHint("drag-guide", "按住拖动，松手挥出一刀", DESIGN_WIDTH / 2, 118, 2.5);
     }
 
-    // 初始化副刀
+    // 初始化副刀（先确保有默认绿刀+2把绿副刀）
+    saveDefaultWhiteBlade();
     const equipped = getEquippedBlades();
     this.mainBladeQuality = equipped.main?.quality ?? null;
     this.subBlades = equipped.subs.filter(b => b && b.quality);
-    this.subBladeTimers = this.subBlades.map(() => 0);
+    this.subBladeTimers = this.subBlades.map((_, i) => -(4 + i * 2)); // 蓄势(槽0)=4s首发,破点(槽1)=6s首发
     this.subBladeCooldowns = this.subBlades.map((b) => {
       const stats = BLADE_BASE_STATS[b.quality];
       return stats ? stats.subSlashInterval : 5;
     });
+    this.weakpointMarks = new Map();
+    this._breakReadyNotified = false;
+    this._act1Triggered = false;
+    this._act2Triggered = false;
+    this._act3Triggered = false;
+    this.oneBladeModeTimer = 0;
+    this._usedEvents = new Set();
+    this._activeEventTimer = 0;
+    this._slowRainMultiplier = 1;
   }
 
   /** 首局教学：使用固定密集波次代替随机 */
@@ -263,6 +307,21 @@ export class Game {
           { kind: "infantry", x: 220, count: 3 },
           { kind: "infantry", x: 268, count: 2 },
           { kind: "infantry", x: 316, count: 2 },
+        ],
+      },
+      {
+        name: "第五波·混合流",
+        delay: 0.2,
+        spawnAt: 20.0,
+        speedMultiplier: 0.95,
+        enemies: [
+          { kind: "infantry", x: 44, count: 2 },
+          { kind: "shield", x: 92, count: 1 },
+          { kind: "infantry", x: 140, count: 3 },
+          { kind: "powder", x: 188, count: 1 },
+          { kind: "infantry", x: 236, count: 2 },
+          { kind: "infantry", x: 284, count: 2 },
+          { kind: "shield", x: 332, count: 1 },
         ],
       },
     ];
@@ -328,6 +387,8 @@ export class Game {
     if (!this.currentSlash?.active && this.warDrumNoDecayTimer > 0) {
       // 不恢复也不衰减，维持当前刀势
     }
+
+    // 三幕制阶段爆发检查在主循环后面调用
     if (!this.currentSlash?.active && this.energy >= 90) {
       this.showHint("burst-ready", "破阵锋已成", DESIGN_WIDTH / 2, 656, 1);
     }
@@ -336,8 +397,20 @@ export class Game {
     this.warDrumNoDecayTimer = Math.max(0, this.warDrumNoDecayTimer - scaledDt);
     this.warriorDrawTimer = Math.max(0, this.warriorDrawTimer - scaledDt);
     this.warriorSheathTimer = Math.max(0, this.warriorSheathTimer - scaledDt);
+    this.eliteIntroTimer = Math.max(0, this.eliteIntroTimer - scaledDt);
+    this.bossIntroTimer = Math.max(0, this.bossIntroTimer - scaledDt);
     this.screenShake = Math.max(0, this.screenShake - scaledDt * 2.7);
     this.flash = Math.max(0, this.flash - scaledDt * 2.2);
+    if (this.oneBladeModeTimer > 0) this.oneBladeModeTimer = Math.max(0, this.oneBladeModeTimer - scaledDt);
+
+    // 事件波计时衰减
+    if (this._activeEventTimer > 0) {
+      this._activeEventTimer = Math.max(0, this._activeEventTimer - scaledDt);
+      if (this._activeEventTimer <= 0) this._currentEventType = null;
+    }
+
+    // 三幕制阶段爆发
+    this.checkActMilestones();
 
     this.updateActiveSlash(scaledDt);
     this.updateEnemies(scaledDt);
@@ -345,6 +418,7 @@ export class Game {
     this.updateParticles(scaledDt);
     this.updateTexts(scaledDt);
     this.updateWaves(scaledDt);
+    this.updateSubSpawnQueue();
     this.updateEliteSpawn();
     this.updateSubBlades(scaledDt);
     this.updateBossSpawn();
@@ -370,13 +444,17 @@ export class Game {
     // 远景山间雾气遮罩（敌人从雾后现身）
     this.drawTopMist(ctx);
     this.drawSlash(ctx);
+    this.drawSubSlashes(ctx);
     this.drawParticles(ctx);
     this.drawDefenseAndWarrior(ctx);
+    this.drawSubReadyPings(ctx);
+    this.drawSubRunes(ctx);
     this.drawHud(ctx);
     this.drawSplitFlashes(ctx);
     this.drawFloatingTexts(ctx);
     this.drawWaveProgress(ctx);
     this.drawChestDrop(ctx);
+    this.drawMidfieldEventBorder(ctx);
     this.drawIntroOverlay(ctx);
     this.drawDebugPanel(ctx);
     this.drawBuffChoice(ctx);
@@ -396,6 +474,11 @@ export class Game {
       return;
     }
     if (this.phase !== "playing") return;
+    // 蓄势阶段（0-9%）不可挥刀
+    if (!canSlash(this.energy)) {
+      this.showHint("蓄势中", "刀势不足", DESIGN_WIDTH / 2, 200, 0.6);
+      return;
+    }
     this.pointerDown = true;
     this.pointerPos = this.clampPointer(pos);
     if (this.currentSlash?.active) this.endSlash("收刀");
@@ -424,6 +507,15 @@ export class Game {
     const maxPathLength = stage.maxPathLength * pathMultiplier;
     const point = { x: pos.x, y: pos.y, t: this.elapsed, energyRatio: 1 };
 
+    // 一刀斩模式：本次挥刀威力×2（仅当前这一刀）
+    this._slashOneBladeBoost = this.oneBladeModeTimer > 0 ? 2.0 : 1.0;
+    if (this._slashOneBladeBoost > 1) {
+      this.oneBladeModeTimer = 0; // 消耗掉
+      this.addText(DESIGN_WIDTH / 2, 240, "⚡ 一刀斩！", "#ff6a33", 26, 1.5);
+    } else {
+      this._slashOneBladeBoost = 1.0;
+    }
+
     this.currentSlash = {
       id: this.nextId("slash"),
       tier,
@@ -451,7 +543,7 @@ export class Game {
       active: true
     };
 
-    this.energy = consumeEnergyForSlash(this.energy);
+    this.energy = consumeEnergyByTier(this.energy, tier);
     this.regenDelayTimer = BALANCE.swordEnergy.regenDelayAfterSlash;
     this.nextSoul = false;
     this.nextOil = false;
@@ -508,7 +600,9 @@ export class Game {
     const trail = this.currentSlash;
     if (!trail?.active) return;
 
-    trail.remainingDuration = Math.max(0, trail.remainingDuration - dt);
+    // 减速雨：主刀路径消耗加倍（等效"路径减速50%"）
+    const slowRainMul = this._currentEventType === "slowRain" ? 2 : 1;
+    trail.remainingDuration = Math.max(0, trail.remainingDuration - dt * slowRainMul);
     const ratio = this.getSlashRatio(trail);
     const last = trail.points[trail.points.length - 1];
     last.energyRatio = Math.min(last.energyRatio, ratio);
@@ -532,9 +626,42 @@ export class Game {
     const slashBonus = this.getSlashScoreBonus(trail.kills);
     if (slashBonus > 0) this.score += slashBonus;
 
-    if (BALANCE.swordEnergy.applyKillEnergyAfterSlash) {
-      const gainedEnergy = Math.min(trail.energyBank, BALANCE.swordEnergy.maxEnergyGainPerSlash);
-      this.energy = clamp(this.energy + gainedEnergy, 0, BALANCE.swordEnergy.max);
+    // 新刀势返还：基于击杀数和段位的阶梯返还
+    const refund = calculateMomentumRefund(trail.kills, trail.tier, {
+      powderChains: trail.explosionCount,
+      coreCollapses: trail.coreCollapseCount
+    });
+    if (refund > 0) {
+      this.energy = clamp(this.energy + refund, 0, BALANCE.swordEnergy.max);
+      // 返还 >= 15 时显示返还量
+      if (refund >= 15) {
+        this.addText(DESIGN_WIDTH / 2, 106, `刀势返还 +${refund}%`, "#5bc0ff", 18, 1.2);
+      }
+    }
+
+    // 主刀高击杀减少副刀 CD
+    const cdReduction = getSubBladeCDReduction(trail.kills);
+    if (cdReduction.seconds > 0 || cdReduction.ratio > 0) {
+      if (cdReduction.seconds > 0) {
+        for (let i = 0; i < this.subBladeTimers.length; i++) {
+          this.subBladeTimers[i] = Math.max(0, this.subBladeTimers[i] - cdReduction.seconds);
+        }
+      } else if (cdReduction.ratio > 0) {
+        for (let i = 0; i < this.subBladeTimers.length; i++) {
+          const cd = this.subBladeCooldowns[i];
+          if (cd > 0) {
+            this.subBladeTimers[i] = Math.max(this.subBladeTimers[i], cd * (1 - cdReduction.ratio));
+          }
+        }
+      }
+      // 副刀加速视觉反馈：浮字 + 图标光圈闪烁
+      if (trail.kills >= 5 && !this.hasRecentText("副刀共鸣", 0.5)) {
+        this.addText(DESIGN_WIDTH / 2, 160, "副刀共鸣", "#5bc0ff", 18, 0.8);
+        // 触发所有副刀光圈闪烁
+        for (let i = 0; i < 2; i++) {
+          this.subReadyPing.push({ slot: i, life: 0.3, maxLife: 0.3 });
+        }
+      }
     }
 
     this.stats.maxSingleBlade = Math.max(this.stats.maxSingleBlade, trail.kills);
@@ -634,6 +761,8 @@ export class Game {
   }
 
   private getSlashPraise(trail: SlashTrail, fallback: string) {
+    if (trail.tier === "burst" && trail.kills >= 12) return "神之一刀";
+    if (trail.tier === "burst" && trail.kills >= 8) return "一刀破军";
     if (trail.coreCollapseCount > 0 && trail.tier === "burst") return "一刀破阵";
     if (trail.kills >= 13) return "一刀破阵";
     if (trail.coreCollapseCount > 0) return "阵破";
@@ -882,6 +1011,19 @@ export class Game {
       if (segmentHitCircle(a, b, enemy, enemy.radius + bladeReach)) {
         trail.hitEnemyIds.add(enemy.id);
         this.handleEnemyHit(enemy, trail);
+        // 破绽检测：主刀命中带破绽标记的敌人
+        const remaining = this.weakpointMarks.get(enemy.id) ?? 0;
+        if (remaining > 0) {
+          const refund = 15;
+          this.energy = clamp(this.energy + refund, 0, BALANCE.swordEnergy.max);
+          this.addText(enemy.x, enemy.y - 36, `破点斩 +${refund}%`, "#ff6a33", 20, 1.5);
+          this.weakpointMarks.delete(enemy.id);
+          this.flash = Math.max(this.flash, 0.5);
+          this.screenShake = Math.max(this.screenShake, 0.3);
+          // 更强的视觉反馈：中心迸发粒子
+          this.particles.push(...sparkBurst(enemy, 12, "#ff6a33"));
+          this.particles.push(...sparkBurst(enemy, 8, "#ffd35a"));
+        }
       }
     }
 
@@ -910,6 +1052,10 @@ export class Game {
     const stage = SWORD_STAGE_BY_ID[trail.tier];
     enemy.flash = 0.25;
     const bladeDmg = this.getMainBladeDamageMultiplier();
+    // 一刀斩模式：本次挥刀所有伤害×2（仅当前这一刀）
+    const oneBladeMul = this._slashOneBladeBoost ?? 1.0;
+    // 一刀斩时强制破盾/破精英
+    const canBreakAll = oneBladeMul > 1 ? true : stage.canBreakShield;
 
     if (enemy.kind === "infantry") {
       this.killEnemy(enemy, trail, false, "paper");
@@ -917,10 +1063,10 @@ export class Game {
     }
 
     if (enemy.kind === "shield") {
-      if (stage.canBreakShield || (trail.tier === "normal" && this.hasBuff("pierceShield"))) {
+      if (canBreakAll || (trail.tier === "normal" && this.hasBuff("pierceShield"))) {
         this.killEnemy(enemy, trail, false, "shield");
       } else if (trail.tier === "normal") {
-        this.damageEnemy(enemy, 1 * this.progressionModifiers.shieldDamageMultiplier * bladeDmg, trail, false, "shield_crack");
+        this.damageEnemy(enemy, 1 * this.progressionModifiers.shieldDamageMultiplier * bladeDmg * oneBladeMul, trail, false, "shield_crack");
         if (enemy.alive) {
           enemy.shieldCrack = 1;
           this.addText(enemy.x, enemy.y - 18, "盾裂", "#ffd67c", 13);
@@ -1042,7 +1188,7 @@ export class Game {
       AudioService.slashHit();
 
       // 司马懿无敌阶段（Phase1：瞬移后闪白=无敌）
-      if (enemy.bossId === "simaYi" && (enemy.bossPhase === 0 || enemy.bossPhase === undefined)) {
+      if (enemy.bossId === "moXiu" && (enemy.bossPhase === 0 || enemy.bossPhase === undefined)) {
         // 没有无敌
       }
     }
@@ -1218,6 +1364,21 @@ export class Game {
       trail.energyBank = Math.min(BALANCE.swordEnergy.maxEnergyGainPerSlash, trail.energyBank + 5);
     }
 
+    // 陷阱阵特殊机制：阵眼死→引爆附近火药兵
+    if (this._currentEventType === "trapFormation" && enemy.kind === "core") {
+      for (const powder of this.enemies) {
+        if (!powder.alive || powder.kind !== "powder") continue;
+        if (distance(enemy, powder) < 160) {
+          powder.alive = false;
+          trail.kills += 1;
+          this.score += powder.score;
+          this.stats.kills += 1;
+          this.particles.push(...explosionBurst(powder, 2, ["#ff6a33", "#ffb15c", "#f6e7bd"]));
+          this.addText(powder.x, powder.y - 16, "连锁引爆", "#ff6a33", 14, 0.8);
+        }
+      }
+    }
+
     const colors = source === "core" || source === "core_chain" ? ["#e8d7ff", "#5d4a8f", "#ead8a7"] : paperColors;
     const tierMap: Record<string, number> = { weak: 0, normal: 1, strong: 2, burst: 3 };
     const tierPower = tierMap[trail.tier] ?? 1;
@@ -1294,6 +1455,14 @@ export class Game {
   }
 
   private updateEnemies(dt: number) {
+    // 中场事件计时衰减
+    if (this._midfieldEvent) {
+      this._midfieldEvent.timer += dt;
+      if (this._midfieldEvent.timer >= this._midfieldEvent.duration) {
+        this._midfieldEvent = null;
+      }
+    }
+
     // 同屏敌人上限
     if (this.enemies.length > MAX_ENEMIES_ON_SCREEN) {
       // 跳过多余敌人的更新（少移动），但保持存活逻辑
@@ -1318,7 +1487,63 @@ export class Game {
 
       const statusSlow = enemy.ignited || enemy.marked ? 0.54 : 1;
       const fortressSlow = enemy.slowedTimer > 0 ? 0.4 : 1;
-      enemy.y += enemy.speed * statusSlow * fortressSlow * dt;
+
+      // ── 急冲兵 rush_then_slow ──
+      let rushMultiplier = 1;
+      if (enemy.rushTimer !== undefined) {
+        if (enemy.rushTimer > 0) {
+          rushMultiplier = 2.2;
+          enemy.rushTimer -= dt;
+          if (Math.random() < 0.15) {
+            this.particles.push(glowParticle(enemy, "#ff6a33", 6, 4));
+          }
+        } else {
+          rushMultiplier = 0.8;
+        }
+      }
+
+      // ── 中场事件：gather 聚阵（仅作用于本波敌人，急冲兵不参与） ──
+      if (enemy.spawnedWithEvent === 'gather' && enemy.homeX !== undefined && enemy.rushTimer === undefined) {
+        if (enemy.y >= 260 && enemy.y <= 460) {
+          const centerX = DESIGN_WIDTH / 2;
+          const dx = centerX - enemy.x;
+          enemy.x += dx * 0.08 * dt * 60;
+          enemy.x = clamp(enemy.x, enemy.homeX - 35, enemy.homeX + 35);
+        }
+      }
+
+      // ── 中场事件：charge_pause 蓄冲（仅作用于本波敌人） ──
+      if (enemy.spawnedWithEvent === 'charge_pause' && enemy.chargeTimer === undefined) {
+        // 到达 y=340 时触发蓄力
+        if (enemy.y >= 340 && enemy.y <= 360) {
+          enemy.chargeTimer = 0.45; // 0.45s 停顿蓄力
+          // 蓄力视觉标记：闪光
+          enemy.flash = 0.4;
+          this.particles.push(glowParticle(enemy, "#ff6a33", 16, 28));
+        }
+      }
+      if (enemy.chargeTimer !== undefined && enemy.chargeTimer >= 0) {
+        enemy.chargeTimer -= dt;
+        if (enemy.chargeTimer <= 0) {
+          // 蓄力完成：1.8倍速冲刺
+          enemy.chargeTimer = -1;
+          enemy.speed *= 1.8;
+          // 冲刺视觉标记：红色闪光
+          enemy.flash = 0.6;
+          this.particles.push(glowParticle(enemy, "#ff6a33", 22, 36));
+        }
+      }
+
+      // 正常下落（未蓄力时或冲刺后）
+      const isCharging = enemy.chargeTimer !== undefined && enemy.chargeTimer >= 0;
+      if (!isCharging) {
+        enemy.y += enemy.speed * rushMultiplier * statusSlow * fortressSlow * dt;
+      } else {
+        // 蓄力时略微闪红光
+        if (Math.sin(this.elapsed * 20) > 0) {
+          enemy.flash = Math.max(enemy.flash, 0.2);
+        }
+      }
 
       if (enemy.y >= BALANCE.battlefield.bottomDefenseY) {
         // ---- 堅城(fortress)buff：敌军触线后减速1秒，而非立即消失 ----
@@ -1378,120 +1603,378 @@ export class Game {
     this.splitFlashes = this.splitFlashes.filter((sf) => sf.life > 0);
   }
 
-  /** 副刀自动攻击 - 两把副刀对称角度出刀（视觉拖影+伤害扫描） */
+  /** 副刀自动攻击 - 蓄势横扫(槽0) + 破点追击(槽1) */
   private updateSubBlades(dt: number) {
+    // 处理挥击弧线生命衰减
+    for (const s of this.subSlash) {
+      s.life -= dt;
+      if (!s.damaged && s.life <= s.maxLife * 0.5) {
+        s.damaged = true;
+        this.applySubSlashDamage(s);
+      }
+    }
+    this.subSlash = this.subSlash.filter(s => s.life > 0);
+
+    // 破绽标记衰减
+    for (const [enemyId, timeLeft] of this.weakpointMarks) {
+      const newTime = timeLeft - dt;
+      if (newTime <= 0) {
+        this.weakpointMarks.delete(enemyId);
+      } else {
+        this.weakpointMarks.set(enemyId, newTime);
+      }
+    }
+
+    // 副刀cd光圈提示
+    for (const p of this.subReadyPing) p.life -= dt;
+    this.subReadyPing = this.subReadyPing.filter(p => p.life > 0);
+
+    for (const r of this.subRune) r.life -= dt;
+    this.subRune = this.subRune.filter(r => r.life > 0);
+
     for (let i = 0; i < 2; i++) {
       const blade = this.subBlades[i];
       if (!blade) continue;
-      this.subBladeTimers[i] += dt;
-      if (this.subBladeTimers[i] < this.subBladeCooldowns[i]) continue;
+      // 鼓舞：副刀CD加速30%
+      const inspireMul = this._currentEventType === "inspire" ? 1.3 : 1;
+      this.subBladeTimers[i] += dt * inspireMul;
+      const cd = this.subBladeCooldowns[i];
+      const remaining = cd - this.subBladeTimers[i];
+      if (remaining > 0 && remaining < 0.3) {
+        const hasPing = this.subReadyPing.some(p => p.slot === i);
+        if (!hasPing) {
+          this.subReadyPing.push({ slot: i, life: 0.4, maxLife: 0.4 });
+        }
+      }
+      if (this.subBladeTimers[i] < cd) continue;
       this.subBladeTimers[i] = 0;
       const stats = BLADE_BASE_STATS[blade.quality];
       if (!stats) continue;
 
       const cx = DESIGN_WIDTH / 2;
       const cy = BALANCE.battlefield.warriorY;
-      // 两把副刀分别从左/右斜下方挥向斜上方
-      const angle = i === 0 ? -Math.PI * 0.6 : -Math.PI * 0.4;
-      const reach = 80 + (stats.bladeMultiplier - 1) * 30;
-      const tipX = cx + Math.cos(angle) * reach;
-      const tipY = cy + Math.sin(angle) * reach;
-      const tailX = cx - Math.cos(angle) * 30;
-      const tailY = cy - Math.sin(angle) * 30;
 
-      // 路径粒子（拖影）
-      for (let p = 0; p < 6; p++) {
-        const t = p / 6;
-        const px = tailX + (tipX - tailX) * t;
-        const py = tailY + (tipY - tailY) * t;
-        this.particles.push(ringParticle({ x: px, y: py }, "rgba(168, 230, 207, 0.6)", 12));
-      }
-
-      // 扫描路径上所有敌人
-      const hits: Enemy[] = [];
-      for (const enemy of this.enemies) {
-        if (!enemy.alive) continue;
-        // 检查到路径线段的距离
-        const dist = distanceToSegment(enemy, { x: tailX, y: tailY }, { x: tipX, y: tipY });
-        if (dist < enemy.radius + 22) hits.push(enemy);
-      }
-
-      // 应用伤害 + 词缀
-      const damage = stats.damageMultiplier;
-      let killedAny = false;
-      for (const target of hits) {
-        target.hp -= Math.ceil(damage);
-        target.flash = 0.18;
-        const killed = target.hp <= 0;
-        if (killed) {
-          target.alive = false;
-          this.score += target.score;
-          this.stats.kills += 1;
-          this.particles.push(...paperBurst(target, 6, ["#a8e6cf", "#f6e7bd"]));
-          killedAny = true;
-        }
-        this.particles.push(ringParticle({ x: target.x, y: target.y }, "#a8e6cf", 16));
-        if (blade.affix) {
-          this.applySubAffixEffect(blade.affix, target, killed);
-        }
-      }
-
-      if (hits.length > 0) {
-        // 命中统计
+      if (i === 0) {
+        // 蓄势横扫：找敌群最密集的横向区域
+        this.triggerMomentumSweep(blade, cx, cy, stats);
       } else {
-        // 无敌人：恢复1点刀势
-        this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 1);
+        // 破点追击：锁定高价值目标
+        this.triggerWeakpointChase(blade, cx, cy, stats);
       }
     }
   }
 
-  /** 副刀词缀效果 */
-  private applySubAffixEffect(affix: string, target: Vec2, killed: boolean) {
+  /** 蓄势横扫 —— 横向扫过敌群最密集区域 */
+  private triggerMomentumSweep(blade: Blade, cx: number, cy: number, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]) {
+    // 找敌人最密集的 y 区间
+    const denseY = this.findDensestYBand();
+    // 中场化：从中场横向扫过（不再从玩家身上发出）
+    const sweepY = Math.min(denseY, 580); // 中场密区y轴
+    const sweepX = DESIGN_WIDTH / 2; // 横向居中
+    // 从左到右横扫
+    const span = 180;
+    const tailX = sweepX - span;
+    const tipX = sweepX + span;
+    const tailY = sweepY + 8;
+    const tipY = sweepY - 4;
+
+    const color = "#5bc0ff";
+    // 方案B：副刀符阵（起点+终点各一个旋转符文）
+    this.subRune.push({ x: tailX, y: tailY, color, life: 0.3, maxLife: 0.3 });
+    this.subRune.push({ x: tipX, y: tipY, color, life: 0.3, maxLife: 0.3 });
+    this.subSlash.push({
+      x1: tailX, y1: tailY, x2: tipX, y2: tipY,
+      color,
+      life: 0.35, maxLife: 0.35,
+      bladeIdx: 0,
+      damaged: false,
+      slotType: 'momentum_sweep'
+    });
+  }
+
+  /** 破点追击 —— 锁定高价值目标 */
+  private triggerWeakpointChase(blade: Blade, cx: number, cy: number, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]) {
+    let target = this.findHighValueTarget();
+    if (!target) {
+      // 无高价值目标 → 退化为攻击最近敌人
+      const fallback = this.findClosestEnemy();
+      if (!fallback) return;
+      target = fallback;
+    }
+    // 从 warrior 飞向目标
+    const dx = target.x - cx;
+    const dy = target.y - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 10) return;
+    // 中场化：从天而降追击（不再从玩家身上发出）
+    const tipX = target.x;
+    const tipY = target.y + 10;
+    const tailX = target.x + (Math.random() - 0.5) * 60;
+    const tailY = Math.max(70, target.y - 80); // 从目标上方追下
+
+    const color = "#ff6a33"; // 金色——破点副刀
+    // 方案B：副刀符阵（目标上方旋转符文）
+    this.subRune.push({ x: tipX, y: tipY - 40, color, life: 0.3, maxLife: 0.3 });
+    this.subRune.push({ x: tailX, y: tailY, color, life: 0.3, maxLife: 0.3 });
+    this.subSlash.push({
+      x1: tailX, y1: tailY, x2: tipX, y2: tipY,
+      color,
+      life: 0.40, maxLife: 0.40,
+      bladeIdx: 1,
+      damaged: false,
+      slotType: 'weakpoint_chase',
+      lockOnEnemyId: target.id
+    });
+
+    // 标记高价值目标弱点的前置：命中后由 applySubSlashDamage 处理
+    this._pendingWeakpointChaseTarget = target;
+  }
+
+  // 临时存储破点追击的目标（在 applySubSlashDamage 中使用）
+  private _pendingWeakpointChaseTarget: { x: number; y: number; id?: string; kind: string } | null = null;
+
+  /** 找敌人最密集的 y 区间 */
+  private findDensestYBand(): number {
+    const alive = this.enemies.filter(e => e.alive);
+    if (alive.length === 0) return 300;
+    // 把 y 分成 3 个区间，找敌人最多的区间的中心 y
+    const bands = [0, 0, 0]; // [0-200, 200-400, 400-600]
+    for (const e of alive) {
+      if (e.y < 200) bands[0]++;
+      else if (e.y < 400) bands[1]++;
+      else bands[2]++;
+    }
+    const maxIdx = bands.indexOf(Math.max(...bands));
+    return [100, 300, 500][maxIdx];
+  }
+
+  /** 找高价值目标（阵眼 > 火药 > 精英 > 盾兵 > 最近敌人） */
+  private findHighValueTarget(): Enemy | null {
+    const alive = this.enemies.filter(e => e.alive);
+    if (alive.length === 0) return null;
+    const priority: EnemyKind[] = ["core", "powder", "elite", "shield"];
+    for (const kind of priority) {
+      const found = alive.find(e => e.kind === kind);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  /** 找离防线最近的敌人 */
+  private findClosestEnemy(): Enemy | null {
+    const alive = this.enemies.filter(e => e.alive);
+    if (alive.length === 0) return null;
+    return alive.reduce((a, b) => a.y > b.y ? a : b);
+  }
+
+  /** 在弧线中点结算副刀伤害 */
+  private applySubSlashDamage(s: { x1: number; y1: number; x2: number; y2: number; color: string; bladeIdx: number; slotType?: 'momentum_sweep' | 'weakpoint_chase' }) {
+    if (this.phase !== "playing") return;
+    const blade = this.subBlades[s.bladeIdx];
+    if (!blade) return;
+    const stats = BLADE_BASE_STATS[blade.quality];
+    if (!stats) return;
+    const slotType = s.slotType ?? (s.bladeIdx === 0 ? 'momentum_sweep' : 'weakpoint_chase');
+
+    if (slotType === 'momentum_sweep') {
+      this.applyMomentumSweepDamage(s, blade, stats);
+    } else {
+      this.applyWeakpointChaseDamage(s, blade, stats);
+    }
+  }
+
+  /** 蓄势横扫伤害结算 */
+  private applyMomentumSweepDamage(
+    s: { x1: number; y1: number; x2: number; y2: number; color: string; bladeIdx: number },
+    blade: Blade, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]
+  ) {
+    const hits: Enemy[] = [];
+    // 横扫判定范围更大（radius + 32）
+    for (const enemy of this.enemies) {
+      if (!enemy.alive) continue;
+      const dist = distanceToSegment(enemy, { x: s.x1, y: s.y1 }, { x: s.x2, y: s.y2 });
+      if (dist < enemy.radius + 32) hits.push(enemy);
+    }
+    const damage = stats.damageMultiplier * 0.8; // 蓄势副刀伤害略低
+    let killCount = 0;
+    for (const target of hits) {
+      target.hp -= Math.max(1, Math.ceil(damage));
+      target.flash = 0.18;
+      const killed = target.hp <= 0;
+      if (killed) {
+        target.alive = false;
+        this.score += target.score;
+        this.stats.kills += 1;
+        killCount++;
+        this.particles.push(...paperBurst(target, 5, ["#5bc0ff", "#f6e7bd"]));
+      }
+      this.particles.push(ringParticle({ x: target.x, y: target.y }, s.color, 18));
+      if (blade.affix) this.applySubAffixEffect(blade.affix, target, killed, 'momentum_sweep');
+    }
+
+    // 蓄势返还刀势
+    if (killCount > 0) {
+      const refund = killCount * 1; // 每击杀1个 +1%
+      if (killCount >= 3) {
+        const extraRefund = 5; // 击杀3+ 额外 +5%
+        this.addText(s.x1 + (s.x2 - s.x1) / 2, s.y1 + (s.y2 - s.y1) / 2 - 16, `蓄势连斩 +${refund + extraRefund}%`, "#5bc0ff", 16, 1.0);
+        this.energy = clamp(this.energy + refund + extraRefund, 0, BALANCE.swordEnergy.max);
+        // 击杀5+ 自加速：当前CD -20%（不低于原始CD的50%）
+        if (killCount >= 5 && s.bladeIdx < this.subBladeCooldowns.length) {
+          const origCd = BLADE_BASE_STATS[blade.quality]?.subSlashInterval ?? 5;
+          const minCd = origCd * 0.5;
+          this.subBladeCooldowns[s.bladeIdx] = Math.max(minCd, this.subBladeCooldowns[s.bladeIdx] * 0.8);
+        }
+      } else {
+        this.addText(s.x1 + (s.x2 - s.x1) / 2, s.y1 + (s.y2 - s.y1) / 2 - 16, `蓄势 +${refund}%`, "#5bc0ff", 14, 0.8);
+        this.energy = clamp(this.energy + refund, 0, BALANCE.swordEnergy.max);
+      }
+    }
+  }
+
+  /** 破点追击伤害结算 */
+  private applyWeakpointChaseDamage(
+    s: { x1: number; y1: number; x2: number; y2: number; color: string; bladeIdx: number },
+    blade: Blade, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]
+  ) {
+    const hits: Enemy[] = [];
+    // 破点判定范围更精确（radius + 24）
+    for (const enemy of this.enemies) {
+      if (!enemy.alive) continue;
+      const dist = distanceToSegment(enemy, { x: s.x1, y: s.y1 }, { x: s.x2, y: s.y2 });
+      if (dist < enemy.radius + 24) hits.push(enemy);
+    }
+    const damage = stats.damageMultiplier * 1.0;
+    for (const target of hits) {
+      target.hp -= Math.max(1, Math.ceil(damage));
+      target.flash = 0.2;
+      const killed = target.hp <= 0;
+      if (killed) {
+        target.alive = false;
+        this.score += target.score;
+        this.stats.kills += 1;
+        this.particles.push(...paperBurst(target, 6, ["#ff6a33", "#ffd35a"]));
+      }
+      this.particles.push(ringParticle({ x: target.x, y: target.y }, s.color, 22));
+      if (blade.affix) this.applySubAffixEffect(blade.affix, target, killed, 'weakpoint_chase');
+
+      // 破点标记：高价值目标（火药/阵眼/精英/盾兵）标记破绽2秒
+      const highValue: EnemyKind[] = ["core", "powder", "elite", "shield"];
+      if (highValue.includes(target.kind) && !killed) {
+        this.weakpointMarks.set(target.id, 2.0);
+        this.addText(target.x, target.y - 20, "破绽", "#ff6a33", 16, 1.2);
+        // 标记浮字
+        this.addText(s.x1 + (s.x2 - s.x1) / 2, s.y1 + (s.y2 - s.y1) / 2 - 16, "破点追击", "#ffd35a", 15, 0.8);
+      }
+
+      // 击杀高价值目标 → 主刀刀势 +5%
+      if (killed && highValue.includes(target.kind)) {
+        this.energy = clamp(this.energy + 5, 0, BALANCE.swordEnergy.max);
+        this.addText(target.x, target.y - 36, "+5%刀势", "#ffd35a", 14, 0.8);
+      }
+    }
+  }
+
+  /** 副刀词缀效果（按槽位转译） */
+  private applySubAffixEffect(affix: string, target: Vec2, killed: boolean, slotType?: 'momentum_sweep' | 'weakpoint_chase') {
+    const st = slotType ?? 'momentum_sweep';
+    const radius = 50;
     switch (affix) {
       case "frost":
-        for (const e of this.enemies) {
-          if (!e.alive || distance(e, target) > 50) continue;
-          e.slowedTimer = 0.8;
+        if (st === 'momentum_sweep') {
+          // 蓄势槽：横扫命中区域减速 1.5 秒
+          for (const e of this.enemies) {
+            if (!e.alive || distance(e, target) > radius) continue;
+            e.slowedTimer = 1.5;
+          }
+          this.addText(target.x, target.y - 34, "冰霜横扫", "#9FE1CB", 12, 0.4);
+        } else {
+          // 破点槽：锁定目标冻结 1 秒，周围小范围减速
+          for (const e of this.enemies) {
+            if (!e.alive || distance(e, target) > 35) continue;
+            e.slowedTimer = 1.0;
+          }
+          this.addText(target.x, target.y - 34, "冰霜锁定", "#9FE1CB", 12, 0.4);
         }
-        this.addText(target.x, target.y - 34, "冰霜", "#9FE1CB", 12, 0.4);
         this.particles.push(ringParticle(target, "#9FE1CB", 24));
         break;
       case "flame":
-        for (const e of this.enemies) {
-          if (!e.alive || distance(e, target) > 40) continue;
-          e.ignited = true;
+        if (st === 'momentum_sweep') {
+          // 蓄势槽：横扫路径点燃敌人
+          for (const e of this.enemies) {
+            if (!e.alive || distance(e, target) > radius) continue;
+            e.ignited = true;
+          }
+          this.addText(target.x, target.y - 34, "烈火横扫", "#F0997B", 12, 0.4);
+        } else {
+          // 破点槽：点燃高血量目标
+          const highHp = this.enemies.filter(e => e.alive).sort((a, b) => b.hp - a.hp)[0];
+          if (highHp && distance(highHp, target) < 40) highHp.ignited = true;
+          this.addText(target.x, target.y - 34, "烈火追击", "#F0997B", 12, 0.4);
         }
-        this.addText(target.x, target.y - 34, "烈火", "#F0997B", 12, 0.4);
         this.particles.push(...sparkBurst(target, 8, "#F0997B"));
         break;
       case "thunder":
-        this.addText(target.x, target.y - 34, "雷暴", "#AFA9EC", 12, 0.4);
-        this.flash = Math.max(this.flash, 0.35);
-        const chain = this.enemies.filter(e => e.alive && distance(e, target) < 70).slice(0, 3);
-        for (const ct of chain) {
-          ct.hp -= 1; ct.flash = 0.3;
-          this.particles.push(ringParticle(ct, "#AFA9EC", 16));
-          if (ct.hp <= 0) { ct.alive = false; this.score += ct.score; this.stats.kills += 1; }
+        this.addText(target.x, target.y - 34, st === 'momentum_sweep' ? "雷暴横扫" : "雷暴锁定", "#AFA9EC", 12, 0.4);
+        if (Math.random() < 0.3) {
+          // 30% 概率触发链雷
+          const chain = this.enemies.filter(e => e.alive && distance(e, target) < 70).slice(0, st === 'momentum_sweep' ? 3 : 2);
+          for (const ct of chain) {
+            ct.hp -= 1; ct.flash = 0.3;
+            this.particles.push(ringParticle(ct, "#AFA9EC", 16));
+            if (ct.hp <= 0) { ct.alive = false; this.score += ct.score; this.stats.kills += 1; }
+          }
+          this.flash = Math.max(this.flash, 0.25);
         }
         break;
       case "armorBreak":
-        for (const e of this.enemies) {
-          if (!e.alive || e.kind !== "shield" || distance(e, target) > 55) continue;
-          e.hp -= 1; e.flash = 0.2;
+        if (st === 'momentum_sweep') {
+          // 蓄势槽：横扫命中敌人防御 -30%
+          for (const e of this.enemies) {
+            if (!e.alive || e.kind !== "shield" || distance(e, target) > radius) continue;
+            e.hp -= 1; e.flash = 0.2;
+          }
+          this.addText(target.x, target.y - 34, "破甲横扫", "#85B7EB", 12, 0.4);
+        } else {
+          // 破点槽：对精英/盾兵防御 -50%
+          for (const e of this.enemies) {
+            if (!e.alive || !["elite", "shield", "core", "boss"].includes(e.kind) || distance(e, target) > 40) continue;
+            e.hp -= 2; e.flash = 0.3;
+          }
+          this.addText(target.x, target.y - 34, "破甲点杀", "#85B7EB", 12, 0.4);
         }
-        this.addText(target.x, target.y - 34, "破甲", "#85B7EB", 12, 0.4);
         break;
       case "vampire":
-        if (killed) {
-          this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 8);
-          this.addText(target.x, target.y - 34, "回春+"+Math.round(8), "#a8e6cf", 12, 0.4);
+        if (st === 'momentum_sweep') {
+          // 蓄势槽：横扫击杀每个敌人额外 +1% 刀势
+          if (killed) {
+            this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 1);
+            this.addText(target.x, target.y - 34, "蓄势回春+1", "#a8e6cf", 12, 0.4);
+          }
+        } else {
+          // 破点槽：击杀高价值目标额外 +8% 刀势
+          if (killed) {
+            this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 8);
+            this.addText(target.x, target.y - 34, "破点回春+8", "#a8e6cf", 12, 0.4);
+          }
         }
         break;
       case "phantom":
-        if (!killed) {
-          const p = this.enemies.find(e => e.alive && distance(e, target) < 45);
-          if (p) { p.hp -= 0.5; p.flash = 0.2; }
-          this.addText(target.x, target.y - 34, "幻影", "#EEEDFE", 12, 0.4);
+        if (st === 'momentum_sweep') {
+          // 25% 概率追加一次较弱横扫（视觉闪烁代替）
+          if (Math.random() < 0.25) {
+            this.flash = Math.max(this.flash, 0.15);
+            this.addText(target.x, target.y - 34, "幻影横扫", "#EEEDFE", 12, 0.4);
+          }
+        } else {
+          // 25% 概率追加一次追击
+          if (Math.random() < 0.25) {
+            if (!killed) {
+              const p = this.enemies.find(e => e.alive && distance(e, target) < 45);
+              if (p) { p.hp -= 1; p.flash = 0.2; }
+            }
+            this.addText(target.x, target.y - 34, "幻影追击", "#EEEDFE", 12, 0.4);
+          }
         }
         break;
     }
@@ -1503,6 +1986,72 @@ export class Game {
       text.y -= 22 * dt;
     }
     this.texts = this.texts.filter((text) => text.life > 0).slice(0, MAX_FLOATING_TEXT);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 三幕制阶段爆发 —— 15s/30s/45s 三个时间节点给玩家大礼
+  // ═══════════════════════════════════════════════════════════════
+  private checkActMilestones() {
+    if (this.phase !== "playing") return;
+
+    // 15s 第一幕结束 → 满势时刻
+    if (!this._act1Triggered && this.elapsed >= 15) {
+      this._act1Triggered = true;
+      this.triggerMomentumBurst();
+    }
+    // 30s 第二幕结束 → 副刀共鸣
+    if (!this._act2Triggered && this.elapsed >= 30) {
+      this._act2Triggered = true;
+      this.triggerSubBladeResonance();
+    }
+    // 45s 第三幕结束 → 一刀斩模式
+    if (!this._act3Triggered && this.elapsed >= 45) {
+      this._act3Triggered = true;
+      this.triggerOneBladeMode();
+    }
+  }
+
+  /** 满势时刻：15s 灌满刀势 + 强震屏 + 飘字 */
+  private triggerMomentumBurst() {
+    this.energy = BALANCE.swordEnergy.max;
+    this._breakReadyNotified = true; // 满势时不再触发单独的破阵提示
+    this.screenShake = Math.max(this.screenShake, 0.9);
+    this.flash = Math.max(this.flash, 0.5);
+    this.slowMoTimer = Math.max(this.slowMoTimer, 0.12);
+    this.addText(DESIGN_WIDTH / 2, 280, "⚡ 满势时刻", "#ffd35a", 30, 2.0);
+    // 满屏光晕粒子
+    for (let i = 0; i < 12; i++) {
+      this.particles.push(glowParticle({ x: DESIGN_WIDTH / 2 + (Math.random() - 0.5) * 200, y: 400 + (Math.random() - 0.5) * 300 }, "#ffd35a", 18));
+    }
+    AudioService.slashHit();
+  }
+
+  /** 副刀共鸣：30s 立即清空两把副刀CD + 飘字 */
+  private triggerSubBladeResonance() {
+    for (let i = 0; i < this.subBladeTimers.length; i++) {
+      this.subBladeTimers[i] = 999; // 立即可发
+    }
+    this.screenShake = Math.max(this.screenShake, 0.6);
+    this.flash = Math.max(this.flash, 0.3);
+    this.addText(DESIGN_WIDTH / 2, 280, "⚔ 副刀共鸣", "#ff6a33", 28, 2.0);
+    // 副刀光圈立刻出现
+    for (let i = 0; i < 2; i++) {
+      this.subReadyPing.push({ slot: i, life: 0.4, maxLife: 0.4 });
+    }
+    AudioService.slashHit();
+  }
+
+  /** 一刀斩模式：45s 后下次挥刀威力×2 + 持续15s 引导 */
+  private triggerOneBladeMode() {
+    this.oneBladeModeTimer = 15;
+    this.screenShake = Math.max(this.screenShake, 1.2);
+    this.flash = Math.max(this.flash, 0.7);
+    this.slowMoTimer = Math.max(this.slowMoTimer, 0.15);
+    this.addText(DESIGN_WIDTH / 2, 280, "🗡 一刀斩模式", "#ff6a33", 32, 2.5);
+    for (let i = 0; i < 16; i++) {
+      this.particles.push(...sparkBurst({ x: DESIGN_WIDTH / 2 + (Math.random() - 0.5) * 240, y: 400 + (Math.random() - 0.5) * 320 }, 8, "#ff6a33"));
+    }
+    AudioService.oneBladeBreak();
   }
 
   private updateWaves(dt: number) {
@@ -1527,24 +2076,115 @@ export class Game {
     if (this.wavesSpawned >= this.level.waves.length) {
       this.wavesFinishedAt = this.elapsed;
     }
-    // 每波HP递增（从第2波开始+1，最多+5）
     this.waveHpBonus = Math.min(5, this.wavesSpawned);
-    const speedMultiplier = wave.speedMultiplier ?? 1;
 
-    for (const spawn of wave.enemies) {
-      const cnt = Math.max(1, spawn.count ?? 1);
-      const spawnY = BALANCE.battlefield.enemySpawnY - (spawn.yOffset ?? 0);
-      // 多只同品质敌人均匀分布在7条通道
+    // ── 决定是否触发事件波（20%概率，同局不重复，第1波不触发）──
+    const triggerEvent = this.wavesSpawned > 1 && Math.random() < 0.2;
+    // 事件波按关卡解锁
+    const e = this.level.id;
+    const availableEvents: string[] = [];
+    if (e >= 1)  availableEvents.push("reinforce", "inspire");
+    if (e >= 6)  availableEvents.push("slowRain");
+    if (e >= 16) availableEvents.push("eliteStrike");
+    if (e >= 31) availableEvents.push("trapFormation");
+    const unusedAvailable = availableEvents.filter(ev => !this._usedEvents.has(ev));
+    let chosenEvent: string | null = null;
+    if (triggerEvent && unusedAvailable.length > 0) {
+      chosenEvent = unusedAvailable[Math.floor(Math.random() * unusedAvailable.length)];
+      this._usedEvents.add(chosenEvent);
+      this._activeEventTimer = 0;
+      this._currentEventType = chosenEvent;
+    }
+
+    // 根据事件波调整 spawn 参数
+    let extraSpeedMul = (wave.speedMultiplier ?? 1);
+    let extraEnemies: Array<{ kind: string; count: number; x: number; yOffset: number }> = [];
+
+    // ── 中场事件触发（wave配置）──
+    if (wave.midfieldEventType && wave.midfieldEventType !== 'none') {
+      this._currentWaveEvent = wave.midfieldEventType;
+      this.addText(DESIGN_WIDTH / 2, 180,
+        wave.midfieldEventType === 'gather' ? "敌军聚阵" : "敌军蓄冲",
+        wave.midfieldEventType === 'gather' ? "#5bc0ff" : "#ff6a33", 22, 1.2);
+      this.addText(DESIGN_WIDTH / 2, 208,
+        wave.midfieldEventType === 'gather' ? "等它们靠近，一刀更爽" : "快斩，不然冲下来",
+        "#f6e7bd", 13, 1.0);
+      this.flash = Math.max(this.flash, 0.15);
+      // 屏幕边缘提示色（蓄冲=红，聚阵=青）
+      const ringColor = wave.midfieldEventType === 'gather' ? "91,192,255" : "255,106,51";
+      this._midfieldEvent = { type: wave.midfieldEventType, timer: 0, duration: 8 };
+    } else {
+      this._currentWaveEvent = null;
+    }
+
+    if (chosenEvent === "reinforce") {
+      extraSpeedMul *= 1.2;
+      // 清除事件波计时器不算在局内
+      this.addText(DESIGN_WIDTH / 2, 200, "⚡ 增援潮！", "#ff6a33", 24, 1.8);
+      this.addText(DESIGN_WIDTH / 2, 228, "敌人数×1.5，速度↑", "#ff9e7a", 14, 1.5);
+      this.screenShake = Math.max(this.screenShake, 0.4);
+    } else if (chosenEvent === "slowRain") {
+      this._activeEventTimer = 0.5; // 减速雨持续 0.5s
+      this.addText(DESIGN_WIDTH / 2, 200, "🌧 减速雨！", "#5bc0ff", 24, 1.8);
+      this.addText(DESIGN_WIDTH / 2, 228, "主刀路径减速50%", "#7fb1ff", 14, 1.5);
+    } else if (chosenEvent === "inspire") {
+      // 鼓舞：副刀CD临时-30%，持续8秒
+      this._activeEventTimer = 8;
+      // 给所有副刀施加临时加速
+      for (let i = 0; i < this.subBladeTimers.length; i++) {
+        this.subBladeTimers[i] = Math.max(0, this.subBladeTimers[i] - 0.5); // 立即加速0.5s
+      }
+      this.addText(DESIGN_WIDTH / 2, 200, "🥁 鼓舞！", "#ffd35a", 24, 1.8);
+      this.addText(DESIGN_WIDTH / 2, 228, "副刀CD临时-30%", "#f6e7bd", 14, 1.5);
+    } else if (chosenEvent === "eliteStrike") {
+      this.addText(DESIGN_WIDTH / 2, 200, "👹 精英袭！", "#9b6dff", 24, 1.8);
+      this.addText(DESIGN_WIDTH / 2, 228, "精英督战出现", "#c896ff", 14, 1.5);
+      // 增加精英在wave中
+      extraEnemies.push({ kind: "elite", count: 1, x: 188, yOffset: 0 });
+    } else if (chosenEvent === "trapFormation") {
+      this.addText(DESIGN_WIDTH / 2, 200, "🔱 陷阱阵！", "#ffb15c", 24, 1.8);
+      this.addText(DESIGN_WIDTH / 2, 228, "火药+阵眼组合埋伏", "#ffd67c", 14, 1.5);
+      // 增加火药+阵眼
+      extraEnemies.push({ kind: "powder", count: 2, x: 140, yOffset: 0 });
+      extraEnemies.push({ kind: "core", count: 1, x: 284, yOffset: 0 });
+    }
+
+    const speedMultiplier = extraSpeedMul;
+    // 如果是增援潮，敌人数量×1.5
+    const countMul = chosenEvent === "reinforce" ? 1.5 : 1;
+
+    // 多波多次刷新：把每个 spawn 拆成 2~3 次 sub-spawn
+    const subInterval = randomRange(0.8, 1.2);
+    let subDelay = 0;
+    const allSpawns = [...wave.enemies, ...extraEnemies];
+    for (const spawn of allSpawns) {
+      const cnt = Math.max(1, Math.ceil((spawn.count ?? 1) * countMul));
+      const subGroups = Math.min(3, Math.max(2, Math.ceil(cnt / 3)));
+      const perGroup = Math.ceil(cnt / subGroups);
       const lanes = [44, 92, 140, 188, 236, 284, 336];
-      for (let k = 0; k < cnt; k++) {
-        const x = cnt > 1 ? lanes[Math.floor((k * lanes.length) / cnt)] : spawn.x;
-        const yJ = (k % 2) * 8 - 4;
-        this.enemies.push(this.createEnemy(spawn.kind, x, spawnY + yJ, speedMultiplier));
-        this.discoveredEnemies.add(spawn.kind);
-        // 出生烟雾
-        this.particles.push(glowParticle({ x, y: spawnY + yJ }, "#5c4a3a", 12, 20));
+
+      let enemyIdx = 0;
+      for (let g = 0; g < subGroups; g++) {
+        const subDelayAt = subDelay;
+        subDelay += subInterval;
+        const startK = g * perGroup;
+        const endK = Math.min(cnt, (g + 1) * perGroup);
+        for (let k = startK; k < endK; k++) {
+          const x = cnt > 1 ? lanes[Math.floor((k * lanes.length) / cnt)] : (spawn.x ?? lanes[enemyIdx % lanes.length]);
+          const xJ = (Math.random() - 0.5) * 40;
+          this.subSpawnQueue.push({
+            time: this.elapsed + subDelayAt,
+            kind: spawn.kind,
+            x: x + xJ,
+            speedMultiplier,
+            yOffset: spawn.yOffset ?? 0
+          });
+          enemyIdx++;
+        }
       }
     }
+
+    // 每日挑战特殊逻辑
     if (
       this.runContext.mode === "dailyChallenge" &&
       this.runContext.dailyChallengeId === "more_powder" &&
@@ -1570,6 +2210,32 @@ export class Game {
     }
 
     this.addText(DESIGN_WIDTH / 2, 96, wave.name, "#f6e7bd", 16);
+  }
+
+  /** 处理 sub-spawn 队列（多波多次刷新） */
+  private updateSubSpawnQueue() {
+    if (this.subSpawnQueue.length === 0) return;
+    const ready: typeof this.subSpawnQueue = [];
+    const remain: typeof this.subSpawnQueue = [];
+    for (const item of this.subSpawnQueue) {
+      if (item.time <= this.elapsed) {
+        ready.push(item);
+      } else {
+        remain.push(item);
+      }
+    }
+    this.subSpawnQueue = remain;
+    for (const item of ready) {
+      const spawnY = BALANCE.battlefield.enemySpawnY - (item.yOffset ?? 0);
+      const enemy = this.createEnemy(item.kind as any, item.x, spawnY, item.speedMultiplier);
+      // 中场事件波及：本波敌人带event标记
+      if (this._currentWaveEvent) {
+        enemy.spawnedWithEvent = this._currentWaveEvent;
+      }
+      this.enemies.push(enemy);
+      this.discoveredEnemies.add(item.kind as any);
+      this.particles.push(glowParticle({ x: item.x, y: spawnY }, "#5c4a3a", 12, 20));
+    }
   }
 
   /** 判定是否应立刻胜利结算 */
@@ -1751,6 +2417,7 @@ export class Game {
       id: this.nextId("enemy"),
       kind,
       x,
+      homeX: x,
       y,
       radius: balance.radius,
       hp: balance.hp + dailyShieldBonus + hpBonus,
@@ -1770,7 +2437,9 @@ export class Game {
       formationId: kind === "core" ? this.level.formationId : undefined,
       formationLitIndex: 0,
       formationLitTimer: 0,
-      formationWrongHits: 0
+      formationWrongHits: 0,
+      // 30% 步兵是急冲兵
+      rushTimer: kind === "infantry" && Math.random() < 0.3 ? 0.8 : undefined
     };
   }
 
@@ -1828,6 +2497,10 @@ export class Game {
     size: number,
     life: number = BALANCE.feedback.floatingTextLife
   ) {
+    // 文字去重：相同内容已存在则不重复添加
+    if (this.texts.some(t => t.text === text && t.life > life * 0.5)) {
+      return;
+    }
     this.texts.push({
       id: this.nextId("text"),
       x,
@@ -1986,6 +2659,21 @@ export class Game {
       const baseColor = enemy.flash > 0 ? "#fff1b8" : def.color;
       const accentColor = def.accent;
 
+      // 破绽标记：外发光光圈（2秒持续）
+      if (this.weakpointMarks.has(enemy.id)) {
+        const remain = this.weakpointMarks.get(enemy.id) ?? 0;
+        const pulse = 0.5 + Math.sin(this.elapsed * 8) * 0.5;
+        ctx.shadowColor = "#ff6a33";
+        ctx.shadowBlur = 18 + pulse * 12;
+        ctx.strokeStyle = `rgba(255, 106, 51, ${0.5 + pulse * 0.3})`;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, enemy.radius + 6 + pulse * 3, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.shadowBlur = 6;
+        ctx.shadowColor = "rgba(0,0,0,0.45)";
+      }
+
       // ═════════════════════════════════════
       // 汉字化渲染：单字 + 颜色 + 动效
       // ═════════════════════════════════════
@@ -1994,6 +2682,15 @@ export class Game {
         // 步兵："兵"字 朱红，旋转下落动画
         const rot = Math.sin(enemy.wobble * 5) * 0.15;
         ctx.save();
+        // 急冲兵：底部红色光环 + 名称上方加⚡标识
+        if (enemy.rushTimer !== undefined) {
+          const rushPulse = Math.abs(Math.sin(this.elapsed * 12));
+          ctx.strokeStyle = `rgba(255, 106, 51, ${rushPulse * 0.6})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, 0, enemy.radius + 6, 0, Math.PI * 2);
+          ctx.stroke();
+        }
         ctx.rotate(rot);
         ctx.shadowBlur = 8;
         ctx.shadowColor = "rgba(0,0,0,0.6)";
@@ -2127,6 +2824,24 @@ export class Game {
       // ---- 精英怪渲染 ----
       if (enemy.kind === "elite" && enemy.eliteKind) {
         const visDef = ELITE_VISUAL_DEFS[enemy.eliteKind];
+        // 精英气场：脉动外光环（增强震撼感）
+        const auraPulse = 0.5 + Math.sin(this.elapsed * 3) * 0.5;
+        ctx.save();
+        ctx.shadowColor = visDef.color;
+        ctx.shadowBlur = 16 + auraPulse * 8;
+        ctx.strokeStyle = `${visDef.color}${auraPulse > 0.5 ? "55" : "33"}`;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, enemy.radius + 8 + auraPulse * 4, 0, Math.PI * 2);
+        ctx.stroke();
+        // 第二层光环
+        const ringT = (this.elapsed * 0.6) % 1;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${1 - ringT})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, enemy.radius + 4 + ringT * 20, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
         ctx.fillStyle = enemy.flash > 0 ? "#fff1b8" : visDef.color;
         ctx.strokeStyle = visDef.accent;
         ctx.lineWidth = 3;
@@ -2156,11 +2871,25 @@ export class Game {
         ctx.closePath();
         ctx.stroke();
 
-        // 名称
+        // 名称（更显眼：背景+发光+加大）
+        ctx.save();
+        const nameText = visDef.name;
+        ctx.font = '800 13px "Microsoft YaHei", sans-serif';
+        const nameW = ctx.measureText(nameText).width;
+        // 背景
+        ctx.fillStyle = "rgba(20, 14, 8, 0.85)";
+        ctx.fillRect(-nameW / 2 - 6, -enemy.radius - 22, nameW + 12, 18);
+        // 边框
+        ctx.strokeStyle = visDef.color;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(-nameW / 2 - 6, -enemy.radius - 22, nameW + 12, 18);
+        // 文字
         ctx.fillStyle = "#fff3c0";
-        ctx.font = '700 11px "Microsoft YaHei", sans-serif';
-        ctx.textAlign = "center";
-        ctx.fillText(visDef.name, 0, -enemy.radius - 10);
+        ctx.shadowColor = visDef.color;
+        ctx.shadowBlur = 6;
+        ctx.fillText(nameText, 0, -enemy.radius - 9);
+        ctx.shadowBlur = 0;
+        ctx.restore();
 
         // 火环将：三团火焰
         if (enemy.eliteKind === "fireRing") {
@@ -2317,8 +3046,7 @@ export class Game {
   }
 
   private drawSlash(ctx: CanvasRenderingContext2D) {
-    const trail = this.currentSlash;
-    if (!trail) return;
+    const trail = this.currentSlash;    if (!trail) return;
 
     const stage = SWORD_STAGE_BY_ID[trail.tier];
     const ratio = this.getSlashRatio(trail);
@@ -2371,6 +3099,152 @@ export class Game {
     const visualLength = stage.visualLength * (0.34 + ratio * 0.82) * lowFade;
     this.drawBladeTip(ctx, last, angle, visualLength, width, stage.color, ratio);
     ctx.restore();
+  }
+
+  /** 副刀弧形挥击 - 从尾到头延展的弧线（0.40s，更粗更亮） */
+  private drawSubSlashes(ctx: CanvasRenderingContext2D) {
+    if (this.subSlash.length === 0) return;
+    ctx.save();
+    for (const s of this.subSlash) {
+      const t = 1 - s.life / s.maxLife; // 0→1 随时间推进
+      // 弧形控制点（中间略偏移，形成弧线）
+      const midX = (s.x1 + s.x2) / 2 + (s.bladeIdx === 0 ? -22 : 22);
+      const midY = (s.y1 + s.y2) / 2 - 30;
+      // 已划到的部分：t 比例的尾→头
+      const curX = s.x1 + (s.x2 - s.x1) * t;
+      const curY = s.y1 + (s.y2 - s.y1) * t;
+      // 外发光层（最宽、最低不透明）
+      ctx.strokeStyle = s.color + "88";
+      ctx.shadowColor = s.color;
+      ctx.shadowBlur = 26;
+      ctx.lineWidth = 18;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(s.x1, s.y1);
+      ctx.quadraticCurveTo(midX, midY, curX, curY);
+      ctx.stroke();
+      // 主刀光（亮）
+      ctx.strokeStyle = s.color + "ee";
+      ctx.shadowBlur = 12;
+      ctx.lineWidth = 9;
+      ctx.beginPath();
+      ctx.moveTo(s.x1, s.y1);
+      ctx.quadraticCurveTo(midX, midY, curX, curY);
+      ctx.stroke();
+      // 内白线（最亮核心）
+      ctx.strokeStyle = "#ffffffee";
+      ctx.shadowBlur = 0;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(s.x1, s.y1);
+      ctx.quadraticCurveTo(midX, midY, curX, curY);
+      ctx.stroke();
+      // 刀头圆点
+      if (t > 0.05) {
+        ctx.fillStyle = "#ffffff";
+        ctx.shadowColor = s.color;
+        ctx.shadowBlur = 16;
+        ctx.beginPath();
+        ctx.arc(curX, curY, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // 破点追击：被锁定敌人头顶准星
+      if (s.slotType === 'weakpoint_chase' && s.lockOnEnemyId) {
+        const target = this.enemies.find(e => e.id === s.lockOnEnemyId);
+        if (target && target.alive) {
+          const pulse = 0.5 + Math.sin(this.elapsed * 16) * 0.5;
+          ctx.save();
+          ctx.shadowColor = s.color;
+          ctx.shadowBlur = 12 + pulse * 8;
+          ctx.strokeStyle = `rgba(255, 106, 51, ${0.7 + pulse * 0.3})`;
+          ctx.lineWidth = 2.5;
+          const r = target.radius + 10;
+          // 4个角的L型
+          const L = 8;
+          const corners = [[target.x - r, target.y - r], [target.x + r, target.y - r], [target.x - r, target.y + r], [target.x + r, target.y + r]];
+          for (const [cx, cy] of corners) {
+            const dx = Math.sign(cx - target.x);
+            const dy = Math.sign(cy - target.y);
+            ctx.beginPath();
+            ctx.moveTo(cx - dx * L, cy);
+            ctx.lineTo(cx, cy);
+            ctx.lineTo(cx, cy - dy * L);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  /** 副刀cd将好：warrior 身上召唤光圈（0.4s） */
+  private drawSubReadyPings(ctx: CanvasRenderingContext2D) {
+    if (this.subReadyPing.length === 0) return;
+    const cx = DESIGN_WIDTH / 2;
+    const cy = BALANCE.battlefield.warriorY;
+    for (const p of this.subReadyPing) {
+      const t = 1 - p.life / p.maxLife; // 0→1
+      const slot = p.slot;
+      const baseColor = "#a8e6cf";
+      const ringR = 38 + t * 24; // 从38扩大到62
+      const alpha = (1 - t) * 0.85;
+      ctx.save();
+      ctx.strokeStyle = baseColor + Math.floor(alpha * 255).toString(16).padStart(2, "0");
+      ctx.shadowColor = baseColor;
+      ctx.shadowBlur = 18;
+      ctx.lineWidth = 3.5;
+      // 偏左/右（匹配 slot 0/1 角度）
+      const offX = slot === 0 ? -34 : 34;
+      const offY = -8;
+      ctx.beginPath();
+      ctx.arc(cx + offX, cy + offY, ringR, 0, Math.PI * 2);
+      ctx.stroke();
+      // 中心小光点
+      ctx.fillStyle = baseColor + Math.floor(alpha * 200).toString(16).padStart(2, "0");
+      ctx.beginPath();
+      ctx.arc(cx + offX, cy + offY, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  /** 绘制副刀符阵（方案B：旋转符文提示） */
+  private drawSubRunes(ctx: CanvasRenderingContext2D) {
+    if (this.subRune.length === 0) return;
+    for (const r of this.subRune) {
+      const t = r.life / r.maxLife;
+      const alpha = Math.min(1, t * 4) * 0.6;
+      const pulse = Math.sin(this.elapsed * 8 + r.x) * 0.5 + 0.5;
+      ctx.save();
+      ctx.translate(r.x, r.y);
+      ctx.globalAlpha = alpha;
+      // 外圈符文环（旋转）
+      const rotAngle = this.elapsed * 4;
+      ctx.strokeStyle = r.color;
+      ctx.lineWidth = 2;
+      ctx.shadowColor = r.color;
+      ctx.shadowBlur = 8;
+      // 外圆
+      ctx.beginPath();
+      ctx.arc(0, 0, 8 + pulse * 4, 0, Math.PI * 2);
+      ctx.stroke();
+      // 内圈8个小圆
+      for (let i = 0; i < 8; i++) {
+        const a = rotAngle + (Math.PI * 2 / 8) * i;
+        const rx = Math.cos(a) * 10;
+        const ry = Math.sin(a) * 10;
+        ctx.beginPath();
+        ctx.arc(rx, ry, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // 中心点
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(0, 0, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
   }
 
   private drawBladeTip(ctx: CanvasRenderingContext2D, pos: Vec2, angle: number, length: number, width: number, color: string, ratio: number) {
@@ -2480,13 +3354,18 @@ export class Game {
       ctx.restore();
     }
 
-    ctx.globalAlpha = 0.23;
-    ctx.fillStyle = "#efd08c";
-    for (let x = -10; x < DESIGN_WIDTH; x += 44) {
-      ctx.fillRect(x, WALL_TOP_Y + 18, 28, 8);
-      ctx.fillRect(x + 20, WALL_TOP_Y + 48, 30, 8);
+    ctx.save();
+    ctx.globalAlpha = 0.1;
+    ctx.fillStyle = "#8a5d2e";
+    // 顶部砖块：更不规则、更像墙
+    for (let x = 4; x < DESIGN_WIDTH; x += 36) {
+      ctx.fillRect(x, WALL_TOP_Y + 4, 28, 3);
     }
-    ctx.globalAlpha = 1;
+    // 第二层：错开半个位置
+    for (let x = -12; x < DESIGN_WIDTH; x += 36) {
+      ctx.fillRect(x, WALL_TOP_Y + 14, 28, 3);
+    }
+    ctx.restore();
 
     const cx = DESIGN_WIDTH / 2;
     const cy = BALANCE.battlefield.warriorY + 28;
@@ -2598,113 +3477,114 @@ export class Game {
     // 右下角临时效果图标（鼓/魂/油）— 含圆形倒计时
     this.drawPickupBuffs(ctx);
 
-    // 副刀槽位（放大版：左下角大图标+CD数字+发光）
-    {
-      const startX = 16;
-      const y = 808;
-      const iconR = 22; // 44px 直径
-      ctx.textAlign = "left";
-      for (let i = 0; i < 2; i++) {
-        const ix = startX + i * 56;
-        const blade = this.subBlades[i] ?? null;
-        ctx.save();
+    // 副刀槽位1（蓄势）：战士左侧
+    this.drawSubBladeSlot(ctx, 0, 24, BALANCE.battlefield.warriorY + 5, 26, 0x5bc0ff);
+    // 副刀槽位2（破点）：战士右侧
+    this.drawSubBladeSlot(ctx, 1, DESIGN_WIDTH - 76, BALANCE.battlefield.warriorY + 5, 26, 0xff6a33);
 
-        // 槽位底框
-        ctx.fillStyle = "rgba(18, 16, 14, 0.6)";
-        ctx.beginPath();
-        ctx.arc(ix + iconR, y + iconR, iconR + 2, 0, Math.PI * 2);
-        ctx.fill();
+    // 刀势三段能量条 —— 屏幕底部居中（窄条）
+    const eBarW = 200;
+    const eBarH = 14;
+    const eBarX = (DESIGN_WIDTH - eBarW) / 2;
+    const eBarY = DESIGN_HEIGHT - 36;
+    const energyPct = this.energy / BALANCE.swordEnergy.max;
+    const eTier = getBladeTier(this.energy);
+    const eTierName = SWORD_STAGE_BY_ID[eTier]?.name ?? "蓄势";
 
-        if (!blade) {
-          // 空槽
-          ctx.strokeStyle = "rgba(255, 211, 90, 0.3)";
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.arc(ix + iconR, y + iconR, iconR, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.fillStyle = "rgba(246, 231, 189, 0.4)";
-          ctx.font = '600 10px "Microsoft YaHei", sans-serif';
-          ctx.textAlign = "center";
-          ctx.fillText("空", ix + iconR, y + iconR + 4);
-        } else {
-          const timer = this.subBladeTimers[i] ?? 0;
-          const cd = this.subBladeCooldowns[i] ?? 5;
-          const ratio = Math.min(1, timer / cd);
-          const ready = ratio >= 1;
-          // 品质背景
-          const qualityColor = BLADE_BASE_STATS[blade.quality] ? "#ffd35a" : "#a8e6cf";
-          ctx.fillStyle = "rgba(18, 16, 14, 0.85)";
-          ctx.beginPath();
-          ctx.arc(ix + iconR, y + iconR, iconR, 0, Math.PI * 2);
-          ctx.fill();
-          // 冷却进度弧或发光
-          if (ready) {
-            // Ready: glowing ring + pulse
-            const pulse = 0.5 + Math.sin(this.elapsed * 4 + i * 2) * 0.5;
-            ctx.strokeStyle = qualityColor;
-            ctx.shadowColor = qualityColor;
-            ctx.shadowBlur = 10 + pulse * 8;
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.arc(ix + iconR, y + iconR, iconR - 2, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.shadowBlur = 0;
-            // 图标
-            ctx.fillStyle = qualityColor;
-            ctx.font = '700 16px "Microsoft YaHei", sans-serif';
-            ctx.textAlign = "center";
-            ctx.fillText("⚔", ix + iconR, y + iconR + 6);
-          } else {
-            // 冷却进度弧
-            ctx.strokeStyle = qualityColor;
-            ctx.lineWidth = 2.5;
-            ctx.beginPath();
-            ctx.arc(ix + iconR, y + iconR, iconR - 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
-            ctx.stroke();
-            // 品质边框
-            ctx.strokeStyle = "rgba(240, 195, 107, 0.3)";
-            ctx.lineWidth = 1.2;
-            ctx.beginPath();
-            ctx.arc(ix + iconR, y + iconR, iconR - 2, 0, Math.PI * 2);
-            ctx.stroke();
-            // CD数字
-            ctx.fillStyle = "#f6e7bd";
-            ctx.font = '700 14px "Microsoft YaHei", sans-serif';
-            ctx.textAlign = "center";
-            ctx.fillText(`${Math.ceil(cd - timer)}`, ix + iconR, y + iconR + 5);
-            // "s" 小字
-            ctx.fillStyle = "rgba(246, 231, 189, 0.5)";
-            ctx.font = '600 8px "Microsoft YaHei", sans-serif';
-            ctx.fillText("s", ix + iconR + 10, y + iconR + 2);
-          }
-        }
-        ctx.restore();
+    // 段位分界刻度（条下方对应位置的小三角）
+    const tierMarks = [
+      { pct: 0.10, color: "rgba(192, 208, 224, 0.6)" },  // 蓄势终点 → 轻斩
+      { pct: 0.40, color: "rgba(91, 192, 255, 0.7)" },    // 轻斩终点 → 强斩
+      { pct: 0.90, color: "rgba(255, 211, 90, 0.85)" },   // 强斩终点 → 破阵
+    ];
+
+    // 背景
+    ctx.save();
+    ctx.fillStyle = "rgba(18, 16, 14, 0.6)";
+    ctx.strokeStyle = "rgba(255, 214, 124, 0.25)";
+    ctx.lineWidth = 1;
+    roundRect(ctx, eBarX, eBarY, eBarW, eBarH, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    // 段位色彩分层（极淡的色块作为背景刻度）
+    const segColors = [
+      { x0: 0, x1: 0.10, color: "rgba(192, 208, 224, 0.08)" },
+      { x0: 0.10, x1: 0.40, color: "rgba(192, 208, 224, 0.16)" },
+      { x0: 0.40, x1: 0.90, color: "rgba(91, 192, 255, 0.16)" },
+      { x0: 0.90, x1: 1.00, color: "rgba(255, 211, 90, 0.20)" },
+    ];
+    for (const seg of segColors) {
+      ctx.fillStyle = seg.color;
+      ctx.fillRect(eBarX + eBarW * seg.x0, eBarY, eBarW * (seg.x1 - seg.x0), eBarH);
+    }
+
+    // 能量填充
+    const fillX = eBarX;
+    const fillW = eBarW * energyPct;
+    if (fillW > 0) {
+      // 渐变填充：从灰→青→金（按当前段位走色）
+      const grad = ctx.createLinearGradient(fillX, 0, fillX + fillW, 0);
+      const fillPct = energyPct;
+      if (fillPct < 0.4) {
+        grad.addColorStop(0, "#666");
+        grad.addColorStop(1, "#c0d0e0");
+      } else if (fillPct < 0.9) {
+        grad.addColorStop(0, "#c0d0e0");
+        grad.addColorStop(1, "#5bc0ff");
+      } else {
+        grad.addColorStop(0, "#5bc0ff");
+        grad.addColorStop(1, "#ffd35a");
       }
-    }
-
-    // 右下角 Buff 展示
-    if (this.selectedRoutes.length > 0 || this.subBlades.length > 0) {
-      const bx = DESIGN_WIDTH - 88;
-      const by = 760;
-      ctx.save();
-      ctx.textAlign = "right";
-      ctx.fillStyle = "rgba(18, 16, 14, 0.6)";
-      ctx.fillRect(bx - 10, by - 4, 88, 44);
+      ctx.fillStyle = grad;
+      ctx.shadowColor = eTier === "burst" ? "rgba(255, 211, 90, 0.8)" : eTier === "strong" ? "rgba(91, 192, 255, 0.6)" : "rgba(192, 208, 224, 0.4)";
+      ctx.shadowBlur = eTier === "burst" ? 14 : 6;
+      roundRect(ctx, fillX, eBarY, fillW, eBarH, 6);
       ctx.fill();
-      ctx.font = '700 9px "Microsoft YaHei", sans-serif';
-      ctx.fillStyle = "rgba(168, 230, 207, 0.7)";
-      ctx.textAlign = "right";
-      ctx.fillText("Buff", bx + 68, by + 12);
-      ctx.font = '600 8px "Microsoft YaHei", sans-serif';
-      ctx.fillStyle = "rgba(246, 231, 189, 0.5)";
-      ctx.fillText(`副刀×${this.subBlades.length}`, bx + 68, by + 30);
-      ctx.restore();
+      ctx.shadowBlur = 0;
     }
 
+    // 段位分界点（条内部竖线）
+    ctx.strokeStyle = "rgba(255, 211, 90, 0.45)";
+    ctx.lineWidth = 1.5;
+    for (const mark of tierMarks) {
+      const mx = eBarX + eBarW * mark.pct;
+      ctx.beginPath();
+      ctx.moveTo(mx, eBarY + 1);
+      ctx.lineTo(mx, eBarY + eBarH - 1);
+      ctx.stroke();
+    }
+
+    // 段位分界刻度（条下方小三角，从左到右：蓄/轻/强/破）
     ctx.fillStyle = "#f6e7bd";
-    ctx.font = '700 13px "Microsoft YaHei", sans-serif';
+    for (let i = 0; i < tierMarks.length; i++) {
+      const mark = tierMarks[i];
+      const mx = eBarX + eBarW * mark.pct;
+      ctx.beginPath();
+      ctx.moveTo(mx - 3, eBarY + eBarH + 2);
+      ctx.lineTo(mx + 3, eBarY + eBarH + 2);
+      ctx.lineTo(mx, eBarY + eBarH + 6);
+      ctx.closePath();
+      ctx.fillStyle = mark.color;
+      ctx.fill();
+    }
+
+    // 百分比 + 段位名（条下方居中）
     ctx.textAlign = "center";
-    ctx.fillText(`刀势 ${Math.floor(this.energy)}% ${stage.name}`, DESIGN_WIDTH / 2, 828);
+    ctx.fillStyle = "#f6e7bd";
+    ctx.font = '700 12px "Microsoft YaHei", sans-serif';
+    const pctText = `${Math.floor(this.energy)}% ${eTierName}`;
+    ctx.fillText(pctText, DESIGN_WIDTH / 2, eBarY - 4);
+
+    ctx.restore();
+
+    // 破阵就绪提示（移到屏幕顶部下方，与关卡文字分隔）
+    if (eTier === "burst" && !this._breakReadyNotified) {
+      this._breakReadyNotified = true;
+      this.addText(DESIGN_WIDTH / 2, 100, "破阵斩已就绪！", "#ffd35a", 20, 1.8);
+      this.slowMoTimer = Math.max(this.slowMoTimer, 0.06);
+    }
+    ctx.restore();
   }
 
   /** 右下角临时效果图标：鼓/魂/油，含圆形旋转倒计时 */
@@ -2719,10 +3599,11 @@ export class Game {
 
     if (items.length === 0) return;
 
-    const itemSize = 36;
-    const gap = 8;
+    const itemSize = 30;
+    const gap = 6;
+    // 移到右上角（分数下方）
     const startX = DESIGN_WIDTH - 16;
-    const startY = DESIGN_HEIGHT - 110;
+    const startY = 60;
 
     ctx.save();
     items.forEach((item, idx) => {
@@ -2736,18 +3617,18 @@ export class Game {
       ctx.fill();
       // 边框
       ctx.strokeStyle = item.color;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.arc(ix + itemSize / 2, iy + itemSize / 2, itemSize / 2, 0, Math.PI * 2);
       ctx.stroke();
 
       // 字符
       ctx.fillStyle = item.color;
-      ctx.font = '800 16px "Microsoft YaHei", "SimHei", sans-serif';
+      ctx.font = '800 13px "Microsoft YaHei", "SimHei", sans-serif';
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.shadowColor = item.color;
-      ctx.shadowBlur = 6;
+      ctx.shadowBlur = 4;
       ctx.fillText(item.label, ix + itemSize / 2, iy + itemSize / 2);
       ctx.shadowBlur = 0;
 
@@ -2756,24 +3637,105 @@ export class Game {
         const startAngle = -Math.PI / 2;
         const endAngle = startAngle + Math.PI * 2 * item.ratio;
         ctx.strokeStyle = item.color;
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(ix + itemSize / 2, iy + itemSize / 2, itemSize / 2 + 3, startAngle, endAngle);
+        ctx.arc(ix + itemSize / 2, iy + itemSize / 2, itemSize / 2 + 2, startAngle, endAngle);
         ctx.stroke();
-        // 剩余秒数
-        ctx.fillStyle = "#fff";
-        ctx.font = '700 10px "Microsoft YaHei", sans-serif';
-        ctx.fillText(`${Math.ceil(item.ratio * (PICKUP_BALANCE.drum.duration === "next_slash" ? 5 : Number(PICKUP_BALANCE.drum.duration) || 5))}`, ix + itemSize / 2, iy + itemSize + 8);
       } else {
         // 永续效果：脉动圆
         const pulse = 0.6 + Math.sin(this.elapsed * 4) * 0.4;
-        ctx.strokeStyle = `rgba(${item.color.slice(1).match(/.{2}/g)?.map((h) => parseInt(h, 16)).join(", ") || "255,255,255"}, ${pulse * 0.5})`;
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = item.color;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.arc(ix + itemSize / 2, iy + itemSize / 2, itemSize / 2 + 4, 0, Math.PI * 2);
+        ctx.arc(ix + itemSize / 2, iy + itemSize / 2, itemSize / 2 + 3, 0, Math.PI * 2);
         ctx.stroke();
       }
     });
+    ctx.restore();
+  }
+
+  /** 副刀槽位渲染（战士左右侧） */
+  private drawSubBladeSlot(ctx: CanvasRenderingContext2D, slotIndex: number, x: number, y: number, iconR: number, color: number) {
+    const blade = this.subBlades[slotIndex] ?? null;
+    const colorStr = "#" + color.toString(16).padStart(6, "0");
+    const slotType = slotIndex === 0 ? "蓄势" : "破点";
+    const slotTypeIcon = slotIndex === 0 ? "斩" : "破";
+
+    ctx.save();
+
+    // 槽位底框（圆形背景）
+    ctx.fillStyle = "rgba(18, 16, 14, 0.75)";
+    ctx.beginPath();
+    ctx.arc(x + iconR, y + iconR, iconR + 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 边框（统一样式）
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(x + iconR, y + iconR, iconR, 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (!blade) {
+      ctx.fillStyle = "rgba(246, 231, 189, 0.35)";
+      ctx.font = '600 10px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = "center";
+      ctx.fillText("空", x + iconR, y + iconR + 4);
+    } else {
+      const timer = this.subBladeTimers[slotIndex] ?? 0;
+      const cd = this.subBladeCooldowns[slotIndex] ?? 5;
+      const ratio = Math.min(1, timer / cd);
+      const ready = ratio >= 1;
+
+      if (ready) {
+        // Ready: 完整光环 + 中心色点
+        const pulse = 0.5 + Math.sin(this.elapsed * 6 + slotIndex * 2) * 0.5;
+        ctx.strokeStyle = colorStr;
+        ctx.shadowColor = colorStr;
+        ctx.shadowBlur = 12 + pulse * 12;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(x + iconR, y + iconR, iconR - 1, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        // 中心icon（统一风格）
+        ctx.fillStyle = colorStr;
+        ctx.font = '900 16px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(slotTypeIcon, x + iconR, y + iconR + 1);
+      } else {
+        // 冷却中：未填充圆 + 进度弧（统一风格）
+        // 底圈
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.arc(x + iconR, y + iconR, iconR - 1, 0, Math.PI * 2);
+        ctx.stroke();
+        // 进度弧
+        ctx.strokeStyle = colorStr;
+        ctx.lineWidth = 3.5;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.arc(x + iconR, y + iconR, iconR - 1, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
+        ctx.stroke();
+        // CD数字（中心）
+        ctx.fillStyle = "#f6e7bd";
+        ctx.font = '700 14px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(`${Math.ceil(cd - timer)}`, x + iconR, y + iconR);
+      }
+    }
+    ctx.restore();
+
+    // 槽位标签（图标下方）
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = colorStr;
+    ctx.font = '700 11px "Microsoft YaHei", sans-serif';
+    ctx.fillText(slotType, x + iconR, y + iconR * 2 + 6);
     ctx.restore();
   }
 
@@ -2939,26 +3901,39 @@ export class Game {
     const enemy = this.createElite(ek, lane, BALANCE.battlefield.enemySpawnY, conf);
     this.enemies.push(enemy);
     this.discoveredEnemies.add("elite");
-    // 出场播报
+    // 出场播报（2.5秒）
     this.eliteIntroTimer = 2.5;
     this.eliteIntroText = conf.introText;
-    // 出场特效
-    this.screenShake = Math.max(this.screenShake, 0.45);
-    this.flash = Math.max(this.flash, 0.35);
-    this.particles.push(glowParticle({ x: lane, y: BALANCE.battlefield.enemySpawnY }, conf.color, 30, 55));
+    // 出场特效强化
+    this.screenShake = Math.max(this.screenShake, 0.6);
+    this.flash = Math.max(this.flash, 0.5);
+    // 全屏光柱粒子
+    for (let i = 0; i < 8; i++) {
+      this.particles.push(glowParticle(
+        { x: lane + (Math.random() - 0.5) * 60, y: BALANCE.battlefield.enemySpawnY + (Math.random() - 0.5) * 40 },
+        conf.color, 18 + Math.random() * 16, 40 + Math.random() * 20
+      ));
+    }
+    // 向外扩散的光圈
+    this.particles.push(ringParticle({ x: lane, y: BALANCE.battlefield.enemySpawnY + 14 }, conf.color, 75));
     logEvent("elite_spawn", { levelId: this.level.id, eliteKind: ek, time: this.elapsed });
   }
 
   /** Boss生成 */
   private updateBossSpawn() {
     if (this.bossSpawned || !this.level.bossId) return;
-    // Boss在最后一波敌人出波完成后立刻生成 (不等待长时间)
-    if (this.wavesSpawned < this.level.waves.length) return;
-    // 突破战(boss关)立刻出boss, 普通boss关在最后一波5秒后
+    // 突破战(boss关): Boss开场即出（0.5秒后）
     const isChallengeBreakthrough = this.currentRunMode === "challenge";
-    const minDelay = isChallengeBreakthrough ? 2 : 5;
-    if (this.elapsed < this.wavesFinishedAt + minDelay) return;
-    this.bossSpawned = true;
+    if (isChallengeBreakthrough) {
+      if (this.elapsed < 0.5) return;
+      this.bossSpawned = true;
+    } else {
+      // 普通主线不会有 boss（由 levels.ts 配置控制）
+      // Boss在最后一波敌人出波完成后才出
+      if (this.wavesSpawned < this.level.waves.length) return;
+      if (this.elapsed < this.wavesFinishedAt + 5) return;
+      this.bossSpawned = true;
+    }
     const bid = this.level.bossId;
     const enemy = this.createBoss(bid);
     this.enemies.push(enemy);
@@ -3038,8 +4013,8 @@ export class Game {
       // 技能冷却
       enemy.skillCooldown = (enemy.skillCooldown ?? 0) + dt;
 
-      if (enemy.bossId === "zhangFei") {
-        // 张飞：怒吼 — 碰到的刀芒损耗能量
+      if (enemy.bossId === "yaoWang") {
+        // 妖兽咆哮：碰到的刀芒损耗能量
         if (enemy.skillCooldown >= conf.skill.cooldown) {
           // 怒吼视觉
           this.particles.push(ringParticle(enemy, conf.color, 80));
@@ -3048,7 +4023,7 @@ export class Game {
         }
       }
 
-      if (enemy.bossId === "simaYi") {
+      if (enemy.bossId === "moXiu") {
         if (enemy.skillCooldown >= conf.skill.cooldown) {
           enemy.skillCooldown = 0;
           // 瞬移到随机列
@@ -3064,7 +4039,7 @@ export class Game {
         }
       }
 
-      if (enemy.bossId === "zhenJi") {
+      if (enemy.bossId === "huaYao") {
         if (enemy.skillCooldown >= conf.skill.cooldown) {
           enemy.skillCooldown = 0;
           // 释放花瓣小兵
@@ -3183,9 +4158,17 @@ export class Game {
     this.chestAnimTimer = 0;
     this.chestBuffResult = null;
     this.chestBuffRevealed = false;
-    // 飘落宝箱粒子
-    this.particles.push(glowParticle({ x, y }, "#ffd35a", 20, 45));
-    this.addText(x, y - 22, "军令宝箱", "#ffd35a", 16, 1.6);
+    // 宝箱坠落特效（强化）
+    this.particles.push(glowParticle({ x, y }, "#ffd35a", 24, 55));
+    this.particles.push(glowParticle({ x: x - 12, y: y + 6 }, "#ffd67c", 16, 40));
+    this.particles.push(glowParticle({ x: x + 12, y: y + 6 }, "#ffd67c", 16, 40));
+    this.particles.push(ringParticle({ x, y: y + 10 }, "#ffd35a", 50));
+    for (let i = 0; i < 6; i++) {
+      this.particles.push(...sparkBurst({ x: x + (Math.random() - 0.5) * 20, y: y + (Math.random() - 0.5) * 10 }, 4, "#ffd35a"));
+    }
+    this.screenShake = Math.max(this.screenShake, 0.3);
+    this.flash = Math.max(this.flash, 0.2);
+    this.addText(x, y - 22, "军令宝箱", "#ffd35a", 18, 2.0);
   }
 
   /** 随机抽取一个军令 */
@@ -3227,10 +4210,27 @@ export class Game {
         this.chestAnimTimer = 0;
         this.chestBuffResult = this.getRandomBuff();
         this.chestBuffRevealed = false;
-        // 宝箱打开粒子效果
-        this.particles.push(glowParticle({ x: this.chestDropX, y: this.chestDropY }, "#ffd35a", 30, 60));
-        this.particles.push(...sparkBurst({ x: this.chestDropX, y: this.chestDropY }, 24, "#ffd35a"));
-        this.flash = Math.max(this.flash, 0.5);
+        // 宝箱打开全屏粒子爆发
+        for (let i = 0; i < 4; i++) {
+          this.particles.push(glowParticle(
+            { x: this.chestDropX + (Math.random() - 0.5) * 30, y: this.chestDropY + (Math.random() - 0.5) * 30 },
+            "#ffd35a", 30 + Math.random() * 12, 60
+          ));
+        }
+        for (let i = 0; i < 3; i++) {
+          this.particles.push(glowParticle(
+            { x: this.chestDropX + (Math.random() - 0.5) * 40, y: this.chestDropY + (Math.random() - 0.5) * 40 },
+            "#ffb15c", 22 + Math.random() * 10, 50
+          ));
+        }
+        this.particles.push(ringParticle({ x: this.chestDropX, y: this.chestDropY }, "#ffd35a", 80));
+        this.particles.push(ringParticle({ x: this.chestDropX, y: this.chestDropY }, "#ff9e7a", 60));
+        for (let i = 0; i < 8; i++) {
+          this.particles.push(...sparkBurst({ x: this.chestDropX + (Math.random() - 0.5) * 20, y: this.chestDropY + (Math.random() - 0.5) * 20 }, 4, "#ffd35a"));
+        }
+        this.flash = Math.max(this.flash, 0.7);
+        this.screenShake = Math.max(this.screenShake, 0.5);
+        this.addText(this.chestDropX, this.chestDropY - 36, "军令宝箱开启", "#ffd35a", 18, 1.8);
         AudioService.pickup();
       }
     }
@@ -3262,71 +4262,156 @@ export class Game {
   private drawChestDrop(ctx: CanvasRenderingContext2D) {
     if (!this.chestDropped) return;
     const cx = this.chestDropX;
-    const cy = this.chestDropY - (this.chestOpening ? 4 : 0);
+    const cy = this.chestDropY - (this.chestOpening ? 8 : 0);
+
+    // 落点光环：金色波纹 + 远景光柱
+    const ringT = (this.chestDropTimer * 2) % 1;
+    ctx.save();
+    ctx.strokeStyle = `rgba(255, 211, 90, ${1 - ringT * 0.8})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 8 + ringT * 60, 0, Math.PI * 2);
+    ctx.stroke();
+    // 第二层环
+    const ringT2 = (this.chestDropTimer * 2 + 0.5) % 1;
+    ctx.strokeStyle = `rgba(255, 158, 122, ${1 - ringT2 * 0.8})`;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 8 + ringT2 * 60, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
 
     ctx.save();
     ctx.translate(cx, cy);
 
-    // 宝箱主体
-    const pulse = 1 + Math.sin(this.chestDropTimer * 3) * 0.06;
-    const alpha = this.chestOpened ? 0.6 : 1;
-    ctx.globalAlpha = alpha;
-
-    // 宝箱阴影
-    ctx.shadowColor = "#ffd35a";
-    ctx.shadowBlur = this.chestOpened ? 0 : 16;
-
     if (!this.chestOpened) {
-      // 未打开：金色箱子
+      // 未打开：金色箱子（强化版）
+      const pulse = 1 + Math.sin(this.chestDropTimer * 3) * 0.08;
+      ctx.scale(pulse, pulse);
+
+      // 阴影光晕
+      ctx.shadowColor = "#ffd35a";
+      ctx.shadowBlur = 20;
+
+      // 箱子体（加大）
       ctx.fillStyle = "#8b6914";
       ctx.strokeStyle = "#ffd35a";
       ctx.lineWidth = 2.5;
-      ctx.scale(pulse, pulse);
-      // 箱子体
-      ctx.fillRect(-14, -8, 28, 18);
-      ctx.strokeRect(-14, -8, 28, 18);
+      ctx.fillRect(-22, -10, 44, 24);
+      ctx.strokeRect(-22, -10, 44, 24);
+
       // 箱子盖
       ctx.fillStyle = "#a07d1a";
       ctx.beginPath();
-      ctx.moveTo(-15, -10);
-      ctx.lineTo(0, -18);
-      ctx.lineTo(15, -10);
+      ctx.moveTo(-24, -12);
+      ctx.lineTo(0, -22);
+      ctx.lineTo(24, -12);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
+
       // 锁扣
       ctx.fillStyle = "#ffd35a";
-      ctx.fillRect(-3, -4, 6, 4);
+      ctx.fillRect(-4, -4, 8, 5);
+      ctx.fillStyle = "#8b6914";
+      ctx.fillRect(-1, -1, 2, 2);
+
+      ctx.shadowBlur = 0;
+
       // 倒计时
       ctx.fillStyle = "#fff3c0";
-      ctx.font = '10px "Microsoft YaHei", sans-serif';
+      ctx.font = '700 12px "Microsoft YaHei", sans-serif';
       ctx.textAlign = "center";
-      ctx.fillText(`${Math.ceil(3 - this.chestDropTimer)}s`, 0, 24);
-    } else {
-      // 已打开：卷轴 + 光效
-      ctx.fillStyle = "rgba(255, 211, 90, 0.25)";
-      ctx.beginPath();
-      ctx.arc(0, 0, 28, 0, Math.PI * 2);
-      ctx.fill();
-      // 卷轴
-      if (!this.chestBuffRevealed) {
-        // 卷轴旋转动画
-        const spinAngle = Math.min(this.chestAnimTimer * 4, Math.PI * 0.5);
+      ctx.fillText(`${Math.ceil(3 - this.chestDropTimer)}s`, 0, 32);
+    } else if (!this.chestBuffRevealed) {
+      // 已打开但军令未揭示：旋转的金色符文
+      const spinAngle = this.chestAnimTimer * 6;
+      ctx.save();
+      ctx.rotate(spinAngle);
+      for (let i = 0; i < 4; i++) {
         ctx.save();
-        ctx.rotate(spinAngle);
-        ctx.fillStyle = "#d4a574";
-        ctx.fillRect(-8, -12, 16, 24);
-        ctx.strokeStyle = "#8b6914";
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(-8, -12, 16, 24);
+        ctx.rotate((i * Math.PI) / 2);
+        ctx.fillStyle = "#ffd35a";
+        ctx.fillRect(15, -2, 8, 4);
         ctx.restore();
-        ctx.fillStyle = "#fff3c0";
-        ctx.font = '10px "Microsoft YaHei", sans-serif';
-        ctx.textAlign = "center";
-        ctx.fillText("开", 0, 4);
       }
+      ctx.restore();
+      // 中心圆
+      ctx.fillStyle = "#ffd35a";
+      ctx.beginPath();
+      ctx.arc(0, 0, 12, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#8b6914";
+      ctx.beginPath();
+      ctx.arc(0, 0, 8, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+        // 军令已揭示：大图标 + 名字
+        const buff = RUN_BUFF_BY_ID[this.chestBuffResult!];
+        if (buff) {
+          // 背景光圈
+          ctx.fillStyle = "rgba(255, 211, 90, 0.3)";
+          ctx.beginPath();
+          ctx.arc(0, 0, 30, 0, Math.PI * 2);
+          ctx.fill();
+          // 圆形
+          ctx.fillStyle = buff.color;
+          ctx.shadowColor = buff.color;
+          ctx.shadowBlur = 14;
+          ctx.beginPath();
+          ctx.arc(0, 0, 22, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          // 军令字符（取名字首字）
+          ctx.fillStyle = "#fff";
+          ctx.font = '900 22px "Microsoft YaHei", sans-serif';
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(buff.name.charAt(0), 0, 1);
+          // 军令名称（横条）
+          const nameW = ctx.measureText(buff.name).width + 16;
+          ctx.fillStyle = "rgba(20, 14, 8, 0.85)";
+          ctx.fillRect(-nameW / 2, 30, nameW, 16);
+          ctx.fillStyle = buff.color;
+          ctx.font = '700 11px "Microsoft YaHei", sans-serif';
+          ctx.fillText(buff.name, 0, 39);
+        }
     }
+    ctx.restore();
 
+    // 顶部"军令宝箱"标题
+    if (!this.chestOpened) {
+      ctx.save();
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#ffd35a";
+      ctx.shadowColor = "#ffd35a";
+      ctx.shadowBlur = 8;
+      ctx.font = '700 13px "Microsoft YaHei", sans-serif';
+      ctx.fillText("军令宝箱", cx, cy - 38);
+      ctx.restore();
+    }
+  }
+
+  /** 绘制中场事件屏幕边缘提示 */
+  private drawMidfieldEventBorder(ctx: CanvasRenderingContext2D) {
+    if (!this._midfieldEvent) return;
+    const e = this._midfieldEvent;
+    if (e.timer > e.duration) return;
+    const color = e.type === 'gather' ? "91,192,255" : "255,106,51";
+    const alpha = Math.min(1, (e.duration - e.timer) / 2);
+    ctx.save();
+    ctx.globalAlpha = alpha * 0.4;
+    // 顶部边
+    const grad = ctx.createLinearGradient(0, 0, 0, 60);
+    grad.addColorStop(0, `rgba(${color}, 0.7)`);
+    grad.addColorStop(1, `rgba(${color}, 0)`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, DESIGN_WIDTH, 60);
+    // 底部边
+    const grad2 = ctx.createLinearGradient(0, DESIGN_HEIGHT - 60, 0, DESIGN_HEIGHT);
+    grad2.addColorStop(0, `rgba(${color}, 0)`);
+    grad2.addColorStop(1, `rgba(${color}, 0.7)`);
+    ctx.fillStyle = grad2;
+    ctx.fillRect(0, DESIGN_HEIGHT - 60, DESIGN_WIDTH, 60);
     ctx.restore();
   }
 
@@ -3378,6 +4463,26 @@ export class Game {
     ctx.lineTo(x + cut, y + h - 2);
     ctx.lineTo(x, y + h - cut);
     ctx.lineTo(x + 2, y + cut);
+    ctx.closePath();
+  }
+}
+
+/** Canvas 圆角矩形辅助 */
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  if (typeof ctx.roundRect === 'function') {
+    ctx.roundRect(x, y, w, h, r);
+  } else {
+    // 降级方案
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
     ctx.closePath();
   }
 }
