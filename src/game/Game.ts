@@ -58,6 +58,7 @@ export class Game {
 
   private readonly onFinish: FinishCallback;
   private readonly onReviveOffer?: ReviveOfferCallback;
+  private readonly onBuffReveal?: (buffId: BuffId) => void;
   private phase: GamePhase = "playing";
   private elapsed = 0;
   private idCounter = 0;
@@ -182,6 +183,16 @@ export class Game {
   private chestAnimTimer = 0;
   private chestBuffResult: BuffId | null = null;
   private chestBuffRevealed = false;
+  /** 军令揭示后等待玩家在弹窗中确认（应用前不应用buff） */
+  public chestPendingConfirm = false;
+  /** 军令图标飞向左上角的目标点（相对画布坐标） */
+  public chestFlyTarget = { x: 0, y: 0 };
+  /** 军令图标飞行动画的进度 0..1 */
+  public chestFlyT = 0;
+  /** 军令图标是否处于飞行动画中 */
+  public chestFlying = false;
+  /** 飞行完成后已隐藏 */
+  public chestDone = false;
 
   private stats: BattleStats = {
     kills: 0,
@@ -208,10 +219,11 @@ export class Game {
     killedBoss: null
   };
 
-  constructor(level: LevelConfig, onFinish: FinishCallback, onReviveOffer?: ReviveOfferCallback) {
+  constructor(level: LevelConfig, onFinish: FinishCallback, onReviveOffer?: ReviveOfferCallback, onBuffReveal?: (buffId: BuffId) => void) {
     this.level = level;
     this.onFinish = onFinish;
     this.onReviveOffer = onReviveOffer;
+    this.onBuffReveal = onBuffReveal;
     this.maxHp = Math.min(level.hp + this.progressionModifiers.openingShield, BALANCE.player.maxHp + this.progressionModifiers.openingShield);
     this.hp = this.maxHp;
     this.energy = clamp(this.runContext.mode === "freeBurst" ? BALANCE.swordEnergy.max : level.initialEnergy + this.progressionModifiers.initialEnergyBonus, 0, BALANCE.swordEnergy.max);
@@ -635,7 +647,7 @@ export class Game {
       this.energy = clamp(this.energy + refund, 0, BALANCE.swordEnergy.max);
       // 返还 >= 15 时显示返还量
       if (refund >= 15) {
-        this.addText(DESIGN_WIDTH / 2, 106, `刀势返还 +${refund}%`, "#5bc0ff", 18, 1.2);
+        this.addText(DESIGN_WIDTH / 2, 810, `+${refund}% 刀势`, "#5bc0ff", 12, 0.7);
       }
     }
 
@@ -656,7 +668,9 @@ export class Game {
       }
       // 副刀加速视觉反馈：浮字 + 图标光圈闪烁
       if (trail.kills >= 5 && !this.hasRecentText("副刀共鸣", 0.5)) {
-        this.addText(DESIGN_WIDTH / 2, 160, "副刀共鸣", "#5bc0ff", 18, 0.8);
+        // 副刀共鸣：靠近两个副刀槽位（左右下）
+        this.addText(60, 720, "副刀共鸣", "#5bc0ff", 11, 0.6);
+        this.addText(DESIGN_WIDTH - 60, 720, "副刀共鸣", "#ff6a33", 11, 0.6);
         // 触发所有副刀光圈闪烁
         for (let i = 0; i < 2; i++) {
           this.subReadyPing.push({ slot: i, life: 0.3, maxLife: 0.3 });
@@ -1488,6 +1502,16 @@ export class Game {
       const statusSlow = enemy.ignited || enemy.marked ? 0.54 : 1;
       const fortressSlow = enemy.slowedTimer > 0 ? 0.4 : 1;
 
+      // ── 蛇形兵 sine_sway：横向正弦摆动 ──
+      if (enemy.snakeSwayT !== undefined) {
+        enemy.snakeSwayT += dt;
+        // 振幅 14px，频率 0.8Hz（周期 1.25s）
+        const sway = Math.sin(enemy.snakeSwayT * Math.PI * 1.6) * 14;
+        if (enemy.homeX !== undefined) {
+          enemy.x = enemy.homeX + sway;
+        }
+      }
+
       // ── 急冲兵 rush_then_slow ──
       let rushMultiplier = 1;
       if (enemy.rushTimer !== undefined) {
@@ -2033,7 +2057,9 @@ export class Game {
     }
     this.screenShake = Math.max(this.screenShake, 0.6);
     this.flash = Math.max(this.flash, 0.3);
-    this.addText(DESIGN_WIDTH / 2, 280, "⚔ 副刀共鸣", "#ff6a33", 28, 2.0);
+    this.addText(60, 720, "⚔ 共鸣", "#5bc0ff", 12, 0.8);
+    this.addText(DESIGN_WIDTH - 60, 720, "⚔ 共鸣", "#ff6a33", 12, 0.8);
+    this.addText(DESIGN_WIDTH / 2, 240, "副刀共鸣·CD清零", "#ffd35a", 16, 1.5);
     // 副刀光圈立刻出现
     for (let i = 0; i < 2; i++) {
       this.subReadyPing.push({ slot: i, life: 0.4, maxLife: 0.4 });
@@ -2438,8 +2464,9 @@ export class Game {
       formationLitIndex: 0,
       formationLitTimer: 0,
       formationWrongHits: 0,
-      // 30% 步兵是急冲兵
-      rushTimer: kind === "infantry" && Math.random() < 0.3 ? 0.8 : undefined
+      // 30% 步兵是急冲兵；15% 步兵/盾兵是蛇形兵
+      rushTimer: kind === "infantry" && Math.random() < 0.3 ? 0.8 : undefined,
+      snakeSwayT: (kind === "infantry" || kind === "shield") && Math.random() < 0.15 ? 0 : undefined
     };
   }
 
@@ -2633,7 +2660,11 @@ export class Game {
     ctx.font = '700 16px "Microsoft YaHei", sans-serif';
     const isBossLevel = this.level.id < 10000 && Boolean(this.level.bossId);
     const displayFloor = isBossLevel ? null : (this.level.id >= 10000 ? this.level.id - 10000 : this.level.id);
-    ctx.fillText(displayFloor !== null ? `第${displayFloor}关 ${this.level.title}` : this.level.title, DESIGN_WIDTH / 2, 28);
+    // 防止标题里已含"第X关"前缀造成重复
+    const titleText = this.level.title;
+    const hasPrefix = displayFloor !== null && titleText.startsWith(`第${displayFloor}关`);
+    const displayTitle = hasPrefix ? titleText : (displayFloor !== null ? `第${displayFloor}关 ${titleText}` : titleText);
+    ctx.fillText(displayTitle, DESIGN_WIDTH / 2, 28);
     ctx.font = '11px "Microsoft YaHei", sans-serif';
     ctx.fillStyle = "rgba(246, 231, 189, 0.72)";
     ctx.fillText(`波次 ${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`, DESIGN_WIDTH / 2, 48);
@@ -2871,23 +2902,53 @@ export class Game {
         ctx.closePath();
         ctx.stroke();
 
-        // 名称（更显眼：背景+发光+加大）
+        // 名称（统一表达：大字 + 盾形包裹）
         ctx.save();
-        const nameText = visDef.name;
-        ctx.font = '800 13px "Microsoft YaHei", sans-serif';
-        const nameW = ctx.measureText(nameText).width;
-        // 背景
-        ctx.fillStyle = "rgba(20, 14, 8, 0.85)";
-        ctx.fillRect(-nameW / 2 - 6, -enemy.radius - 22, nameW + 12, 18);
-        // 边框
+        const nameText = visDef.name; // "回血将" 3字
+        // 盾形背景：3字用 22px 字号
+        const charSize = 22;
+        const charGap = 4;
+        const totalW = nameText.length * charSize + (nameText.length - 1) * charGap;
+        const shapeH = 32;
+        const shapeW = totalW + 16;
+        const shapeY = -enemy.radius - 38;
+        // 盾形路径（圆角矩形 + 底部小三角）
+        ctx.beginPath();
+        const shapeX = -shapeW / 2;
+        ctx.moveTo(shapeX + 8, shapeY);
+        ctx.lineTo(shapeX + shapeW - 8, shapeY);
+        ctx.quadraticCurveTo(shapeX + shapeW, shapeY, shapeX + shapeW, shapeY + 8);
+        ctx.lineTo(shapeX + shapeW, shapeY + shapeH - 8);
+        ctx.quadraticCurveTo(shapeX + shapeW, shapeY + shapeH, shapeX + shapeW - 8, shapeY + shapeH);
+        ctx.lineTo(0, shapeY + shapeH + 6); // 底部小三角
+        ctx.lineTo(shapeX + 8, shapeY + shapeH);
+        ctx.quadraticCurveTo(shapeX, shapeY + shapeH, shapeX, shapeY + shapeH - 8);
+        ctx.lineTo(shapeX, shapeY + 8);
+        ctx.quadraticCurveTo(shapeX, shapeY, shapeX + 8, shapeY);
+        ctx.closePath();
+        // 填充
+        ctx.fillStyle = "rgba(20, 14, 8, 0.92)";
+        ctx.fill();
+        // 边框（双层：外深 + 内亮）
         ctx.strokeStyle = visDef.color;
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(-nameW / 2 - 6, -enemy.radius - 22, nameW + 12, 18);
-        // 文字
-        ctx.fillStyle = "#fff3c0";
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+        // 名字
+        ctx.font = `900 ${charSize}px "Microsoft YaHei", "SimHei", sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
         ctx.shadowColor = visDef.color;
         ctx.shadowBlur = 6;
-        ctx.fillText(nameText, 0, -enemy.radius - 9);
+        ctx.fillStyle = "#fff3c0";
+        // 逐字绘制
+        const textY = shapeY + shapeH / 2;
+        for (let i = 0; i < nameText.length; i++) {
+          const charX = -totalW / 2 + i * (charSize + charGap) + charSize / 2;
+          ctx.fillText(nameText[i], charX, textY);
+        }
         ctx.shadowBlur = 0;
         ctx.restore();
 
@@ -3376,27 +3437,31 @@ export class Game {
     ctx.save();
     ctx.translate(cx, cy);
     ctx.globalCompositeOperation = "lighter";
-    const auraCount = energyRatio >= 0.9 ? 4 : energyRatio >= 0.6 ? 2 : 1;
-    for (let i = 0; i < auraCount; i += 1) {
-      ctx.strokeStyle = stage.color;
-      ctx.shadowColor = stage.color;
-      ctx.shadowBlur = 12 + energyRatio * 28;
-      ctx.lineWidth = 4 + energyRatio * 7 - i;
-      ctx.globalAlpha = (0.16 + energyRatio * 0.46) / (i + 1);
-      ctx.beginPath();
-      ctx.arc(0, -12, 42 + energyRatio * 18 + drawPulse * 8 + i * 9 + Math.sin(this.elapsed * 5 + i) * 2, -Math.PI * 0.92, -Math.PI * 0.92 + energyRatio * Math.PI * 1.85);
-      ctx.stroke();
-    }
-    if (energyRatio >= 0.6) {
-      for (let i = 0; i < 4; i += 1) {
-        const angle = this.elapsed * 2.2 + i * Math.PI * 0.5;
-        const r = 34 + energyRatio * 28 + Math.sin(this.elapsed * 4 + i) * 4;
-        ctx.globalAlpha = 0.2 + energyRatio * 0.28;
+    // 弱化：仅在 >= 轻斩(0.1) 阶段显示能量气场
+    if (energyRatio >= 0.1) {
+      const auraCount = energyRatio >= 0.9 ? 3 : energyRatio >= 0.6 ? 2 : 1;
+      for (let i = 0; i < auraCount; i += 1) {
         ctx.strokeStyle = stage.color;
-        ctx.lineWidth = 2;
+        ctx.shadowColor = stage.color;
+        ctx.shadowBlur = 4 + energyRatio * 8; // 减弱 12+28 → 4+8
+        ctx.lineWidth = 1.5 + energyRatio * 2 - i * 0.4; // 减弱 4+7 → 1.5+2
+        ctx.globalAlpha = (0.06 + energyRatio * 0.18) / (i + 1); // 减弱 0.16+0.46 → 0.06+0.18
+        ctx.beginPath();
+        ctx.arc(0, -12, 36 + energyRatio * 12 + i * 5 + Math.sin(this.elapsed * 5 + i) * 2, -Math.PI * 0.85, -Math.PI * 0.85 + energyRatio * Math.PI * 1.7);
+        ctx.stroke();
+      }
+    }
+    if (energyRatio >= 0.7) {
+      // 仅在接近破阵斩时才有装饰性弧线
+      for (let i = 0; i < 3; i += 1) {
+        const angle = this.elapsed * 2.2 + i * Math.PI * 0.5;
+        const r = 32 + energyRatio * 22 + Math.sin(this.elapsed * 4 + i) * 3;
+        ctx.globalAlpha = 0.12 + energyRatio * 0.18;
+        ctx.strokeStyle = stage.color;
+        ctx.lineWidth = 1.2;
         ctx.beginPath();
         ctx.moveTo(Math.cos(angle) * r, -14 + Math.sin(angle) * r * 0.36);
-        ctx.quadraticCurveTo(0, -44 - energyRatio * 18, Math.cos(angle + 0.7) * (r + 12), -12 + Math.sin(angle + 0.7) * r * 0.36);
+        ctx.quadraticCurveTo(0, -40 - energyRatio * 14, Math.cos(angle + 0.7) * (r + 10), -12 + Math.sin(angle + 0.7) * r * 0.36);
         ctx.stroke();
       }
     }
@@ -4237,34 +4302,189 @@ export class Game {
 
     if (this.chestOpened && !this.chestBuffRevealed) {
       this.chestAnimTimer += dt;
-      // 0.8秒后揭示军令
+      // 0.8秒后揭示军令 → 弹窗等待玩家确认
       if (this.chestAnimTimer >= 0.8) {
         this.chestBuffRevealed = true;
+        this.chestPendingConfirm = true;
         if (this.chestBuffResult) {
-          this.applyChestBuff(this.chestBuffResult);
-          // 播放随机卷轴动画：卷轴在空中展开
+          // 通知 App 层显示弹窗
+          this.onBuffReveal?.(this.chestBuffResult);
+          // 暂停游戏
+          this.phase = "paused_for_chest";
+          // 在场景中央绘制大图标的入场效果（由 drawChestDrop 处理）
           const buff = RUN_BUFF_BY_ID[this.chestBuffResult];
           const routeColor = ROUTE_COLORS[buff.route];
-          this.particles.push(ringParticle({ x: DESIGN_WIDTH / 2, y: 140 }, routeColor, 60));
-          this.addText(DESIGN_WIDTH / 2, 120, `${ROUTE_NAMES[buff.route]}·${buff.name}`, routeColor, 24, 2);
-          this.flash = Math.max(this.flash, 0.7);
+          this.particles.push(ringParticle({ x: DESIGN_WIDTH / 2, y: 380 }, routeColor, 90));
+          this.flash = Math.max(this.flash, 0.6);
         }
       }
     }
 
-    // 3秒后清除宝箱状态
-    if (this.chestBuffRevealed && this.chestAnimTimer > 3) {
+    // 3秒后清除宝箱状态（已确认才清）
+    if (this.chestBuffRevealed && this.chestAnimTimer > 3 && !this.chestPendingConfirm && !this.chestFlying && !this.chestDone) {
       this.chestDropped = false;
     }
+
+    // 飞行动画更新
+    if (this.chestFlying) {
+      this.chestFlyT += dt / 0.7; // 0.7s飞行
+      if (this.chestFlyT >= 1) {
+        this.chestFlyT = 1;
+        this.finishChestFly();
+      }
+    }
+  }
+
+  /** 玩家确认军令：应用buff并启动飞行动画 */
+  public confirmChestBuff() {
+    if (!this.chestPendingConfirm || !this.chestBuffResult) return;
+    this.chestPendingConfirm = false;
+    this.applyChestBuff(this.chestBuffResult);
+    // 启动飞行动画：从大图标中心飞向暂停按钮下方
+    this.chestFlyT = 0;
+    this.chestFlying = true;
+    // 飞行的起点/终点（相对于画布）
+    // 起点：大图标位置（中下）
+    const startX = DESIGN_WIDTH / 2;
+    const startY = 380;
+    // 终点：暂停按钮下方（左上角 28+40=68，y=68）
+    const endX = 60;
+    const endY = 68;
+    this.chestFlyTarget = { x: endX, y: endY };
+    this._chestFlyStart = { x: startX, y: startY };
+    this._chestBuffStartScale = 1.0;
+    this._chestBuffEndScale = 0.32;
+    // 继续游戏
+    this.phase = "playing";
+  }
+
+  private _chestFlyStart = { x: 0, y: 0 };
+  private _chestBuffStartScale = 1;
+  private _chestBuffEndScale = 0.32;
+
+  /** 飞行完成 */
+  public finishChestFly() {
+    this.chestFlying = false;
+    this.chestDone = true;
   }
 
   /** 绘制军令宝箱 */
   private drawChestDrop(ctx: CanvasRenderingContext2D) {
     if (!this.chestDropped) return;
+
+    // 1) 飞行中：画从中心飞向左上角的小图标
+    if (this.chestFlying && this.chestBuffResult) {
+      const buff = RUN_BUFF_BY_ID[this.chestBuffResult];
+      if (buff) {
+        // 缓出曲线
+        const t = this.chestFlyT;
+        const easeT = 1 - Math.pow(1 - t, 2);
+        const curX = this._chestFlyStart.x + (this.chestFlyTarget.x - this._chestFlyStart.x) * easeT;
+        const curY = this._chestFlyStart.y + (this.chestFlyTarget.y - this._chestFlyStart.y) * easeT;
+        // 弧形轨迹：中段向上拱
+        const arcOffset = Math.sin(t * Math.PI) * -40;
+        const finalX = curX;
+        const finalY = curY + arcOffset;
+        // 缩放
+        const scale = this._chestBuffStartScale + (this._chestBuffEndScale - this._chestBuffStartScale) * easeT;
+        const radius = 22 * scale;
+        ctx.save();
+        ctx.translate(finalX, finalY);
+        // 拖尾
+        for (let i = 0; i < 4; i++) {
+          const trailT = i * 0.08;
+          const tt = Math.max(0, t - trailT);
+          const et = 1 - Math.pow(1 - tt, 2);
+          const tx = this._chestFlyStart.x + (this.chestFlyTarget.x - this._chestFlyStart.x) * et;
+          const ty = this._chestFlyStart.y + (this.chestFlyTarget.y - this._chestFlyStart.y) * et + Math.sin(tt * Math.PI) * -40;
+          ctx.fillStyle = `${buff.color}${i === 0 ? "AA" : i === 1 ? "77" : i === 2 ? "44" : "22"}`;
+          ctx.beginPath();
+          ctx.arc(tx - finalX, ty - finalY, radius * 0.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        // 主圆
+        ctx.shadowColor = buff.color;
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = buff.color;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        // 字符
+        ctx.fillStyle = "#fff";
+        ctx.font = `900 ${Math.round(22 * scale)}px "Microsoft YaHei", sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(buff.name.charAt(0), 0, 1);
+        ctx.restore();
+      }
+      return;
+    }
+
+    // 2) 揭示后等待确认：在屏幕中央绘制大图标
+    if (this.chestBuffRevealed && this.chestPendingConfirm && this.chestBuffResult) {
+      const buff = RUN_BUFF_BY_ID[this.chestBuffResult];
+      if (buff) {
+        // 半透明背景遮罩（强调"请确认"）
+        ctx.save();
+        ctx.fillStyle = "rgba(10, 7, 5, 0.55)";
+        ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+        // 中心位置（更大，离地更高）
+        const cx = DESIGN_WIDTH / 2;
+        const cy = 360;
+        // 脉动光晕
+        const pulse = Math.sin(this.elapsed * 4) * 0.5 + 0.5;
+        // 外圈光晕
+        const grad = ctx.createRadialGradient(cx, cy, 20, cx, cy, 100 + pulse * 20);
+        grad.addColorStop(0, buff.color + "66");
+        grad.addColorStop(0.5, buff.color + "22");
+        grad.addColorStop(1, "transparent");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 120, 0, Math.PI * 2);
+        ctx.fill();
+        // 大圆形主体
+        ctx.shadowColor = buff.color;
+        ctx.shadowBlur = 24 + pulse * 8;
+        ctx.fillStyle = buff.color;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 50, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        // 边框
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 50, 0, Math.PI * 2);
+        ctx.stroke();
+        // 军令大字符
+        ctx.fillStyle = "#fff";
+        ctx.font = '900 36px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(buff.name.charAt(0), cx, cy + 2);
+        // 路线名+军令名
+        ctx.fillStyle = buff.color;
+        ctx.font = '800 16px "Microsoft YaHei", sans-serif';
+        ctx.fillText(`${ROUTE_NAMES[buff.route]}·${buff.name}`, cx, cy + 80);
+        // 描述
+        ctx.fillStyle = "rgba(246, 231, 189, 0.85)";
+        ctx.font = '500 11px "Microsoft YaHei", sans-serif';
+        ctx.fillText(buff.description, cx, cy + 102, 280);
+        // 提示文字（点关闭）
+        ctx.fillStyle = "rgba(255, 211, 90, 0.7)";
+        ctx.font = '600 11px "Microsoft YaHei", sans-serif';
+        ctx.fillText("点击空白处关闭", cx, cy + 140);
+        ctx.restore();
+        return;
+      }
+    }
+
+    // 3) 默认流程：落点处绘制（开箱前/开箱中）
     const cx = this.chestDropX;
     const cy = this.chestDropY - (this.chestOpening ? 8 : 0);
 
-    // 落点光环：金色波纹 + 远景光柱
+    // 落点光环：金色波纹
     const ringT = (this.chestDropTimer * 2) % 1;
     ctx.save();
     ctx.strokeStyle = `rgba(255, 211, 90, ${1 - ringT * 0.8})`;
@@ -4272,7 +4492,6 @@ export class Game {
     ctx.beginPath();
     ctx.arc(cx, cy, 8 + ringT * 60, 0, Math.PI * 2);
     ctx.stroke();
-    // 第二层环
     const ringT2 = (this.chestDropTimer * 2 + 0.5) % 1;
     ctx.strokeStyle = `rgba(255, 158, 122, ${1 - ringT2 * 0.8})`;
     ctx.beginPath();
@@ -4284,22 +4503,16 @@ export class Game {
     ctx.translate(cx, cy);
 
     if (!this.chestOpened) {
-      // 未打开：金色箱子（强化版）
+      // 未打开：金色箱子
       const pulse = 1 + Math.sin(this.chestDropTimer * 3) * 0.08;
       ctx.scale(pulse, pulse);
-
-      // 阴影光晕
       ctx.shadowColor = "#ffd35a";
       ctx.shadowBlur = 20;
-
-      // 箱子体（加大）
       ctx.fillStyle = "#8b6914";
       ctx.strokeStyle = "#ffd35a";
       ctx.lineWidth = 2.5;
       ctx.fillRect(-22, -10, 44, 24);
       ctx.strokeRect(-22, -10, 44, 24);
-
-      // 箱子盖
       ctx.fillStyle = "#a07d1a";
       ctx.beginPath();
       ctx.moveTo(-24, -12);
@@ -4308,16 +4521,11 @@ export class Game {
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-
-      // 锁扣
       ctx.fillStyle = "#ffd35a";
       ctx.fillRect(-4, -4, 8, 5);
       ctx.fillStyle = "#8b6914";
       ctx.fillRect(-1, -1, 2, 2);
-
       ctx.shadowBlur = 0;
-
-      // 倒计时
       ctx.fillStyle = "#fff3c0";
       ctx.font = '700 12px "Microsoft YaHei", sans-serif';
       ctx.textAlign = "center";
@@ -4335,7 +4543,6 @@ export class Game {
         ctx.restore();
       }
       ctx.restore();
-      // 中心圆
       ctx.fillStyle = "#ffd35a";
       ctx.beginPath();
       ctx.arc(0, 0, 12, 0, Math.PI * 2);
@@ -4344,41 +4551,10 @@ export class Game {
       ctx.beginPath();
       ctx.arc(0, 0, 8, 0, Math.PI * 2);
       ctx.fill();
-    } else {
-        // 军令已揭示：大图标 + 名字
-        const buff = RUN_BUFF_BY_ID[this.chestBuffResult!];
-        if (buff) {
-          // 背景光圈
-          ctx.fillStyle = "rgba(255, 211, 90, 0.3)";
-          ctx.beginPath();
-          ctx.arc(0, 0, 30, 0, Math.PI * 2);
-          ctx.fill();
-          // 圆形
-          ctx.fillStyle = buff.color;
-          ctx.shadowColor = buff.color;
-          ctx.shadowBlur = 14;
-          ctx.beginPath();
-          ctx.arc(0, 0, 22, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.shadowBlur = 0;
-          // 军令字符（取名字首字）
-          ctx.fillStyle = "#fff";
-          ctx.font = '900 22px "Microsoft YaHei", sans-serif';
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText(buff.name.charAt(0), 0, 1);
-          // 军令名称（横条）
-          const nameW = ctx.measureText(buff.name).width + 16;
-          ctx.fillStyle = "rgba(20, 14, 8, 0.85)";
-          ctx.fillRect(-nameW / 2, 30, nameW, 16);
-          ctx.fillStyle = buff.color;
-          ctx.font = '700 11px "Microsoft YaHei", sans-serif';
-          ctx.fillText(buff.name, 0, 39);
-        }
     }
     ctx.restore();
 
-    // 顶部"军令宝箱"标题
+    // 顶部"军令宝箱"标题（未开箱时）
     if (!this.chestOpened) {
       ctx.save();
       ctx.textAlign = "center";

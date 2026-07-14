@@ -8,7 +8,7 @@ export type EnemyKind = "infantry" | "shield" | "powder" | "core" | "elite" | "b
 export type EliteKind = "fireRing" | "heal" | "aura";
 export type BossId = "yaoWang" | "moXiu" | "huaYao";
 export type PickupKind = "drum" | "soul" | "oil";
-export type GamePhase = "playing" | "buffChoice" | "revive" | "won" | "lost" | "chestOpen";
+export type GamePhase = "playing" | "buffChoice" | "revive" | "won" | "lost" | "chestOpen" | "paused_for_chest";
 export type RatingGrade = "C" | "B" | "A" | "S" | "SS" | "神之一刀";
 
 // ---- 战术指令路线系统 ----
@@ -144,6 +144,10 @@ export type Enemy = {
   spawnedWithEvent?: 'gather' | 'charge_pause';
   /** 急冲兵：出生后0.8s速度×2.2，之后×0.8 */
   rushTimer?: number;
+  /** 蛇形兵初始y（用于 sin 摆动） */
+  snakeSwayOriginY?: number;
+  /** 蛇形兵已经过时间（秒） */
+  snakeSwayT?: number;
 };
 
 export type Pickup = {
