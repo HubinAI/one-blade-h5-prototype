@@ -2308,8 +2308,10 @@ export class Game {
     const profile = ENTRY_PROFILE_EDICT_BURST;
     for (const spawn of wave.enemies) {
       const count = spawn.count ?? 1;
+      const baseX = spawn.x;
       for (let i = 0; i < count; i++) {
-        const x = spawn.x;
+        // 第二轮修正：使用 burst 分布函数避免重叠
+        const x = this.getBurstSpawnX(baseX, i, count);
         const spawnY = profile.spawnY - (spawn.yOffset ?? 0);
         const enemy = this.createEnemy(spawn.kind as any, x, spawnY, 1, profile);
         this.enemies.push(enemy);
@@ -2420,7 +2422,8 @@ export class Game {
         const startK = g * perGroup;
         const endK = Math.min(cnt, (g + 1) * perGroup);
         for (let k = startK; k < endK; k++) {
-          const x = cnt > 1 ? lanes[Math.floor((k * lanes.length) / cnt)] : (spawn.x ?? lanes[enemyIdx % lanes.length]);
+          const baseX = spawn.x ?? lanes[enemyIdx % lanes.length];
+          const x = this.getSpawnXForGroupedEnemy(baseX, k - startK, endK - startK);
           const xJ = (Math.random() - 0.5) * 40;
           this.subSpawnQueue.push({
             time: this.elapsed + subDelayAt,
@@ -2733,6 +2736,23 @@ export class Game {
   private getEntryProfile() {
     if (this.battlePhase === 'edict_burst') return ENTRY_PROFILE_EDICT_BURST;
     return ENTRY_PROFILE_COMMON;
+  }
+
+  /** 第二轮修正：普通波次怪物横向分布函数（围绕 spawn.x 展开） */
+  private getSpawnXForGroupedEnemy(baseX: number, index: number, count: number): number {
+    if (count <= 1) return baseX;
+    const spacing = count >= 5 ? 28 : 32;
+    const centerOffset = (count - 1) * spacing * 0.5;
+    const jitter = randomRange(-5, 5);
+    return clamp(baseX - centerOffset + index * spacing + jitter, 24, DESIGN_WIDTH - 24);
+  }
+
+  /** 第二轮修正：军令爆发怪潮横向分布函数（更密集但保持展开） */
+  private getBurstSpawnX(baseX: number, index: number, count: number): number {
+    const spacing = count >= 8 ? 24 : 30;
+    const centerOffset = (count - 1) * spacing * 0.5;
+    const jitter = randomRange(-7, 7);
+    return clamp(baseX - centerOffset + index * spacing + jitter, 20, DESIGN_WIDTH - 20);
   }
 
   private createEnemy(kind: EnemyKind, x: number, y: number, speedMultiplier = 1, entryProfile?: { spawnY: number; entryEndY: number; entryMultiplier: number; entryMaxDuration: number }): Enemy {
