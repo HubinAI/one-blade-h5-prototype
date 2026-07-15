@@ -218,6 +218,10 @@ export class Game {
   private hasPendingKeyAnimation = false;
   /** 最终波清场率（存活敌人/总生成） */
   private finalWaveClearRatio = 0;
+  /** 第一轮修正：精英死后自动resolve chest的时间戳 */
+  private autoChestResolveAt: number | null = null;
+  /** 第一轮修正：军令爆发开始的时间基准 */
+  private postChestStartAt: number | null = null;
   /** 宝箱开启固定buff专用（第一关） */
   private chestFixedBuffApplied = false;
 
@@ -293,7 +297,7 @@ export class Game {
         name: "第一波·横切",
         delay: 0.2,
         spawnAt: 0.5,
-        speedMultiplier: 0.7,
+        speedMultiplier: 1.0,
         enemies: [
           { kind: "infantry", x: 44, count: 1 },
           { kind: "infantry", x: 88, count: 1 },
@@ -308,7 +312,7 @@ export class Game {
         name: "第二波·双排",
         delay: 0.2,
         spawnAt: 4.0,
-        speedMultiplier: 0.8,
+        speedMultiplier: 1.0,
         enemies: [
           { kind: "infantry", x: 44, count: 2 },
           { kind: "infantry", x: 108, count: 2 },
@@ -321,7 +325,7 @@ export class Game {
         name: "第三波·密集阵",
         delay: 0.2,
         spawnAt: 9.0,
-        speedMultiplier: 0.85,
+        speedMultiplier: 1.0,
         enemies: [
           { kind: "infantry", x: 44, count: 3 },
           { kind: "infantry", x: 92, count: 3 },
@@ -336,7 +340,7 @@ export class Game {
         name: "第四波·火药连锁",
         delay: 0.2,
         spawnAt: 15.0,
-        speedMultiplier: 0.9,
+        speedMultiplier: 1.0,
         enemies: [
           { kind: "infantry", x: 44, count: 3 },
           { kind: "infantry", x: 92, count: 2 },
@@ -352,7 +356,7 @@ export class Game {
         name: "第五波·混合流",
         delay: 0.2,
         spawnAt: 20.0,
-        speedMultiplier: 0.95,
+        speedMultiplier: 1.0,
         enemies: [
           { kind: "infantry", x: 44, count: 2 },
           { kind: "shield", x: 92, count: 1 },
@@ -366,8 +370,8 @@ export class Game {
     ];
     // 教程波次：快速冷却、满刀势
     this.level.initialEnergy = BALANCE.swordEnergy.max;
-    this.level.enemySpeed = 0.65;
-    this.level.durationSeconds = 180; // 不用这个判断了，保留作为fallback
+    this.level.enemySpeed = 1.0;
+    this.level.durationSeconds = 180;
     this.energy = BALANCE.swordEnergy.max;
   }
 
@@ -478,6 +482,13 @@ export class Game {
     this.updateEliteSkills(scaledDt);
     this.updateBossSkills(scaledDt);
     this.updateChestDrop(scaledDt);
+
+    // 第一轮修正：精英死后 1 秒，自动 resolve 第一关 chest
+    if (this.autoChestResolveAt !== null && this.elapsed >= this.autoChestResolveAt) {
+      this.autoChestResolveAt = null;
+      this.autoResolveFirstLevelChestReward();
+    }
+
     this.updatePostChestWaves(scaledDt);
     this.updateBattlePhase();
     this.updateBuffChoiceTriggers();
@@ -1503,6 +1514,8 @@ export class Game {
       this.startChestDrop(enemy.x, enemy.y - 10);
       this.particles.push(glowParticle(enemy, "#ffd35a", 25, 50));
       this.addText(enemy.x, enemy.y - 40, "宝箱掉落！", "#ffd35a", 18, 1.6);
+      // 第一轮修正：1秒后自动resolve chest（避免卡在chestDone）
+      this.autoChestResolveAt = this.elapsed + 1.0;
     }
 
     // ---- Boss击杀：追踪图鉴 ----
@@ -1580,7 +1593,8 @@ export class Game {
       const statusSlow = enemy.ignited || enemy.marked ? 0.54 : 1;
       const fortressSlow = enemy.slowedTimer > 0 ? 0.4 : 1;
 
-      // ── 快速入场阶段 entryPhase：所有敌人生成后统一加速入场 ──
+      // ── 第一轮修正：entryPhase 按目标时间强制下压 ──
+      // 无论 enemy.speed 被压多低，都保证在 maxDuration 内到达 entryEndY
       if (enemy.entryPhase?.active && !enemy.entryPhase.completed) {
         const e = enemy.entryPhase;
         e.elapsed += dt;
@@ -1590,11 +1604,19 @@ export class Game {
           e.completed = true;
           e.active = false;
         }
-        // 入场期间速度倍率由 entryPhase.speedMultiplier 决定
-        // 后续 normal/rush 逻辑中使用 entryMultiplier
       }
       const ep = enemy.entryPhase;
-      const entryMultiplier = ep && ep.active && !ep.completed ? ep.speedMultiplier : 1;
+      let entryMultiplier = 1;
+      if (ep?.active && !ep.completed) {
+        // 保底速度：剩余距离 / 剩余时间，确保在 maxDuration 内到达
+        const remainingDistance = Math.max(0, ep.endY - enemy.y);
+        const remainingTime = Math.max(0.08, ep.maxDuration - ep.elapsed);
+        const requiredSpeed = remainingDistance / remainingTime;
+        const multipliedSpeed = enemy.speed * ep.speedMultiplier;
+        // 实际速度 = max(倍率速度, 保底速度)
+        const actualSpeed = Math.max(multipliedSpeed, requiredSpeed);
+        entryMultiplier = actualSpeed / enemy.speed;
+      }
 
       // ── 蛇形兵 sine_sway：横向正弦摆动 ──
       if (enemy.snakeSwayT !== undefined) {
@@ -1689,6 +1711,8 @@ export class Game {
             this.eliteKilled = true;
             this.startChestDrop(enemy.x, enemy.y - 10);
             this.addText(enemy.x, enemy.y - 40, "宝箱掉落！", "#ffd35a", 18, 1.6);
+            // 第一轮修正：1秒后自动resolve chest
+            this.autoChestResolveAt = this.elapsed + 1.0;
           } else {
             this.addText(enemy.x, BALANCE.battlefield.bottomDefenseY - 12, `-${enemy.hpDamage}`, "#ff7b6e", 18);
           }
@@ -2255,51 +2279,45 @@ export class Game {
     }
   }
 
-  /** V0715008: 宝箱后爆发怪潮生成 */
+  /** V0715008: 宝箱后爆发怪潮生成 (第一轮修正：使用 postChestStartAt 时间基准) */
   private updatePostChestWaves(dt: number) {
     const postWaves = this.level.postChestWaves;
     if (!postWaves || postWaves.length === 0) return;
-    // 宝箱必须在已打开并确认后才能触发
     if (!this.chestDone) return;
+    if (this.postChestStartAt === null) return;
     if (this.allPostChestWavesSpawned) return;
 
     const wave = postWaves[this.postChestWaveIndex];
     if (!wave) { this.allPostChestWavesSpawned = true; return; }
 
-    // post chest waves 的 spawnAt 是相对宝箱确认时间的偏移
-    const chestConfirmTime = this.chestDropTimer > 0 ? this.elapsed : 0;
-    const postElapsed = this.elapsed - this.chestDropTimer;
-    if (postElapsed >= wave.spawnAt!) {
-      // 性能保护：达到上限时不生成
-      const aliveCount = this.enemies.filter(e => e.alive).length;
-      if (aliveCount >= PERFORMANCE_LIMITS.maxEnemiesOnScreen) {
-        return; // 延迟生成
-      }
+    const postElapsed = this.elapsed - this.postChestStartAt;
+
+    if (postElapsed >= (wave.spawnAt ?? 0)) {
+      this.spawnPostChestWave(wave);
       this.postChestWaveIndex += 1;
-      this.edictBurstRoundIndex = this.postChestWaveIndex - 1;
+      this.edictBurstRoundIndex = this.postChestWaveIndex;
+
       if (this.postChestWaveIndex >= postWaves.length) {
         this.allPostChestWavesSpawned = true;
       }
-      // 生成这波敌人
-      for (const spawn of wave.enemies) {
-        // 第一轮修正：postChestWaves 必须显式使用 edict_burst profile，不依赖 this.getEntryProfile()
-        const profile = ENTRY_PROFILE_EDICT_BURST;
-        const spawnY = profile.spawnY;
-        const count = spawn.count ?? 1;
-        for (let i = 0; i < count; i++) {
-          const x = spawn.x + (i % 2 === 0 ? -8 : 8) * Math.floor(i / 2);
-          const enemy = this.createEnemy(spawn.kind as any, x, spawnY - (spawn.yOffset ?? 0), 1, profile);
-          this.enemies.push(enemy);
-          this.discoveredEnemies.add(spawn.kind as any);
-          this.particles.push(glowParticle({ x, y: spawnY }, "#5c4a3a", 12, 20));
-        }
-      }
-      // 波次名称飘字
-      // V0715008 二次打磨：屏蔽军令爆发轮次名称（"反扑·终"等）
-      // this.addText(DESIGN_WIDTH / 2, 120, wave.name, "#ff6a33", 20, 1.4);
     }
   }
 
+  /** 第一轮修正：生成单波 postChest 敌人，使用 EDICT_BURST profile */
+  private spawnPostChestWave(wave: typeof this.level.waves[0]) {
+    const profile = ENTRY_PROFILE_EDICT_BURST;
+    for (const spawn of wave.enemies) {
+      const count = spawn.count ?? 1;
+      for (let i = 0; i < count; i++) {
+        const x = spawn.x;
+        const spawnY = profile.spawnY - (spawn.yOffset ?? 0);
+        const enemy = this.createEnemy(spawn.kind as any, x, spawnY, 1, profile);
+        this.enemies.push(enemy);
+        this.discoveredEnemies.add(spawn.kind as any);
+        this.particles.push(glowParticle({ x, y: spawnY }, "#5c4a3a", 12, 20));
+      }
+    }
+  }
 
   private spawnCurrentWave(wave: typeof this.level.waves[0]) {
     this._lastWaveElapsed = this.elapsed;
@@ -2500,6 +2518,10 @@ export class Game {
     const hasPostChest = this.level.postChestWaves && this.level.postChestWaves.length > 0;
     if (hasPostChest) {
       if (!this.chestDone || !this.allPostChestWavesSpawned) return false;
+      // 第一轮修正：兜底——chestDone 已 true 但 postChestStartAt 未设置
+      if (this.chestDone && this.postChestStartAt === null) {
+        this.postChestStartAt = this.elapsed;
+      }
     }
 
     // 无宝箱后怪潮：宝箱非强制
@@ -4801,6 +4823,35 @@ export class Game {
   }
 
   /** 应用军令 */
+  /** 第一轮修正：第一关精英死后，宝箱军令自动生效 */
+  private autoResolveFirstLevelChestReward() {
+    if (this.level.id !== 1 && this.level.id !== 10001) return;
+    if (this.chestDone) return;
+
+    this.chestDropped = true;
+    this.chestOpened = true;
+    this.chestOpening = false;
+    this.chestPendingConfirm = false;
+    this.chestFlying = false;
+    this.chestDone = true;
+
+    this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 70);
+    for (let i = 0; i < this.subBladeTimers.length; i++) {
+      this.subBladeTimers[i] = 0;
+    }
+    this.chestMomentumTimer = Math.max(this.chestMomentumTimer, 12);
+
+    this.battlePhase = "edict_burst";
+    this.postChestStartAt = this.elapsed;
+    this.postChestWaveIndex = 0;
+    this.allPostChestWavesSpawned = false;
+    this.edictBurstRoundIndex = 0;
+    this.edictBurstRoundTotal = this.level.postChestWaves?.length ?? 0;
+
+    this.addText(DESIGN_WIDTH / 2, 150, "军令激活", "#ffd35a", 24, 1.2);
+    this.addText(DESIGN_WIDTH / 2, 185, "刀势回涌！副刀共鸣！", "#ffd35a", 18, 1.4);
+  }
+
   private applyChestBuff(id: BuffId) {
     this.runBuffs.add(id);
     const buff = RUN_BUFF_BY_ID[id];
