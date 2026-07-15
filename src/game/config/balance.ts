@@ -86,12 +86,12 @@ export const BALANCE = {
 /** 战斗纵向区域定义 */
 export const BATTLEFIELD_ZONES = {
   spawnTopY: -60,
-  spawnVisibleY: 80,
-  entryEndY: 240,
-  midfieldStartY: 260,
-  midfieldCenterY: 360,
-  midfieldEndY: 520,
-  harvestStartY: 520,
+  spawnVisibleY: 60,
+  entryEndY: 400,
+  midfieldStartY: 420,
+  midfieldCenterY: 490,
+  midfieldEndY: 560,
+  harvestStartY: 560,
   defenseLineY: 720
 } as const;
 

@@ -1547,7 +1547,7 @@ export class Game {
 
       // ── 中场事件：gather 聚阵（仅作用于本波敌人，急冲兵不参与） ──
       if (enemy.spawnedWithEvent === 'gather' && enemy.homeX !== undefined && enemy.rushTimer === undefined) {
-        if (enemy.y >= 260 && enemy.y <= 460) {
+        if (enemy.y >= 420 && enemy.y <= 540) {
           const centerX = DESIGN_WIDTH / 2;
           const dx = centerX - enemy.x;
           enemy.x += dx * 0.08 * dt * 60;
@@ -1588,8 +1588,8 @@ export class Game {
         }
       }
 
-      // ── 中场特性激活：y>=260 后激活特殊怪的中场表现 ──
-      if (enemy.y >= 260 && !enemy.midfieldActivated) {
+      // ── 中场特性激活：y>=420 后激活特殊怪的中场表现 ──
+      if (enemy.y >= 420 && !enemy.midfieldActivated) {
         enemy.midfieldActivated = true;
         this.activateMidfieldTrait(enemy);
       }
@@ -1656,11 +1656,11 @@ export class Game {
   private updateMidfieldHints(dt: number) {
     this._midfieldHintTimer = Math.max(0, this._midfieldHintTimer - dt);
     if (this._midfieldHintTimer > 0) return;
-    // 计数中场敌人（y>=260）
-    const enemiesInMidfield = this.enemies.filter(e => e.alive && e.y >= 260 && e.y < 520).length;
+    // 计数中场敌人（y>=420）
+    const enemiesInMidfield = this.enemies.filter(e => e.alive && e.y >= 420 && e.y < 560).length;
     if (this.energy >= 90 && enemiesInMidfield > 0) {
       // 检查是否有高价值目标
-      const hasHighValue = this.enemies.some(e => e.alive && e.y >= 260 && e.y < 520 &&
+      const hasHighValue = this.enemies.some(e => e.alive && e.y >= 420 && e.y < 560 &&
         (e.kind === "powder" || e.kind === "core" || e.kind === "elite"));
       if (hasHighValue) {
         this.addText(DESIGN_WIDTH / 2, 252, "破阵良机", "#ffd35a", 14, 0.8);
@@ -2515,9 +2515,9 @@ export class Game {
       // 快速入场阶段：所有基础敌人生成时激活（急冲兵用 rushTimer 覆盖）
       entryPhase: isBasicEnemy && !(kind === "infantry" && Math.random() < 0.3) ? {
         active: true,
-        endY: 240,
+        endY: 400,
         speedMultiplier: 1.8,
-        maxDuration: 0.9,
+        maxDuration: 1.2,
         elapsed: 0,
         completed: false
       } : undefined
@@ -3617,10 +3617,10 @@ export class Game {
       { pct: 0.90, color: "rgba(255, 211, 90, 0.85)" },   // 强斩终点 → 破阵
     ];
 
-    // 背景
+    // 背景（深色实心，明确未填充区域）
     ctx.save();
-    ctx.fillStyle = "rgba(18, 16, 14, 0.6)";
-    ctx.strokeStyle = "rgba(255, 214, 124, 0.25)";
+    ctx.fillStyle = "rgba(10, 8, 6, 0.85)";
+    ctx.strokeStyle = "rgba(255, 214, 124, 0.3)";
     ctx.lineWidth = 1;
     roundRect(ctx, eBarX, eBarY, eBarW, eBarH, 6);
     ctx.fill();
@@ -3628,10 +3628,10 @@ export class Game {
 
     // 段位色彩分层（极淡的色块作为背景刻度，仅作为视觉参考）
     const segColors = [
-      { x0: 0, x1: 0.10, color: "rgba(192, 208, 224, 0.04)" },
-      { x0: 0.10, x1: 0.40, color: "rgba(192, 208, 224, 0.06)" },
-      { x0: 0.40, x1: 0.90, color: "rgba(91, 192, 255, 0.06)" },
-      { x0: 0.90, x1: 1.00, color: "rgba(255, 211, 90, 0.08)" },
+      { x0: 0, x1: 0.10, color: "rgba(192, 208, 224, 0.03)" },
+      { x0: 0.10, x1: 0.40, color: "rgba(192, 208, 224, 0.04)" },
+      { x0: 0.40, x1: 0.90, color: "rgba(91, 192, 255, 0.04)" },
+      { x0: 0.90, x1: 1.00, color: "rgba(255, 211, 90, 0.05)" },
     ];
     for (const seg of segColors) {
       ctx.fillStyle = seg.color;
@@ -3827,14 +3827,28 @@ export class Game {
       const ready = ratio >= 1;
 
       if (ready) {
-        // Ready: 完整光环 + 中心单字（蓄势=斩/破点=破）
+        // Ready: 完整环形（与冷却态一致：底圈+进度弧=100%）+ 中心单字
+        // 底圈（与冷却态统一）
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(x + iconR, y + iconR, iconR - 2, 0, Math.PI * 2);
+        ctx.stroke();
+        // 完整进度弧（覆盖360°，与冷却态保持视觉一致）
         const pulse = 0.5 + Math.sin(this.elapsed * 6 + slotIndex * 2) * 0.5;
         ctx.strokeStyle = colorStr;
-        ctx.shadowColor = colorStr;
-        ctx.shadowBlur = 12 + pulse * 12;
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 4;
+        ctx.lineCap = "round";
         ctx.beginPath();
-        ctx.arc(x + iconR, y + iconR, iconR - 1, 0, Math.PI * 2);
+        ctx.arc(x + iconR, y + iconR, iconR - 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2);
+        ctx.stroke();
+        // 脉冲光晕（双层环）
+        ctx.strokeStyle = colorStr;
+        ctx.shadowColor = colorStr;
+        ctx.shadowBlur = 6 + pulse * 6;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(x + iconR, y + iconR, iconR - 4, 0, Math.PI * 2);
         ctx.stroke();
         ctx.shadowBlur = 0;
         // 中心单字（不同于CD数字，用"斩"/"破"单字标识槽位职责）
@@ -4252,7 +4266,16 @@ export class Game {
       wobble: 0,
       slowedTimer: 0,
       skillTimer: 0,
-      skillCooldown: 0
+      skillCooldown: 0,
+      // 精英也参与快速入场阶段（endY=400, 1.2s 或到中场结束）
+      entryPhase: {
+        active: true,
+        endY: 400,
+        speedMultiplier: 1.8,
+        maxDuration: 1.2,
+        elapsed: 0,
+        completed: false
+      }
     };
   }
 
@@ -4444,7 +4467,7 @@ export class Game {
 
   /** 绘制军令宝箱 */
   private drawChestDrop(ctx: CanvasRenderingContext2D) {
-    if (!this.chestDropped) return;
+    if (!this.chestDropped || this.chestDone) return;
 
     // 1) 飞行中：画从中心飞向左上角的小图标
     if (this.chestFlying && this.chestBuffResult) {
