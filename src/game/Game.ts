@@ -3872,12 +3872,12 @@ export class Game {
         ctx.beginPath();
         ctx.arc(x + iconR, y + iconR, iconR - 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
         ctx.stroke();
-        // 槽位单字（右下角小字，常驻显示）
+        // 槽位单字（右上角，醒目显示）
         ctx.fillStyle = colorStr;
-        ctx.font = '800 9px "Microsoft YaHei", sans-serif';
+        ctx.font = '900 13px "Microsoft YaHei", "SimHei", sans-serif';
         ctx.textAlign = "right";
-        ctx.textBaseline = "bottom";
-        ctx.fillText(slotTypeIcon, x + iconR * 2 - 2, y + iconR * 2 - 2);
+        ctx.textBaseline = "top";
+        ctx.fillText(slotTypeIcon, x + iconR * 2 - 3, y + 3);
         // CD数字（中心，醒目）
         ctx.fillStyle = "#fff3c0";
         ctx.font = '800 16px "Microsoft YaHei", sans-serif';
@@ -4748,11 +4748,12 @@ export class Game {
 
 /** Canvas 圆角矩形辅助 */
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  // 始终先 beginPath，避免与前一个未关闭的路径合并
+  ctx.beginPath();
   if (typeof ctx.roundRect === 'function') {
     ctx.roundRect(x, y, w, h, r);
   } else {
     // 降级方案
-    ctx.beginPath();
     ctx.moveTo(x + r, y);
     ctx.lineTo(x + w - r, y);
     ctx.quadraticCurveTo(x + w, y, x + w, y + r);
