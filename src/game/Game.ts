@@ -2282,13 +2282,13 @@ export class Game {
       }
       // 生成这波敌人
       for (const spawn of wave.enemies) {
-        // 三次修正：军令爆发阶段使用 edict burst 更激进的 profile
-        const profile = this.getEntryProfile();
+        // 第一轮修正：postChestWaves 必须显式使用 edict_burst profile，不依赖 this.getEntryProfile()
+        const profile = ENTRY_PROFILE_EDICT_BURST;
         const spawnY = profile.spawnY;
         const count = spawn.count ?? 1;
         for (let i = 0; i < count; i++) {
           const x = spawn.x + (i % 2 === 0 ? -8 : 8) * Math.floor(i / 2);
-          const enemy = this.createEnemy(spawn.kind as any, x, spawnY - (spawn.yOffset ?? 0), 1);
+          const enemy = this.createEnemy(spawn.kind as any, x, spawnY - (spawn.yOffset ?? 0), 1, profile);
           this.enemies.push(enemy);
           this.discoveredEnemies.add(spawn.kind as any);
           this.particles.push(glowParticle({ x, y: spawnY }, "#5c4a3a", 12, 20));
@@ -2468,7 +2468,7 @@ export class Game {
       const phase = item.battlePhase ?? this.battlePhase;
       const profile = phase === 'edict_burst' ? ENTRY_PROFILE_EDICT_BURST : ENTRY_PROFILE_COMMON;
       const spawnY = profile.spawnY - (item.yOffset ?? 0);
-      const enemy = this.createEnemy(item.kind as any, item.x, spawnY, item.speedMultiplier);
+      const enemy = this.createEnemy(item.kind as any, item.x, spawnY, item.speedMultiplier, profile);
       // 中场事件波及：本波敌人带event标记
       if (this._currentWaveEvent) {
         enemy.spawnedWithEvent = this._currentWaveEvent;
@@ -2713,14 +2713,14 @@ export class Game {
     return ENTRY_PROFILE_COMMON;
   }
 
-  private createEnemy(kind: EnemyKind, x: number, y: number, speedMultiplier = 1): Enemy {
+  private createEnemy(kind: EnemyKind, x: number, y: number, speedMultiplier = 1, entryProfile?: { spawnY: number; entryEndY: number; entryMultiplier: number; entryMaxDuration: number }): Enemy {
     const balance = ENEMY_BALANCE[kind];
     const dailyShieldBonus = this.runContext.mode === "dailyChallenge" && this.runContext.dailyChallengeId === "hard_shield" && kind === "shield" ? 1 : 0;
     // 逐波HP递增：每波+1，最多+5（仅对基础敌人生效，精英/Boss不受影响）
     const isBasicEnemy = kind === "infantry" || kind === "shield" || kind === "powder" || kind === "core";
     const hpBonus = isBasicEnemy ? this.waveHpBonus : 0;
-    // 三次修正：统一使用 entry profile（按 battlePhase 选择）
-    const profile = this.getEntryProfile();
+    // 第一轮修正：优先使用传入的 entryProfile，fallback 到 getEntryProfile()
+    const profile = entryProfile ?? this.getEntryProfile();
     const epEndY = profile.entryEndY;
     const epMul = profile.entryMultiplier;
     const epMaxDur = profile.entryMaxDuration;
@@ -2750,17 +2750,18 @@ export class Game {
       formationLitTimer: 0,
       formationWrongHits: 0,
       // 30% 步兵是急冲兵；15% 步兵/盾兵是蛇形兵
-      rushTimer: kind === "infantry" && Math.random() < 0.3 ? 0.8 : undefined,
+      // rushTimer 被统一维护在 enemy 对象底部，这里移除
       snakeSwayT: (kind === "infantry" || kind === "shield") && Math.random() < 0.15 ? 0 : undefined,
-      // 快速入场阶段：所有基础敌人生成时激活（急冲兵用 rushTimer 覆盖）
-      entryPhase: isBasicEnemy && !(kind === "infantry" && Math.random() < 0.3) ? {
+      // 第一轮修正：所有基础敌人必须有 entryPhase；rushTimer 只是额外运动表现
+      entryPhase: isBasicEnemy ? {
         active: true,
         endY: epEndY,
         speedMultiplier: epMul,
         maxDuration: epMaxDur,
         elapsed: 0,
         completed: false
-      } : undefined
+      } : undefined,
+      rushTimer: isBasicEnemy && kind === "infantry" && Math.random() < 0.3 ? 0.8 : undefined,
     };
   }
 
