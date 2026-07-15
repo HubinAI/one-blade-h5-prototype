@@ -48,6 +48,12 @@ const TARGETS = [
       content.replace(/V(?:\d{7}|[\d.]+)(?: IAA版)?/, ver),
   },
   {
+    file: "src/App.tsx",
+    // 替换 appVersion useState 的 V 号
+    replace: (content, ver) =>
+      content.replace(/useState\("V(?:\d{7}|[\d.]+)(?: IAA)?"\)/, `useState("${ver}")`),
+  },
+  {
     file: "src/components/MainMenu.tsx",
     replace: (content, ver) =>
       content.replace(/V(?:\d{7}|[\d.]+)(?: IAA版)?/, ver),
