@@ -3858,7 +3858,7 @@ export class Game {
         ctx.textBaseline = "middle";
         ctx.fillText(slotTypeIcon, x + iconR, y + iconR + 1);
       } else {
-        // 冷却中：薄底圈 + 弧形进度 + 中心CD数字
+        // 冷却中：薄底圈 + 弧形进度 + 中心CD数字 + 槽位单字(右下角小字)
         // 底圈（细线，不抢戏）
         ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
         ctx.lineWidth = 1.5;
@@ -3872,6 +3872,12 @@ export class Game {
         ctx.beginPath();
         ctx.arc(x + iconR, y + iconR, iconR - 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
         ctx.stroke();
+        // 槽位单字（右下角小字，常驻显示）
+        ctx.fillStyle = colorStr;
+        ctx.font = '800 9px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = "right";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(slotTypeIcon, x + iconR * 2 - 2, y + iconR * 2 - 2);
         // CD数字（中心，醒目）
         ctx.fillStyle = "#fff3c0";
         ctx.font = '800 16px "Microsoft YaHei", sans-serif';
