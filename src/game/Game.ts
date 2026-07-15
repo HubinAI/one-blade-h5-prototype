@@ -4427,7 +4427,7 @@ export class Game {
       `energy: ${this.energy.toFixed(1)}`,
       `stage: ${stage.label}`,
       `slash stage: ${slash ? SWORD_STAGE_BY_ID[slash.tier].name : "-"}`,
-      `--- V0715008 Debug ---`,
+      `--- V0715009 Debug ---`,
       `entryEndY: ${z.entryEndY}`,
       `midfieldStartY: ${z.midfieldStartY}`,
       `harvestStartY: ${z.harvestStartY}`,
