@@ -102,7 +102,7 @@ export class Game {
   /** 副刀符阵（方案B）：攻击前0.3s的旋转符文提示 */
   private subRune: { x: number; y: number; color: string; life: number; maxLife: number }[] = [];
   // 多波多次刷新队列：每个子刷新有时间戳，到时间就spawn
-  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number }[] = [];
+  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase }[] = [];
 
   private pointerDown = false;
   private pointerPos?: Vec2;
@@ -2409,7 +2409,8 @@ export class Game {
             kind: spawn.kind,
             x: x + xJ,
             speedMultiplier,
-            yOffset: spawn.yOffset ?? 0
+            yOffset: spawn.yOffset ?? 0,
+            battlePhase: this.battlePhase
           });
           enemyIdx++;
         }
@@ -2463,8 +2464,9 @@ export class Game {
     }
     this.subSpawnQueue = remain;
     for (const item of ready) {
-      // 三次修正：使用统一入口的 spawnY 而非硬编码
-      const profile = this.getEntryProfile();
+      // 使用队列携带的战斗阶段获取 entry profile
+      const phase = item.battlePhase ?? this.battlePhase;
+      const profile = phase === 'edict_burst' ? ENTRY_PROFILE_EDICT_BURST : ENTRY_PROFILE_COMMON;
       const spawnY = profile.spawnY - (item.yOffset ?? 0);
       const enemy = this.createEnemy(item.kind as any, item.x, spawnY, item.speedMultiplier);
       // 中场事件波及：本波敌人带event标记
@@ -4499,6 +4501,8 @@ export class Game {
   /** 精英怪生成 */
   private updateEliteSpawn() {
     if (this.eliteSpawned || !this.level.eliteSpawnAt || !this.level.eliteKind) return;
+    // 三次修正：等所有主波次全部刷完后才出精英（避免精英乱入）
+    if (!this.allNormalWavesSpawned) return;
     if (this.elapsed < this.level.eliteSpawnAt) return;
     this.eliteSpawned = true;
     const ek = this.level.eliteKind;
