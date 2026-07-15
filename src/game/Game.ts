@@ -3801,6 +3801,11 @@ export class Game {
     const colorStr = "#" + color.toString(16).padStart(6, "0");
     const slotType = slotIndex === 0 ? "蓄势" : "破点";
     const slotTypeIcon = slotIndex === 0 ? "斩" : "破";
+    const timer = this.subBladeTimers[slotIndex] ?? 0;
+    const cd = this.subBladeCooldowns[slotIndex] ?? 5;
+    const ratio = blade ? Math.min(1, timer / cd) : 0;
+    const ready = blade !== null && ratio >= 1;
+    const cdSec = blade ? Math.max(0, Math.ceil(cd - timer)) : 0;
 
     ctx.save();
 
@@ -3819,22 +3824,18 @@ export class Game {
       ctx.fillStyle = "rgba(246, 231, 189, 0.35)";
       ctx.font = '600 10px "Microsoft YaHei", sans-serif';
       ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
       ctx.fillText("空", x + iconR, y + iconR + 4);
     } else {
-      const timer = this.subBladeTimers[slotIndex] ?? 0;
-      const cd = this.subBladeCooldowns[slotIndex] ?? 5;
-      const ratio = Math.min(1, timer / cd);
-      const ready = ratio >= 1;
+      // 底圈
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(x + iconR, y + iconR, iconR - 2, 0, Math.PI * 2);
+      ctx.stroke();
 
       if (ready) {
-        // Ready: 完整环形（与冷却态一致：底圈+进度弧=100%）+ 中心单字
-        // 底圈（与冷却态统一）
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(x + iconR, y + iconR, iconR - 2, 0, Math.PI * 2);
-        ctx.stroke();
-        // 完整进度弧（覆盖360°，与冷却态保持视觉一致）
+        // Ready: 完整进度弧（360°）+ 脉冲双层环
         const pulse = 0.5 + Math.sin(this.elapsed * 6 + slotIndex * 2) * 0.5;
         ctx.strokeStyle = colorStr;
         ctx.lineWidth = 4;
@@ -3842,7 +3843,7 @@ export class Game {
         ctx.beginPath();
         ctx.arc(x + iconR, y + iconR, iconR - 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2);
         ctx.stroke();
-        // 脉冲光晕（双层环）
+        // 脉冲光晕
         ctx.strokeStyle = colorStr;
         ctx.shadowColor = colorStr;
         ctx.shadowBlur = 6 + pulse * 6;
@@ -3851,50 +3852,35 @@ export class Game {
         ctx.arc(x + iconR, y + iconR, iconR - 4, 0, Math.PI * 2);
         ctx.stroke();
         ctx.shadowBlur = 0;
-        // 中心单字（不同于CD数字，用"斩"/"破"单字标识槽位职责）
-        ctx.fillStyle = colorStr;
-        ctx.font = '900 18px "Microsoft YaHei", "SimHei", sans-serif';
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(slotTypeIcon, x + iconR, y + iconR + 1);
       } else {
-        // 冷却中：薄底圈 + 弧形进度 + 中心CD数字 + 槽位单字(右下角小字)
-        // 底圈（细线，不抢戏）
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(x + iconR, y + iconR, iconR - 2, 0, Math.PI * 2);
-        ctx.stroke();
-        // 进度弧（粗一些，更明显是"刻度盘"）
+        // 冷却中：进度弧
         ctx.strokeStyle = colorStr;
         ctx.lineWidth = 4;
         ctx.lineCap = "round";
         ctx.beginPath();
         ctx.arc(x + iconR, y + iconR, iconR - 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
         ctx.stroke();
-        // 槽位单字（右上角，醒目显示）
-        ctx.fillStyle = colorStr;
-        ctx.font = '900 13px "Microsoft YaHei", "SimHei", sans-serif';
-        ctx.textAlign = "right";
-        ctx.textBaseline = "top";
-        ctx.fillText(slotTypeIcon, x + iconR * 2 - 3, y + 3);
-        // CD数字（中心，醒目）
-        ctx.fillStyle = "#fff3c0";
-        ctx.font = '800 16px "Microsoft YaHei", sans-serif';
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(`${Math.ceil(cd - timer)}`, x + iconR, y + iconR + 1);
       }
+
+      // 中心大字（"斩"/"破"）- 22px 是主元素
+      ctx.fillStyle = colorStr;
+      ctx.font = '900 22px "Microsoft YaHei", "SimHei", sans-serif';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(slotTypeIcon, x + iconR, y + iconR + 2);
     }
     ctx.restore();
 
-    // 槽位标签（图标下方）
+    // 槽位标签：CD态显示"X秒"，Ready态显示"可"，空状态显示"蓄势"/"破点"
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     ctx.fillStyle = colorStr;
     ctx.font = '700 11px "Microsoft YaHei", sans-serif';
-    ctx.fillText(slotType, x + iconR, y + iconR * 2 + 6);
+    let label = slotType;
+    if (blade && ready) label = "可";
+    else if (blade) label = `${cdSec}秒`;
+    ctx.fillText(label, x + iconR, y + iconR * 2 + 6);
     ctx.restore();
   }
 
