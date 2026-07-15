@@ -424,8 +424,139 @@ export function getStageNameByFloor(floor: number): string {
   return "初入刀道";
 }
 
+/** 第一关硬编码波次配置（0715割草密度激进调优版） */
+function createLevel1Config(): LevelConfig {
+  const level1Waves: WaveConfig[] = [
+    // Wave 1: 入场横排 (0.5s, 16~20敌) 三次修正：放宽间隔，玩家有反应时间
+    {
+      name: "散修潮",
+      delay: 0.2,
+      spawnAt: 0.5,
+      enemies: [
+        { kind: "infantry", count: 8, x: 44 },
+        { kind: "infantry", count: 8, x: 140 },
+        { kind: "infantry", count: 4, x: 236 }
+      ]
+    },
+    // Wave 2: 密集小潮 (4.0s, 18~22敌)
+    {
+      name: "密集阵",
+      delay: 0.2,
+      spawnAt: 4.0,
+      enemies: [
+        { kind: "infantry", count: 8, x: 92 },
+        { kind: "infantry", count: 6, x: 188 },
+        { kind: "infantry", count: 4, x: 140 },
+        { kind: "powder", count: 1, x: 236 }
+      ]
+    },
+    // Wave 3: 双排推进 (8.0s, 20~24敌)
+    {
+      name: "双排队",
+      delay: 0.2,
+      spawnAt: 8.0,
+      enemies: [
+        { kind: "infantry", count: 8, x: 44 },
+        { kind: "infantry", count: 8, x: 188 },
+        { kind: "infantry", count: 4, x: 140 },
+        { kind: "shield", count: 2, x: 284 }
+      ]
+    },
+    // Wave 4: 火药爆点波 (13.0s, 22~28敌)
+    {
+      name: "火药阵",
+      delay: 0.2,
+      spawnAt: 13.0,
+      enemies: [
+        { kind: "infantry", count: 10, x: 44 },
+        { kind: "infantry", count: 8, x: 140 },
+        { kind: "powder", count: 2, x: 236 },
+        { kind: "infantry", count: 6, x: 92 },
+        { kind: "powder", count: 1, x: 284 }
+      ]
+    },
+    // Wave 5: 精英前压迫波 (19.0s, 22~28敌)
+    {
+      name: "压迫阵",
+      delay: 0.2,
+      spawnAt: 19.0,
+      enemies: [
+        { kind: "infantry", count: 8, x: 44 },
+        { kind: "shield", count: 2, x: 140 },
+        { kind: "infantry", count: 8, x: 188 },
+        { kind: "infantry", count: 6, x: 92 },
+        { kind: "powder", count: 1, x: 284 }
+      ]
+    }
+  ];
+
+  // 精英后宝箱后爆发怪潮（3波）
+  const level1PostChestWaves: WaveConfig[] = [
+    // Post-Wave 1: 宝箱后第一波 (宝箱开启后0.5s, 24~30敌)
+    {
+      name: "反扑·一",
+      delay: 0.2,
+      spawnAt: 0.5,
+      enemies: [
+        { kind: "infantry", count: 10, x: 44 },
+        { kind: "infantry", count: 8, x: 140 },
+        { kind: "powder", count: 2, x: 236 },
+        { kind: "infantry", count: 8, x: 188 }
+      ]
+    },
+    // Post-Wave 2: 宝箱后第二波 (宝箱开启后5.0s, 30~38敌)
+    {
+      name: "反扑·二",
+      delay: 0.2,
+      spawnAt: 5.0,
+      enemies: [
+        { kind: "infantry", count: 10, x: 44 },
+        { kind: "shield", count: 2, x: 140 },
+        { kind: "infantry", count: 10, x: 188 },
+        { kind: "infantry", count: 8, x: 92 },
+        { kind: "powder", count: 3, x: 284 }
+      ]
+    },
+    // Post-Wave 3: 最终怪潮 (宝箱开启后10.5s, 38~50敌)
+    {
+      name: "反扑·终",
+      delay: 0.2,
+      spawnAt: 10.5,
+      enemies: [
+        { kind: "infantry", count: 14, x: 44 },
+        { kind: "infantry", count: 12, x: 140 },
+        { kind: "powder", count: 3, x: 236 },
+        { kind: "infantry", count: 8, x: 92 },
+        { kind: "shield", count: 2, x: 284 },
+        { kind: "infantry", count: 6, x: 188 }
+      ]
+    }
+  ];
+
+  return {
+    id: 10001,
+    title: "第1关",
+    subtitle: "初入刀道 | 敌军HP 1",
+    initialEnergy: 45,
+    hp: 3,
+    enemySpeed: 1.0,
+    pickupChance: 0.03,
+    durationSeconds: 90,
+    buffTimes: [],
+    waves: level1Waves,
+    eliteSpawnAt: 25, // 三次修正：推迟到 wave 5 之后 (19s + 6s)
+    eliteKind: "fireRing" as any,
+    chestBuffId: "chest_first_clear",
+    postChestWaves: level1PostChestWaves,
+    entryOverride: { multiplier: 3.4, endY: 560, maxDuration: 2.0, spawnY: -20 }
+  };
+}
+
 /** 动态生成一局主线的完整LevelConfig */
 export function createFloorLevelConfig(floor: number): LevelConfig {
+  // 第1关：使用硬编码激进割草配置
+  if (floor === 1) return createLevel1Config();
+
   const stats = getFloorStats(floor);
   const waveTemplates = generateFloorWaves(floor);
 
@@ -443,33 +574,45 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
         yOffset: ei * 6,
       } as any;
     });
-    // 方案B中场事件：精英前蓄冲 + 精英后聚阵
-    const waveCount = waveTemplates.length;
-    // 蓄冲：在波次40%位置（精英前4-6秒预警）
-    const chargeIdx = Math.max(1, Math.floor(waveCount * 0.4));
-    // 聚阵：最后一波（精英死后残敌收尾）
-    const gatherIdx = waveCount - 1;
-    let midfieldEventType: 'none' | 'gather' | 'charge_pause' | undefined = undefined;
-    if (idx === chargeIdx && chargeIdx < gatherIdx) {
-      midfieldEventType = 'charge_pause';
-    } else if (idx === gatherIdx) {
-      midfieldEventType = 'gather';
-    }
     return {
       name: tpl.name,
       delay: idx === 0 ? 0.2 : 0.2,
       spawnAt: idx * 5.5,
       speedMultiplier: 1 + floor * 0.005,
       enemies,
-      midfieldEventType,
     };
   });
 
-  // 决定精英出场时机（每关必出1个，通过 updateEliteSpawn 系统）
+  // 决定精英出场时机（每关必出1个）
   const eliteKinds = ["fireRing", "heal", "aura"];
   const eKind = eliteKinds[floor % eliteKinds.length] as any;
-  // 精英约在第3波时段出现（足够早，玩家击杀后有时间体验宝箱）
   const eliteSpawnAt = Math.max(8, waves.length * 1.8);
+
+  // 第2-5关：增加后置波
+  let postChestWaves: WaveConfig[] | undefined;
+  if (floor >= 2 && floor <= 5) {
+    const postCount = floor <= 2 ? 3 : (floor <= 3 ? 4 : 5);
+    postChestWaves = [];
+    for (let i = 0; i < postCount; i++) {
+      const postDelay = i === 0 ? 0.5 : 5.0 + (i - 1) * 5.5;
+      const baseCount = 24 + i * 6;
+      postChestWaves.push({
+        name: `反扑·${['一','二','三','四','五'][i] || String(i+1)}`,
+        delay: 0.2,
+        spawnAt: postDelay,
+        enemies: [
+          { kind: "infantry", count: Math.min(12, Math.floor(baseCount * 0.4)), x: 44 },
+          { kind: "infantry", count: Math.min(10, Math.floor(baseCount * 0.3)), x: 140 },
+          { kind: i % 2 === 0 ? "powder" : "shield", count: 2, x: 236 },
+          { kind: "infantry", count: Math.min(8, Math.floor(baseCount * 0.2)), x: 92 }
+        ]
+      });
+    }
+  }
+
+  const entryOverride = floor <= 5
+    ? { multiplier: 3.4, endY: 560, maxDuration: 2.0, spawnY: -20 }
+    : undefined;
 
   return {
     id: 10000 + floor,
@@ -484,5 +627,7 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
     waves,
     eliteSpawnAt,
     eliteKind: eKind,
+    postChestWaves,
+    entryOverride,
   };
 }

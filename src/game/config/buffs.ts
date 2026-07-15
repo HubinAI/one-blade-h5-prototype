@@ -134,6 +134,17 @@ export const RUN_BUFFS: RunBuffConfig[] = [
     route: "ironWall",
     tier: 3,
     color: ROUTE_COLORS.ironWall
+  },
+  // ---- 特殊：第一关固定宝箱Buff ----
+  {
+    id: "chest_first_clear",
+    name: "刀势回涌",
+    shortName: "回涌",
+    description: "立即恢复70%刀势，副刀CD清零，后续12秒刀势恢复+30%",
+    feedback: "刀势回涌！副刀共鸣！",
+    route: "scorch" as any,
+    tier: 1,
+    color: "#ffd35a"
   }
 ];
 

@@ -23,7 +23,8 @@ export type BuffId =
   | "shatterArmy"   // 贯阵3：破军
   | "fortress"      // 鐵壁1：堅城
   | "warDrum"       // 鐵壁2：鼓阵
-  | "soulReturn";   // 鐵壁3：魂返
+  | "soulReturn"    // 鐵壁3：魂返
+  | "chest_first_clear"; // 第一关宝箱固定Buff（V0715008）
 
 // ---- 技能雷达四维 ----
 export type SkillDimension = "momentum" | "precision" | "shatter" | "guard";
@@ -96,7 +97,16 @@ export type LevelConfig = {
   bossId?: BossId;
   /** 阵眼阵法ID */
   formationId?: string;
+  /** 宝箱后爆发怪潮（V0715008 新增，二次打磨改用 edictBurstRounds） */
+  postChestWaves?: WaveConfig[];
+  /** 第一关固定宝箱Buff ID（V0715008 新增） */
+  chestBuffId?: string;
+  /** entryPhase 前5关覆写（V0715008 新增） */
+  entryOverride?: { multiplier: number; endY: number; maxDuration: number; spawnY: number };
 };
+
+/** 军令爆发阶段类型（二次打磨新增） */
+export type BattlePhase = 'main_waves' | 'elite' | 'chest' | 'edict_burst' | 'result';
 
 export type Enemy = {
   id: string;

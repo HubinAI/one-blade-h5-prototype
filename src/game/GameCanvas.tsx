@@ -73,6 +73,9 @@ export function GameCanvas({ level, onFinish, onReviveOffer, onBuffReveal, reviv
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() === "d") {
         gameRef.current?.toggleDebugPanel();
+      } else if (event.key.toLowerCase() === "w") {
+        // 调试用：强制给所有敌人加破绽标记
+        gameRef.current?.debugForceWeakpoint();
       }
     };
 

@@ -83,25 +83,70 @@ export const BALANCE = {
   }
 } as const;
 
-/** 战斗纵向区域定义 */
+/** 战斗纵向区域定义（二次打磨版：主战区继续下压） */
 export const BATTLEFIELD_ZONES = {
-  spawnTopY: -60,
+  spawnTopY: -20,
   spawnVisibleY: 60,
-  entryEndY: 400,
-  midfieldStartY: 420,
-  midfieldCenterY: 490,
-  midfieldEndY: 560,
+  // 快速入场终点继续下压
+  entryEndY: 560,
+  // 中场区下移
+  midfieldStartY: 430,
+  midfieldCenterY: 540,
+  midfieldEndY: 620,
+  // 主战区/收割区
   harvestStartY: 560,
+  harvestEndY: 700,
   defenseLineY: 720
 } as const;
 
-/** 快速入场阶段配置 */
+/** 快速入场阶段配置（二次打磨版：更快压入更深处） */
 export const ENTRY_PHASE_CONFIG = {
-  defaultMultiplier: 1.8,
-  earlyStageMultiplier: 2.0,
-  lateStageMultiplier: 1.7,
-  defaultEndY: 240,
-  defaultMaxDuration: 0.9
+  defaultMultiplier: 3.0,
+  earlyStageMultiplier: 3.4,
+  lateStageMultiplier: 2.4,
+  defaultEndY: 560,
+  defaultMaxDuration: 2.0
+} as const;
+
+/** 三次修正：统一刷怪入口参数（根据阶段选择） */
+export const ENTRY_PROFILE_COMMON = {
+  spawnY: -20,
+  entryEndY: 560,
+  entryMultiplier: 3.4,
+  entryMaxDuration: 2.0
+} as const;
+
+export const ENTRY_PROFILE_EDICT_BURST = {
+  spawnY: -20,
+  entryEndY: 580,
+  entryMultiplier: 3.6,
+  entryMaxDuration: 2.1
+} as const;
+
+/** 性能上限 */
+export const PERFORMANCE_LIMITS = {
+  maxEnemiesOnScreen: 60,
+  maxParticlesOnScreen: 180,
+  maxFloatingText: 12
+} as const;
+
+/** 怪物软分离参数（三次修正：加强一档） */
+export const ENEMY_SOFT_SEPARATION = {
+  enabled: true,
+  minXDistance: 38,
+  minYDistance: 26,
+  strength: 0.42,
+  maxCorrectionPerFrame: 10,
+  yMin: 300,
+  yMax: 720
+} as const;
+
+/** 浮字聚合器参数（三次修正） */
+export const FLOATING_TEXT_LIMITS = {
+  maxOnScreen: 10,
+  mergeWindowMs: 700,
+  mergeRadius: 100,
+  lowPriorityMax: 3
 } as const;
 
 export type SwordStage = {

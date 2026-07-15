@@ -12,3 +12,7 @@ pnpm-debug.log*
 Thumbs.db
 
 .version-state.json
+
+# 自动化测试
+*.mjs
+e2e-screenshots/

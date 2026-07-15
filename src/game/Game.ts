@@ -5,7 +5,7 @@ import { ELITE_VISUAL_DEFS } from "../data/elites";
 import { BOSS_VISUAL_DEFS } from "../data/bosses";
 import { FORMATIONS } from "../data/formations";
 import { DESIGN_HEIGHT, DESIGN_WIDTH, HUD_HEIGHT, WALL_TOP_Y, MAX_ENEMIES_ON_SCREEN, MAX_PARTICLES_ON_SCREEN, MAX_CHAIN_DEPTH, MAX_FLOATING_TEXT } from "./config/constants";
-import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID } from "./config/balance";
+import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID, BATTLEFIELD_ZONES, ENTRY_PHASE_CONFIG, PERFORMANCE_LIMITS, ENEMY_SOFT_SEPARATION, FLOATING_TEXT_LIMITS, ENTRY_PROFILE_COMMON, ENTRY_PROFILE_EDICT_BURST } from "./config/balance";
 import { AD_CONFIG } from "./config/ads";
 import { RUN_BUFFS, RUN_BUFF_BY_ID, ROUTE_COLORS, ROUTE_NAMES, ROUTE_BUFFS, getNextBuffInRoute, getBuffRoute } from "./config/buffs";
 import { BOSS_CONFIG, getBossPhase } from "./config/bosses";
@@ -22,6 +22,7 @@ import { logEvent } from "./services/Analytics";
 import { AudioService } from "./services/AudioService";
 import { calculateSkillScores } from "./services/SkillTracker";
 import type {
+  BattlePhase,
   BattleResult,
   BattleStats,
   BossId,
@@ -60,6 +61,12 @@ export class Game {
   private readonly onReviveOffer?: ReviveOfferCallback;
   private readonly onBuffReveal?: (buffId: BuffId) => void;
   private phase: GamePhase = "playing";
+  /** 二次打磨：战斗阶段 HUD 显示 */
+  private battlePhase: BattlePhase = 'main_waves';
+  /** 军令爆发轮次索引 */
+  private edictBurstRoundIndex = 0;
+  /** 军令爆发轮次总数 */
+  private edictBurstRoundTotal = 0;
   private elapsed = 0;
   private idCounter = 0;
   private finished = false;
@@ -70,6 +77,8 @@ export class Game {
   private energy: number;
   private regenDelayTimer = 0;
   private drumTimer = 0;
+  /** 三次修正：chest_first_clear 持续刀势回涌的 flag（独立于 drumTimer，避免显示"鼓"图标） */
+  private chestMomentumTimer = 0;
   private nextSoul = false;
   private nextOil = false;
   private pickupsSpawned = 0;
@@ -195,6 +204,22 @@ export class Game {
   public chestFlying = false;
   /** 飞行完成后已隐藏 */
   public chestDone = false;
+
+  // ---- V0715008 割草密度优化新增跟踪字段 ----
+  /** 精英是否已死亡 */
+  private eliteKilled = false;
+  /** 所有前置波是否已生成 */
+  private allNormalWavesSpawned = false;
+  /** 宝箱后爆发波索引 */
+  private postChestWaveIndex = 0;
+  /** 宝箱后所有爆发波是否已生成 */
+  private allPostChestWavesSpawned = false;
+  /** 是否有关键动画播放中 */
+  private hasPendingKeyAnimation = false;
+  /** 最终波清场率（存活敌人/总生成） */
+  private finalWaveClearRatio = 0;
+  /** 宝箱开启固定buff专用（第一关） */
+  private chestFixedBuffApplied = false;
 
   private stats: BattleStats = {
     kills: 0,
@@ -350,6 +375,16 @@ export class Game {
     this.debugEnabled = !this.debugEnabled;
   }
 
+  /** 调试用：强制给所有存活敌人加破绽标记（按 W 触发） */
+  debugForceWeakpoint() {
+    for (const enemy of this.enemies) {
+      if (enemy.alive) {
+        this.weakpointMarks.set(enemy.id, 2.0);
+      }
+    }
+    this.addText(DESIGN_WIDTH / 2, 240, "+ 破绽 调试触发", "#ff6a33", 18, 1.2);
+  }
+
   reviveFromRewardedAd() {
     if (this.phase !== "revive") return;
     this.phase = "playing";
@@ -394,8 +429,11 @@ export class Game {
 
     this.elapsed += scaledDt;
     this.regenDelayTimer = Math.max(0, this.regenDelayTimer - scaledDt);
+    this.chestMomentumTimer = Math.max(0, this.chestMomentumTimer - scaledDt);
+    // 三次修正：chest_first_clear 的刀势回涌用一个虚拟 drumTimer 注入到 recoverEnergy
+    const effectiveDrumTimer = this.drumTimer + this.chestMomentumTimer;
     if (!this.currentSlash?.active && this.regenDelayTimer <= 0 && this.warDrumNoDecayTimer <= 0) {
-      this.energy = recoverEnergy(this.energy, scaledDt * this.getPassiveRegenMultiplier(), this.drumTimer);
+      this.energy = recoverEnergy(this.energy, scaledDt * this.getPassiveRegenMultiplier(), effectiveDrumTimer);
     }
     // 鼓阵：击杀后1s内刀势不衰减（不扣regenDelay）
     if (!this.currentSlash?.active && this.warDrumNoDecayTimer > 0) {
@@ -440,6 +478,8 @@ export class Game {
     this.updateEliteSkills(scaledDt);
     this.updateBossSkills(scaledDt);
     this.updateChestDrop(scaledDt);
+    this.updatePostChestWaves(scaledDt);
+    this.updateBattlePhase();
     this.updateBuffChoiceTriggers();
     this.checkBattleEnd();
   }
@@ -763,6 +803,40 @@ export class Game {
       if (mainRoute === "ironWall" && trail.kills > 0) {
         this.screenShake = Math.max(this.screenShake, 0.28);
       }
+    }
+
+    // 二次打磨：击杀清空感分层反馈
+    const kills = trail.kills;
+    if (kills >= 10) {
+      // 10+：中幅震屏 + 刀光余辉延长 + 刀路清空带
+      this.screenShake = Math.max(this.screenShake, 0.5);
+      // 沿刀路产生"裂痕"效果：每 3 个 trail 点一个 splitFlash
+      for (let i = 0; i < trail.points.length; i += 3) {
+        const p = trail.points[i];
+        const next = trail.points[Math.min(i + 1, trail.points.length - 1)];
+        const angle = Math.atan2(next.y - p.y, next.x - p.x);
+        this.splitFlashes.push({
+          x: p.x, y: p.y,
+          angle,
+          length: 20 + Math.random() * 12,
+          life: 0.28, maxLife: 0.28,
+        });
+        // 碎片粒子向刀线两侧飞散
+        this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 4, "#ffffff"));
+      }
+    }
+    if (kills >= 15) {
+      // 15+：短慢镜头 + 强刀光残影 + "神之一刀"
+      this.slowMoTimer = Math.max(this.slowMoTimer, 0.12);
+      this.screenShake = Math.max(this.screenShake, 0.75);
+      if (kills >= 15 && !this.hasRecentText("神之一刀", 2)) {
+        this.addText(DESIGN_WIDTH / 2, 136, "神之一刀", "#ffd35a", 32, 2.0);
+        this.flash = Math.max(this.flash, 1.0);
+      }
+    }
+    if (kills >= 20) {
+      // 20+：全屏边缘金光 + "神之一刀"（已涵盖15+）
+      this.flash = Math.max(this.flash, 1.2);
     }
 
     logEvent("slash_end", {
@@ -1425,6 +1499,7 @@ export class Game {
     if (enemy.kind === "elite" && enemy.eliteKind && !this.chestDropped) {
       this.killedElites.push(enemy.eliteKind);
       this.stats.killedElites = [...this.killedElites];
+      this.eliteKilled = true;
       this.startChestDrop(enemy.x, enemy.y - 10);
       this.particles.push(glowParticle(enemy, "#ffd35a", 25, 50));
       this.addText(enemy.x, enemy.y - 40, "宝箱掉落！", "#ffd35a", 18, 1.6);
@@ -1580,7 +1655,9 @@ export class Game {
       // 正常下落（未蓄力时或冲刺后）
       const isCharging = enemy.chargeTimer !== undefined && enemy.chargeTimer >= 0;
       if (!isCharging) {
-        enemy.y += enemy.speed * entryMultiplier * rushMultiplier * statusSlow * fortressSlow * dt;
+        // 二次打磨：主战区（y>=560）轻微减速，让怪物在可砍区域停留更久
+        const harvestSlow = enemy.y >= BATTLEFIELD_ZONES.harvestStartY && enemy.chargeTimer === undefined ? 0.85 : 1;
+        enemy.y += enemy.speed * entryMultiplier * rushMultiplier * statusSlow * fortressSlow * harvestSlow * dt;
       } else {
         // 蓄力时略微闪红光
         if (Math.sin(this.elapsed * 20) > 0) {
@@ -1588,8 +1665,8 @@ export class Game {
         }
       }
 
-      // ── 中场特性激活：y>=420 后激活特殊怪的中场表现 ──
-      if (enemy.y >= 420 && !enemy.midfieldActivated) {
+      // ── 中场特性激活：使用 BATTLEFIELD_ZONES 配置 ──
+      if (enemy.y >= BATTLEFIELD_ZONES.midfieldStartY && !enemy.midfieldActivated) {
         enemy.midfieldActivated = true;
         this.activateMidfieldTrait(enemy);
       }
@@ -1605,13 +1682,22 @@ export class Game {
           this.addText(enemy.x, BALANCE.battlefield.bottomDefenseY - 12, "-1 坚城减速", "#5b8db8", 14);
           this.particles.push(...sparkBurst(enemy, 8, "#5b8db8"));
         } else {
+          // 三次修正：精英触底死亡也要掉宝箱（之前直接 enemy.alive=false 绕过了 killEnemy）
+          if (enemy.kind === "elite" && enemy.eliteKind && !this.chestDropped) {
+            this.killedElites.push(enemy.eliteKind);
+            this.stats.killedElites = [...this.killedElites];
+            this.eliteKilled = true;
+            this.startChestDrop(enemy.x, enemy.y - 10);
+            this.addText(enemy.x, enemy.y - 40, "宝箱掉落！", "#ffd35a", 18, 1.6);
+          } else {
+            this.addText(enemy.x, BALANCE.battlefield.bottomDefenseY - 12, `-${enemy.hpDamage}`, "#ff7b6e", 18);
+          }
           enemy.alive = false;
           this.hp -= enemy.hpDamage;
           this.defenseLineHits += 1;
           this.screenShake = Math.max(this.screenShake, 0.45);
           this.flash = Math.max(this.flash, 0.35);
           AudioService.defenseHit();
-          this.addText(enemy.x, BALANCE.battlefield.bottomDefenseY - 12, `-${enemy.hpDamage}`, "#ff7b6e", 18);
           this.particles.push(...paperBurst({ x: enemy.x, y: BALANCE.battlefield.bottomDefenseY }, 12, ["#7b241f", "#d8b46e"]));
         }
 
@@ -1624,6 +1710,35 @@ export class Game {
     }
 
     this.enemies = this.enemies.filter((enemy) => enemy.alive);
+
+    // 二次打磨：怪物软分离（中场/收割区自然挤开，减少重叠）
+    this.applyEnemySoftSeparation(dt);
+  }
+
+  /** 怪物软分离：同屏怪物过密时轻微推开 */
+  private applyEnemySoftSeparation(dt: number) {
+    const cfg = ENEMY_SOFT_SEPARATION;
+    if (!cfg.enabled) return;
+    const alive = this.enemies;
+    for (let i = 0; i < alive.length; i++) {
+      const a = alive[i];
+      if (a.y < cfg.yMin || a.y > cfg.yMax) continue;
+      for (let j = i + 1; j < alive.length; j++) {
+        const b = alive[j];
+        if (b.y < cfg.yMin || b.y > cfg.yMax) continue;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const tooCloseX = Math.abs(dx) < cfg.minXDistance;
+        const tooCloseY = Math.abs(dy) < cfg.minYDistance;
+        if (!tooCloseX || !tooCloseY) continue;
+        const pushX = (cfg.minXDistance - Math.abs(dx)) * cfg.strength * Math.sign(dx || 1);
+        const clampedPush = Math.max(-cfg.maxCorrectionPerFrame, Math.min(cfg.maxCorrectionPerFrame, pushX));
+        a.x -= clampedPush * 0.5;
+        b.x += clampedPush * 0.5;
+        a.x = clamp(a.x, 10, 380);
+        b.x = clamp(b.x, 10, 380);
+      }
+    }
   }
 
   private updatePickups(dt: number) {
@@ -1656,11 +1771,11 @@ export class Game {
   private updateMidfieldHints(dt: number) {
     this._midfieldHintTimer = Math.max(0, this._midfieldHintTimer - dt);
     if (this._midfieldHintTimer > 0) return;
-    // 计数中场敌人（y>=420）
-    const enemiesInMidfield = this.enemies.filter(e => e.alive && e.y >= 420 && e.y < 560).length;
+    // 计数中场敌人（使用 BATTLEFIELD_ZONES 配置）
+    const enemiesInMidfield = this.enemies.filter(e => e.alive && e.y >= BATTLEFIELD_ZONES.midfieldStartY && e.y < BATTLEFIELD_ZONES.harvestStartY).length;
     if (this.energy >= 90 && enemiesInMidfield > 0) {
       // 检查是否有高价值目标
-      const hasHighValue = this.enemies.some(e => e.alive && e.y >= 420 && e.y < 560 &&
+      const hasHighValue = this.enemies.some(e => e.alive && e.y >= BATTLEFIELD_ZONES.midfieldStartY && e.y < BATTLEFIELD_ZONES.harvestStartY &&
         (e.kind === "powder" || e.kind === "core" || e.kind === "elite"));
       if (hasHighValue) {
         this.addText(DESIGN_WIDTH / 2, 252, "破阵良机", "#ffd35a", 14, 0.8);
@@ -1931,7 +2046,7 @@ export class Game {
       const highValue: EnemyKind[] = ["core", "powder", "elite", "shield"];
       if (highValue.includes(target.kind) && !killed) {
         this.weakpointMarks.set(target.id, 2.0);
-        this.addText(target.x, target.y - 20, "破绽", "#ff6a33", 16, 1.2);
+        this.addText(target.x, target.y - 20, "+ 破绽", "#ff6a33", 16, 1.2);
         // 标记浮字
         this.addText(s.x1 + (s.x2 - s.x1) / 2, s.y1 + (s.y2 - s.y1) / 2 - 16, "破点追击", "#ffd35a", 15, 0.8);
       }
@@ -2104,7 +2219,7 @@ export class Game {
     this.flash = Math.max(this.flash, 0.3);
     this.addText(60, 720, "⚔ 共鸣", "#5bc0ff", 12, 0.8);
     this.addText(DESIGN_WIDTH - 60, 720, "⚔ 共鸣", "#ff6a33", 12, 0.8);
-    this.addText(DESIGN_WIDTH / 2, 240, "副刀共鸣·CD清零", "#ffd35a", 16, 1.5);
+    this.addText(DESIGN_WIDTH / 2, 720, "副刀共鸣·CD清零", "#ffd35a", 16, 1.5);
     // 副刀光圈立刻出现
     for (let i = 0; i < 2; i++) {
       this.subReadyPing.push({ slot: i, life: 0.4, maxLife: 0.4 });
@@ -2129,14 +2244,59 @@ export class Game {
     if (this.wavesSpawned >= this.level.waves.length) return;
     const wave = this.level.waves[this.wavesSpawned];
 
-    // 双重判断：到达 spawnAt 时间 或 场上敌人已少、立即刷下一波
+    // 双重判断：到达 spawnAt 时间 或 场上活跃敌人少、立即刷下一波
     const reachedSpawnAt = wave.spawnAt !== undefined && this.elapsed >= wave.spawnAt;
-    const aliveCount = this.enemies.filter(e => e.alive).length;
+    const aliveInZone = this.enemies.filter(e => e.alive && e.y >= 60 && e.y < BALANCE.battlefield.bottomDefenseY).length;
     const enoughGap = this.elapsed - (this._lastWaveElapsed ?? 0) >= 1.6;
-    const fewEnemiesLeft = aliveCount <= 3 && enoughGap;
+    const fewEnemiesLeft = aliveInZone <= 3 && enoughGap;
 
     if (reachedSpawnAt || fewEnemiesLeft) {
       this.spawnCurrentWave(wave);
+    }
+  }
+
+  /** V0715008: 宝箱后爆发怪潮生成 */
+  private updatePostChestWaves(dt: number) {
+    const postWaves = this.level.postChestWaves;
+    if (!postWaves || postWaves.length === 0) return;
+    // 宝箱必须在已打开并确认后才能触发
+    if (!this.chestDone) return;
+    if (this.allPostChestWavesSpawned) return;
+
+    const wave = postWaves[this.postChestWaveIndex];
+    if (!wave) { this.allPostChestWavesSpawned = true; return; }
+
+    // post chest waves 的 spawnAt 是相对宝箱确认时间的偏移
+    const chestConfirmTime = this.chestDropTimer > 0 ? this.elapsed : 0;
+    const postElapsed = this.elapsed - this.chestDropTimer;
+    if (postElapsed >= wave.spawnAt!) {
+      // 性能保护：达到上限时不生成
+      const aliveCount = this.enemies.filter(e => e.alive).length;
+      if (aliveCount >= PERFORMANCE_LIMITS.maxEnemiesOnScreen) {
+        return; // 延迟生成
+      }
+      this.postChestWaveIndex += 1;
+      this.edictBurstRoundIndex = this.postChestWaveIndex - 1;
+      if (this.postChestWaveIndex >= postWaves.length) {
+        this.allPostChestWavesSpawned = true;
+      }
+      // 生成这波敌人
+      for (const spawn of wave.enemies) {
+        // 三次修正：军令爆发阶段使用 edict burst 更激进的 profile
+        const profile = this.getEntryProfile();
+        const spawnY = profile.spawnY;
+        const count = spawn.count ?? 1;
+        for (let i = 0; i < count; i++) {
+          const x = spawn.x + (i % 2 === 0 ? -8 : 8) * Math.floor(i / 2);
+          const enemy = this.createEnemy(spawn.kind as any, x, spawnY - (spawn.yOffset ?? 0), 1);
+          this.enemies.push(enemy);
+          this.discoveredEnemies.add(spawn.kind as any);
+          this.particles.push(glowParticle({ x, y: spawnY }, "#5c4a3a", 12, 20));
+        }
+      }
+      // 波次名称飘字
+      // V0715008 二次打磨：屏蔽军令爆发轮次名称（"反扑·终"等）
+      // this.addText(DESIGN_WIDTH / 2, 120, wave.name, "#ff6a33", 20, 1.4);
     }
   }
 
@@ -2146,6 +2306,7 @@ export class Game {
     this.wavesSpawned += 1;
     if (this.wavesSpawned >= this.level.waves.length) {
       this.wavesFinishedAt = this.elapsed;
+      this.allNormalWavesSpawned = true;
     }
     this.waveHpBonus = Math.min(5, this.wavesSpawned);
 
@@ -2205,8 +2366,8 @@ export class Game {
       for (let i = 0; i < this.subBladeTimers.length; i++) {
         this.subBladeTimers[i] = Math.max(0, this.subBladeTimers[i] - 0.5); // 立即加速0.5s
       }
-      this.addText(DESIGN_WIDTH / 2, 200, "🥁 鼓舞！", "#ffd35a", 24, 1.8);
-      this.addText(DESIGN_WIDTH / 2, 228, "副刀CD临时-30%", "#f6e7bd", 14, 1.5);
+      this.addText(DESIGN_WIDTH / 2, 720, "🥁 鼓舞！", "#ffd35a", 18, 1.8);
+      this.addText(DESIGN_WIDTH / 2, 746, "副刀CD临时-30%", "#f6e7bd", 13, 1.5);
     } else if (chosenEvent === "eliteStrike") {
       this.addText(DESIGN_WIDTH / 2, 200, "👹 精英袭！", "#9b6dff", 24, 1.8);
       this.addText(DESIGN_WIDTH / 2, 228, "精英督战出现", "#c896ff", 14, 1.5);
@@ -2280,12 +2441,17 @@ export class Game {
       this.pickupsSpawned += 1;
     }
 
-    this.addText(DESIGN_WIDTH / 2, 96, wave.name, "#f6e7bd", 16);
+    // V0715008 二次打磨：屏蔽波次描述（"第一波·横切"等）飘字
+    // this.addText(DESIGN_WIDTH / 2, 96, wave.name, "#f6e7bd", 16);
   }
 
   /** 处理 sub-spawn 队列（多波多次刷新） */
+  /** 子刷新队列处理（含性能保护） */
   private updateSubSpawnQueue() {
     if (this.subSpawnQueue.length === 0) return;
+    const aliveCount = this.enemies.filter(e => e.alive).length;
+    // 性能保护：达到上限时不处理队列（延迟生成）
+    if (aliveCount >= PERFORMANCE_LIMITS.maxEnemiesOnScreen) return;
     const ready: typeof this.subSpawnQueue = [];
     const remain: typeof this.subSpawnQueue = [];
     for (const item of this.subSpawnQueue) {
@@ -2297,7 +2463,9 @@ export class Game {
     }
     this.subSpawnQueue = remain;
     for (const item of ready) {
-      const spawnY = BALANCE.battlefield.enemySpawnY - (item.yOffset ?? 0);
+      // 三次修正：使用统一入口的 spawnY 而非硬编码
+      const profile = this.getEntryProfile();
+      const spawnY = profile.spawnY - (item.yOffset ?? 0);
       const enemy = this.createEnemy(item.kind as any, item.x, spawnY, item.speedMultiplier);
       // 中场事件波及：本波敌人带event标记
       if (this._currentWaveEvent) {
@@ -2309,12 +2477,71 @@ export class Game {
     }
   }
 
-  /** 判定是否应立刻胜利结算 */
+  /** 判定是否应立刻胜利结算（二次打磨：检查 battlePhase） */
   private shouldFinishVictory(): boolean {
     const allWavesDone = this.wavesSpawned >= this.level.waves.length;
     const noAliveEnemies = !this.enemies.some(e => e.alive);
     const notResolving = !this.currentSlash;
-    return allWavesDone && noAliveEnemies && notResolving;
+
+    // 基础条件
+    if (!allWavesDone || !notResolving) return false;
+
+    // 禁止在精英阶段/宝箱阶段结算
+    if (this.battlePhase === 'elite' || this.battlePhase === 'chest') return false;
+
+    // 有精英的关卡：必须已击杀精英
+    if (this.level.eliteSpawnAt && this.level.eliteKind) {
+      if (!this.eliteKilled) return false;
+    }
+
+    // 有军令爆发轮次的关卡：必须在 edict_burst 阶段且全部生成
+    const hasPostChest = this.level.postChestWaves && this.level.postChestWaves.length > 0;
+    if (hasPostChest) {
+      if (!this.chestDone || !this.allPostChestWavesSpawned) return false;
+    }
+
+    // 无宝箱后怪潮：宝箱非强制
+    if (!hasPostChest && this.level.eliteSpawnAt && this.chestDropped) {
+      if (!this.chestDone) return false;
+    }
+
+    // 最后检查：场上敌人 ≤ 3 或 清场接近完成
+    const aliveCount = this.enemies.filter(e => e.alive).length;
+    if (aliveCount > 3) return false;
+
+    // 没有关键动画播放中
+    if (this.chestPendingConfirm || this.chestFlying) return false;
+
+    return true;
+  }
+
+  /** 二次打磨：自动切换 battlePhase HUD 显示 */
+  private updateBattlePhase() {
+    // 已进入结果页
+    if (this.finished) { this.battlePhase = 'result'; return; }
+
+    // 军令爆发阶段（宝箱确认后）
+    const hasEdictBurst = this.level.postChestWaves && this.level.postChestWaves.length > 0;
+    if (hasEdictBurst && this.chestDone) {
+      this.battlePhase = 'edict_burst';
+      this.edictBurstRoundTotal = this.level.postChestWaves!.length;
+      return;
+    }
+
+    // 宝箱阶段（宝箱已打开但未确认）
+    if (this.chestDropped && this.chestOpened) {
+      this.battlePhase = 'chest';
+      return;
+    }
+
+    // 精英阶段（精英已出场）
+    if (this.eliteSpawned && !this.eliteKilled) {
+      this.battlePhase = 'elite';
+      return;
+    }
+
+    // 默认主波次阶段
+    this.battlePhase = 'main_waves';
   }
 
   private checkBattleEnd() {
@@ -2478,12 +2705,23 @@ export class Game {
     this.onFinish(result);
   }
 
+  /** 三次修正：根据当前战斗阶段获取对应 entry profile */
+  private getEntryProfile() {
+    if (this.battlePhase === 'edict_burst') return ENTRY_PROFILE_EDICT_BURST;
+    return ENTRY_PROFILE_COMMON;
+  }
+
   private createEnemy(kind: EnemyKind, x: number, y: number, speedMultiplier = 1): Enemy {
     const balance = ENEMY_BALANCE[kind];
     const dailyShieldBonus = this.runContext.mode === "dailyChallenge" && this.runContext.dailyChallengeId === "hard_shield" && kind === "shield" ? 1 : 0;
     // 逐波HP递增：每波+1，最多+5（仅对基础敌人生效，精英/Boss不受影响）
     const isBasicEnemy = kind === "infantry" || kind === "shield" || kind === "powder" || kind === "core";
     const hpBonus = isBasicEnemy ? this.waveHpBonus : 0;
+    // 三次修正：统一使用 entry profile（按 battlePhase 选择）
+    const profile = this.getEntryProfile();
+    const epEndY = profile.entryEndY;
+    const epMul = profile.entryMultiplier;
+    const epMaxDur = profile.entryMaxDuration;
     return {
       id: this.nextId("enemy"),
       kind,
@@ -2515,9 +2753,9 @@ export class Game {
       // 快速入场阶段：所有基础敌人生成时激活（急冲兵用 rushTimer 覆盖）
       entryPhase: isBasicEnemy && !(kind === "infantry" && Math.random() < 0.3) ? {
         active: true,
-        endY: 400,
-        speedMultiplier: 1.8,
-        maxDuration: 1.2,
+        endY: epEndY,
+        speedMultiplier: epMul,
+        maxDuration: epMaxDur,
         elapsed: 0,
         completed: false
       } : undefined
@@ -2591,6 +2829,79 @@ export class Game {
       maxLife: life,
       color,
       size
+    });
+    // 二次打磨：浮字上限保护，超出时移除最早的小字（size≤13为low priority）
+    if (this.texts.length > MAX_FLOATING_TEXT) {
+      // 保留大尺寸（关键反馈），从小尺寸中移除最老的
+      this.texts.sort((a, b) => {
+        const aIsLarge = a.size >= 16 ? 1 : 0;
+        const bIsLarge = b.size >= 16 ? 1 : 0;
+        if (aIsLarge !== bIsLarge) return aIsLarge - bIsLarge; // 大字在后面
+        return b.maxLife - b.life - (a.maxLife - a.life); // 老的在前
+      });
+      this.texts = this.texts.slice(0, MAX_FLOATING_TEXT);
+    }
+  }
+
+  /** 三次修正：浮字聚合器——同类型小浮字合并 + 优先级保护 */
+  private pushFloatingTextEvent(
+    x: number,
+    y: number,
+    text: string,
+    priority: 'critical' | 'high' | 'medium' | 'low',
+    color: string,
+    size: number,
+    life: number = BALANCE.feedback.floatingTextLife
+  ) {
+    // 合并：查找附近同类文本
+    const mergeTarget = this.texts.find(t =>
+      t.life > life * 0.3 &&
+      Math.abs(t.x - x) < FLOATING_TEXT_LIMITS.mergeRadius &&
+      Math.abs(t.y - y) < FLOATING_TEXT_LIMITS.mergeRadius &&
+      (t.text === text || (
+        (text.startsWith("连斩") && t.text.startsWith("连斩")) ||
+        (text.startsWith("蓄势") && t.text.startsWith("蓄势")) ||
+        (text.startsWith("连") && t.text.startsWith("连")) ||
+        (text.startsWith("+") && t.text.startsWith("+"))
+      ))
+    );
+
+    if (mergeTarget) {
+      // 合并：累加数值（如"连斩 x4" + "连斩 x3" → "连斩 x7"）
+      const numMatch = text.match(/(\d+)/);
+      const targetNumMatch = mergeTarget.text.match(/(\d+)/);
+      if (numMatch && targetNumMatch) {
+        const sum = parseInt(numMatch[1]) + parseInt(targetNumMatch[1]);
+        mergeTarget.text = mergeTarget.text.replace(/\d+/, String(sum));
+      }
+      mergeTarget.life = life * 0.85; // 合并后重置生存
+      mergeTarget.maxLife = life;
+      return;
+    }
+
+    // 低优先级文本：超出限制时丢弃
+    if (priority === 'low' || priority === 'medium') {
+      const lowCount = this.texts.filter(t => {
+        const isLow = t.size <= 12;
+        return isLow && t.life > 0;
+      }).length;
+      if (priority === 'low' && lowCount >= FLOATING_TEXT_LIMITS.lowPriorityMax) return;
+      if (priority === 'medium' && lowCount >= FLOATING_TEXT_LIMITS.maxOnScreen - 2) return;
+    }
+
+    // 上限保护：临界值/高级别始终保留
+    if (this.texts.length >= FLOATING_TEXT_LIMITS.maxOnScreen && priority !== 'critical') {
+      // 找最低优先级文本
+      const removable = [...this.texts].sort((a, b) => (a.size - b.size) || (a.life - b.life));
+      if (removable[0]) {
+        const idx = this.texts.indexOf(removable[0]);
+        if (idx >= 0) this.texts.splice(idx, 1);
+      }
+    }
+
+    this.texts.push({
+      id: this.nextId("text"),
+      x, y, text, life, maxLife: life, color, size
     });
   }
 
@@ -2708,7 +3019,7 @@ export class Game {
     ctx.lineTo(DESIGN_WIDTH, HUD_HEIGHT);
     ctx.stroke();
 
-    // 中间：关名 + 波次（上下结构）
+    // 中间：关名 + 阶段（二次打磨：按 battlePhase 切换显示）
     ctx.textAlign = "center";
     ctx.fillStyle = "#f6e7bd";
     ctx.font = '700 16px "Microsoft YaHei", sans-serif';
@@ -2721,7 +3032,26 @@ export class Game {
     ctx.fillText(displayTitle, DESIGN_WIDTH / 2, 28);
     ctx.font = '11px "Microsoft YaHei", sans-serif';
     ctx.fillStyle = "rgba(246, 231, 189, 0.72)";
-    ctx.fillText(`波次 ${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`, DESIGN_WIDTH / 2, 48);
+    // 按 battlePhase 显示不同的阶段文本
+    let phaseText = "";
+    switch (this.battlePhase) {
+      case 'main_waves':
+        phaseText = `波次 ${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`;
+        break;
+      case 'elite':
+        phaseText = "精英来袭";
+        break;
+      case 'chest':
+        phaseText = "军令激活";
+        break;
+      case 'edict_burst':
+        phaseText = `军令爆发 ${this.edictBurstRoundIndex + 1}/${this.edictBurstRoundTotal || 3}`;
+        break;
+      case 'result':
+        phaseText = "";
+        break;
+    }
+    ctx.fillText(phaseText, DESIGN_WIDTH / 2, 48);
 
     // 右侧：分数
     ctx.textAlign = "right";
@@ -2731,7 +3061,9 @@ export class Game {
   }
 
   private drawEnemies(ctx: CanvasRenderingContext2D) {
-    for (const enemy of this.enemies) {
+    // 二次打磨：按 y 排序绘制（靠下的在上层）
+    const sorted = [...this.enemies].sort((a, b) => a.y - b.y);
+    for (const enemy of sorted) {
       const def = ENEMY_DEFS[enemy.kind];
       const wobbleX = Math.sin(enemy.wobble * 5) * 1.2;
       ctx.save();
@@ -2744,19 +3076,42 @@ export class Game {
       const baseColor = enemy.flash > 0 ? "#fff1b8" : def.color;
       const accentColor = def.accent;
 
-      // 破绽标记：外发光光圈（2秒持续）
+      // 破绽标记：瞄准准星（4 角括号向内 + 中心十字，区别于盾兵外圈）
       if (this.weakpointMarks.has(enemy.id)) {
         const remain = this.weakpointMarks.get(enemy.id) ?? 0;
         const pulse = 0.5 + Math.sin(this.elapsed * 8) * 0.5;
-        ctx.shadowColor = "#ff6a33";
-        ctx.shadowBlur = 18 + pulse * 12;
-        ctx.strokeStyle = `rgba(255, 106, 51, ${0.5 + pulse * 0.3})`;
-        ctx.lineWidth = 2.5;
+        // 4 角括号：紧贴敌人边缘内侧（缩小到圈内）
+        const r = enemy.radius + 2 + pulse * 1;
+        const armLen = 4; // 每段括号长度
+        ctx.strokeStyle = `rgba(255, 106, 51, ${0.7 + pulse * 0.3})`;
+        ctx.lineWidth = 2;
+        ctx.lineCap = "round";
+        // top-left
         ctx.beginPath();
-        ctx.arc(0, 0, enemy.radius + 6 + pulse * 3, 0, Math.PI * 2);
+        ctx.moveTo(-r, -r + armLen); ctx.lineTo(-r, -r); ctx.lineTo(-r + armLen, -r);
         ctx.stroke();
+        // top-right
+        ctx.beginPath();
+        ctx.moveTo(r - armLen, -r); ctx.lineTo(r, -r); ctx.lineTo(r, -r + armLen);
+        ctx.stroke();
+        // bottom-left
+        ctx.beginPath();
+        ctx.moveTo(-r, r - armLen); ctx.lineTo(-r, r); ctx.lineTo(-r + armLen, r);
+        ctx.stroke();
+        // bottom-right
+        ctx.beginPath();
+        ctx.moveTo(r - armLen, r); ctx.lineTo(r, r); ctx.lineTo(r, r - armLen);
+        ctx.stroke();
+        // 中心 + 十字（放大字号与"破绽"文字里+号对应，建立视觉关联）
+        ctx.lineWidth = 2.2;
+        ctx.strokeStyle = `rgba(255, 200, 80, ${0.85 + pulse * 0.15})`;
+        ctx.shadowColor = "rgba(255, 106, 51, 0.6)";
         ctx.shadowBlur = 6;
-        ctx.shadowColor = "rgba(0,0,0,0.45)";
+        ctx.beginPath();
+        ctx.moveTo(-7, 0); ctx.lineTo(7, 0);
+        ctx.moveTo(0, -7); ctx.lineTo(0, 7);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
       }
 
       // ═════════════════════════════════════
@@ -2767,15 +3122,32 @@ export class Game {
         // 步兵："兵"字 朱红，旋转下落动画
         const rot = Math.sin(enemy.wobble * 5) * 0.15;
         ctx.save();
-        // 急冲兵：底部红色光环 + 名称上方加⚡标识
-        if (enemy.rushTimer !== undefined) {
-          const rushPulse = Math.abs(Math.sin(this.elapsed * 12));
-          ctx.strokeStyle = `rgba(255, 106, 51, ${rushPulse * 0.6})`;
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(0, 0, enemy.radius + 6, 0, Math.PI * 2);
-          ctx.stroke();
-        }
+      // 急冲兵：顶部向下箭头 + 闪红底色（避免与破绽标记圆圈混淆）
+      if (enemy.rushTimer !== undefined) {
+        const rushPulse = Math.abs(Math.sin(this.elapsed * 12));
+        ctx.save();
+        // 闪红底色（更亮）
+        ctx.fillStyle = `rgba(255, 106, 51, ${0.15 + rushPulse * 0.2})`;
+        ctx.beginPath();
+        ctx.arc(0, 0, enemy.radius + 4, 0, Math.PI * 2);
+        ctx.fill();
+        // 顶部向下箭头（区别于破绽标记的4角括号+中心+）
+        ctx.strokeStyle = `rgba(255, 106, 51, ${0.7 + rushPulse * 0.3})`;
+        ctx.fillStyle = `rgba(255, 106, 51, ${0.7 + rushPulse * 0.3})`;
+        ctx.lineWidth = 1.8;
+        ctx.lineCap = "round";
+        // 向下箭头（顶部"▼"指向敌人）
+        ctx.beginPath();
+        ctx.moveTo(0, -enemy.radius - 9);
+        ctx.lineTo(0, -enemy.radius - 3);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-3, -enemy.radius - 5);
+        ctx.lineTo(0, -enemy.radius - 2);
+        ctx.lineTo(3, -enemy.radius - 5);
+        ctx.stroke();
+        ctx.restore();
+      }
         ctx.rotate(rot);
         ctx.shadowBlur = 8;
         ctx.shadowColor = "rgba(0,0,0,0.6)";
@@ -3700,7 +4072,8 @@ export class Game {
     // 破阵就绪提示（移到屏幕顶部下方，与关卡文字分隔）
     if (eTier === "burst" && !this._breakReadyNotified) {
       this._breakReadyNotified = true;
-      this.addText(DESIGN_WIDTH / 2, 100, "破阵斩已就绪！", "#ffd35a", 20, 1.8);
+      // V0715008 二次打磨：屏蔽"破阵斩已就绪！"飘字
+      // this.addText(DESIGN_WIDTH / 2, 100, "破阵斩已就绪！", "#ffd35a", 20, 1.8);
       this.slowMoTimer = Math.max(this.slowMoTimer, 0.06);
     }
     ctx.restore();
@@ -3896,6 +4269,12 @@ export class Game {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(slotTypeIcon, x + iconR, y + iconR + 2);
+      // 破槽位叠加 + 号（与破绽标记准星中心+号建立视觉关联）
+      if (slotIndex === 1) {
+        ctx.fillStyle = "#ff6a33";
+        ctx.font = '900 13px "Microsoft YaHei", sans-serif';
+        ctx.fillText("+", x + iconR + 13, y + iconR - 11);
+      }
     }
     ctx.restore();
 
@@ -4006,29 +4385,74 @@ export class Game {
     const tier = getBladeTier(this.energy);
     const stage = getTierConfig(tier);
     const slash = this.currentSlash;
+    // 计算各区域敌人数量
+    const z = BATTLEFIELD_ZONES;
+    const topCount = this.enemies.filter(e => e.alive && e.y < z.entryEndY).length;
+    const entryCount = this.enemies.filter(e => e.alive && e.y >= z.entryEndY && e.y < z.midfieldStartY).length;
+    const midCount = this.enemies.filter(e => e.alive && e.y >= z.midfieldStartY && e.y < z.harvestStartY).length;
+    const harvestCount = this.enemies.filter(e => e.alive && e.y >= z.harvestStartY).length;
+    const aliveCount = this.enemies.filter(e => e.alive).length;
+    const avgTimeToMidfield = this._lastWaveElapsed > 0 ? (this.elapsed / Math.max(1, this.wavesSpawned)).toFixed(1) : "-";
     const lines = [
       `level: ${this.level.id}`,
       `phase: ${this.phase}`,
       `wave: ${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`,
-      `enemies: ${this.enemies.length}`,
+      `postWave: ${this.postChestWaveIndex}/${this.level.postChestWaves?.length ?? 0}`,
+      `enemies: ${this.enemies.length} (alive: ${aliveCount})`,
       `energy: ${this.energy.toFixed(1)}`,
       `stage: ${stage.label}`,
       `slash stage: ${slash ? SWORD_STAGE_BY_ID[slash.tier].name : "-"}`,
-      `slash time: ${slash ? slash.remainingDuration.toFixed(2) : "-"}`,
-      `slash path: ${slash ? slash.remainingPathLength.toFixed(0) : "-"}`,
-      `hits: ${slash ? slash.hitEnemyIds.size : 0}`,
-      `max single: ${this.stats.maxSingleBlade}`
+      `--- V0715008 Debug ---`,
+      `entryEndY: ${z.entryEndY}`,
+      `midfieldStartY: ${z.midfieldStartY}`,
+      `harvestStartY: ${z.harvestStartY}`,
+      `Top: ${topCount}  Entry: ${entryCount}`,
+      `Midfield: ${midCount}  Harvest: ${harvestCount}`,
+      `Alive: ${aliveCount}`,
+      `AvgTimeToMidfield: ${avgTimeToMidfield}s`,
+      `eliteKilled: ${this.eliteKilled}`,
+      `chestDone: ${this.chestDone}`,
+      `allPostSpawned: ${this.allPostChestWavesSpawned}`,
     ];
 
     ctx.save();
+    const panelH = lines.length * 16 + 16;
     ctx.fillStyle = "rgba(13, 16, 17, 0.78)";
-    ctx.fillRect(10, 82, 178, 190);
+    ctx.fillRect(10, 82, 220, panelH);
     ctx.strokeStyle = "rgba(255, 214, 124, 0.36)";
-    ctx.strokeRect(10, 82, 178, 190);
+    ctx.strokeRect(10, 82, 220, panelH);
     ctx.fillStyle = "#f6e7bd";
     ctx.font = '11px "Consolas", monospace';
     ctx.textAlign = "left";
-    lines.forEach((line, index) => ctx.fillText(line, 18, 102 + index * 16));
+    lines.forEach((line, index) => {
+      ctx.fillStyle = line.startsWith("---") ? "#ffd35a" : "#f6e7bd";
+      ctx.fillText(line, 18, 102 + index * 16);
+    });
+    ctx.restore();
+
+    // 绘制区域参考线
+    this.drawDebugZoneLine(ctx, z.entryEndY, "entryEndY=480", "#ff6a33");
+    this.drawDebugZoneLine(ctx, z.midfieldStartY, "midfieldStartY=360", "#5bc0ff");
+    this.drawDebugZoneLine(ctx, z.harvestStartY, "harvestStartY=560", "#9b6dff");
+    this.drawDebugZoneLine(ctx, z.defenseLineY, "defenseLineY=720", "#ff3535");
+  }
+
+  private drawDebugZoneLine(ctx: CanvasRenderingContext2D, y: number, label: string, color: string) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.4;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(DESIGN_WIDTH, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.7;
+    ctx.font = '10px "Consolas", sans-serif';
+    ctx.textAlign = "left";
+    ctx.fillText(label, 4, y - 3);
     ctx.restore();
   }
 
@@ -4298,12 +4722,12 @@ export class Game {
       slowedTimer: 0,
       skillTimer: 0,
       skillCooldown: 0,
-      // 精英也参与快速入场阶段（endY=400, 1.2s 或到中场结束）
+      // 精英也参与快速入场阶段（三次修正：使用统一 entry profile）
       entryPhase: {
         active: true,
-        endY: 400,
-        speedMultiplier: 1.8,
-        maxDuration: 1.2,
+        endY: this.getEntryProfile().entryEndY,
+        speedMultiplier: this.getEntryProfile().entryMultiplier,
+        maxDuration: this.getEntryProfile().entryMaxDuration,
         elapsed: 0,
         completed: false
       }
@@ -4364,8 +4788,9 @@ export class Game {
     this.addText(x, y - 22, "军令宝箱", "#ffd35a", 18, 2.0);
   }
 
-  /** 随机抽取一个军令 */
+  /** 随机抽取一个军令（第一关使用固定Buff） */
   private getRandomBuff(): BuffId {
+    if (this.level.chestBuffId) return this.level.chestBuffId as BuffId;
     const all = RUN_BUFFS.map(b => b.id);
     return all[Math.floor(Math.random() * all.length)];
   }
@@ -4374,6 +4799,33 @@ export class Game {
   private applyChestBuff(id: BuffId) {
     this.runBuffs.add(id);
     const buff = RUN_BUFF_BY_ID[id];
+
+    // 第一关固定宝箱Buff：刀势回涌 + 副刀共鸣
+    if (id === "chest_first_clear") {
+      this.energy = Math.min(100, this.energy + 70);
+      // 两把副刀CD清零
+      for (let i = 0; i < this.subBladeTimers.length; i++) {
+        this.subBladeTimers[i] = 0;
+      }
+      // 三次修正：刀势回涌持续到关卡结束（用独立 flag，不显示"鼓"图标）
+      this.chestMomentumTimer = Math.max(this.chestMomentumTimer, 120);
+      this.selectedRoutes.push("scorch" as any);
+      // 刀势回涌特效
+      for (let i = 0; i < 3; i++) {
+        this.particles.push(glowParticle({ x: DESIGN_WIDTH / 2, y: 800 }, "#5bc0ff", 24 + Math.random() * 10, 40));
+      }
+      this.addText(DESIGN_WIDTH / 2, 150, "刀势回涌！副刀共鸣！", "#ffd35a", 22, 2.0);
+      this.addText(DESIGN_WIDTH / 2, 176, "12秒内刀势恢复+30%", "#5bc0ff", 14, 1.8);
+      this.flash = Math.max(this.flash, 0.8);
+      this.screenShake = Math.max(this.screenShake, 0.5);
+      for (let i = 0; i < 6; i++) {
+        this.particles.push(glowParticle({ x: 60, y: 768 + i * 10 }, "#5bc0ff", 15, 30));
+        this.particles.push(glowParticle({ x: DESIGN_WIDTH - 60, y: 768 + i * 10 }, "#ff6a33", 15, 30));
+      }
+      AudioService.buffSelect();
+      return;
+    }
+
     this.selectedRoutes.push(buff.route);
 
     // 堅城：HP+1
