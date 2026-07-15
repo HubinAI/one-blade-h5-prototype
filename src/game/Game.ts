@@ -3861,16 +3861,31 @@ export class Game {
         ctx.arc(x + iconR, y + iconR, iconR - 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
         ctx.stroke();
 
-        // CD 将好（最后 1 秒）: 外层闪光提示
-        if (ratio >= 0.85 && !ready) {
-          const flashPulse = Math.sin(this.elapsed * 10 + slotIndex * 3) * 0.5 + 0.5;
+        // CD 将好（最后 1 秒）: 多层脉冲 + 强烈发光
+        if (ratio >= 0.85) {
+          const flashPulse = Math.sin(this.elapsed * 12 + slotIndex * 3) * 0.5 + 0.5;
+          const intensity = 0.5 + flashPulse * 0.5; // 0.5 → 1.0
+          // 1) 外层大光环（最大 + 最亮）
           ctx.strokeStyle = colorStr;
           ctx.shadowColor = colorStr;
-          ctx.shadowBlur = 4 + flashPulse * 10;
-          ctx.lineWidth = 2;
+          ctx.shadowBlur = 10 + flashPulse * 16;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(x + iconR, y + iconR, iconR + 4 + flashPulse * 3, 0, Math.PI * 2);
+          ctx.stroke();
+          // 2) 中层光环
+          ctx.shadowBlur = 6 + flashPulse * 10;
+          ctx.lineWidth = 1.5;
           ctx.beginPath();
           ctx.arc(x + iconR, y + iconR, iconR + 1, 0, Math.PI * 2);
           ctx.stroke();
+          // 3) 填充发光底（透出亮色）
+          ctx.fillStyle = colorStr;
+          ctx.globalAlpha = 0.18 * intensity;
+          ctx.beginPath();
+          ctx.arc(x + iconR, y + iconR, iconR + 2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
           ctx.shadowBlur = 0;
         }
       }
@@ -3895,12 +3910,13 @@ export class Game {
       label = "可";
     } else if (blade) {
       label = `${cdSec}秒`;
-      // CD 将好时标签闪烁
+      // CD 将好时标签闪烁 + 发光
       if (ratio >= 0.85) {
-        const flashPulse = Math.sin(this.elapsed * 10 + slotIndex * 3) * 0.5 + 0.5;
+        const flashPulse = Math.sin(this.elapsed * 12 + slotIndex * 3) * 0.5 + 0.5;
         ctx.fillStyle = colorStr;
         ctx.shadowColor = colorStr;
-        ctx.shadowBlur = 4 + flashPulse * 8;
+        ctx.shadowBlur = 8 + flashPulse * 12;
+        ctx.font = '900 12px "Microsoft YaHei", sans-serif';
       }
     }
     ctx.fillText(label, x + iconR, y + iconR * 2 + 6);
