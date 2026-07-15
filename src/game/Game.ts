@@ -3860,6 +3860,19 @@ export class Game {
         ctx.beginPath();
         ctx.arc(x + iconR, y + iconR, iconR - 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
         ctx.stroke();
+
+        // CD 将好（最后 1 秒）: 外层闪光提示
+        if (ratio >= 0.85 && !ready) {
+          const flashPulse = Math.sin(this.elapsed * 10 + slotIndex * 3) * 0.5 + 0.5;
+          ctx.strokeStyle = colorStr;
+          ctx.shadowColor = colorStr;
+          ctx.shadowBlur = 4 + flashPulse * 10;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(x + iconR, y + iconR, iconR + 1, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
       }
 
       // 中心大字（"斩"/"破"）- 22px 是主元素
@@ -3878,8 +3891,18 @@ export class Game {
     ctx.fillStyle = colorStr;
     ctx.font = '700 11px "Microsoft YaHei", sans-serif';
     let label = slotType;
-    if (blade && ready) label = "可";
-    else if (blade) label = `${cdSec}秒`;
+    if (blade && ready) {
+      label = "可";
+    } else if (blade) {
+      label = `${cdSec}秒`;
+      // CD 将好时标签闪烁
+      if (ratio >= 0.85) {
+        const flashPulse = Math.sin(this.elapsed * 10 + slotIndex * 3) * 0.5 + 0.5;
+        ctx.fillStyle = colorStr;
+        ctx.shadowColor = colorStr;
+        ctx.shadowBlur = 4 + flashPulse * 8;
+      }
+    }
     ctx.fillText(label, x + iconR, y + iconR * 2 + 6);
     ctx.restore();
   }
