@@ -4,7 +4,7 @@ export type Vec2 = {
 };
 
 export type BladeTier = "weak" | "normal" | "strong" | "burst";
-export type EnemyKind = "infantry" | "shield" | "powder" | "core" | "elite" | "boss";
+export type EnemyKind = "infantry" | "shield" | "powder" | "core" | "elite" | "boss" | "splitter" | "tractor";
 export type EliteKind = "fireRing" | "heal" | "aura";
 export type BossId = "yaoWang" | "moXiu" | "huaYao";
 export type PickupKind = "drum" | "soul" | "oil";
@@ -177,6 +177,16 @@ export type Enemy = {
   eliteLowHpWarned?: boolean;
   /** P2：精英护盾破裂闪光计时 */
   shieldBrokenFlash?: number;
+  /** P3：分裂兵状态 */
+  splitState?: "idle" | "warning" | "splitting" | "done";
+  splitTimer?: number;
+  splitCount?: number;
+  isSplitChild?: boolean;
+  /** P3：牵引兵状态 */
+  tractorState?: "idle" | "charging" | "pulling" | "cooldown" | "done";
+  tractorTimer?: number;
+  tractorPullCount?: number;
+  tractorTargetRefs?: Enemy[];
 };
 
 export type Pickup = {

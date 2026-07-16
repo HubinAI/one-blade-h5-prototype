@@ -146,6 +146,24 @@ export const ENTRY_END_JITTER = {
   }
 } as const;
 
+/** P3：分裂兵配置 */
+export const SPLITTER_CONFIG = {
+  hp: 1, score: 14, radius: 20,
+  triggerY: 390, chargeDuration: 2.2,
+  maxSplitCount: 1, childCount: 2,
+  childKind: "infantry" as EnemyKind,
+  maxActiveSplitters: 2
+} as const;
+
+/** P3：牵引兵配置 */
+export const TRACTOR_CONFIG = {
+  hp: 1, score: 16, radius: 21,
+  triggerY: 410, firstDelay: 0.6, chargeDuration: 1.1,
+  maxPullCount: 2, cooldown: 3.0,
+  minTargets: 3, maxTargets: 5, pullRadius: 135,
+  pullStrength: 0.28, maxActiveTractors: 1
+} as const;
+
 /** P2.7：战斗安全区域（防止怪物贴左边缘，手机左滑返回兼容） */
 export const BATTLE_SAFE_X = {
   normalMin: 88,
@@ -380,6 +398,26 @@ export const ENEMY_BALANCE: Record<
     score: 200,
     energyReward: 30,
     behavior: "boss"
+  },
+  splitter: {
+    name: "分裂兵",
+    hp: SPLITTER_CONFIG.hp,
+    speed: 33,
+    radius: SPLITTER_CONFIG.radius,
+    defenseDamage: 1,
+    score: SPLITTER_CONFIG.score,
+    energyReward: 4,
+    behavior: "normal"
+  },
+  tractor: {
+    name: "牵引兵",
+    hp: TRACTOR_CONFIG.hp,
+    speed: 30,
+    radius: TRACTOR_CONFIG.radius,
+    defenseDamage: 1,
+    score: TRACTOR_CONFIG.score,
+    energyReward: 5,
+    behavior: "normal"
   }
 };
 

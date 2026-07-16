@@ -50,5 +50,19 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDefinition> = {
     hint: "强力Boss，分阶段战斗。",
     color: "#b03a2e",
     accent: "#f0b0a0"
+  },
+  splitter: {
+    kind: "splitter",
+    name: "裂",
+    hint: "进入中场后蓄力，不及时击杀会分裂成2个小兵。",
+    color: "#e67e22",
+    accent: "#ffb85a"
+  },
+  tractor: {
+    kind: "tractor",
+    name: "引",
+    hint: "进入中场后连接附近敌人，聚拢后形成一刀切团机会。",
+    color: "#5dade2",
+    accent: "#8fdcff"
   }
 };

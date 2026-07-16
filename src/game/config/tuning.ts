@@ -104,6 +104,18 @@ export const ENEMY_TUNING: Record<EnemyKind, { radius: number; hpDamage: number;
     hpDamage: ENEMY_BALANCE.boss.defenseDamage,
     score: ENEMY_BALANCE.boss.score,
     energy: ENEMY_BALANCE.boss.energyReward
+  },
+  splitter: {
+    radius: ENEMY_BALANCE.splitter.radius,
+    hpDamage: ENEMY_BALANCE.splitter.defenseDamage,
+    score: ENEMY_BALANCE.splitter.score,
+    energy: ENEMY_BALANCE.splitter.energyReward
+  },
+  tractor: {
+    radius: ENEMY_BALANCE.tractor.radius,
+    hpDamage: ENEMY_BALANCE.tractor.defenseDamage,
+    score: ENEMY_BALANCE.tractor.score,
+    energy: ENEMY_BALANCE.tractor.energyReward
   }
 };
 

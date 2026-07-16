@@ -5,7 +5,7 @@ import { ELITE_VISUAL_DEFS } from "../data/elites";
 import { BOSS_VISUAL_DEFS } from "../data/bosses";
 import { FORMATIONS } from "../data/formations";
 import { DESIGN_HEIGHT, DESIGN_WIDTH, HUD_HEIGHT, WALL_TOP_Y, MAX_ENEMIES_ON_SCREEN, MAX_PARTICLES_ON_SCREEN, MAX_CHAIN_DEPTH, MAX_FLOATING_TEXT } from "./config/constants";
-import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID, BATTLEFIELD_ZONES, ENTRY_PHASE_CONFIG, PERFORMANCE_LIMITS, ENEMY_SOFT_SEPARATION, FLOATING_TEXT_LIMITS, ENTRY_PROFILE_COMMON, ENTRY_PROFILE_EDICT_BURST, ENTRY_PROFILE_ELITE, ENTRY_END_JITTER, BATTLE_SAFE_X } from "./config/balance";
+import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID, BATTLEFIELD_ZONES, ENTRY_PHASE_CONFIG, PERFORMANCE_LIMITS, ENEMY_SOFT_SEPARATION, FLOATING_TEXT_LIMITS, ENTRY_PROFILE_COMMON, ENTRY_PROFILE_EDICT_BURST, ENTRY_PROFILE_ELITE, ENTRY_END_JITTER, BATTLE_SAFE_X, SPLITTER_CONFIG, TRACTOR_CONFIG } from "./config/balance";
 import { AD_CONFIG } from "./config/ads";
 import { RUN_BUFFS, RUN_BUFF_BY_ID, ROUTE_COLORS, ROUTE_NAMES, ROUTE_BUFFS, getNextBuffInRoute, getBuffRoute } from "./config/buffs";
 import { BOSS_CONFIG, getBossPhase } from "./config/bosses";
@@ -527,6 +527,7 @@ export class Game {
     this.updateBossSpawn();
     this.updateEliteSkills(scaledDt);
     this.updateBossSkills(scaledDt);
+    this.updateMechanicEnemies(scaledDt);
     this.updateChestDrop(scaledDt);
 
     // 第一轮修正：精英死后 1 秒，自动 resolve 第一关 chest
@@ -556,6 +557,7 @@ export class Game {
     this.drawBackground(ctx);
     this.drawPickups(ctx);
     this.drawEnemies(ctx);
+    this.drawTractorLinks(ctx);
     // 远景山间雾气遮罩（敌人从雾后现身）
     this.drawTopMist(ctx);
     this.drawSlash(ctx);
@@ -2771,7 +2773,131 @@ export class Game {
     return true;
   }
 
-  /** 紧急修正：清理屏幕外异常敌人（仅清理不可见的异常残留） */
+  /** P3：更新机制怪（分裂兵+牵引兵） */
+  private updateMechanicEnemies(dt: number) {
+    for (const enemy of this.enemies) {
+      if (!enemy.alive) continue;
+      if (enemy.kind === "splitter") this.updateSplitterEnemy(enemy, dt);
+      if (enemy.kind === "tractor") this.updateTractorEnemy(enemy, dt);
+    }
+  }
+
+  /** P3：分裂兵逻辑 */
+  private updateSplitterEnemy(enemy: Enemy, dt: number) {
+    if (enemy.kind !== "splitter" || !enemy.alive) return;
+    if (enemy.splitState === "done") return;
+    if (!enemy.splitState) { enemy.splitState = "idle"; enemy.splitTimer = 0; enemy.splitCount = 0; }
+    if (enemy.splitState === "idle") {
+      if (enemy.y >= SPLITTER_CONFIG.triggerY) {
+        enemy.splitState = "warning";
+        enemy.splitTimer = SPLITTER_CONFIG.chargeDuration;
+      }
+      return;
+    }
+    if (enemy.splitState === "warning") {
+      enemy.splitTimer = Math.max(0, (enemy.splitTimer ?? 0) - dt);
+      if (enemy.splitTimer <= 0) this.performSplitterSplit(enemy);
+    }
+  }
+
+  /** P3：执行分裂 */
+  private performSplitterSplit(enemy: Enemy) {
+    if (!enemy.alive) return;
+    if ((enemy.splitCount ?? 0) >= SPLITTER_CONFIG.maxSplitCount) return;
+    if (this.enemies.filter(e => e.alive).length >= PERFORMANCE_LIMITS.maxEnemiesOnScreen - 4) {
+      enemy.splitState = "done";
+      this.addText(enemy.x, enemy.y - 24, "裂变受阻", "#f6e7bd", 12, 0.6);
+      return;
+    }
+    enemy.splitState = "done";
+    enemy.splitCount = (enemy.splitCount ?? 0) + 1;
+    enemy.alive = false;
+    const offsets = [-18, 18];
+    for (let i = 0; i < SPLITTER_CONFIG.childCount; i++) {
+      const childX = clamp(enemy.x + offsets[i], BATTLE_SAFE_X.normalMin, BATTLE_SAFE_X.normalMax);
+      const childY = enemy.y + randomRange(-8, 8);
+      const child = this.createEnemy("infantry", childX, childY, 1, ENTRY_PROFILE_COMMON);
+      child.isSplitChild = true;
+      this.enemies.push(child);
+    }
+    this.addText(enemy.x, enemy.y - 24, "分裂！", "#ffb85a", 16, 0.8);
+    this.particles.push(ringParticle(enemy, "#ffb85a", 24));
+  }
+
+  /** P3：牵引兵逻辑 */
+  private updateTractorEnemy(enemy: Enemy, dt: number) {
+    if (enemy.kind !== "tractor" || !enemy.alive) return;
+    if (!enemy.tractorState) { enemy.tractorState = "idle"; enemy.tractorTimer = 0; enemy.tractorPullCount = 0; }
+    if (enemy.tractorState === "idle") {
+      if (enemy.y >= TRACTOR_CONFIG.triggerY) {
+        enemy.tractorState = "charging";
+        enemy.tractorTimer = TRACTOR_CONFIG.firstDelay + TRACTOR_CONFIG.chargeDuration;
+        this.prepareTractorTargets(enemy);
+      }
+      return;
+    }
+    if (enemy.tractorState === "charging") {
+      enemy.tractorTimer = Math.max(0, (enemy.tractorTimer ?? 0) - dt);
+      if (enemy.tractorTimer <= TRACTOR_CONFIG.chargeDuration && (enemy.tractorTimer ?? 0) + dt > TRACTOR_CONFIG.chargeDuration) {
+        // 刚进入牵引蓄力阶段
+      }
+      if (enemy.tractorTimer <= 0) {
+        enemy.tractorState = "pulling";
+        enemy.tractorTimer = 0.75;
+        this.addText(enemy.x, enemy.y - 30, "牵引！", "#8fdcff", 16, 0.7);
+      }
+      return;
+    }
+    if (enemy.tractorState === "pulling") {
+      this.applyTractorPull(enemy, dt);
+      enemy.tractorTimer = Math.max(0, (enemy.tractorTimer ?? 0) - dt);
+      if (enemy.tractorTimer <= 0) {
+        enemy.tractorPullCount = (enemy.tractorPullCount ?? 0) + 1;
+        if ((enemy.tractorPullCount ?? 0) >= TRACTOR_CONFIG.maxPullCount) {
+          enemy.tractorState = "done";
+        } else {
+          enemy.tractorState = "cooldown";
+          enemy.tractorTimer = TRACTOR_CONFIG.cooldown;
+        }
+      }
+      return;
+    }
+    if (enemy.tractorState === "cooldown") {
+      enemy.tractorTimer = Math.max(0, (enemy.tractorTimer ?? 0) - dt);
+      if (enemy.tractorTimer <= 0) {
+        enemy.tractorState = "charging";
+        enemy.tractorTimer = TRACTOR_CONFIG.chargeDuration;
+        this.prepareTractorTargets(enemy);
+      }
+    }
+  }
+
+  /** P3：选择牵引目标 */
+  private prepareTractorTargets(enemy: Enemy) {
+    const candidates = this.enemies
+      .filter(e => e.alive && e !== enemy && e.kind !== "elite" && distance(e, enemy) <= TRACTOR_CONFIG.pullRadius)
+      .sort((a, b) => distance(a, enemy) - distance(b, enemy));
+    const count = Math.min(candidates.length, TRACTOR_CONFIG.maxTargets);
+    enemy.tractorTargetRefs = candidates.slice(0, count);
+  }
+
+  /** P3：执行牵引拉力 */
+  private applyTractorPull(enemy: Enemy, dt: number) {
+    const targets = (enemy.tractorTargetRefs ?? []).filter(e => e.alive);
+    if (targets.length === 0) return;
+    for (const target of targets) {
+      const dx = enemy.x - target.x;
+      const dy = enemy.y - target.y;
+      const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+      const pull = TRACTOR_CONFIG.pullStrength * dt * 60;
+      target.x += (dx / dist) * pull;
+      target.y += (dy / dist) * pull * 0.35;
+      target.x = clamp(target.x, BATTLE_SAFE_X.normalMin, BATTLE_SAFE_X.normalMax);
+      target.y = clamp(target.y, 260, BALANCE.battlefield.bottomDefenseY - 30);
+    }
+  }
+
+  /** P3：清理屏幕外异常敌人（仅清理不可见的异常残留） */
   private cleanupOutOfBattleEnemiesForVictoryCheck() {
     const aliveEnemies = this.enemies.filter(e => e.alive);
     const canCleanup =
@@ -4137,6 +4263,11 @@ export class Game {
       // P2：精英名牌（在所有精英效果之上绘制）
       if (enemy.kind === "elite") {
         this.drawEliteNameplate(ctx, enemy);
+      }
+
+      // P3：分裂兵预警
+      if (enemy.kind === "splitter") {
+        this.drawSplitterWarning(ctx, enemy);
       }
 
       // ---- Boss渲染 ----
@@ -5545,6 +5676,17 @@ export class Game {
     if (enemy.kind === "elite" && enemy.eliteKind && !this.chestDropped) {
       this.triggerEliteChestDrop(enemy);
     }
+
+    // P3：分裂兵预警击杀反馈
+    if (enemy.kind === "splitter" && enemy.splitState === "warning") {
+      this.addText(enemy.x, enemy.y - 28, "阻裂！", "#ffd35a", 16, 0.7);
+      this.particles.push(ringParticle(enemy, "#ffd35a", 20));
+    }
+    // P3：牵引兵预警击杀反馈
+    if (enemy.kind === "tractor" && enemy.tractorState === "charging") {
+      this.addText(enemy.x, enemy.y - 28, "断引！", "#8fdcff", 16, 0.7);
+      this.particles.push(ringParticle(enemy, "#8fdcff", 22));
+    }
   }
 
   /** P2.9：弹出宝箱军令弹窗（等待玩家主动确认） */
@@ -5692,6 +5834,69 @@ export class Game {
   public confirmChestBuff() {
     if (!this.chestPendingConfirm || !this.chestBuffResult) return;
     this.confirmEliteChestReward();
+  }
+
+  /** P3：分裂兵预警绘制 */
+  private drawSplitterWarning(ctx: CanvasRenderingContext2D, enemy: Enemy) {
+    if (enemy.kind !== "splitter" || enemy.splitState !== "warning") return;
+    const timer = enemy.splitTimer ?? 0;
+    const ratio = clamp(timer / SPLITTER_CONFIG.chargeDuration, 0, 1);
+    const danger = ratio <= 0.25;
+    const pulse = 0.5 + Math.sin(this.elapsed * (danger ? 16 : 8)) * 0.5;
+    ctx.save();
+    ctx.strokeStyle = danger
+      ? `rgba(255, 80, 40, ${0.7 + pulse * 0.3})`
+      : `rgba(255, 160, 70, ${0.45 + pulse * 0.25})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-4, -enemy.radius * 0.7);
+    ctx.lineTo(3, -4);
+    ctx.lineTo(-2, 6);
+    ctx.lineTo(5, enemy.radius * 0.65);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.strokeStyle = "rgba(255, 180, 80, 0.9)";
+    ctx.lineWidth = 2;
+    ctx.arc(0, -enemy.radius - 10, 7, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - ratio));
+    ctx.stroke();
+    if (danger) {
+      ctx.fillStyle = "#ff5a3d";
+      ctx.font = '900 12px "Microsoft YaHei", "SimHei", sans-serif';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("!", 0, -enemy.radius - 10);
+    }
+    ctx.restore();
+  }
+
+  /** P3：牵引兵连接线绘制 */
+  private drawTractorLinks(ctx: CanvasRenderingContext2D) {
+    ctx.save();
+    for (const enemy of this.enemies) {
+      if (enemy.kind !== "tractor" || !enemy.alive) continue;
+      if (enemy.tractorState !== "charging" && enemy.tractorState !== "pulling") continue;
+      const targets = (enemy.tractorTargetRefs ?? []).filter(e => e.alive);
+      if (targets.length === 0) continue;
+      const isPulling = enemy.tractorState === "pulling";
+      const pulse = 0.5 + Math.sin(this.elapsed * (isPulling ? 12 : 6)) * 0.5;
+      for (const target of targets) {
+        ctx.strokeStyle = isPulling
+          ? `rgba(120, 220, 255, ${0.55 + pulse * 0.35})`
+          : `rgba(120, 220, 255, ${0.25 + pulse * 0.2})`;
+        ctx.lineWidth = isPulling ? 2.5 : 1.5;
+        ctx.setLineDash(isPulling ? [] : [4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(enemy.x, enemy.y);
+        ctx.lineTo(target.x, target.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(120, 220, 255, ${0.35 + pulse * 0.3})`;
+        ctx.arc(target.x, target.y - target.radius - 4, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.setLineDash([]);
+    ctx.restore();
   }
 
   private _chestFlyStart = { x: 0, y: 0 };
