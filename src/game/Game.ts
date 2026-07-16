@@ -1508,14 +1508,7 @@ export class Game {
 
     // ---- 精英击杀：掉落军令宝箱 ----
     if (enemy.kind === "elite" && enemy.eliteKind && !this.chestDropped) {
-      this.killedElites.push(enemy.eliteKind);
-      this.stats.killedElites = [...this.killedElites];
-      this.eliteKilled = true;
-      this.startChestDrop(enemy.x, enemy.y - 10);
-      this.particles.push(glowParticle(enemy, "#ffd35a", 25, 50));
-      this.addText(enemy.x, enemy.y - 40, "宝箱掉落！", "#ffd35a", 18, 1.6);
-      // 第一轮修正：1秒后自动resolve chest（避免卡在chestDone）
-      this.autoChestResolveAt = this.elapsed + 1.0;
+      this.triggerEliteChestDrop(enemy);
     }
 
     // ---- Boss击杀：追踪图鉴 ----
@@ -1706,13 +1699,7 @@ export class Game {
         } else {
           // 三次修正：精英触底死亡也要掉宝箱（之前直接 enemy.alive=false 绕过了 killEnemy）
           if (enemy.kind === "elite" && enemy.eliteKind && !this.chestDropped) {
-            this.killedElites.push(enemy.eliteKind);
-            this.stats.killedElites = [...this.killedElites];
-            this.eliteKilled = true;
-            this.startChestDrop(enemy.x, enemy.y - 10);
-            this.addText(enemy.x, enemy.y - 40, "宝箱掉落！", "#ffd35a", 18, 1.6);
-            // 第一轮修正：1秒后自动resolve chest
-            this.autoChestResolveAt = this.elapsed + 1.0;
+            this.triggerEliteChestDrop(enemy);
           } else {
             this.addText(enemy.x, BALANCE.battlefield.bottomDefenseY - 12, `-${enemy.hpDamage}`, "#ff7b6e", 18);
           }
@@ -2010,9 +1997,7 @@ export class Game {
       target.flash = 0.18;
       const killed = target.hp <= 0;
       if (killed) {
-        target.alive = false;
-        this.score += target.score;
-        this.stats.kills += 1;
+        this.handleDirectEnemyKilledBySystem(target, "sub_momentum");
         killCount++;
         this.particles.push(...paperBurst(target, 5, ["#5bc0ff", "#f6e7bd"]));
       }
@@ -2058,9 +2043,7 @@ export class Game {
       target.flash = 0.2;
       const killed = target.hp <= 0;
       if (killed) {
-        target.alive = false;
-        this.score += target.score;
-        this.stats.kills += 1;
+        this.handleDirectEnemyKilledBySystem(target, "sub_weakpoint");
         this.particles.push(...paperBurst(target, 6, ["#ff6a33", "#ffd35a"]));
       }
       this.particles.push(ringParticle({ x: target.x, y: target.y }, s.color, 22));
@@ -2554,10 +2537,11 @@ export class Game {
     if (this.finished) { this.battlePhase = 'result'; return; }
 
     // 军令爆发阶段（宝箱确认后）
-    const hasEdictBurst = this.level.postChestWaves && this.level.postChestWaves.length > 0;
+    const postWaves = this.getEffectivePostChestWaves();
+    const hasEdictBurst = postWaves.length > 0;
     if (hasEdictBurst && this.chestDone) {
       this.battlePhase = 'edict_burst';
-      this.edictBurstRoundTotal = this.level.postChestWaves!.length;
+      this.edictBurstRoundTotal = postWaves.length;
       return;
     }
 
@@ -2858,6 +2842,8 @@ export class Game {
     // 逐波HP递增：每波+1，最多+5（仅对基础敌人生效，精英/Boss不受影响）
     const isBasicEnemy = kind === "infantry" || kind === "shield" || kind === "powder" || kind === "core";
     const hpBonus = isBasicEnemy ? this.waveHpBonus : 0;
+    // 第六轮修正：精英也使用 entryPhase（使用 ENTRY_PROFILE_ELITE）
+    const shouldUseEntryPhase = isBasicEnemy || kind === "elite";
     // 第一轮修正：优先使用传入的 entryProfile，fallback 到 getEntryProfile()
     const profile = entryProfile ?? this.getEntryProfile();
     const epEndY = profile.entryEndY;
@@ -2891,8 +2877,8 @@ export class Game {
       // 30% 步兵是急冲兵；15% 步兵/盾兵是蛇形兵
       // rushTimer 被统一维护在 enemy 对象底部，这里移除
       snakeSwayT: (kind === "infantry" || kind === "shield") && Math.random() < 0.15 ? 0 : undefined,
-      // 第一轮修正：所有基础敌人必须有 entryPhase；rushTimer 只是额外运动表现
-      entryPhase: isBasicEnemy ? {
+      // 第六轮修正：所有基础敌人 + 精英必须有 entryPhase
+      entryPhase: shouldUseEntryPhase ? {
         active: true,
         endY: epEndY,
         speedMultiplier: epMul,
@@ -4942,6 +4928,34 @@ export class Game {
     if (this.level.chestBuffId) return this.level.chestBuffId as BuffId;
     const all = RUN_BUFFS.map(b => b.id);
     return all[Math.floor(Math.random() * all.length)];
+  }
+
+  /** 第六轮修正：统一精英宝箱掉落入口（主刀/副刀/触底共用） */
+  private triggerEliteChestDrop(enemy: Enemy) {
+    if (this.chestDropped) return;
+    if (enemy.kind !== "elite" || !enemy.eliteKind) return;
+
+    this.killedElites.push(enemy.eliteKind);
+    this.stats.killedElites = [...this.killedElites];
+    this.eliteKilled = true;
+
+    this.startChestDrop(enemy.x, enemy.y - 10);
+    this.particles.push(glowParticle(enemy, "#ffd35a", 25, 50));
+    this.addText(enemy.x, enemy.y - 40, "宝箱掉落！", "#ffd35a", 18, 1.6);
+
+    this.autoChestResolveAt = this.elapsed + 1.0;
+  }
+
+  /** 第六轮修正：副刀/系统伤害造成的敌人死亡处理（确保精英走宝箱流程） */
+  private handleDirectEnemyKilledBySystem(enemy: Enemy, source: "sub_momentum" | "sub_weakpoint" | "system") {
+    if (!enemy.alive) return;
+    enemy.alive = false;
+    this.score += enemy.score;
+    this.stats.kills += 1;
+
+    if (enemy.kind === "elite" && enemy.eliteKind && !this.chestDropped) {
+      this.triggerEliteChestDrop(enemy);
+    }
   }
 
   /** 第五轮修正：通用精英宝箱军令自动生效（去掉第1关限制） */
