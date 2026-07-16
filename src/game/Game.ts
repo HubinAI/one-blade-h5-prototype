@@ -2293,12 +2293,19 @@ export class Game {
     const postElapsed = this.elapsed - this.postChestStartAt;
 
     if (postElapsed >= (wave.spawnAt ?? 0)) {
-      this.spawnPostChestWave(wave);
-      this.postChestWaveIndex += 1;
-      this.edictBurstRoundIndex = this.postChestWaveIndex;
+      const total = postWaves.length;
+      this.edictBurstRoundTotal = total;
 
-      if (this.postChestWaveIndex >= postWaves.length) {
+      // 第三轮修正：生成前设置 index，1-based，clamp 到 total
+      this.edictBurstRoundIndex = Math.min(this.postChestWaveIndex + 1, total);
+
+      this.spawnPostChestWave(wave);
+
+      this.postChestWaveIndex += 1;
+
+      if (this.postChestWaveIndex >= total) {
         this.allPostChestWavesSpawned = true;
+        this.edictBurstRoundIndex = total;
       }
     }
   }
@@ -2520,7 +2527,16 @@ export class Game {
     // 有军令爆发轮次的关卡：必须在 edict_burst 阶段且全部生成
     const hasPostChest = this.level.postChestWaves && this.level.postChestWaves.length > 0;
     if (hasPostChest) {
-      if (!this.chestDone || !this.allPostChestWavesSpawned) return false;
+      if (!this.chestDone) return false;
+      if (this.postChestStartAt === null) return false;
+      if (!this.allPostChestWavesSpawned) {
+        // 第三轮修正：超时兜底——军令爆发 35s 后仍没刷完，强制完成
+        if (this.elapsed - this.postChestStartAt > 35 && this.enemies.filter(e => e.alive).length <= 6) {
+          this.allPostChestWavesSpawned = true;
+        } else {
+          return false;
+        }
+      }
       // 第一轮修正：兜底——chestDone 已 true 但 postChestStartAt 未设置
       if (this.chestDone && this.postChestStartAt === null) {
         this.postChestStartAt = this.elapsed;
@@ -3090,7 +3106,9 @@ export class Game {
         phaseText = "军令激活";
         break;
       case 'edict_burst':
-        phaseText = `军令爆发 ${this.edictBurstRoundIndex + 1}/${this.edictBurstRoundTotal || 3}`;
+        const total = this.edictBurstRoundTotal || this.level.postChestWaves?.length || 3;
+        const current = Math.min(Math.max(this.edictBurstRoundIndex || 1, 1), total);
+        phaseText = `军令爆发 ${current}/${total}`;
         break;
       case 'result':
         phaseText = "";
@@ -4849,10 +4867,12 @@ export class Game {
     if (this.chestDone) return;
 
     this.chestDropped = true;
-    this.chestOpened = true;
     this.chestOpening = false;
+    this.chestOpened = true;
+    this.chestBuffRevealed = true;
     this.chestPendingConfirm = false;
     this.chestFlying = false;
+    this.chestFlyT = 1;
     this.chestDone = true;
 
     this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 70);
@@ -4865,7 +4885,7 @@ export class Game {
     this.postChestStartAt = this.elapsed;
     this.postChestWaveIndex = 0;
     this.allPostChestWavesSpawned = false;
-    this.edictBurstRoundIndex = 0;
+    this.edictBurstRoundIndex = 1;
     this.edictBurstRoundTotal = this.level.postChestWaves?.length ?? 0;
 
     this.addText(DESIGN_WIDTH / 2, 150, "军令激活", "#ffd35a", 24, 1.2);
