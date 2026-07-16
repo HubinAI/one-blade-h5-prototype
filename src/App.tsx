@@ -70,8 +70,9 @@ export default function App() {
   const [home, setHome] = useState(getHomeSnapshot);
   const [currentLevel, setCurrentLevel] = useState<LevelConfig>(LEVELS[0]);
   const [lastResult, setLastResult] = useState<BattleResult | null>(null);
-  const [appVersion] = useState("V0716016");
+  const [appVersion] = useState("V0716017");
   const [runIndex, setRunIndex] = useState(0);
+  const [currentMode, setCurrentMode] = useState<RunMode>("normal");
   const [reviveOffer, setReviveOffer] = useState<ReviveOffer | null>(null);
   const [reviveSignal, setReviveSignal] = useState(0);
   const [pendingBuff, setPendingBuff] = useState<string | null>(null);
@@ -101,6 +102,7 @@ export default function App() {
       setCurrentMainlineFloor(nextFloor);
     }
     setBreakthroughResult(null);
+    setCurrentMode("normal");
     setHome(getHomeSnapshot());
     setScreen("menu");
   }, [breakthroughResult]);
@@ -130,6 +132,7 @@ export default function App() {
       }
 
       setRunIndex(beginRun(level.id, mode));
+      setCurrentMode(mode);
       setCurrentLevel(level);
       setLastResult(null);
       setReviveOffer(null);
@@ -172,8 +175,8 @@ export default function App() {
       refreshHome();
       window.setTimeout(() => {
         // 检测是否为突破战胜利
-        const ctx = getCurrentRunContext();
-        if (result.win && ctx.mode === "challenge") {
+        // P3.3：突破检测使用内存态 currentMode，不再依赖 storage（已被 applyBattleRewards 重置）
+        if (result.win && currentMode === "challenge") {
           // 突破战胜利：根据 result.levelId 找对应 rankId
           // result.levelId = 100 + rankIdx
           const rankIdx = Math.max(0, result.levelId - 100);
@@ -193,7 +196,7 @@ export default function App() {
         }
       }, 180);
     },
-    [refreshHome, home.highestFloor]
+    [refreshHome, home.highestFloor, currentMode]
   );
 
   const nextLevel = LEVELS.find((level) => level.id === (lastResult?.levelId ?? 0) + 1);

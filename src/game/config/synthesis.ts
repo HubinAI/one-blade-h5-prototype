@@ -271,13 +271,23 @@ export function generateFloorWaves(floor: number, templateCount?: number): WaveT
   const available = WAVE_TEMPLATES.filter(t => floor >= t.unlockFloor);
   if (available.length === 0) return [WAVE_TEMPLATES[0]];
 
-  const count = templateCount ?? (5 + Math.floor(floor / 8)); // V0709018: 5+floor/8
+  const density = getMainlineDensityConfig(floor);
+  const count = templateCount ?? density.waveCount;
   const waves: WaveTemplate[] = [];
   for (let i = 0; i < count; i++) {
     const idx = Math.floor(Math.random() * available.length);
     waves.push(available[idx]);
   }
   return waves;
+}
+
+/** P3.3：动态主线密度表 */
+function getMainlineDensityConfig(floor: number) {
+  if (floor <= 1) return { waveCount: 5, minWaveEnemies: 18, maxWaveEnemies: 28, groupMax: 12 };
+  if (floor <= 3) return { waveCount: 6, minWaveEnemies: 20, maxWaveEnemies: 32, groupMax: 14 };
+  if (floor <= 5) return { waveCount: 7, minWaveEnemies: 24, maxWaveEnemies: 38, groupMax: 16 };
+  if (floor <= 10) return { waveCount: 8, minWaveEnemies: 26, maxWaveEnemies: 42, groupMax: 18 };
+  return { waveCount: Math.min(10, 8 + Math.floor((floor - 10) / 10)), minWaveEnemies: 28, maxWaveEnemies: 48, groupMax: 18 };
 }
 
 /** 主线每层的基础数值公式 */
@@ -562,25 +572,27 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
 
   const stats = getFloorStats(floor);
   const waveTemplates = generateFloorWaves(floor);
-
-  // 兵数量随层数递增：每sub-spawn 3~5只, 1层起步2倍
-  const countMul = 2 + Math.floor(floor / 4);
+  const density = getMainlineDensityConfig(floor);
 
   const waves: WaveConfig[] = waveTemplates.map((tpl, idx) => {
     const lane = (idx * 3 + 1) % LANES.length;
+    const templateTotal = tpl.enemies.reduce((sum, e) => sum + e.count, 0);
+    const targetTotal = Math.floor(density.minWaveEnemies + Math.random() * (density.maxWaveEnemies - density.minWaveEnemies + 1));
+
     const enemies: EnemySpawn[] = tpl.enemies.map((e, ei) => {
-      const cnt = Math.max(1, Math.min(5, e.count * Math.max(1, Math.floor(countMul / 2))));
+      const ratio = e.count / Math.max(1, templateTotal);
+      const cnt = Math.max(1, Math.min(density.groupMax, Math.round(targetTotal * ratio)));
       return {
         kind: e.kind as any,
         count: cnt,
         x: LANES[(lane + ei * 2) % LANES.length],
-        yOffset: ei * 6,
+        yOffset: ei * 8,
       } as any;
     });
     return {
       name: tpl.name,
       delay: idx === 0 ? 0.2 : 0.2,
-      spawnAt: idx * 5.5,
+      spawnAt: idx * (floor <= 5 ? 4.5 : 4.8),
       speedMultiplier: 1 + floor * 0.005,
       enemies,
     };
@@ -617,26 +629,27 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
     ? { multiplier: 3.4, endY: 560, maxDuration: 2.0, spawnY: -20 }
     : undefined;
 
-  // P3.1/P3.2：强制插入机制怪教学波次
+  // P3.3：强制插入机制怪教学波次
   if (floor === 4) {
-    // 教学（14s）
-    waves.splice(1, 0, {
-      name: "裂变初现", delay: 0.2, spawnAt: 14,
+    // helper
+    const sw = (name: string, spawnAt: number, sc: number, ic: number): WaveConfig => ({
+      name, delay: 0.2, spawnAt,
       speedMultiplier: 1 + floor * 0.005,
-      enemies: [{ kind: "infantry" as any, count: 3, x: LANES[2], yOffset: 0 }, { kind: "splitter" as any, count: 1, x: LANES[3], yOffset: 12 }, { kind: "infantry" as any, count: 3, x: LANES[4], yOffset: 24 }],
+      enemies: [{ kind: "infantry" as any, count: Math.ceil(ic * 0.4), x: LANES[1], yOffset: 0 }, { kind: "splitter" as any, count: sc, x: LANES[3], yOffset: 10 }, { kind: "infantry" as any, count: Math.ceil(ic * 0.6), x: LANES[5], yOffset: 22 }],
     });
-    // 复现（26s）
-    waves.splice(3, 0, {
-      name: "裂变复现", delay: 0.2, spawnAt: 26,
-      speedMultiplier: 1 + floor * 0.005,
-      enemies: [{ kind: "infantry" as any, count: 5, x: LANES[1], yOffset: 0 }, { kind: "splitter" as any, count: 1, x: LANES[3], yOffset: 12 }, { kind: "powder" as any, count: 1, x: LANES[5], yOffset: 24 }],
-    });
-    // 双裂压迫（38s）
-    waves.splice(5, 0, {
-      name: "双裂压迫", delay: 0.2, spawnAt: 38,
-      speedMultiplier: 1 + floor * 0.005,
-      enemies: [{ kind: "infantry" as any, count: 4, x: LANES[1], yOffset: 0 }, { kind: "splitter" as any, count: 1, x: LANES[2], yOffset: 8 }, { kind: "splitter" as any, count: 1, x: LANES[4], yOffset: 16 }, { kind: "infantry" as any, count: 4, x: LANES[5], yOffset: 24 }],
-    });
+    // 12s分裂初现(1只), 24s裂变复现(2只), 36s双裂压迫(2只), 48s裂潮(3只)
+    waves.splice(2, 0, sw("裂变初现", 12, 1, 8));
+    waves.splice(4, 0, sw("裂变复现", 24, 2, 10));
+    waves.splice(6, 0, sw("双裂压迫", 36, 2, 12));
+    waves.splice(8, 0, sw("裂潮", 48, 3, 14));
+  }
+  // P3.3：后置波补分裂兵
+  if (floor === 4 && postChestWaves) {
+    if (postChestWaves[1]) postChestWaves[1].enemies.push({ kind: "splitter" as any, count: 2, x: 188 });
+  }
+  if (floor === 5 && postChestWaves) {
+    if (postChestWaves[0]) postChestWaves[0].enemies.push({ kind: "splitter" as any, count: 2, x: 188 });
+    if (postChestWaves[2]) postChestWaves[2].enemies.push({ kind: "splitter" as any, count: 2, x: 236 });
   }
   if (floor === 5) {
     waves.splice(2, 0, {

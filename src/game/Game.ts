@@ -3303,52 +3303,38 @@ export class Game {
     ctx.restore();
   }
 
-  /** P2.9：左上角持续军令 Icon 更新 */
+  /** P3.3：更新军令状态 Icon（不再用倒计时决定隐藏） */
   private updateEdictStatusIcon(dt: number) {
-    if (!this.edictIconActive) return;
-    if (this.edictIconTimer > 0) this.edictIconTimer -= dt;
-    const stillInEdict = this.battlePhase === "edict_burst" || this.chestMomentumTimer > 0;
-    if (this.edictIconTimer <= 0 && !stillInEdict) {
-      this.edictIconTimer = 0;
+    const stillInEdict = this.battlePhase === "edict_burst" || this.chestMomentumTimer > 0 || this.edictIconActive;
+    if (!stillInEdict && this.edictIconActive) {
       this.edictIconActive = false;
       this.triggerEdictIconFadeOut();
     }
   }
 
-  /** P2.9：左上角持续军令 Icon 绘制 */
+  /** P3.3：左上角军令状态 Icon（不显示倒计时，只显示状态） */
   private drawEdictStatusIcon(ctx: CanvasRenderingContext2D) {
     const shouldShow = this.edictIconActive || this.chestMomentumTimer > 0 || this.battlePhase === "edict_burst";
     if (!shouldShow) return;
 
-    const remain = Math.max(this.edictIconTimer, this.chestMomentumTimer, 0);
-    const maxTime = Math.max(this.edictIconMaxTimer, 1);
-    const ratio = clamp(remain / maxTime, 0, 1);
-
     const x = 46;
     const y = 78;
-    const lowTime = remain > 0 && remain <= 3;
-    const pulse = 0.5 + Math.sin(this.elapsed * (lowTime ? 12 : 5)) * 0.5;
+    const inBurst = this.battlePhase === "edict_burst";
+    const pulse = 0.5 + Math.sin(this.elapsed * 5) * 0.5;
 
     ctx.save();
     ctx.translate(x, y);
+
     ctx.shadowColor = "rgba(255, 210, 90, 0.75)";
     ctx.shadowBlur = 10 + pulse * 8;
 
     ctx.fillStyle = "rgba(45, 24, 10, 0.88)";
-    ctx.strokeStyle = lowTime
-      ? `rgba(255, 100, 60, ${0.65 + pulse * 0.35})`
-      : "rgba(255, 211, 90, 0.8)";
+    ctx.strokeStyle = "rgba(255, 211, 90, 0.8)";
     ctx.lineWidth = 2;
+
     ctx.beginPath();
     ctx.arc(0, 0, 18, 0, Math.PI * 2);
     ctx.fill();
-    ctx.stroke();
-
-    // 环形进度
-    ctx.beginPath();
-    ctx.strokeStyle = "rgba(255, 211, 90, 0.95)";
-    ctx.lineWidth = 3;
-    ctx.arc(0, 0, 21, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
     ctx.stroke();
 
     ctx.fillStyle = "#fff1b8";
@@ -3357,11 +3343,10 @@ export class Game {
     ctx.textBaseline = "middle";
     ctx.fillText("令", 0, 1);
 
-    if (remain > 0) {
-      ctx.font = '700 10px "Microsoft YaHei", "SimHei", sans-serif';
-      ctx.fillStyle = "#ffd35a";
-      ctx.fillText(`${Math.ceil(remain)}s`, 0, 29);
-    }
+    ctx.font = '700 10px "Microsoft YaHei", "SimHei", sans-serif';
+    ctx.fillStyle = "#ffd35a";
+    ctx.fillText(inBurst ? "爆发中" : "已激活", 0, 29);
+
     ctx.restore();
   }
 
