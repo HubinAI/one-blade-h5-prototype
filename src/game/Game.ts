@@ -487,7 +487,7 @@ export class Game {
     // 第一轮修正：精英死后 1 秒，自动 resolve 第一关 chest
     if (this.autoChestResolveAt !== null && this.elapsed >= this.autoChestResolveAt) {
       this.autoChestResolveAt = null;
-      this.autoResolveFirstLevelChestReward();
+      this.autoResolveEliteChestReward();
     }
 
     this.updatePostChestWaves(scaledDt);
@@ -2121,7 +2121,7 @@ export class Game {
           for (const ct of chain) {
             ct.hp -= 1; ct.flash = 0.3;
             this.particles.push(ringParticle(ct, "#AFA9EC", 16));
-            if (ct.hp <= 0) { ct.alive = false; this.score += ct.score; this.stats.kills += 1; }
+            if (ct.hp <= 0) { this.handleDirectEnemyKilledBySystem(ct, "chain"); }
           }
           this.flash = Math.max(this.flash, 0.25);
         }
@@ -2453,34 +2453,35 @@ export class Game {
   }
 
   /** 处理 sub-spawn 队列（多波多次刷新） */
-  /** 子刷新队列处理（含性能保护） */
+  /** 紧急修正：子刷新队列处理（三路拆分，禁止重复复制） */
   private updateSubSpawnQueue() {
     if (this.subSpawnQueue.length === 0) return;
     const aliveCount = this.enemies.filter(e => e.alive).length;
     // 性能保护：达到上限时不处理队列（延迟生成）
     if (aliveCount >= PERFORMANCE_LIMITS.maxEnemiesOnScreen) return;
     const ready: typeof this.subSpawnQueue = [];
-    const remain: typeof this.subSpawnQueue = [];
+    const future: typeof this.subSpawnQueue = [];
     for (const item of this.subSpawnQueue) {
       if (item.time <= this.elapsed) {
         ready.push(item);
       } else {
-        remain.push(item);
+        future.push(item);
       }
     }
-    this.subSpawnQueue = remain;
-    // 第六轮修正：单帧最多生成 10 个队列怪，避免瞬时卡顿
+    // 超过单帧上限的 ready item 延迟到下一帧
+    const delayed: typeof this.subSpawnQueue = [];
     const MAX_SPAWNS_PER_FRAME = 10;
     let spawnedThisFrame = 0;
     for (const item of ready) {
       if (spawnedThisFrame >= MAX_SPAWNS_PER_FRAME) {
-        remain.push(item);
+        delayed.push(item);
         continue;
       }
       this.spawnEnemyFromQueueItem(item);
       spawnedThisFrame += 1;
     }
-    this.subSpawnQueue = [...remain, ...this.subSpawnQueue];
+    // 最终队列 = 延迟的 + 未来的（禁止重复复制）
+    this.subSpawnQueue = [...delayed, ...future];
   }
 
   /** 第六轮修正：从队列 item 生成敌人（抽取为独立方法） */
@@ -4967,7 +4968,7 @@ export class Game {
   }
 
   /** 第六轮修正：副刀/系统伤害造成的敌人死亡处理（确保精英走宝箱流程） */
-  private handleDirectEnemyKilledBySystem(enemy: Enemy, source: "sub_momentum" | "sub_weakpoint" | "system") {
+  private handleDirectEnemyKilledBySystem(enemy: Enemy, source: "sub_momentum" | "sub_weakpoint" | "chain" | "system") {
     if (!enemy.alive) return;
     enemy.alive = false;
     this.score += enemy.score;
