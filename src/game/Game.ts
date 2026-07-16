@@ -229,6 +229,16 @@ export class Game {
   private hitStopTimer = 0;
   private hitStopScale = 1;
   private lastHitStopAt = -999;
+  /** P2.8：刀光残影 */
+  private slashAfterglowTimer = 0;
+  private slashAfterglowPower = 0;
+  /** P2.8：屏幕边缘金光 */
+  private edgeFlashTimer = 0;
+  private edgeFlashPower = 0;
+  /** P2.8：破阵成功过渡 */
+  private victoryTransitionActive = false;
+  private victoryTransitionTimer = 0;
+  private victoryTransitionDuration = 1.0;
 
   private chestFixedBuffApplied = false;
 
@@ -471,6 +481,15 @@ export class Game {
     this.warriorSheathTimer = Math.max(0, this.warriorSheathTimer - scaledDt);
     this.eliteIntroTimer = Math.max(0, this.eliteIntroTimer - scaledDt);
     this.bossIntroTimer = Math.max(0, this.bossIntroTimer - scaledDt);
+    // P2.8：慢镜头 visual 衰减（用原始 frameDt，不随慢镜头变慢）
+    if (this.slashAfterglowTimer > 0) {
+      this.slashAfterglowTimer -= frameDt;
+      if (this.slashAfterglowTimer <= 0) this.slashAfterglowPower = 0;
+    }
+    if (this.edgeFlashTimer > 0) {
+      this.edgeFlashTimer -= frameDt;
+      if (this.edgeFlashTimer <= 0) this.edgeFlashPower = 0;
+    }
     this.screenShake = Math.max(0, this.screenShake - scaledDt * 2.7);
     this.flash = Math.max(0, this.flash - scaledDt * 2.2);
     if (this.oneBladeModeTimer > 0) this.oneBladeModeTimer = Math.max(0, this.oneBladeModeTimer - scaledDt);
@@ -515,6 +534,7 @@ export class Game {
     this.updateBattlePhase();
     this.updateBuffChoiceTriggers();
     this.checkBattleEnd();
+    this.updateVictoryTransition(scaledDt);
   }
 
   render(ctx: CanvasRenderingContext2D) {
@@ -544,6 +564,9 @@ export class Game {
     this.drawChestDrop(ctx);
     this.drawMidfieldEventBorder(ctx);
     this.drawIntroOverlay(ctx);
+    // P2.8：战斗层之后绘制边缘金光和破阵过渡
+    this.drawEdgeFlash(ctx);
+    this.drawVictoryTransition(ctx);
     if (this.debugEnabled) this.drawDebugPanel(ctx);
     this.drawBuffChoice(ctx);
     this.drawRevivePause(ctx);
@@ -756,15 +779,8 @@ export class Game {
 
     this.stats.maxSingleBlade = Math.max(this.stats.maxSingleBlade, trail.kills);
     this.stats.maxChain = Math.max(this.stats.maxChain, trail.chain);
-    // P2.7：多杀 hit stop
-    if (trail.kills >= 20) {
-      this.triggerMajorHitStop(0.16, 0.12);
-      this.screenShake = Math.max(this.screenShake, 0.22);
-      this.particles.push(ringParticle({ x: last?.x ?? DESIGN_WIDTH / 2, y: last?.y ?? 400 }, "#ffd35a", 36));
-    } else if (trail.kills >= 12) {
-      this.triggerHitStop(0.1, 0.18);
-      this.screenShake = Math.max(this.screenShake, 0.12);
-    }
+    // P2.8：多杀综合反馈
+    this.triggerSlashKillFeedback(trail.kills, last?.x, last?.y);
     this.warriorSheathTimer = 0.38;
     this.warriorDrawTimer = 0;
     this.regenDelayTimer = BALANCE.swordEnergy.regenDelayAfterSlash;
@@ -2031,19 +2047,99 @@ export class Game {
     }
   }
 
-  /** P2.7：hit stop 普通触发（12+击杀/精英破盾） */
-  private triggerHitStop(duration: number, scale = 0.18) {
-    if (this.elapsed - this.lastHitStopAt < 0.25) return;
+  /** P2.8：hit stop 普通触发（有冷却，force=true 可无视冷却） */
+  private triggerHitStop(duration: number, scale = 0.18, force = false) {
+    if (!force && this.elapsed - this.lastHitStopAt < 0.25) return;
     this.lastHitStopAt = this.elapsed;
     this.hitStopTimer = Math.max(this.hitStopTimer, duration);
     this.hitStopScale = Math.min(this.hitStopScale, scale);
   }
 
-  /** P2.7：hit stop 重大触发（精英死亡/20+击杀，无视冷却） */
-  private triggerMajorHitStop(duration: number, scale = 0.1) {
-    this.lastHitStopAt = this.elapsed;
-    this.hitStopTimer = Math.max(this.hitStopTimer, duration);
-    this.hitStopScale = Math.min(this.hitStopScale, scale);
+  /** P2.8：刀光残影 */
+  private triggerSlashAfterglow(power: number, duration: number) {
+    this.slashAfterglowPower = Math.max(this.slashAfterglowPower, power);
+    this.slashAfterglowTimer = Math.max(this.slashAfterglowTimer, duration);
+  }
+
+  /** P2.8：屏幕边缘金光 */
+  private triggerEdgeFlash(power: number, duration: number) {
+    this.edgeFlashPower = Math.max(this.edgeFlashPower, power);
+    this.edgeFlashTimer = Math.max(this.edgeFlashTimer, duration);
+  }
+
+  /** P2.8：一刀结算后触发综合反馈 */
+  private triggerSlashKillFeedback(slashKills: number, lastX?: number, lastY?: number) {
+    if (slashKills >= 20) {
+      this.triggerHitStop(0.18, 0.10);
+      this.triggerSlashAfterglow(0.8, 0.25);
+      this.triggerEdgeFlash(0.75, 0.25);
+      this.screenShake = Math.max(this.screenShake, 0.22);
+      this.addText(DESIGN_WIDTH / 2, 220, "神之一刀", "#ffd35a", 24, 0.9);
+    } else if (slashKills >= 12) {
+      this.triggerHitStop(0.10, 0.18);
+      this.triggerSlashAfterglow(0.45, 0.16);
+      this.triggerEdgeFlash(0.35, 0.15);
+      this.screenShake = Math.max(this.screenShake, 0.12);
+    } else if (slashKills >= 8) {
+      this.triggerHitStop(0.06, 0.25);
+    }
+  }
+
+  /** P2.8：破阵成功过渡启动 */
+  private startVictoryTransition() {
+    if (this.victoryTransitionActive || this.phase === "won") return;
+    this.victoryTransitionActive = true;
+    this.victoryTransitionTimer = 0;
+    this.triggerHitStop(0.18, 0.08, true);
+    this.triggerSlashAfterglow(1.0, 0.35);
+    this.triggerEdgeFlash(1.0, 0.35);
+    this.screenShake = Math.max(this.screenShake, 0.18);
+    this.addText(DESIGN_WIDTH / 2, DESIGN_HEIGHT * 0.38, "破阵成功！", "#ffd35a", 30, 0.9);
+  }
+
+  /** P2.8：更新破阵过渡 */
+  private updateVictoryTransition(dt: number) {
+    if (!this.victoryTransitionActive) return;
+    this.victoryTransitionTimer += dt;
+    if (this.victoryTransitionTimer >= this.victoryTransitionDuration) {
+      this.victoryTransitionActive = false;
+      this.finish(true);
+    }
+  }
+
+  /** P2.8：绘制破阵成功大字 */
+  private drawVictoryTransition(ctx: CanvasRenderingContext2D) {
+    if (!this.victoryTransitionActive) return;
+    const t = clamp(this.victoryTransitionTimer / this.victoryTransitionDuration, 0, 1);
+    const alpha = t < 0.2 ? t / 0.2 : 1 - Math.max(0, t - 0.75) / 0.25;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = '900 34px "Microsoft YaHei", "SimHei", sans-serif';
+    ctx.fillStyle = "#ffd35a";
+    ctx.shadowColor = "rgba(255, 210, 90, 0.9)";
+    ctx.shadowBlur = 18;
+    ctx.fillText("破阵成功！", DESIGN_WIDTH / 2, DESIGN_HEIGHT * 0.38);
+    ctx.restore();
+  }
+
+  /** P2.8：屏幕边缘金光 */
+  private drawEdgeFlash(ctx: CanvasRenderingContext2D) {
+    if (this.edgeFlashTimer <= 0) return;
+    const t = clamp(this.edgeFlashTimer / 0.35, 0, 1);
+    const alpha = t * this.edgeFlashPower * 0.45;
+    ctx.save();
+    const grd = ctx.createRadialGradient(
+      DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2, DESIGN_WIDTH * 0.28,
+      DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2, DESIGN_HEIGHT * 0.7
+    );
+    grd.addColorStop(0, "rgba(255, 210, 80, 0)");
+    grd.addColorStop(0.72, `rgba(255, 210, 80, ${alpha * 0.2})`);
+    grd.addColorStop(1, `rgba(255, 180, 50, ${alpha})`);
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+    ctx.restore();
   }
 
   /** P2.6：副刀槽位发射起点 */
@@ -2704,12 +2800,9 @@ export class Game {
     if (
       this.shouldFinishVictory()
     ) {
-      // 胜利结算延迟0.6秒，让最后的粒子动画播完
-      if (this._victoryPendingAt === undefined) {
-        this._victoryPendingAt = this.elapsed + 0.6;
-      }
-      if (this.elapsed >= this._victoryPendingAt) {
-        this.finish(true);
+      // P2.8：改为胜利过渡（破阵成功→0.8~1.2秒→结算）
+      if (!this.victoryTransitionActive) {
+        this.startVictoryTransition();
       }
     } else {
       this._victoryPendingAt = undefined;
@@ -2966,8 +3059,10 @@ export class Game {
     this.particles.push(ringParticle(enemy, "#b58cff", 30));
     this.particles.push(...sparkBurst(enemy, 10, "#b58cff"));
     this.screenShake = Math.max(this.screenShake, 0.18);
-    // P2.7：破盾 hit stop
-    this.triggerHitStop(0.12, 0.15);
+    // P2.8：破盾综合反馈
+    this.triggerHitStop(0.12, 0.15, true);
+    this.triggerSlashAfterglow(0.5, 0.18);
+    this.triggerEdgeFlash(0.45, 0.18);
     this.screenShake = Math.max(this.screenShake, 0.16);
   }
 
@@ -5222,9 +5317,12 @@ export class Game {
     this.addText(enemy.x, enemy.y - 40, "宝箱掉落！", "#ffd35a", 18, 1.6);
 
     this.autoChestResolveAt = this.elapsed + 0.55;
-    // P2.7：精英死亡 hit stop
-    this.triggerMajorHitStop(0.18, 0.10);
+    // P2.8：精英死亡强反馈
+    this.triggerHitStop(0.22, 0.08, true);
+    this.triggerSlashAfterglow(0.9, 0.28);
+    this.triggerEdgeFlash(0.85, 0.30);
     this.screenShake = Math.max(this.screenShake, 0.24);
+    this.particles.push(ringParticle(enemy, "#ffd35a", 42));
   }
 
   /** 第六轮修正：副刀/系统伤害造成的敌人死亡处理（确保精英走宝箱流程） */
