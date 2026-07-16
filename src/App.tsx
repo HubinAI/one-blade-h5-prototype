@@ -70,7 +70,7 @@ export default function App() {
   const [home, setHome] = useState(getHomeSnapshot);
   const [currentLevel, setCurrentLevel] = useState<LevelConfig>(LEVELS[0]);
   const [lastResult, setLastResult] = useState<BattleResult | null>(null);
-  const [appVersion] = useState("V0716014");
+  const [appVersion] = useState("V0716015");
   const [runIndex, setRunIndex] = useState(0);
   const [reviveOffer, setReviveOffer] = useState<ReviveOffer | null>(null);
   const [reviveSignal, setReviveSignal] = useState(0);
@@ -83,9 +83,28 @@ export default function App() {
   const [showMerchant, setShowMerchant] = useState(false);
   const [pendingMerchant, setPendingMerchant] = useState(false);
   const [breakthroughResult, setBreakthroughResult] = useState<{ name: string; id: string; unlockText: string } | null>(null);
-  const pendingGate = useMemo(() => getPendingGate(), [home.highestFloor]);
+  const pendingGate = useMemo(() => getPendingGate(), [home.highestFloor, home.rankIndex, home.runIndex]);
 
   const refreshHome = useCallback(() => setHome(getHomeSnapshot()), []);
+  const completeBreakthrough = useCallback(() => {
+    if (!breakthroughResult) return;
+    addClearedBreakthrough(breakthroughResult.id);
+    const gate = MAIN_STAGE_GATES.find(g => g.breakthroughId === breakthroughResult.id);
+    if (gate) {
+      tryRankUp();
+      if (gate.nextUnlockFrom !== null) {
+        updateHighestFloor(gate.nextUnlockFrom);
+        setCurrentMainlineFloor(gate.nextUnlockFrom);
+      } else {
+        updateHighestFloor(gate.afterStage + 1);
+        setCurrentMainlineFloor(gate.afterStage + 1);
+      }
+    }
+    setBreakthroughResult(null);
+    refreshHome();
+    setScreen("menu");
+  }, [breakthroughResult, refreshHome]);
+
   const [currentMainlineFloor, setCurrentMainlineFloor] = useState(1);
 
   const unlockedMap = useMemo(() => {
@@ -400,7 +419,7 @@ export default function App() {
       )}
 
       {screen === "debug" && (
-        <DebugScreen onBack={() => setScreen("menu")} />
+        <DebugScreen onBack={() => { refreshHome(); setScreen("menu"); }} />
       )}
 
       {screen === "team" && (
@@ -516,12 +535,7 @@ export default function App() {
       )}
 
       {screen === "breakthroughResult" && breakthroughResult && (
-        <section className="screen breakthrough-screen" onClick={() => {
-          // 记录突破完成
-          addClearedBreakthrough(breakthroughResult.id);
-          setBreakthroughResult(null);
-          goToMenu();
-        }}>
+        <section className="screen breakthrough-screen" onClick={completeBreakthrough}>
           <div className="breakthrough-bg-light" />
           <div className="breakthrough-icon">✦</div>
           <h1 className="breakthrough-title">破境成功！</h1>
@@ -529,9 +543,7 @@ export default function App() {
           <div className="breakthrough-unlock">{breakthroughResult.unlockText}</div>
           <button className="breakthrough-btn" onClick={(e) => {
             e.stopPropagation();
-            addClearedBreakthrough(breakthroughResult.id);
-            setBreakthroughResult(null);
-            goToMenu();
+            completeBreakthrough();
           }}>
             破境
           </button>

@@ -118,11 +118,12 @@ export const LEVELS: LevelConfig[] = [
     waves: [
       wave("开场人群", 1, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 3, 5], 1)])),
       wave("第一桶火", 12, mix([row("infantry", [0, 1, 2, 4, 5, 6], 0), row("powder", [3], 1), row("infantry", [1, 3, 5], 2)])),
+      wave("分裂初现", 20, mix([row("infantry", [1, 3, 5], 0), [enemy("splitter", 3, 1)], row("infantry", [2, 4], 2)])),
       wave("双火在人群", 24, mix([row("infantry", [0, 1, 3, 5, 6], 0), row("powder", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), [pickup("oil", 1)], 1.06),
       wave("盾前火后", 41, mix([row("shield", [1, 3, 5], 0), row("powder", [2, 4], 1), row("infantry", [0, 1, 2, 3, 4, 5, 6], 2)]), undefined, 1.14),
       wave("三火连爆", 61, mix([row("powder", [1, 3, 5], 0), row("infantry", [0, 1, 2, 3, 4, 5, 6], 1), row("shield", [2, 4], 2)]), [pickup("drum", 3)], 1.20),
       wave("火线收束", 80, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("powder", [1, 2, 4, 5], 1), row("infantry", [0, 2, 3, 4, 6], 2)]), undefined, 1.26),
-      wave("分裂初现", 95, mix([row("infantry", [0, 1, 2, 4, 5], 0), [enemy("splitter", 3, 1)], row("infantry", [1, 3, 5], 2)]))
+      wave("分裂复现", 95, mix([row("infantry", [0, 1, 2, 4, 5], 0), [enemy("splitter", 3, 1)], row("infantry", [1, 3, 5], 2)]))
     ],
     briefing: {
       highlightEnemies: [{ kind: "powder", label: "火药兵集群", icon: "🔥" }],

@@ -259,6 +259,9 @@ export const WAVE_TEMPLATES: WaveTemplate[] = [
   { id: "infantry_3", name: "散修波", unlockFloor: 0,  enemies: [{ kind: "infantry", count: 4 }] },
   { id: "mixed_12",   name: "妖卫波", unlockFloor: 0,  enemies: [{ kind: "infantry", count: 3 }, { kind: "shield", count: 2 }] },
   { id: "powder_12",  name: "火修波", unlockFloor: 0,  enemies: [{ kind: "infantry", count: 2 }, { kind: "powder", count: 2 }] },
+  { id: "splitter_intro", name: "裂变初现", unlockFloor: 4, enemies: [{ kind: "infantry", count: 3 }, { kind: "splitter", count: 1 }] },
+  { id: "splitter_mix", name: "裂变混阵", unlockFloor: 5, enemies: [{ kind: "infantry", count: 4 }, { kind: "splitter", count: 1 }, { kind: "powder", count: 1 }] },
+  { id: "tractor_intro", name: "牵引初现", unlockFloor: 7, enemies: [{ kind: "infantry", count: 5 }, { kind: "tractor", count: 1 }] },
   { id: "core_21",    name: "阵法波", unlockFloor: 50, enemies: [{ kind: "shield", count: 4 }, { kind: "core", count: 2 }] },
   { id: "elite_21",   name: "精英波", unlockFloor: 100,enemies: [{ kind: "elite", count: 2 }, { kind: "infantry", count: 4 }] },
 ];
@@ -613,6 +616,41 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
   const entryOverride = floor <= 5
     ? { multiplier: 3.4, endY: 560, maxDuration: 2.0, spawnY: -20 }
     : undefined;
+
+  // P3.1：强制插入机制怪教学波次
+  if (floor === 4) {
+    waves.splice(2, 0, {
+      name: "裂变初现", delay: 0.2, spawnAt: 18,
+      speedMultiplier: 1 + floor * 0.005,
+      enemies: [{ kind: "infantry" as any, count: 4, x: LANES[2], yOffset: 0 }, { kind: "splitter" as any, count: 1, x: LANES[3], yOffset: 12 }, { kind: "infantry" as any, count: 3, x: LANES[4], yOffset: 24 }],
+    });
+    waves.splice(4, 0, {
+      name: "裂变复现", delay: 0.2, spawnAt: 34,
+      speedMultiplier: 1 + floor * 0.005,
+      enemies: [{ kind: "infantry" as any, count: 4, x: LANES[1], yOffset: 0 }, { kind: "splitter" as any, count: 1, x: LANES[3], yOffset: 12 }, { kind: "powder" as any, count: 1, x: LANES[5], yOffset: 24 }],
+    });
+  }
+  if (floor === 5) {
+    waves.splice(2, 0, {
+      name: "裂变巩固", delay: 0.2, spawnAt: 20,
+      speedMultiplier: 1 + floor * 0.005,
+      enemies: [{ kind: "infantry" as any, count: 4, x: LANES[1], yOffset: 0 }, { kind: "splitter" as any, count: 1, x: LANES[2], yOffset: 10 }, { kind: "splitter" as any, count: 1, x: LANES[4], yOffset: 16 }, { kind: "infantry" as any, count: 4, x: LANES[5], yOffset: 26 }],
+    });
+  }
+  if (floor === 6) {
+    waves.splice(2, 0, {
+      name: "裂变复习", delay: 0.2, spawnAt: 22,
+      speedMultiplier: 1 + floor * 0.005,
+      enemies: [{ kind: "infantry" as any, count: 5, x: LANES[2], yOffset: 0 }, { kind: "splitter" as any, count: 1, x: LANES[3], yOffset: 12 }, { kind: "infantry" as any, count: 5, x: LANES[4], yOffset: 24 }],
+    });
+  }
+  if (floor === 7) {
+    waves.splice(2, 0, {
+      name: "牵引初现", delay: 0.2, spawnAt: 22,
+      speedMultiplier: 1 + floor * 0.005,
+      enemies: [{ kind: "infantry" as any, count: 4, x: LANES[1], yOffset: 0 }, { kind: "tractor" as any, count: 1, x: LANES[3], yOffset: 12 }, { kind: "infantry" as any, count: 4, x: LANES[5], yOffset: 24 }],
+    });
+  }
 
   return {
     id: 10000 + floor,

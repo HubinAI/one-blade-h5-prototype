@@ -4,6 +4,13 @@ import {
   writeProgress,
 } from "../game/services/ProgressionService";
 import { generateBlade, type Blade } from "../game/services/BladeService";
+import {
+  debugSetHighestFloor,
+  debugSetRankIndex,
+  debugRemoveClearedBreakthrough,
+  debugAddClearedBreakthrough,
+  debugResetBreakthroughs,
+} from "../game/services/ProgressionService";
 import { QUALITY_ORDER, QUALITY_META, type Quality } from "../game/config/synthesis";
 
 type DebugScreenProps = {
@@ -136,6 +143,19 @@ export function DebugScreen({ onBack }: DebugScreenProps) {
             <button className="debug-btn" onClick={clearCache}>🧹 清理全部缓存</button>
             <button className="debug-btn danger" onClick={resetProgress}>重置所有进度</button>
           </div>
+        </div>
+
+        <div className="debug-group">
+          <div className="debug-group-title">主线测试</div>
+          <button onClick={() => { debugSetHighestFloor(1); onBack(); }}>跳到第1关</button>
+          <button onClick={() => { debugSetHighestFloor(4); onBack(); }}>跳到第4关：测试分裂兵</button>
+          <button onClick={() => { debugSetHighestFloor(5); onBack(); }}>跳到第5关：测试分裂巩固</button>
+          <button onClick={() => { debugSetHighestFloor(7); onBack(); }}>跳到第7关：测试牵引兵</button>
+          <button onClick={() => { debugSetHighestFloor(6); debugAddClearedBreakthrough("breakthrough_lianqi"); debugSetRankIndex(1); onBack(); }}>跳到第6关：练气突破后</button>
+          <button onClick={() => { debugSetHighestFloor(5); debugRemoveClearedBreakthrough("breakthrough_lianqi"); debugSetRankIndex(0); onBack(); }}>设置为第5关已通关：触发练气突破</button>
+          <button onClick={() => { debugAddClearedBreakthrough("breakthrough_lianqi"); onBack(); }}>标记练气突破已完成</button>
+          <button onClick={() => { debugRemoveClearedBreakthrough("breakthrough_lianqi"); onBack(); }}>清除练气突破完成状态</button>
+          <button onClick={() => { debugResetBreakthroughs(); onBack(); }}>重置所有突破状态</button>
         </div>
 
         {message && <div className="debug-toast">{message}</div>}

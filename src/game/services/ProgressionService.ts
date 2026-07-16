@@ -1374,6 +1374,48 @@ export function getActiveBuffEffects(): TodayBuff[] {
   return state.owned.map(b => getBuffById(b.buffId)).filter((b): b is TodayBuff => b !== null);
 }
 
+// ════════════════════════════════════════════
+// Debug 调试函数
+// ════════════════════════════════════════════
+
+/** Debug: 设置最高主线层数 */
+export function debugSetHighestFloor(floor: number): void {
+  const progress = readProgress();
+  progress.highestFloor = Math.max(1, floor);
+  writeProgress(progress);
+}
+
+/** Debug: 设置段位索引 */
+export function debugSetRankIndex(index: number): void {
+  const progress = readProgress();
+  progress.rankIndex = Math.max(0, index);
+  writeProgress(progress);
+}
+
+/** Debug: 清除某突破完成记录 */
+export function debugRemoveClearedBreakthrough(id: string): void {
+  const progress = readProgress();
+  progress.clearedBreakthroughs = progress.clearedBreakthroughs.filter(x => x !== id);
+  writeProgress(progress);
+}
+
+/** Debug: 标记某突破已完成 */
+export function debugAddClearedBreakthrough(id: string): void {
+  const progress = readProgress();
+  if (!progress.clearedBreakthroughs.includes(id)) {
+    progress.clearedBreakthroughs.push(id);
+  }
+  writeProgress(progress);
+}
+
+/** Debug: 重置突破状态 */
+export function debugResetBreakthroughs(): void {
+  const progress = readProgress();
+  progress.clearedBreakthroughs = [];
+  progress.rankIndex = 0;
+  writeProgress(progress);
+}
+
 /** 生成段位Boss关的LevelConfig */
 export function getBossLevelConfig(rankId: RankId): LevelConfig {
   const rank = RANK_CONFIG[rankId];
