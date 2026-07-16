@@ -5,7 +5,7 @@ import { ELITE_VISUAL_DEFS } from "../data/elites";
 import { BOSS_VISUAL_DEFS } from "../data/bosses";
 import { FORMATIONS } from "../data/formations";
 import { DESIGN_HEIGHT, DESIGN_WIDTH, HUD_HEIGHT, WALL_TOP_Y, MAX_ENEMIES_ON_SCREEN, MAX_PARTICLES_ON_SCREEN, MAX_CHAIN_DEPTH, MAX_FLOATING_TEXT } from "./config/constants";
-import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID, BATTLEFIELD_ZONES, ENTRY_PHASE_CONFIG, PERFORMANCE_LIMITS, ENEMY_SOFT_SEPARATION, FLOATING_TEXT_LIMITS, ENTRY_PROFILE_COMMON, ENTRY_PROFILE_EDICT_BURST } from "./config/balance";
+import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID, BATTLEFIELD_ZONES, ENTRY_PHASE_CONFIG, PERFORMANCE_LIMITS, ENEMY_SOFT_SEPARATION, FLOATING_TEXT_LIMITS, ENTRY_PROFILE_COMMON, ENTRY_PROFILE_EDICT_BURST, ENTRY_PROFILE_ELITE } from "./config/balance";
 import { AD_CONFIG } from "./config/ads";
 import { RUN_BUFFS, RUN_BUFF_BY_ID, ROUTE_COLORS, ROUTE_NAMES, ROUTE_BUFFS, getNextBuffInRoute, getBuffRoute } from "./config/buffs";
 import { BOSS_CONFIG, getBossPhase } from "./config/bosses";
@@ -2281,7 +2281,7 @@ export class Game {
 
   /** V0715008: 宝箱后爆发怪潮生成 (第一轮修正：使用 postChestStartAt 时间基准) */
   private updatePostChestWaves(dt: number) {
-    const postWaves = this.level.postChestWaves;
+    const postWaves = this.getEffectivePostChestWaves();
     if (!postWaves || postWaves.length === 0) return;
     if (!this.chestDone) return;
     if (this.postChestStartAt === null) return;
@@ -2479,9 +2479,9 @@ export class Game {
     }
     this.subSpawnQueue = remain;
     for (const item of ready) {
-      // 使用队列携带的战斗阶段获取 entry profile
+      // 第五轮修正：按怪物类型+阶段选择 entry profile（精英单独回调）
       const phase = item.battlePhase ?? this.battlePhase;
-      const profile = phase === 'edict_burst' ? ENTRY_PROFILE_EDICT_BURST : ENTRY_PROFILE_COMMON;
+      const profile = this.getEntryProfileForEnemy(item.kind as EnemyKind, phase);
       const spawnY = profile.spawnY - (item.yOffset ?? 0);
       const enemy = this.createEnemy(item.kind as any, item.x, spawnY, item.speedMultiplier, profile);
       // 中场事件波及：本波敌人带event标记
@@ -2509,10 +2509,13 @@ export class Game {
     // 有精英的关卡：必须已击杀精英
     if (this.level.eliteSpawnAt && this.level.eliteKind) {
       if (!this.eliteKilled) return false;
+      // 第五轮修正：宝箱掉落了就必须 chestDone，避免卡住
+      if (this.chestDropped && !this.chestDone) return false;
     }
 
-    // 有军令爆发轮次的关卡：必须在 edict_burst 阶段且全部生成
-    const hasPostChest = this.level.postChestWaves && this.level.postChestWaves.length > 0;
+    // 第五轮修正：使用 getEffectivePostChestWaves 判断
+    const postWaves = this.getEffectivePostChestWaves();
+    const hasPostChest = postWaves.length > 0;
     if (hasPostChest) {
       if (!this.chestDone) return false;
       if (this.postChestStartAt === null) return false;
@@ -2739,6 +2742,60 @@ export class Game {
   private getEntryProfile() {
     if (this.battlePhase === 'edict_burst') return ENTRY_PROFILE_EDICT_BURST;
     return ENTRY_PROFILE_COMMON;
+  }
+
+  /** 第五轮修正：按怪物类型+阶段选择 entry profile（精英单独回调） */
+  private getEntryProfileForEnemy(kind: EnemyKind, phase: BattlePhase) {
+    if (kind === "elite") return ENTRY_PROFILE_ELITE;
+    if (phase === "edict_burst") return ENTRY_PROFILE_EDICT_BURST;
+    return ENTRY_PROFILE_COMMON;
+  }
+
+  /** 第五轮修正：获取有效军令爆发轮次（有配置用配置，没配置前5关给默认） */
+  private getEffectivePostChestWaves(): typeof this.level.waves {
+    if (this.level.postChestWaves && this.level.postChestWaves.length > 0) {
+      return this.level.postChestWaves;
+    }
+    // 前5关有精英但没配置 postChestWaves 时，提供默认军令爆发
+    if (this.level.eliteSpawnAt && this.level.eliteKind && this.level.id <= 5) {
+      return this.getDefaultPostChestWavesForEarlyLevel();
+    }
+    return [];
+  }
+
+  private getDefaultPostChestWavesForEarlyLevel(): typeof this.level.waves {
+    return [
+      {
+        name: "军令爆发一",
+        delay: 0,
+        spawnAt: 0.5,
+        enemies: [
+          { kind: "infantry", x: 92, count: 4 },
+          { kind: "infantry", x: 188, count: 5 },
+          { kind: "infantry", x: 284, count: 4 }
+        ]
+      },
+      {
+        name: "军令爆发二",
+        delay: 0,
+        spawnAt: 4.8,
+        enemies: [
+          { kind: "infantry", x: 76, count: 5 },
+          { kind: "shield", x: 188, count: 1 },
+          { kind: "infantry", x: 300, count: 5 }
+        ]
+      },
+      {
+        name: "军令爆发三",
+        delay: 0,
+        spawnAt: 9.2,
+        enemies: [
+          { kind: "infantry", x: 60, count: 5 },
+          { kind: "powder", x: 188, count: 1 },
+          { kind: "infantry", x: 316, count: 5 }
+        ]
+      }
+    ] as any;
   }
 
   /** 第二轮修正：普通波次怪物横向分布函数（围绕 spawn.x 展开） */
@@ -3130,7 +3187,8 @@ export class Game {
         phaseText = "军令激活";
         break;
       case 'edict_burst':
-        const total = this.edictBurstRoundTotal || this.level.postChestWaves?.length || 3;
+        const postWaves = this.getEffectivePostChestWaves();
+        const total = this.edictBurstRoundTotal || postWaves.length || 0;
         const current = Math.min(Math.max(this.edictBurstRoundIndex || 1, 1), total);
         phaseText = `军令爆发 ${current}/${total}`;
         break;
@@ -4595,7 +4653,9 @@ export class Game {
     // 在随机列生成
     const lanes = [44, 92, 140, 188, 236, 284, 336];
     const lane = lanes[Math.floor(Math.random() * lanes.length)];
-    const enemy = this.createElite(ek, lane, BALANCE.battlefield.enemySpawnY, conf);
+    // 第五轮修正：精英使用专用 profile，不压太深
+    const eliteY = ENTRY_PROFILE_ELITE.spawnY;
+    const enemy = this.createElite(ek, lane, eliteY, conf);
     this.enemies.push(enemy);
     this.discoveredEnemies.add("elite");
     // 出场播报（2.5秒）
@@ -4811,12 +4871,12 @@ export class Game {
       slowedTimer: 0,
       skillTimer: 0,
       skillCooldown: 0,
-      // 精英也参与快速入场阶段（三次修正：使用统一 entry profile）
+      // 第五轮修正：精英使用专用 entry profile（不压太深）
       entryPhase: {
         active: true,
-        endY: this.getEntryProfile().entryEndY,
-        speedMultiplier: this.getEntryProfile().entryMultiplier,
-        maxDuration: this.getEntryProfile().entryMaxDuration,
+        endY: ENTRY_PROFILE_ELITE.entryEndY,
+        speedMultiplier: ENTRY_PROFILE_ELITE.entryMultiplier,
+        maxDuration: ENTRY_PROFILE_ELITE.entryMaxDuration,
         elapsed: 0,
         completed: false
       }
@@ -4884,11 +4944,10 @@ export class Game {
     return all[Math.floor(Math.random() * all.length)];
   }
 
-  /** 应用军令 */
-  /** 第一轮修正：第一关精英死后，宝箱军令自动生效 */
-  private autoResolveFirstLevelChestReward() {
-    if (this.level.id !== 1 && this.level.id !== 10001) return;
+  /** 第五轮修正：通用精英宝箱军令自动生效（去掉第1关限制） */
+  private autoResolveEliteChestReward() {
     if (this.chestDone) return;
+    if (!this.chestDropped && !this.eliteKilled) return;
 
     this.chestDropped = true;
     this.chestOpening = false;
@@ -4899,21 +4958,39 @@ export class Game {
     this.chestFlyT = 1;
     this.chestDone = true;
 
+    // 通用军令效果（所有关卡生效）
     this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 70);
     for (let i = 0; i < this.subBladeTimers.length; i++) {
       this.subBladeTimers[i] = 0;
     }
     this.chestMomentumTimer = Math.max(this.chestMomentumTimer, 12);
 
-    this.battlePhase = "edict_burst";
-    this.postChestStartAt = this.elapsed;
-    this.postChestWaveIndex = 0;
-    this.allPostChestWavesSpawned = false;
-    this.edictBurstRoundIndex = 1;
-    this.edictBurstRoundTotal = this.level.postChestWaves?.length ?? 0;
+    const postWaves = this.getEffectivePostChestWaves();
+    const hasPostChest = postWaves.length > 0;
+
+    if (hasPostChest) {
+      this.battlePhase = "edict_burst";
+      this.postChestStartAt = this.elapsed;
+      this.postChestWaveIndex = 0;
+      this.allPostChestWavesSpawned = false;
+      this.edictBurstRoundIndex = 1;
+      this.edictBurstRoundTotal = postWaves.length;
+    } else {
+      // 没有军令爆发轮次的关卡，直接允许结算
+      this.battlePhase = "main_waves";
+      this.postChestStartAt = null;
+      this.allPostChestWavesSpawned = true;
+      this.edictBurstRoundIndex = 0;
+      this.edictBurstRoundTotal = 0;
+    }
 
     this.addText(DESIGN_WIDTH / 2, 150, "军令激活", "#ffd35a", 24, 1.2);
     this.addText(DESIGN_WIDTH / 2, 185, "刀势回涌！副刀共鸣！", "#ffd35a", 18, 1.4);
+  }
+
+  /** 兼容旧调用名（仍被 update 中 autoChestResolveAt 调用） */
+  private autoResolveFirstLevelChestReward() {
+    this.autoResolveEliteChestReward();
   }
 
   private applyChestBuff(id: BuffId) {

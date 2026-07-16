@@ -122,6 +122,14 @@ export const ENTRY_PROFILE_EDICT_BURST = {
   entryMaxDuration: 1.85
 } as const;
 
+/** 第五轮修正：精英专用 entry profile（比普通怪浅，给更多反应时间） */
+export const ENTRY_PROFILE_ELITE = {
+  spawnY: -20,
+  entryEndY: 430,
+  entryMultiplier: 2.35,
+  entryMaxDuration: 1.9
+} as const;
+
 /** 性能上限 */
 export const PERFORMANCE_LIMITS = {
   maxEnemiesOnScreen: 60,
