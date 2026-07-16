@@ -5,7 +5,7 @@ import { ELITE_VISUAL_DEFS } from "../data/elites";
 import { BOSS_VISUAL_DEFS } from "../data/bosses";
 import { FORMATIONS } from "../data/formations";
 import { DESIGN_HEIGHT, DESIGN_WIDTH, HUD_HEIGHT, WALL_TOP_Y, MAX_ENEMIES_ON_SCREEN, MAX_PARTICLES_ON_SCREEN, MAX_CHAIN_DEPTH, MAX_FLOATING_TEXT } from "./config/constants";
-import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID, BATTLEFIELD_ZONES, ENTRY_PHASE_CONFIG, PERFORMANCE_LIMITS, ENEMY_SOFT_SEPARATION, FLOATING_TEXT_LIMITS, ENTRY_PROFILE_COMMON, ENTRY_PROFILE_EDICT_BURST, ENTRY_PROFILE_ELITE } from "./config/balance";
+import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID, BATTLEFIELD_ZONES, ENTRY_PHASE_CONFIG, PERFORMANCE_LIMITS, ENEMY_SOFT_SEPARATION, FLOATING_TEXT_LIMITS, ENTRY_PROFILE_COMMON, ENTRY_PROFILE_EDICT_BURST, ENTRY_PROFILE_ELITE, ENTRY_END_JITTER } from "./config/balance";
 import { AD_CONFIG } from "./config/ads";
 import { RUN_BUFFS, RUN_BUFF_BY_ID, ROUTE_COLORS, ROUTE_NAMES, ROUTE_BUFFS, getNextBuffInRoute, getBuffRoute } from "./config/buffs";
 import { BOSS_CONFIG, getBossPhase } from "./config/bosses";
@@ -2768,6 +2768,38 @@ export class Game {
     this.onFinish(result);
   }
 
+  /** P2.5：随机选择前中后排 */
+  private pickEntryRow(): "back" | "middle" | "front" {
+    const r = Math.random();
+    const weights = ENTRY_END_JITTER.rowWeights;
+    if (r < weights.back) return "back";
+    if (r < weights.back + weights.middle) return "middle";
+    return "front";
+  }
+
+  /** P2.5：计算个体化 entryEndY */
+  private getPersonalizedEntryEndY(kind: EnemyKind, baseEndY: number): number {
+    if (!ENTRY_END_JITTER.enabled) return baseEndY;
+    const row = this.pickEntryRow();
+    const rowOffset = ENTRY_END_JITTER.rowOffset[row] ?? 0;
+    const kindOffsetMap = ENTRY_END_JITTER.kindOffset as Record<string, number>;
+    const kindOffset = kindOffsetMap[kind] ?? 0;
+    const randomOffset = randomRange(ENTRY_END_JITTER.commonMin, ENTRY_END_JITTER.commonMax);
+    return clamp(baseEndY + rowOffset + kindOffset + randomOffset, 330, 560);
+  }
+
+  /** P2.5：怪物类型速度微差异 */
+  private getEntrySpeedFactorByKind(kind: EnemyKind): number {
+    switch (kind) {
+      case "infantry": return randomRange(0.95, 1.08);
+      case "shield": return randomRange(0.86, 0.96);
+      case "powder": return randomRange(0.9, 1.0);
+      case "core": return randomRange(0.86, 0.95);
+      case "elite": return randomRange(0.82, 0.92);
+      default: return 1;
+    }
+  }
+
   /** 三次修正：根据当前战斗阶段获取对应 entry profile */
   private getEntryProfile() {
     if (this.battlePhase === 'edict_burst') return ENTRY_PROFILE_EDICT_BURST;
@@ -2880,31 +2912,43 @@ export class Game {
     }
   }
 
-  /** P2：精英头顶5格状态条 */
-  private drawEliteStatusBar(ctx: CanvasRenderingContext2D, enemy: Enemy) {
+  /** P2.5：替换旧血条——精英头顶小型名牌（名字+血格一体化） */
+  private drawEliteNameplate(ctx: CanvasRenderingContext2D, enemy: Enemy) {
     if (enemy.kind !== "elite") return;
     const maxHp = Math.max(1, enemy.maxHp || enemy.hp || 1);
     const hp = Math.max(0, enemy.hp);
     const ratio = clamp(hp / maxHp, 0, 1);
-
     const segments = 5;
     const filled = Math.ceil(ratio * segments);
-
-    const barW = 50;
-    const barH = 6;
-    const gap = 2;
-    const segW = (barW - gap * (segments - 1)) / segments;
-
-    const x0 = -barW / 2;
-    const y0 = -enemy.radius - 22;
+    const plateW = 64;
+    const plateH = 22;
+    const x0 = -plateW / 2;
+    const y0 = -enemy.radius - 46;
 
     ctx.save();
-    ctx.fillStyle = "rgba(20, 10, 8, 0.72)";
-    roundRect(ctx, x0 - 3, y0 - 3, barW + 6, barH + 6, 4);
+    // 背板：皮影风小匾
+    ctx.fillStyle = "rgba(24, 12, 8, 0.78)";
+    ctx.strokeStyle = "rgba(255, 211, 90, 0.45)";
+    ctx.lineWidth = 1;
+    roundRect(ctx, x0, y0, plateW, plateH, 5);
     ctx.fill();
-
+    ctx.stroke();
+    // 名字
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = '700 10px "Microsoft YaHei", "SimHei", sans-serif';
+    ctx.fillStyle = "#f6e7bd";
+    const eliteName = this.getEliteDisplayName(enemy);
+    ctx.fillText(eliteName, 0, y0 + 7);
+    // 血格
+    const barW = 48;
+    const barH = 5;
+    const gap = 2;
+    const segW = (barW - gap * (segments - 1)) / segments;
+    const bx0 = -barW / 2;
+    const by0 = y0 + 14;
     for (let i = 0; i < segments; i++) {
-      const x = x0 + i * (segW + gap);
+      const x = bx0 + i * (segW + gap);
       if (i < filled) {
         const lowHp = ratio <= 0.25;
         const pulse = 0.5 + Math.sin(this.elapsed * 8) * 0.5;
@@ -2914,10 +2958,20 @@ export class Game {
       } else {
         ctx.fillStyle = "rgba(255, 255, 255, 0.16)";
       }
-      roundRect(ctx, x, y0, segW, barH, 2);
+      roundRect(ctx, x, by0, segW, barH, 2);
       ctx.fill();
     }
     ctx.restore();
+  }
+
+  /** P2.5：精英名牌显示名称 */
+  private getEliteDisplayName(enemy: Enemy): string {
+    switch (enemy.eliteKind) {
+      case "heal": return "氛围将";
+      case "fireRing": return "火环将";
+      case "aura": return "护盾将";
+      default: return "精英";
+    }
   }
 
   /** P2：精英护盾层光晕 */
@@ -2994,8 +3048,9 @@ export class Game {
     const shouldUseEntryPhase = isBasicEnemy || kind === "elite";
     // 第一轮修正：优先使用传入的 entryProfile，fallback 到 getEntryProfile()
     const profile = entryProfile ?? this.getEntryProfile();
-    const epEndY = profile.entryEndY;
-    const epMul = profile.entryMultiplier;
+    // P2.5：个体化落点扰动 + 速度微差异
+    const epEndY = this.getPersonalizedEntryEndY(kind, profile.entryEndY);
+    const epMul = profile.entryMultiplier * this.getEntrySpeedFactorByKind(kind);
     const epMaxDur = profile.entryMaxDuration;
     return {
       id: this.nextId("enemy"),
@@ -3709,9 +3764,9 @@ export class Game {
         }
       }
 
-      // P2：精英状态条（在所有精英效果之上绘制）
+      // P2：精英名牌（在所有精英效果之上绘制）
       if (enemy.kind === "elite") {
-        this.drawEliteStatusBar(ctx, enemy);
+        this.drawEliteNameplate(ctx, enemy);
       }
 
       // ---- Boss渲染 ----

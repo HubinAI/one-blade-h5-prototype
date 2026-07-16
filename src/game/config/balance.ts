@@ -130,6 +130,22 @@ export const ENTRY_PROFILE_ELITE = {
   entryMaxDuration: 1.9
 } as const;
 
+/** P2.5：怪物落点个体化扰动配置 */
+export const ENTRY_END_JITTER = {
+  enabled: true,
+  commonMin: -35,
+  commonMax: 35,
+  rowWeights: { back: 0.22, middle: 0.56, front: 0.22 },
+  rowOffset: { back: -32, middle: 0, front: 32 },
+  kindOffset: {
+    infantry: 0,
+    shield: -18,
+    powder: -8,
+    core: -12,
+    elite: -20
+  }
+} as const;
+
 /** 性能上限 */
 export const PERFORMANCE_LIMITS = {
   maxEnemiesOnScreen: 60,
