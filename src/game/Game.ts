@@ -5,7 +5,7 @@ import { ELITE_VISUAL_DEFS } from "../data/elites";
 import { BOSS_VISUAL_DEFS } from "../data/bosses";
 import { FORMATIONS } from "../data/formations";
 import { DESIGN_HEIGHT, DESIGN_WIDTH, HUD_HEIGHT, WALL_TOP_Y, MAX_ENEMIES_ON_SCREEN, MAX_PARTICLES_ON_SCREEN, MAX_CHAIN_DEPTH, MAX_FLOATING_TEXT } from "./config/constants";
-import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID, BATTLEFIELD_ZONES, ENTRY_PHASE_CONFIG, PERFORMANCE_LIMITS, ENEMY_SOFT_SEPARATION, FLOATING_TEXT_LIMITS, ENTRY_PROFILE_COMMON, ENTRY_PROFILE_EDICT_BURST, ENTRY_PROFILE_ELITE, ENTRY_END_JITTER } from "./config/balance";
+import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID, BATTLEFIELD_ZONES, ENTRY_PHASE_CONFIG, PERFORMANCE_LIMITS, ENEMY_SOFT_SEPARATION, FLOATING_TEXT_LIMITS, ENTRY_PROFILE_COMMON, ENTRY_PROFILE_EDICT_BURST, ENTRY_PROFILE_ELITE, ENTRY_END_JITTER, BATTLE_SAFE_X } from "./config/balance";
 import { AD_CONFIG } from "./config/ads";
 import { RUN_BUFFS, RUN_BUFF_BY_ID, ROUTE_COLORS, ROUTE_NAMES, ROUTE_BUFFS, getNextBuffInRoute, getBuffRoute } from "./config/buffs";
 import { BOSS_CONFIG, getBossPhase } from "./config/bosses";
@@ -225,7 +225,11 @@ export class Game {
   private autoChestResolveAt: number | null = null;
   /** 第一轮修正：军令爆发开始的时间基准 */
   private postChestStartAt: number | null = null;
-  /** 宝箱开启固定buff专用（第一关） */
+  /** P2.7：hit stop 计时器 */
+  private hitStopTimer = 0;
+  private hitStopScale = 1;
+  private lastHitStopAt = -999;
+
   private chestFixedBuffApplied = false;
 
   private stats: BattleStats = {
@@ -418,7 +422,16 @@ export class Game {
 
   update(dt: number) {
     const frameDt = Math.min(dt, 0.04);
-    const scaledDt = frameDt * (this.slowMoTimer > 0 ? 0.58 : 1);
+    const baseDt = frameDt * (this.slowMoTimer > 0 ? 0.58 : 1);
+    // P2.7：hit stop 叠加效果
+    let scaledDt = baseDt;
+    if (this.hitStopTimer > 0) {
+      this.hitStopTimer -= frameDt;
+      scaledDt = baseDt * this.hitStopScale;
+      if (this.hitStopTimer <= 0) {
+        this.hitStopScale = 1;
+      }
+    }
     this.slowMoTimer = Math.max(0, this.slowMoTimer - frameDt);
 
     if (this.phase === "buffChoice") {
@@ -743,6 +756,15 @@ export class Game {
 
     this.stats.maxSingleBlade = Math.max(this.stats.maxSingleBlade, trail.kills);
     this.stats.maxChain = Math.max(this.stats.maxChain, trail.chain);
+    // P2.7：多杀 hit stop
+    if (trail.kills >= 20) {
+      this.triggerMajorHitStop(0.16, 0.12);
+      this.screenShake = Math.max(this.screenShake, 0.22);
+      this.particles.push(ringParticle({ x: last?.x ?? DESIGN_WIDTH / 2, y: last?.y ?? 400 }, "#ffd35a", 36));
+    } else if (trail.kills >= 12) {
+      this.triggerHitStop(0.1, 0.18);
+      this.screenShake = Math.max(this.screenShake, 0.12);
+    }
     this.warriorSheathTimer = 0.38;
     this.warriorDrawTimer = 0;
     this.regenDelayTimer = BALANCE.swordEnergy.regenDelayAfterSlash;
@@ -2009,6 +2031,21 @@ export class Game {
     }
   }
 
+  /** P2.7：hit stop 普通触发（12+击杀/精英破盾） */
+  private triggerHitStop(duration: number, scale = 0.18) {
+    if (this.elapsed - this.lastHitStopAt < 0.25) return;
+    this.lastHitStopAt = this.elapsed;
+    this.hitStopTimer = Math.max(this.hitStopTimer, duration);
+    this.hitStopScale = Math.min(this.hitStopScale, scale);
+  }
+
+  /** P2.7：hit stop 重大触发（精英死亡/20+击杀，无视冷却） */
+  private triggerMajorHitStop(duration: number, scale = 0.1) {
+    this.lastHitStopAt = this.elapsed;
+    this.hitStopTimer = Math.max(this.hitStopTimer, duration);
+    this.hitStopScale = Math.min(this.hitStopScale, scale);
+  }
+
   /** P2.6：副刀槽位发射起点 */
   private getSubBladeLaunchOrigin(slotIndex: number) {
     if (slotIndex === 0) {
@@ -2446,7 +2483,7 @@ export class Game {
       const cnt = Math.max(1, Math.ceil((spawn.count ?? 1) * countMul));
       const subGroups = Math.min(3, Math.max(2, Math.ceil(cnt / 3)));
       const perGroup = Math.ceil(cnt / subGroups);
-      const lanes = [44, 92, 140, 188, 236, 284, 336];
+      const lanes = [BATTLE_SAFE_X.extendedMin, 120, 168, 216, 264, BATTLE_SAFE_X.extendedMax];
 
       let enemyIdx = 0;
       for (let g = 0; g < subGroups; g++) {
@@ -2537,7 +2574,9 @@ export class Game {
     const phase = item.battlePhase ?? this.battlePhase;
     const profile = this.getEntryProfileForEnemy(item.kind as EnemyKind, phase);
     const spawnY = profile.spawnY - (item.yOffset ?? 0);
-    const enemy = this.createEnemy(item.kind as any, item.x, spawnY, item.speedMultiplier, profile);
+    // P2.7：安全区约束
+    const safeX = this.clampSpawnXByPhaseAndKind(item.x, item.kind as EnemyKind, phase);
+    const enemy = this.createEnemy(item.kind as any, safeX, spawnY, item.speedMultiplier, profile);
     if (this._currentWaveEvent) {
       enemy.spawnedWithEvent = this._currentWaveEvent;
     }
@@ -2791,6 +2830,13 @@ export class Game {
     this.onFinish(result);
   }
 
+  /** P2.7：按阶段和类型限制生成 x 到安全区 */
+  private clampSpawnXByPhaseAndKind(x: number, kind: EnemyKind, phase: BattlePhase): number {
+    if (kind === "elite") return clamp(x, BATTLE_SAFE_X.eliteMin, BATTLE_SAFE_X.eliteMax);
+    if (phase === "edict_burst") return clamp(x, BATTLE_SAFE_X.burstMin, BATTLE_SAFE_X.burstMax);
+    return clamp(x, BATTLE_SAFE_X.normalMin, BATTLE_SAFE_X.normalMax);
+  }
+
   /** P2.5：随机选择前中后排 */
   private pickEntryRow(): "back" | "middle" | "front" {
     const r = Math.random();
@@ -2920,6 +2966,9 @@ export class Game {
     this.particles.push(ringParticle(enemy, "#b58cff", 30));
     this.particles.push(...sparkBurst(enemy, 10, "#b58cff"));
     this.screenShake = Math.max(this.screenShake, 0.18);
+    // P2.7：破盾 hit stop
+    this.triggerHitStop(0.12, 0.15);
+    this.screenShake = Math.max(this.screenShake, 0.16);
   }
 
   /** P2：精英濒死提示 */
@@ -2935,41 +2984,34 @@ export class Game {
     }
   }
 
-  /** P2.5：替换旧血条——精英头顶小型名牌（名字+血格一体化） */
+  /** P2.7：精简版精英名牌（只显示5格血条，不常驻显示名字） */
   private drawEliteNameplate(ctx: CanvasRenderingContext2D, enemy: Enemy) {
-    if (enemy.kind !== "elite") return;
+    if (enemy.kind !== "elite" || !enemy.alive) return;
     const maxHp = Math.max(1, enemy.maxHp || enemy.hp || 1);
     const hp = Math.max(0, enemy.hp);
     const ratio = clamp(hp / maxHp, 0, 1);
     const segments = 5;
     const filled = Math.ceil(ratio * segments);
-    const plateW = 64;
-    const plateH = 22;
+    const plateW = 58;
+    const plateH = 14;
     const x0 = -plateW / 2;
-    const y0 = -enemy.radius - 46;
+    const y0 = -enemy.radius - 50;
 
     ctx.save();
-    // 背板：皮影风小匾
-    ctx.fillStyle = "rgba(24, 12, 8, 0.78)";
-    ctx.strokeStyle = "rgba(255, 211, 90, 0.45)";
+    ctx.fillStyle = "rgba(24, 12, 8, 0.76)";
+    ctx.strokeStyle = "rgba(255, 211, 90, 0.42)";
     ctx.lineWidth = 1;
     roundRect(ctx, x0, y0, plateW, plateH, 5);
     ctx.fill();
     ctx.stroke();
-    // 名字
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.font = '700 10px "Microsoft YaHei", "SimHei", sans-serif';
-    ctx.fillStyle = "#f6e7bd";
-    const eliteName = this.getEliteDisplayName(enemy);
-    ctx.fillText(eliteName, 0, y0 + 7);
-    // 血格
-    const barW = 48;
+
+    const barW = 46;
     const barH = 5;
     const gap = 2;
     const segW = (barW - gap * (segments - 1)) / segments;
     const bx0 = -barW / 2;
-    const by0 = y0 + 14;
+    const by0 = y0 + 5;
+
     for (let i = 0; i < segments; i++) {
       const x = bx0 + i * (segW + gap);
       if (i < filled) {
@@ -4871,8 +4913,9 @@ export class Game {
     const ek = this.level.eliteKind;
     const conf = ELITE_CONFIG[ek];
     // 在随机列生成
-    const lanes = [44, 92, 140, 188, 236, 284, 336];
-    const lane = lanes[Math.floor(Math.random() * lanes.length)];
+    // P2.7：精英安全区（远离左边缘）
+    const eliteLanes = [BATTLE_SAFE_X.eliteMin, 152, 188, BATTLE_SAFE_X.eliteMax];
+    const lane = eliteLanes[Math.floor(Math.random() * eliteLanes.length)];
     // 第五轮修正：精英使用专用 profile，不压太深
     const eliteY = ENTRY_PROFILE_ELITE.spawnY;
     const enemy = this.createElite(ek, lane, eliteY, conf);
@@ -5004,7 +5047,7 @@ export class Game {
         if (enemy.skillCooldown >= conf.skill.cooldown) {
           enemy.skillCooldown = 0;
           // 瞬移到随机列
-          const lanes = [44, 92, 140, 188, 236, 284, 336];
+          const lanes = [BATTLE_SAFE_X.extendedMin, 120, 168, 216, 264, BATTLE_SAFE_X.extendedMax];
           const newX = lanes[Math.floor(Math.random() * lanes.length)];
           this.particles.push(glowParticle(enemy, conf.accentColor, 20, 40));
           this.particles.push(...sparkBurst(enemy, 12, conf.accentColor));
@@ -5179,6 +5222,9 @@ export class Game {
     this.addText(enemy.x, enemy.y - 40, "宝箱掉落！", "#ffd35a", 18, 1.6);
 
     this.autoChestResolveAt = this.elapsed + 0.55;
+    // P2.7：精英死亡 hit stop
+    this.triggerMajorHitStop(0.18, 0.10);
+    this.screenShake = Math.max(this.screenShake, 0.24);
   }
 
   /** 第六轮修正：副刀/系统伤害造成的敌人死亡处理（确保精英走宝箱流程） */

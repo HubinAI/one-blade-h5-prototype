@@ -146,6 +146,20 @@ export const ENTRY_END_JITTER = {
   }
 } as const;
 
+/** P2.7：战斗安全区域（防止怪物贴左边缘，手机左滑返回兼容） */
+export const BATTLE_SAFE_X = {
+  normalMin: 88,
+  normalMax: 300,
+  extendedMin: 72,
+  extendedMax: 318,
+  eliteMin: 120,
+  eliteMax: 260,
+  burstMin: 64,
+  burstMax: 324,
+  absoluteMin: 56,
+  absoluteMax: 336
+} as const;
+
 /** 性能上限 */
 export const PERFORMANCE_LIMITS = {
   maxEnemiesOnScreen: 60,
