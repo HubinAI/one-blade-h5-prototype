@@ -83,43 +83,43 @@ export const BALANCE = {
   }
 } as const;
 
-/** 战斗纵向区域定义（第三轮修正：再回调到 480） */
+/** 战斗纵向区域定义（第四轮微调：455） */
 export const BATTLEFIELD_ZONES = {
   spawnTopY: -20,
   spawnVisibleY: 60,
-  // 再次回调：从 520 → 480
-  entryEndY: 480,
-  // 中场与收割区同步回调
-  midfieldStartY: 370,
-  midfieldCenterY: 470,
-  midfieldEndY: 560,
-  harvestStartY: 520,
+  // 继续微调：480 → 455
+  entryEndY: 455,
+  // 中场随之轻微上移
+  midfieldStartY: 350,
+  midfieldCenterY: 455,
+  midfieldEndY: 540,
+  harvestStartY: 500,
   harvestEndY: 700,
   defenseLineY: 720
 } as const;
 
-/** 快速入场阶段配置（第三轮修正） */
+/** 快速入场阶段配置（第四轮微调） */
 export const ENTRY_PHASE_CONFIG = {
-  defaultMultiplier: 2.6,
-  earlyStageMultiplier: 2.9,
-  lateStageMultiplier: 2.2,
-  defaultEndY: 480,
-  defaultMaxDuration: 1.75
+  defaultMultiplier: 2.45,
+  earlyStageMultiplier: 2.75,
+  lateStageMultiplier: 2.15,
+  defaultEndY: 455,
+  defaultMaxDuration: 1.7
 } as const;
 
-/** 第三轮修正：统一刷怪入口参数（再回调） */
+/** 第四轮微调：统一刷怪入口参数 */
 export const ENTRY_PROFILE_COMMON = {
   spawnY: -20,
-  entryEndY: 480,
-  entryMultiplier: 2.9,
-  entryMaxDuration: 1.75
+  entryEndY: 455,
+  entryMultiplier: 2.75,
+  entryMaxDuration: 1.7
 } as const;
 
 export const ENTRY_PROFILE_EDICT_BURST = {
   spawnY: -20,
-  entryEndY: 510,
-  entryMultiplier: 3.1,
-  entryMaxDuration: 1.9
+  entryEndY: 490,
+  entryMultiplier: 2.95,
+  entryMaxDuration: 1.85
 } as const;
 
 /** 性能上限 */

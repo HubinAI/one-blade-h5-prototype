@@ -2310,22 +2310,9 @@ export class Game {
     }
   }
 
-  /** 第一轮修正：生成单波 postChest 敌人，使用 EDICT_BURST profile */
+  /** 第四轮微调：军令爆发怪潮改为分批入队subSpawnQueue */
   private spawnPostChestWave(wave: typeof this.level.waves[0]) {
-    const profile = ENTRY_PROFILE_EDICT_BURST;
-    for (const spawn of wave.enemies) {
-      const count = spawn.count ?? 1;
-      const baseX = spawn.x;
-      for (let i = 0; i < count; i++) {
-        // 第二轮修正：使用 burst 分布函数避免重叠
-        const x = this.getBurstSpawnX(baseX, i, count);
-        const spawnY = profile.spawnY - (spawn.yOffset ?? 0);
-        const enemy = this.createEnemy(spawn.kind as any, x, spawnY, 1, profile);
-        this.enemies.push(enemy);
-        this.discoveredEnemies.add(spawn.kind as any);
-        this.particles.push(glowParticle({ x, y: spawnY }, "#5c4a3a", 12, 20));
-      }
-    }
+    this.enqueuePostChestWave(wave);
   }
 
   private spawnCurrentWave(wave: typeof this.level.waves[0]) {
@@ -2763,12 +2750,49 @@ export class Game {
     return clamp(baseX - centerOffset + index * spacing + jitter, 24, DESIGN_WIDTH - 24);
   }
 
-  /** 第二轮修正：军令爆发怪潮横向分布函数（更密集但保持展开） */
+  /** 第四轮微调：军令爆发怪潮横向分布函数（小批次内更稳定，不要太随机） */
   private getBurstSpawnX(baseX: number, index: number, count: number): number {
-    const spacing = count >= 8 ? 24 : 30;
+    if (count <= 1) return clamp(baseX, 24, DESIGN_WIDTH - 24);
+    const spacing = count >= 6 ? 28 : 34;
     const centerOffset = (count - 1) * spacing * 0.5;
-    const jitter = randomRange(-7, 7);
-    return clamp(baseX - centerOffset + index * spacing + jitter, 20, DESIGN_WIDTH - 20);
+    const jitter = randomRange(-5, 5);
+    return clamp(baseX - centerOffset + index * spacing + jitter, 24, DESIGN_WIDTH - 24);
+  }
+
+  /** 第四轮微调：军令爆发怪潮分批入队（拆 2-4 批，有间隔和前后排） */
+  private enqueuePostChestWave(wave: typeof this.level.waves[0]) {
+    const totalSpawns = wave.enemies;
+    let localDelay = 0;
+    for (const spawn of totalSpawns) {
+      const count = spawn.count ?? 1;
+      // 1~3 个怪：1 批；4~7 个：2 批；8+：3~4 批
+      const batchCount =
+        count >= 12 ? 4 :
+        count >= 8 ? 3 :
+        count >= 4 ? 2 :
+        1;
+      const perBatch = Math.ceil(count / batchCount);
+      for (let batch = 0; batch < batchCount; batch++) {
+        const start = batch * perBatch;
+        const end = Math.min(count, (batch + 1) * perBatch);
+        const batchDelay = localDelay + batch * randomRange(0.28, 0.42);
+        const rowYOffset = (spawn.yOffset ?? 0) + batch * 26;
+        for (let i = start; i < end; i++) {
+          const localIndex = i - start;
+          const localCount = end - start;
+          const x = this.getBurstSpawnX(spawn.x, localIndex, localCount);
+          this.subSpawnQueue.push({
+            time: this.elapsed + batchDelay,
+            kind: spawn.kind,
+            x,
+            speedMultiplier: 1,
+            yOffset: rowYOffset,
+            battlePhase: "edict_burst"
+          });
+        }
+      }
+      localDelay += randomRange(0.18, 0.32);
+    }
   }
 
   private createEnemy(kind: EnemyKind, x: number, y: number, speedMultiplier = 1, entryProfile?: { spawnY: number; entryEndY: number; entryMultiplier: number; entryMaxDuration: number }): Enemy {
