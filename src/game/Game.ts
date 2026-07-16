@@ -116,7 +116,8 @@ export class Game {
   private warriorDrawTimer = 0;
   private warriorSheathTimer = 0;
   private lastSlashAngle = -Math.PI / 2;
-  private debugEnabled = false;
+  /** 第六轮修正：debug 面板开关（线上默认关闭，?debug=1 开启） */
+  private debugEnabled = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get("debug") === "1" : false;
   private hintSeen: Set<string>;
   /** 中场提示冷却计时器（秒） */
   private _midfieldHintTimer = 0;
@@ -522,7 +523,7 @@ export class Game {
     this.drawChestDrop(ctx);
     this.drawMidfieldEventBorder(ctx);
     this.drawIntroOverlay(ctx);
-    this.drawDebugPanel(ctx);
+    if (this.debugEnabled) this.drawDebugPanel(ctx);
     this.drawBuffChoice(ctx);
     this.drawRevivePause(ctx);
 
@@ -1730,7 +1731,14 @@ export class Game {
   private applyEnemySoftSeparation(dt: number) {
     const cfg = ENEMY_SOFT_SEPARATION;
     if (!cfg.enabled) return;
-    const alive = this.enemies;
+    // 第六轮修正：只处理普通小怪，不处理精英；最多 45 个 eligible
+    const eligible = this.enemies.filter(e =>
+      e.alive &&
+      e.kind !== "elite" &&
+      e.y >= cfg.yMin &&
+      e.y <= cfg.yMax
+    ).slice(0, 45);
+    const alive = eligible;
     for (let i = 0; i < alive.length; i++) {
       const a = alive[i];
       if (a.y < cfg.yMin || a.y > cfg.yMax) continue;
@@ -2461,20 +2469,32 @@ export class Game {
       }
     }
     this.subSpawnQueue = remain;
+    // 第六轮修正：单帧最多生成 10 个队列怪，避免瞬时卡顿
+    const MAX_SPAWNS_PER_FRAME = 10;
+    let spawnedThisFrame = 0;
     for (const item of ready) {
-      // 第五轮修正：按怪物类型+阶段选择 entry profile（精英单独回调）
-      const phase = item.battlePhase ?? this.battlePhase;
-      const profile = this.getEntryProfileForEnemy(item.kind as EnemyKind, phase);
-      const spawnY = profile.spawnY - (item.yOffset ?? 0);
-      const enemy = this.createEnemy(item.kind as any, item.x, spawnY, item.speedMultiplier, profile);
-      // 中场事件波及：本波敌人带event标记
-      if (this._currentWaveEvent) {
-        enemy.spawnedWithEvent = this._currentWaveEvent;
+      if (spawnedThisFrame >= MAX_SPAWNS_PER_FRAME) {
+        remain.push(item);
+        continue;
       }
-      this.enemies.push(enemy);
-      this.discoveredEnemies.add(item.kind as any);
-      this.particles.push(glowParticle({ x: item.x, y: spawnY }, "#5c4a3a", 12, 20));
+      this.spawnEnemyFromQueueItem(item);
+      spawnedThisFrame += 1;
     }
+    this.subSpawnQueue = [...remain, ...this.subSpawnQueue];
+  }
+
+  /** 第六轮修正：从队列 item 生成敌人（抽取为独立方法） */
+  private spawnEnemyFromQueueItem(item: typeof this.subSpawnQueue[0]) {
+    const phase = item.battlePhase ?? this.battlePhase;
+    const profile = this.getEntryProfileForEnemy(item.kind as EnemyKind, phase);
+    const spawnY = profile.spawnY - (item.yOffset ?? 0);
+    const enemy = this.createEnemy(item.kind as any, item.x, spawnY, item.speedMultiplier, profile);
+    if (this._currentWaveEvent) {
+      enemy.spawnedWithEvent = this._currentWaveEvent;
+    }
+    this.enemies.push(enemy);
+    this.discoveredEnemies.add(item.kind as any);
+    this.particles.push(glowParticle({ x: item.x, y: spawnY }, "#5c4a3a", 10, 16));
   }
 
   /** 判定是否应立刻胜利结算（二次打磨：检查 battlePhase） */
