@@ -146,11 +146,11 @@ export const ENTRY_END_JITTER = {
   }
 } as const;
 
-/** P3：分裂兵配置 */
+/** P3.2：分裂兵配置（强化威胁） */
 export const SPLITTER_CONFIG = {
   hp: 1, score: 14, radius: 20,
-  triggerY: 390, chargeDuration: 2.2,
-  maxSplitCount: 1, childCount: 2,
+  triggerY: 390, chargeDuration: 1.6,
+  maxSplitCount: 1, childCount: 3,
   childKind: "infantry" as EnemyKind,
   maxActiveSplitters: 2
 } as const;

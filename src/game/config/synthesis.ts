@@ -617,17 +617,25 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
     ? { multiplier: 3.4, endY: 560, maxDuration: 2.0, spawnY: -20 }
     : undefined;
 
-  // P3.1：强制插入机制怪教学波次
+  // P3.1/P3.2：强制插入机制怪教学波次
   if (floor === 4) {
-    waves.splice(2, 0, {
-      name: "裂变初现", delay: 0.2, spawnAt: 18,
+    // 教学（14s）
+    waves.splice(1, 0, {
+      name: "裂变初现", delay: 0.2, spawnAt: 14,
       speedMultiplier: 1 + floor * 0.005,
-      enemies: [{ kind: "infantry" as any, count: 4, x: LANES[2], yOffset: 0 }, { kind: "splitter" as any, count: 1, x: LANES[3], yOffset: 12 }, { kind: "infantry" as any, count: 3, x: LANES[4], yOffset: 24 }],
+      enemies: [{ kind: "infantry" as any, count: 3, x: LANES[2], yOffset: 0 }, { kind: "splitter" as any, count: 1, x: LANES[3], yOffset: 12 }, { kind: "infantry" as any, count: 3, x: LANES[4], yOffset: 24 }],
     });
-    waves.splice(4, 0, {
-      name: "裂变复现", delay: 0.2, spawnAt: 34,
+    // 复现（26s）
+    waves.splice(3, 0, {
+      name: "裂变复现", delay: 0.2, spawnAt: 26,
       speedMultiplier: 1 + floor * 0.005,
-      enemies: [{ kind: "infantry" as any, count: 4, x: LANES[1], yOffset: 0 }, { kind: "splitter" as any, count: 1, x: LANES[3], yOffset: 12 }, { kind: "powder" as any, count: 1, x: LANES[5], yOffset: 24 }],
+      enemies: [{ kind: "infantry" as any, count: 5, x: LANES[1], yOffset: 0 }, { kind: "splitter" as any, count: 1, x: LANES[3], yOffset: 12 }, { kind: "powder" as any, count: 1, x: LANES[5], yOffset: 24 }],
+    });
+    // 双裂压迫（38s）
+    waves.splice(5, 0, {
+      name: "双裂压迫", delay: 0.2, spawnAt: 38,
+      speedMultiplier: 1 + floor * 0.005,
+      enemies: [{ kind: "infantry" as any, count: 4, x: LANES[1], yOffset: 0 }, { kind: "splitter" as any, count: 1, x: LANES[2], yOffset: 8 }, { kind: "splitter" as any, count: 1, x: LANES[4], yOffset: 16 }, { kind: "infantry" as any, count: 4, x: LANES[5], yOffset: 24 }],
     });
   }
   if (floor === 5) {

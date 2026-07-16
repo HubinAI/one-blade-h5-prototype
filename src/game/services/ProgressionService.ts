@@ -1013,13 +1013,15 @@ export function hasClearedBreakthrough(id: string): boolean {
 /** 获取当前需要突破的门(如果有) */
 export function getPendingGate(): StageGate | null {
   const progress = readProgress();
-  const gate = getCurrentGate(progress.highestFloor);
+  // P3.2：highestFloor 语义是"下一关可挑战" → 已通关最高关 = highestFloor - 1
+  const clearedFloor = Math.max(0, progress.highestFloor - 1);
+  const gate = getCurrentGate(clearedFloor);
   if (gate && !progress.clearedBreakthroughs.includes(gate.breakthroughId)) {
     return gate;
   }
   // 没有精确卡点，检查是否在某个阶段的突破未完成
   for (const g of MAIN_STAGE_GATES) {
-    if (progress.highestFloor >= g.afterStage && !progress.clearedBreakthroughs.includes(g.breakthroughId)) {
+    if (clearedFloor >= g.afterStage && !progress.clearedBreakthroughs.includes(g.breakthroughId)) {
       return g;
     }
   }
@@ -1390,6 +1392,16 @@ export function debugSetRankIndex(index: number): void {
   const progress = readProgress();
   progress.rankIndex = Math.max(0, index);
   writeProgress(progress);
+}
+
+/** P3.2：根据 rankId 直接设置 rankIndex */
+export function setRankById(rankId: string): void {
+  const progress = readProgress();
+  const idx = (RANK_ORDER as string[]).indexOf(rankId);
+  if (idx >= 0 && idx > progress.rankIndex) {
+    progress.rankIndex = idx;
+    writeProgress(progress);
+  }
 }
 
 /** Debug: 清除某突破完成记录 */

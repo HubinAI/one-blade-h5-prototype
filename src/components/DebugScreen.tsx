@@ -10,6 +10,8 @@ import {
   debugRemoveClearedBreakthrough,
   debugAddClearedBreakthrough,
   debugResetBreakthroughs,
+  getPendingGate,
+  getHomeSnapshot,
 } from "../game/services/ProgressionService";
 import { QUALITY_ORDER, QUALITY_META, type Quality } from "../game/config/synthesis";
 
@@ -115,7 +117,9 @@ export function DebugScreen({ onBack }: DebugScreenProps) {
           <h1>🛠 Debug 控制台</h1>
         </div>
 
-        <p className="debug-subtitle">当前最高层: {readProgress().highestFloor}</p>
+        <p className="debug-subtitle">
+          最高层: {readProgress().highestFloor} | 已通关: {Math.max(0, readProgress().highestFloor - 1)} | rankIdx: {readProgress().rankIndex}
+        </p>
 
         <div className="debug-section">
           <h3>添加刀</h3>
@@ -145,17 +149,44 @@ export function DebugScreen({ onBack }: DebugScreenProps) {
           </div>
         </div>
 
-        <div className="debug-group">
-          <div className="debug-group-title">主线测试</div>
-          <button onClick={() => { debugSetHighestFloor(1); onBack(); }}>跳到第1关</button>
-          <button onClick={() => { debugSetHighestFloor(4); onBack(); }}>跳到第4关：测试分裂兵</button>
-          <button onClick={() => { debugSetHighestFloor(5); onBack(); }}>跳到第5关：测试分裂巩固</button>
-          <button onClick={() => { debugSetHighestFloor(7); onBack(); }}>跳到第7关：测试牵引兵</button>
-          <button onClick={() => { debugSetHighestFloor(6); debugAddClearedBreakthrough("breakthrough_lianqi"); debugSetRankIndex(1); onBack(); }}>跳到第6关：练气突破后</button>
-          <button onClick={() => { debugSetHighestFloor(5); debugRemoveClearedBreakthrough("breakthrough_lianqi"); debugSetRankIndex(0); onBack(); }}>设置为第5关已通关：触发练气突破</button>
-          <button onClick={() => { debugAddClearedBreakthrough("breakthrough_lianqi"); onBack(); }}>标记练气突破已完成</button>
-          <button onClick={() => { debugRemoveClearedBreakthrough("breakthrough_lianqi"); onBack(); }}>清除练气突破完成状态</button>
-          <button onClick={() => { debugResetBreakthroughs(); onBack(); }}>重置所有突破状态</button>
+        <div className="debug-section">
+          <h3>主线测试</h3>
+          <div className="debug-btn-grid">
+            <button className="debug-btn" onClick={() => { debugSetHighestFloor(1); refresh(); }}>跳到第1关</button>
+            <button className="debug-btn" onClick={() => { debugSetHighestFloor(4); refresh(); }}>跳到第4关：分裂兵教学</button>
+            <button className="debug-btn" onClick={() => { debugSetHighestFloor(5); refresh(); }}>跳到第5关：分裂巩固</button>
+            <button className="debug-btn" onClick={() => { debugSetHighestFloor(6); refresh(); }}>跳到第6关：突破后主线</button>
+            <button className="debug-btn" onClick={() => { debugSetHighestFloor(7); refresh(); }}>跳到第7关：牵引兵教学</button>
+          </div>
+        </div>
+
+        <div className="debug-section">
+          <h3>突破卡点模拟</h3>
+          <div className="debug-btn-grid">
+            <button className="debug-btn" onClick={() => { debugSetHighestFloor(5); debugRemoveClearedBreakthrough("breakthrough_lianqi"); debugSetRankIndex(0); refresh(); }}>模拟：已通关第4关</button>
+            <button className="debug-btn" onClick={() => { debugSetHighestFloor(6); debugRemoveClearedBreakthrough("breakthrough_lianqi"); debugSetRankIndex(0); refresh(); }}>模拟：已通关第5关（未突破）</button>
+            <button className="debug-btn" onClick={() => { debugSetHighestFloor(6); debugAddClearedBreakthrough("breakthrough_lianqi"); debugSetRankIndex(0); refresh(); }}>模拟：练气突破已完成</button>
+            <button className="debug-btn" onClick={() => { debugRemoveClearedBreakthrough("breakthrough_lianqi"); refresh(); }}>清除练气突破记录</button>
+            <button className="debug-btn" onClick={() => { debugAddClearedBreakthrough("breakthrough_lianqi"); refresh(); }}>标记练气突破完成</button>
+            <button className="debug-btn danger" onClick={() => { debugResetBreakthroughs(); refresh(); }}>重置所有突破状态</button>
+          </div>
+        </div>
+
+        <div className="debug-section">
+          <h3>当前进度状态</h3>
+          {(() => {
+            const p = readProgress();
+            const gate = getPendingGate();
+            return (
+              <div style={{ fontSize: 11, lineHeight: 1.6, color: "#f6e7bd", padding: "6px 4px", background: "rgba(0,0,0,0.3)", borderRadius: 4 }}>
+                <div>highestFloor: <b style={{ color: "#ffd35a" }}>{p.highestFloor}</b></div>
+                <div>clearedFloor: <b style={{ color: "#ffd35a" }}>{Math.max(0, p.highestFloor - 1)}</b></div>
+                <div>rankIndex: <b style={{ color: "#ffd35a" }}>{p.rankIndex}</b></div>
+                <div>pendingGate: <b style={{ color: gate ? "#ff7b6e" : "#5bc0ff" }}>{gate ? gate.breakthroughName : "无"}</b></div>
+                <div>clearedBreakthroughs: {p.clearedBreakthroughs.length === 0 ? "无" : p.clearedBreakthroughs.join(", ")}</div>
+              </div>
+            );
+          })()}
         </div>
 
         {message && <div className="debug-toast">{message}</div>}

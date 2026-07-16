@@ -70,7 +70,7 @@ export default function App() {
   const [home, setHome] = useState(getHomeSnapshot);
   const [currentLevel, setCurrentLevel] = useState<LevelConfig>(LEVELS[0]);
   const [lastResult, setLastResult] = useState<BattleResult | null>(null);
-  const [appVersion] = useState("V0716015");
+  const [appVersion] = useState("V0716016");
   const [runIndex, setRunIndex] = useState(0);
   const [reviveOffer, setReviveOffer] = useState<ReviveOffer | null>(null);
   const [reviveSignal, setReviveSignal] = useState(0);
@@ -92,18 +92,18 @@ export default function App() {
     const gate = MAIN_STAGE_GATES.find(g => g.breakthroughId === breakthroughResult.id);
     if (gate) {
       tryRankUp();
-      if (gate.nextUnlockFrom !== null) {
-        updateHighestFloor(gate.nextUnlockFrom);
-        setCurrentMainlineFloor(gate.nextUnlockFrom);
-      } else {
-        updateHighestFloor(gate.afterStage + 1);
-        setCurrentMainlineFloor(gate.afterStage + 1);
+      // P3.2：直接按 gate.rankId 设置段位，避免 highestFloor 误判
+      if ((window as any).__progression_setRankById) {
+        try { (window as any).__progression_setRankById(gate.rankId); } catch { /* no-op */ }
       }
+      const nextFloor = gate.nextUnlockFrom ?? (gate.afterStage + 1);
+      updateHighestFloor(nextFloor);
+      setCurrentMainlineFloor(nextFloor);
     }
     setBreakthroughResult(null);
-    refreshHome();
+    setHome(getHomeSnapshot());
     setScreen("menu");
-  }, [breakthroughResult, refreshHome]);
+  }, [breakthroughResult]);
 
   const [currentMainlineFloor, setCurrentMainlineFloor] = useState(1);
 

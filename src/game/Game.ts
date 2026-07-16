@@ -169,6 +169,9 @@ export class Game {
   private eliteIntroTimer = 0;
   private eliteIntroText = "";
   private bossIntroText = "";
+  /** P3.2：精英预告/出场播报防重复 */
+  private elitePreviewShown = false;
+  private eliteSpawnAnnounced = false;
 
   // ---- 副刀自动AI ----
   private subBlades: Blade[] = [];
@@ -289,6 +292,12 @@ export class Game {
     this.hintSeen = this.readSeenHints();
     this.discoveredEnemies.add("infantry");
     this.currentRunMode = this.runContext.mode;
+
+    // P3.2：重置精英播报状态，防止上一关残留
+    this.eliteIntroTimer = 0;
+    this.eliteIntroText = "";
+    this.elitePreviewShown = false;
+    this.eliteSpawnAnnounced = false;
 
     // 首局教学检测
     this.isFirstRun = (level.id === 1 || level.id === 10001) && !window.localStorage.getItem("one_blade_first_run_done");
@@ -3472,7 +3481,7 @@ export class Game {
 
   /** P2：精英护盾层光晕 */
   private drawEliteShieldLayer(ctx: CanvasRenderingContext2D, enemy: Enemy) {
-    if (enemy.kind !== "elite") return;
+    if (enemy.kind !== "elite" || !enemy.alive) return;
     // 氛围将/火环将使用 skillTimer 作为护盾值
     const shieldValue = enemy.skillTimer ?? 0;
     if (shieldValue <= 0) return;
@@ -5344,6 +5353,17 @@ export class Game {
     if (this.eliteSpawned || !this.level.eliteSpawnAt || !this.level.eliteKind) return;
     // 三次修正：等所有主波次全部刷完后才出精英（避免精英乱入）
     if (!this.allNormalWavesSpawned) return;
+
+    // P3.2：精英预告（出场前 0.75 秒）
+    if (!this.elitePreviewShown) {
+      const previewLead = 0.75;
+      if (this.elapsed >= this.level.eliteSpawnAt - previewLead && this.elapsed < this.level.eliteSpawnAt) {
+        this.elitePreviewShown = true;
+        this.eliteIntroText = "精英来袭";
+        this.eliteIntroTimer = 0.75;
+      }
+    }
+
     if (this.elapsed < this.level.eliteSpawnAt) return;
     this.eliteSpawned = true;
     const ek = this.level.eliteKind;
@@ -5360,6 +5380,8 @@ export class Game {
     // 出场播报（0.85秒）
     this.eliteIntroTimer = 0.85;
     this.eliteIntroText = conf.introText;
+    // P3.2：标记已播报出场
+    this.eliteSpawnAnnounced = true;
     // 出场特效强化
     this.screenShake = Math.max(this.screenShake, 0.6);
     this.flash = Math.max(this.flash, 0.5);
