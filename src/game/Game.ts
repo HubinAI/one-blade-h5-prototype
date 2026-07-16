@@ -197,6 +197,8 @@ export class Game {
   private chestBuffRevealed = false;
   /** 军令揭示后等待玩家在弹窗中确认（应用前不应用buff） */
   public chestPendingConfirm = false;
+  /** P2.6：宝箱弹窗自动关闭计时器 */
+  private chestAutoConfirmAt = 0;
   /** 军令图标飞向左上角的目标点（相对画布坐标） */
   public chestFlyTarget = { x: 0, y: 0 };
   /** 军令图标飞行动画的进度 0..1 */
@@ -488,6 +490,12 @@ export class Game {
     if (this.autoChestResolveAt !== null && this.elapsed >= this.autoChestResolveAt) {
       this.autoChestResolveAt = null;
       this.autoResolveEliteChestReward();
+    }
+
+    // P2.6：宝箱弹窗自动确认
+    if (this.chestPendingConfirm && this.chestAutoConfirmAt > 0 && this.elapsed >= this.chestAutoConfirmAt) {
+      this.chestAutoConfirmAt = 0;
+      this.confirmChestBuff();
     }
 
     this.updatePostChestWaves(scaledDt);
@@ -1999,6 +2007,21 @@ export class Game {
     } else {
       this.applyWeakpointChaseDamage(s, blade, stats);
     }
+  }
+
+  /** P2.6：副刀槽位发射起点 */
+  private getSubBladeLaunchOrigin(slotIndex: number) {
+    if (slotIndex === 0) {
+      return { x: 56, y: DESIGN_HEIGHT - 92 };
+    }
+    return { x: DESIGN_WIDTH - 56, y: DESIGN_HEIGHT - 92 };
+  }
+
+  /** P2.6：优先攻击中下段敌人 */
+  private getPreferredSubBladeTargets(): Enemy[] {
+    const preferred = this.enemies.filter(e => e.alive && e.y >= 360);
+    if (preferred.length > 0) return preferred;
+    return this.enemies.filter(e => e.alive);
   }
 
   /** 蓄势横扫伤害结算 */
@@ -4855,8 +4878,8 @@ export class Game {
     const enemy = this.createElite(ek, lane, eliteY, conf);
     this.enemies.push(enemy);
     this.discoveredEnemies.add("elite");
-    // 出场播报（2.5秒）
-    this.eliteIntroTimer = 2.5;
+    // 出场播报（0.85秒）
+    this.eliteIntroTimer = 0.85;
     this.eliteIntroText = conf.introText;
     // 出场特效强化
     this.screenShake = Math.max(this.screenShake, 0.6);
@@ -5120,6 +5143,7 @@ export class Game {
     this.chestOpened = false;
     this.chestAnimTimer = 0;
     this.chestBuffResult = null;
+    this.chestAutoConfirmAt = 0;
     this.chestBuffRevealed = false;
     // 宝箱坠落特效（强化）
     this.particles.push(glowParticle({ x, y }, "#ffd35a", 24, 55));
@@ -5154,7 +5178,7 @@ export class Game {
     this.particles.push(glowParticle(enemy, "#ffd35a", 25, 50));
     this.addText(enemy.x, enemy.y - 40, "宝箱掉落！", "#ffd35a", 18, 1.6);
 
-    this.autoChestResolveAt = this.elapsed + 1.0;
+    this.autoChestResolveAt = this.elapsed + 0.55;
   }
 
   /** 第六轮修正：副刀/系统伤害造成的敌人死亡处理（确保精英走宝箱流程） */
@@ -5169,48 +5193,28 @@ export class Game {
     }
   }
 
-  /** 第五轮修正：通用精英宝箱军令自动生效（去掉第1关限制） */
+  /** P2.6：通用精英宝箱军令自动生效（恢复弹窗+飞行动画） */
   private autoResolveEliteChestReward() {
     if (this.chestDone) return;
     if (!this.chestDropped && !this.eliteKilled) return;
 
+    // P2.6：弹出宝箱军令弹窗（不再一次性完成全部）
     this.chestDropped = true;
-    this.chestOpening = false;
+    this.chestOpening = false;      // 跳过开箱动画
     this.chestOpened = true;
     this.chestBuffRevealed = true;
-    this.chestPendingConfirm = false;
-    this.chestFlying = false;
-    this.chestFlyT = 1;
-    this.chestDone = true;
+    this.chestBuffResult = "chest_first_clear";  // 固定Buff标识
+    this.chestPendingConfirm = true;
 
-    // 通用军令效果（所有关卡生效）
-    this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 70);
-    for (let i = 0; i < this.subBladeTimers.length; i++) {
-      this.subBladeTimers[i] = 0;
-    }
-    this.chestMomentumTimer = Math.max(this.chestMomentumTimer, 12);
+    // 0.65秒后自动确认
+    this.chestAutoConfirmAt = this.elapsed + 0.65;
 
-    const postWaves = this.getEffectivePostChestWaves();
-    const hasPostChest = postWaves.length > 0;
-
-    if (hasPostChest) {
-      this.battlePhase = "edict_burst";
-      this.postChestStartAt = this.elapsed;
-      this.postChestWaveIndex = 0;
-      this.allPostChestWavesSpawned = false;
-      this.edictBurstRoundIndex = 1;
-      this.edictBurstRoundTotal = postWaves.length;
-    } else {
-      // 没有军令爆发轮次的关卡，直接允许结算
-      this.battlePhase = "main_waves";
-      this.postChestStartAt = null;
-      this.allPostChestWavesSpawned = true;
-      this.edictBurstRoundIndex = 0;
-      this.edictBurstRoundTotal = 0;
-    }
+    // 通用军令效果（先记录，applyChestBuff时真正执行）
+    // 能量、副刀CD、刀势加速在 applyChestBuff 中处理
 
     this.addText(DESIGN_WIDTH / 2, 150, "军令激活", "#ffd35a", 24, 1.2);
     this.addText(DESIGN_WIDTH / 2, 185, "刀势回涌！副刀共鸣！", "#ffd35a", 18, 1.4);
+    this.screenShake = Math.max(this.screenShake, 0.25);
   }
 
   /** 兼容旧调用名（仍被 update 中 autoChestResolveAt 调用） */
@@ -5365,9 +5369,26 @@ export class Game {
   private _chestBuffEndScale = 0.32;
 
   /** 飞行完成 */
+  /** 飞行完成：进入军令爆发阶段 */
   public finishChestFly() {
     this.chestFlying = false;
     this.chestDone = true;
+    const postWaves = this.getEffectivePostChestWaves();
+    const hasPostChest = postWaves.length > 0;
+    if (hasPostChest) {
+      this.battlePhase = "edict_burst";
+      this.postChestStartAt = this.elapsed;
+      this.postChestWaveIndex = 0;
+      this.allPostChestWavesSpawned = false;
+      this.edictBurstRoundIndex = 1;
+      this.edictBurstRoundTotal = postWaves.length;
+    } else {
+      this.battlePhase = "main_waves";
+      this.postChestStartAt = null;
+      this.allPostChestWavesSpawned = true;
+      this.edictBurstRoundIndex = 0;
+      this.edictBurstRoundTotal = 0;
+    }
   }
 
   /** 绘制军令宝箱 */
