@@ -2708,7 +2708,7 @@ export class Game {
       if (this.postChestStartAt === null) return false;
       if (!this.allPostChestWavesSpawned) {
         // 第三轮修正：超时兜底——军令爆发 35s 后仍没刷完，强制完成
-        if (this.elapsed - this.postChestStartAt > 35 && this.enemies.filter(e => e.alive).length <= 6) {
+        if (this.elapsed - this.postChestStartAt > 35 && this.enemies.filter(e => e.alive).length <= 0 && this.subSpawnQueue.length === 0) {
           this.allPostChestWavesSpawned = true;
         } else {
           return false;
@@ -2725,14 +2725,41 @@ export class Game {
       if (!this.chestDone) return false;
     }
 
-    // 最后检查：场上敌人 ≤ 3 或 清场接近完成
-    const aliveCount = this.enemies.filter(e => e.alive).length;
-    if (aliveCount > 3) return false;
+    // 紧急修正：严格清场检查
+    // 清理屏幕外异常敌人
+    this.cleanupOutOfBattleEnemiesForVictoryCheck();
 
-    // 没有关键动画播放中
+    // 仍有待刷出的敌人，不能结算
+    if (this.subSpawnQueue.length > 0) return false;
+
+    // 场上仍有存活敌人，不能结算
+    const aliveCount = this.enemies.filter(e => e.alive).length;
+    if (aliveCount > 0) return false;
+
+    // 宝箱弹窗 / 飞行动画未结束，不能结算
     if (this.chestPendingConfirm || this.chestFlying) return false;
 
+    // 当前仍有挥刀处理，不能结算
+    if (this.currentSlash) return false;
+
     return true;
+  }
+
+  /** 紧急修正：清理屏幕外异常敌人（仅清理不可见的异常残留） */
+  private cleanupOutOfBattleEnemiesForVictoryCheck() {
+    const aliveEnemies = this.enemies.filter(e => e.alive);
+    const canCleanup =
+      this.allNormalWavesSpawned &&
+      this.allPostChestWavesSpawned &&
+      this.subSpawnQueue.length === 0 &&
+      aliveEnemies.length > 0 &&
+      aliveEnemies.every(e => e.y < -40 || e.y > DESIGN_HEIGHT + 80) &&
+      this.wavesFinishedAt !== undefined &&
+      this.elapsed - this.wavesFinishedAt > 8;
+    if (!canCleanup) return;
+    for (const enemy of aliveEnemies) {
+      enemy.alive = false;
+    }
   }
 
   /** 二次打磨：自动切换 battlePhase HUD 显示 */
