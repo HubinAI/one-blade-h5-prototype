@@ -240,6 +240,17 @@ export class Game {
   private victoryTransitionTimer = 0;
   private victoryTransitionDuration = 1.0;
 
+  /** P2.9：军令图标飞行 */
+  private edictIconFlying = false;
+  private edictIconFlyT = 0;
+  private edictIconFlyDuration = 0.45;
+  private edictIconFlyFrom = { x: DESIGN_WIDTH / 2, y: DESIGN_HEIGHT * 0.48 };
+  private edictIconFlyTo = { x: 46, y: 78 };
+  /** P2.9：左上角持续军令Icon */
+  private edictIconActive = false;
+  private edictIconTimer = 0;
+  private edictIconMaxTimer = 12;
+
   private chestFixedBuffApplied = false;
 
   private stats: BattleStats = {
@@ -524,12 +535,8 @@ export class Game {
       this.autoResolveEliteChestReward();
     }
 
-    // P2.6：宝箱弹窗自动确认
-    if (this.chestPendingConfirm && this.chestAutoConfirmAt > 0 && this.elapsed >= this.chestAutoConfirmAt) {
-      this.chestAutoConfirmAt = 0;
-      this.confirmChestBuff();
-    }
-
+    this.updateEdictIconFly(scaledDt);
+    this.updateEdictStatusIcon(scaledDt);
     this.updatePostChestWaves(scaledDt);
     this.updateBattlePhase();
     this.updateBuffChoiceTriggers();
@@ -557,7 +564,9 @@ export class Game {
     this.drawDefenseAndWarrior(ctx);
     this.drawSubReadyPings(ctx);
     this.drawSubRunes(ctx);
+    this.drawEdictIconFly(ctx);
     this.drawHud(ctx);
+    this.drawEdictStatusIcon(ctx);
     this.drawSplitFlashes(ctx);
     this.drawFloatingTexts(ctx);
     this.drawWaveProgress(ctx);
@@ -582,6 +591,13 @@ export class Game {
   handlePointerDown(pos: Vec2) {
     if (this.phase === "buffChoice") {
       this.selectBuffAt(pos);
+      return;
+    }
+    // P2.9：宝箱弹窗期间，只处理"继续"按钮点击
+    if (this.chestPendingConfirm) {
+      if (this.isPointInChestConfirmButton(pos.x, pos.y)) {
+        this.confirmEliteChestReward();
+      }
       return;
     }
     if (this.phase !== "playing") return;
@@ -1024,6 +1040,16 @@ export class Game {
     this.phase = "buffChoice";
     this.pointerDown = false;
     AudioService.buffOpen();
+  }
+
+  /** P2.9：判断点击是否在宝箱确认按钮范围内 */
+  private isPointInChestConfirmButton(x: number, y: number): boolean {
+    return (
+      x >= DESIGN_WIDTH / 2 - 90 &&
+      x <= DESIGN_WIDTH / 2 + 90 &&
+      y >= DESIGN_HEIGHT * 0.58 &&
+      y <= DESIGN_HEIGHT * 0.58 + 48
+    );
   }
 
   private selectBuffAt(pos: Vec2) {
@@ -3104,6 +3130,163 @@ export class Game {
       this.particles.push(ringParticle(enemy, "#ff7b6e", 32));
       this.screenShake = Math.max(this.screenShake, 0.12);
     }
+  }
+
+  /** P2.9：军令图标飞行动画 update */
+  private updateEdictIconFly(dt: number) {
+    if (!this.edictIconFlying) return;
+    this.edictIconFlyT += dt / this.edictIconFlyDuration;
+    if (this.edictIconFlyT >= 1) {
+      this.edictIconFlyT = 1;
+      this.edictIconFlying = false;
+      this.completeEliteChestReward();
+    }
+  }
+
+  /** P2.9：军令图标飞行绘制 */
+  private drawEdictIconFly(ctx: CanvasRenderingContext2D) {
+    if (!this.edictIconFlying) return;
+    const t = clamp(this.edictIconFlyT, 0, 1);
+    const ease = 1 - Math.pow(1 - t, 3);
+    const x = this.edictIconFlyFrom.x + (this.edictIconFlyTo.x - this.edictIconFlyFrom.x) * ease;
+    const y = this.edictIconFlyFrom.y + (this.edictIconFlyTo.y - this.edictIconFlyFrom.y) * ease;
+    const scale = 1.25 + (0.62 - 1.25) * ease;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+    ctx.fillStyle = "rgba(255, 190, 60, 0.95)";
+    ctx.shadowColor = "rgba(255, 210, 90, 0.9)";
+    ctx.shadowBlur = 18;
+    ctx.beginPath();
+    ctx.arc(0, 0, 22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#fff7d0";
+    ctx.font = '900 24px "Microsoft YaHei", "SimHei", sans-serif';
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("令", 0, 1);
+    ctx.restore();
+  }
+
+  /** P2.9：左上角持续军令 Icon 更新 */
+  private updateEdictStatusIcon(dt: number) {
+    if (!this.edictIconActive) return;
+    if (this.edictIconTimer > 0) this.edictIconTimer -= dt;
+    const stillInEdict = this.battlePhase === "edict_burst" || this.chestMomentumTimer > 0;
+    if (this.edictIconTimer <= 0 && !stillInEdict) {
+      this.edictIconTimer = 0;
+      this.edictIconActive = false;
+      this.triggerEdictIconFadeOut();
+    }
+  }
+
+  /** P2.9：左上角持续军令 Icon 绘制 */
+  private drawEdictStatusIcon(ctx: CanvasRenderingContext2D) {
+    const shouldShow = this.edictIconActive || this.chestMomentumTimer > 0 || this.battlePhase === "edict_burst";
+    if (!shouldShow) return;
+
+    const remain = Math.max(this.edictIconTimer, this.chestMomentumTimer, 0);
+    const maxTime = Math.max(this.edictIconMaxTimer, 1);
+    const ratio = clamp(remain / maxTime, 0, 1);
+
+    const x = 46;
+    const y = 78;
+    const lowTime = remain > 0 && remain <= 3;
+    const pulse = 0.5 + Math.sin(this.elapsed * (lowTime ? 12 : 5)) * 0.5;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.shadowColor = "rgba(255, 210, 90, 0.75)";
+    ctx.shadowBlur = 10 + pulse * 8;
+
+    ctx.fillStyle = "rgba(45, 24, 10, 0.88)";
+    ctx.strokeStyle = lowTime
+      ? `rgba(255, 100, 60, ${0.65 + pulse * 0.35})`
+      : "rgba(255, 211, 90, 0.8)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, 18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // 环形进度
+    ctx.beginPath();
+    ctx.strokeStyle = "rgba(255, 211, 90, 0.95)";
+    ctx.lineWidth = 3;
+    ctx.arc(0, 0, 21, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
+    ctx.stroke();
+
+    ctx.fillStyle = "#fff1b8";
+    ctx.font = '900 18px "Microsoft YaHei", "SimHei", sans-serif';
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("令", 0, 1);
+
+    if (remain > 0) {
+      ctx.font = '700 10px "Microsoft YaHei", "SimHei", sans-serif';
+      ctx.fillStyle = "#ffd35a";
+      ctx.fillText(`${Math.ceil(remain)}s`, 0, 29);
+    }
+    ctx.restore();
+  }
+
+  /** P2.9：军令Icon淡出消散 */
+  private triggerEdictIconFadeOut() {
+    this.particles.push(ringParticle({ x: 46, y: 78 }, "#ffd35a", 18));
+  }
+
+  /** P2.9：完成精英宝箱奖励——应用buff + 军令Icon + 进入军令爆发 */
+  private completeEliteChestReward() {
+    if (this.chestDone) return;
+    this.chestFlying = false;
+    this.chestFlyT = 1;
+    this.chestDone = true;
+
+    // 应用军令效果
+    this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 70);
+    for (let i = 0; i < this.subBladeTimers.length; i++) {
+      this.subBladeTimers[i] = 0;
+    }
+    this.chestMomentumTimer = Math.max(this.chestMomentumTimer, 12);
+
+    const postWaves = this.getEffectivePostChestWaves();
+    if (postWaves.length > 0) {
+      this.battlePhase = "edict_burst";
+      this.postChestStartAt = this.elapsed;
+      this.postChestWaveIndex = 0;
+      this.allPostChestWavesSpawned = false;
+      this.edictBurstRoundIndex = 1;
+      this.edictBurstRoundTotal = postWaves.length;
+    } else {
+      this.allPostChestWavesSpawned = true;
+      this.edictBurstRoundIndex = 0;
+      this.edictBurstRoundTotal = 0;
+    }
+
+    // 启动持续军令Icon
+    const lastSpawnAt = postWaves.length > 0
+      ? Math.max(...postWaves.map(w => w.spawnAt ?? 0))
+      : 0;
+    const edictDuration = Math.max(12, lastSpawnAt + 4);
+    this.edictIconActive = true;
+    this.edictIconTimer = Math.max(this.edictIconTimer, edictDuration);
+    this.edictIconMaxTimer = Math.max(this.edictIconMaxTimer, edictDuration);
+
+    this.particles.push(ringParticle({ x: 46, y: 78 }, "#ffd35a", 30));
+    this.screenShake = Math.max(this.screenShake, 0.12);
+    this.addText(70, 102, "军令生效", "#ffd35a", 14, 0.8);
+  }
+
+  /** P2.9：玩家点击确认关闭军令弹窗——启动飞行动画 */
+  private confirmEliteChestReward() {
+    if (!this.chestPendingConfirm) return;
+    this.chestPendingConfirm = false;
+    this.chestFlying = true;
+    this.chestFlyT = 0;
+    this.edictIconFlying = true;
+    this.edictIconFlyT = 0;
+    this.edictIconFlyFrom = { x: DESIGN_WIDTH / 2, y: DESIGN_HEIGHT * 0.48 };
+    this.edictIconFlyTo = { x: 46, y: 78 };
   }
 
   /** P2.7：精简版精英名牌（只显示5格血条，不常驻显示名字） */
@@ -5364,24 +5547,17 @@ export class Game {
     }
   }
 
-  /** P2.6：通用精英宝箱军令自动生效（恢复弹窗+飞行动画） */
+  /** P2.9：弹出宝箱军令弹窗（等待玩家主动确认） */
   private autoResolveEliteChestReward() {
     if (this.chestDone) return;
     if (!this.chestDropped && !this.eliteKilled) return;
 
-    // P2.6：弹出宝箱军令弹窗（不再一次性完成全部）
     this.chestDropped = true;
-    this.chestOpening = false;      // 跳过开箱动画
+    this.chestOpening = false;
     this.chestOpened = true;
     this.chestBuffRevealed = true;
-    this.chestBuffResult = "chest_first_clear";  // 固定Buff标识
-    this.chestPendingConfirm = true;
-
-    // 0.65秒后自动确认
-    this.chestAutoConfirmAt = this.elapsed + 0.65;
-
-    // 通用军令效果（先记录，applyChestBuff时真正执行）
-    // 能量、副刀CD、刀势加速在 applyChestBuff 中处理
+    this.chestBuffResult = "chest_first_clear";
+    this.chestPendingConfirm = true;  // 等待玩家点击"继续"
 
     this.addText(DESIGN_WIDTH / 2, 150, "军令激活", "#ffd35a", 24, 1.2);
     this.addText(DESIGN_WIDTH / 2, 185, "刀势回涌！副刀共鸣！", "#ffd35a", 18, 1.4);
@@ -5512,27 +5688,10 @@ export class Game {
     }
   }
 
-  /** 玩家确认军令：应用buff并启动飞行动画 */
+  /** P2.9：玩家确认宝箱军令——改为委托 confirmEliteChestReward */
   public confirmChestBuff() {
     if (!this.chestPendingConfirm || !this.chestBuffResult) return;
-    this.chestPendingConfirm = false;
-    this.applyChestBuff(this.chestBuffResult);
-    // 启动飞行动画：从大图标中心飞向暂停按钮下方
-    this.chestFlyT = 0;
-    this.chestFlying = true;
-    // 飞行的起点/终点（相对于画布）
-    // 起点：大图标位置（中下）
-    const startX = DESIGN_WIDTH / 2;
-    const startY = 380;
-    // 终点：暂停按钮下方（左上角 28+40=68，y=68）
-    const endX = 60;
-    const endY = 68;
-    this.chestFlyTarget = { x: endX, y: endY };
-    this._chestFlyStart = { x: startX, y: startY };
-    this._chestBuffStartScale = 1.0;
-    this._chestBuffEndScale = 0.32;
-    // 继续游戏
-    this.phase = "playing";
+    this.confirmEliteChestReward();
   }
 
   private _chestFlyStart = { x: 0, y: 0 };
