@@ -171,6 +171,12 @@ export type Enemy = {
   midfieldActivated?: boolean;
   /** 中场视觉/行为状态 */
   visualState?: 'normal' | 'powder_armed' | 'core_revealed' | 'shield_ready' | 'charging_warning' | 'elite_warning';
+  /** P2：精英受击文字冷却 */
+  lastHitTextAt?: number;
+  /** P2：精英濒死提示已触发标记 */
+  eliteLowHpWarned?: boolean;
+  /** P2：精英护盾破裂闪光计时 */
+  shieldBrokenFlash?: number;
 };
 
 export type Pickup = {

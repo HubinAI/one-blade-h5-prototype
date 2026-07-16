@@ -1259,6 +1259,7 @@ export class Game {
       if (enemy.eliteKind === "aura") {
         // 氛围将：护盾机制 - 强锋以上可一次扣2护盾
         const shieldValue = enemy.skillTimer ?? 2;
+        const prevShield = shieldValue;
         if (shieldValue > 0 && stage.damage <= 1) {
           // 低伤刀打不穿护盾
           enemy.flash = 0.15;
@@ -1272,9 +1273,20 @@ export class Game {
           this.addText(enemy.x, enemy.y - 24, `护盾击穿 ${Math.ceil(shieldValue)}→${Math.max(0, shieldValue - 2)}`, "#8e44ad", 13);
           this.particles.push(...sparkBurst(enemy, 8, "#8e44ad"));
         }
+        // P2：护盾破裂反馈
+        if (prevShield > 0 && (enemy.skillTimer ?? 0) <= 0) {
+          this.triggerEliteShieldBreak(enemy);
+        }
       }
       // 对精英造成伤害
+      const prevHp = enemy.hp;
       this.damageEnemy(enemy, stage.damage * bladeDmg, trail, false, "elite");
+      // P2：精英受击反馈
+      this.triggerEliteHitFeedback(enemy);
+      if (trail.tier === "strong" || trail.tier === "burst") {
+        this.triggerEliteHeavyHitFeedback(enemy);
+      }
+      this.checkEliteLowHpFeedback(enemy);
     }
 
     // ---- Boss：伤害处理 ----
@@ -1570,6 +1582,9 @@ export class Game {
       if (!enemy.alive) continue;
       enemy.wobble += dt;
       enemy.flash = Math.max(0, enemy.flash - dt * 3);
+      if (enemy.shieldBrokenFlash !== undefined) {
+        enemy.shieldBrokenFlash = Math.max(0, enemy.shieldBrokenFlash - dt * 3);
+      }
       enemy.slowedTimer = Math.max(0, enemy.slowedTimer - dt);
 
       // ---- 阵法亮字切换 ----
@@ -2003,6 +2018,11 @@ export class Game {
     for (const target of hits) {
       target.hp -= Math.max(1, Math.ceil(damage));
       target.flash = 0.18;
+      // P2：副刀命中精英反馈
+      if (target.kind === "elite") {
+        this.triggerEliteHitFeedback(target);
+        this.checkEliteLowHpFeedback(target);
+      }
       const killed = target.hp <= 0;
       if (killed) {
         this.handleDirectEnemyKilledBySystem(target, "sub_momentum");
@@ -2049,6 +2069,11 @@ export class Game {
     for (const target of hits) {
       target.hp -= Math.max(1, Math.ceil(damage));
       target.flash = 0.2;
+      // P2：副刀命中精英反馈
+      if (target.kind === "elite") {
+        this.triggerEliteHitFeedback(target);
+        this.checkEliteLowHpFeedback(target);
+      }
       const killed = target.hp <= 0;
       if (killed) {
         this.handleDirectEnemyKilledBySystem(target, "sub_weakpoint");
@@ -2812,6 +2837,108 @@ export class Game {
     return clamp(baseX - centerOffset + index * spacing + jitter, 24, DESIGN_WIDTH - 24);
   }
 
+  /** P2：精英受击轻反馈 */
+  private triggerEliteHitFeedback(enemy: Enemy) {
+    enemy.flash = Math.max(enemy.flash, 0.22);
+    if (this.particles.length < 120) {
+      this.particles.push(ringParticle(enemy, "#ffd35a", 18));
+    }
+    if (!enemy.lastHitTextAt || this.elapsed - enemy.lastHitTextAt > 0.5) {
+      enemy.lastHitTextAt = this.elapsed;
+      this.addText(enemy.x, enemy.y - 28, "命中", "#ffd35a", 13, 0.45);
+    }
+  }
+
+  /** P2：精英强力命中反馈 */
+  private triggerEliteHeavyHitFeedback(enemy: Enemy) {
+    enemy.flash = Math.max(enemy.flash, 0.4);
+    this.addText(enemy.x, enemy.y - 34, "重创", "#ffdf7a", 16, 0.8);
+    this.particles.push(ringParticle(enemy, "#ffdf7a", 26));
+    this.screenShake = Math.max(this.screenShake, 0.16);
+  }
+
+  /** P2：精英护盾击破反馈 */
+  private triggerEliteShieldBreak(enemy: Enemy) {
+    enemy.shieldBrokenFlash = 0.45;
+    enemy.flash = Math.max(enemy.flash, 0.35);
+    this.addText(enemy.x, enemy.y - 34, "破盾", "#b58cff", 18, 1.0);
+    this.particles.push(ringParticle(enemy, "#b58cff", 30));
+    this.particles.push(...sparkBurst(enemy, 10, "#b58cff"));
+    this.screenShake = Math.max(this.screenShake, 0.18);
+  }
+
+  /** P2：精英濒死提示 */
+  private checkEliteLowHpFeedback(enemy: Enemy) {
+    if (enemy.kind !== "elite") return;
+    const maxHp = Math.max(1, enemy.maxHp || enemy.hp || 1);
+    const ratio = enemy.hp / maxHp;
+    if (ratio <= 0.25 && !enemy.eliteLowHpWarned && enemy.hp > 0) {
+      enemy.eliteLowHpWarned = true;
+      this.addText(enemy.x, enemy.y - 42, "将破", "#ff7b6e", 18, 1.0);
+      this.particles.push(ringParticle(enemy, "#ff7b6e", 32));
+      this.screenShake = Math.max(this.screenShake, 0.12);
+    }
+  }
+
+  /** P2：精英头顶5格状态条 */
+  private drawEliteStatusBar(ctx: CanvasRenderingContext2D, enemy: Enemy) {
+    if (enemy.kind !== "elite") return;
+    const maxHp = Math.max(1, enemy.maxHp || enemy.hp || 1);
+    const hp = Math.max(0, enemy.hp);
+    const ratio = clamp(hp / maxHp, 0, 1);
+
+    const segments = 5;
+    const filled = Math.ceil(ratio * segments);
+
+    const barW = 50;
+    const barH = 6;
+    const gap = 2;
+    const segW = (barW - gap * (segments - 1)) / segments;
+
+    const x0 = -barW / 2;
+    const y0 = -enemy.radius - 22;
+
+    ctx.save();
+    ctx.fillStyle = "rgba(20, 10, 8, 0.72)";
+    roundRect(ctx, x0 - 3, y0 - 3, barW + 6, barH + 6, 4);
+    ctx.fill();
+
+    for (let i = 0; i < segments; i++) {
+      const x = x0 + i * (segW + gap);
+      if (i < filled) {
+        const lowHp = ratio <= 0.25;
+        const pulse = 0.5 + Math.sin(this.elapsed * 8) * 0.5;
+        ctx.fillStyle = lowHp
+          ? `rgba(255, ${90 + pulse * 80}, 70, 0.95)`
+          : "rgba(255, 211, 90, 0.95)";
+      } else {
+        ctx.fillStyle = "rgba(255, 255, 255, 0.16)";
+      }
+      roundRect(ctx, x, y0, segW, barH, 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /** P2：精英护盾层光晕 */
+  private drawEliteShieldLayer(ctx: CanvasRenderingContext2D, enemy: Enemy) {
+    if (enemy.kind !== "elite") return;
+    // 氛围将/火环将使用 skillTimer 作为护盾值
+    const shieldValue = enemy.skillTimer ?? 0;
+    if (shieldValue <= 0) return;
+
+    const pulse = 0.5 + Math.sin(this.elapsed * 6) * 0.5;
+    ctx.save();
+    ctx.strokeStyle = `rgba(160, 110, 255, ${0.45 + pulse * 0.25})`;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = "rgba(160, 110, 255, 0.6)";
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.arc(0, 0, enemy.radius + 8 + pulse * 2, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   /** 第四轮微调：军令爆发怪潮横向分布函数（小批次内更稳定，不要太随机） */
   private getBurstSpawnX(baseX: number, index: number, count: number): number {
     if (count <= 1) return clamp(baseX, 24, DESIGN_WIDTH - 24);
@@ -3432,6 +3559,9 @@ export class Game {
 
       // ---- 精英怪渲染 ----
       if (enemy.kind === "elite" && enemy.eliteKind) {
+        // P2：护盾层（在效果光环之前绘制）
+        this.drawEliteShieldLayer(ctx, enemy);
+
         const visDef = ELITE_VISUAL_DEFS[enemy.eliteKind];
         // 精英气场：脉动外光环（增强震撼感）
         const auraPulse = 0.5 + Math.sin(this.elapsed * 3) * 0.5;
@@ -3577,6 +3707,11 @@ export class Game {
           ctx.textAlign = "center";
           ctx.fillText(`护盾${Math.ceil(shieldVal)}`, 0, 4);
         }
+      }
+
+      // P2：精英状态条（在所有精英效果之上绘制）
+      if (enemy.kind === "elite") {
+        this.drawEliteStatusBar(ctx, enemy);
       }
 
       // ---- Boss渲染 ----
