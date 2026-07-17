@@ -85,6 +85,16 @@ export class Game {
   private edictBurstRoundIndex = 0;
   /** 军令爆发轮次总数 */
   private edictBurstRoundTotal = 0;
+  /** P4.1A.7：锁定待提交的挥刀手势（按下→有效滑动后才正式消耗） */
+  private pendingSlash: {
+    startPos: Vec2;
+    lockedEnergy: number;
+    tier: "weak" | "normal" | "strong" | "burst";
+    startedAt: number;
+    hasSoul: boolean;
+    hasOil: boolean;
+    oneBladeBoost: number;
+  } | null = null;
   private elapsed = 0;
   private idCounter = 0;
   private finished = false;
@@ -560,7 +570,7 @@ export class Game {
     this.chestMomentumTimer = Math.max(0, this.chestMomentumTimer - scaledDt);
     // 三次修正：chest_first_clear 的刀势回涌用一个虚拟 drumTimer 注入到 recoverEnergy
     const effectiveDrumTimer = this.drumTimer + this.chestMomentumTimer;
-    if (!this.currentSlash?.active && this.regenDelayTimer <= 0 && this.warDrumNoDecayTimer <= 0) {
+    if (!this.currentSlash?.active && !this.pendingSlash && this.regenDelayTimer <= 0 && this.warDrumNoDecayTimer <= 0) {
       this.energy = recoverEnergy(this.energy, scaledDt * this.getPassiveRegenMultiplier(), effectiveDrumTimer);
     }
     // 鼓阵：击杀后1s内刀势不衰减（不扣regenDelay）
@@ -703,40 +713,79 @@ export class Game {
       return;
     }
     this.pointerDown = true;
-    this.pointerPos = this.clampPointer(pos);
+    const start = this.clampPointer(pos);
+    this.pointerPos = start;
     if (this.currentSlash?.active) this.endSlash("收刀");
-    this.startSlash(this.pointerPos);
+    // P4.1A.7：按下只锁定Pending，不消耗刀势
+    const lockedEnergy = clamp(this.energy, 0, BALANCE.swordEnergy.max);
+    this.pendingSlash = {
+      startPos: start,
+      lockedEnergy,
+      tier: getBladeTier(lockedEnergy),
+      startedAt: this.elapsed,
+      hasSoul: this.nextSoul,
+      hasOil: this.nextOil,
+      oneBladeBoost: this.oneBladeModeTimer > 0 ? 2.0 : 1.0
+    };
   }
 
   handlePointerMove(pos: Vec2) {
-    if (this.phase !== "playing" || !this.pointerDown || !this.currentSlash?.active) return;
+    if (this.phase !== "playing" || !this.pointerDown) return;
     const next = this.clampPointer(pos);
     this.pointerPos = next;
+    if (!this.currentSlash?.active) {
+      // P4.1A.7：检查是否达到激活距离
+      const pending = this.pendingSlash;
+      if (!pending) return;
+      const moved = distance(pending.startPos, next);
+      if (moved < BALANCE.slash.activationDistance) return;
+      this.commitPendingSlash(pending, next);
+      return;
+    }
     this.extendSlash(next);
   }
 
   handlePointerUp() {
     if (this.phase !== "playing") return;
     this.pointerDown = false;
-    if (this.currentSlash?.active) this.endSlash("收刀");
+    if (this.currentSlash?.active) {
+      this.endSlash("收刀");
+    } else {
+      // P4.1A.7：只有Pending未提交，零消耗取消
+      this.pendingSlash = null;
+    }
   }
 
-  private startSlash(pos: Vec2) {
-    const lockedEnergy = clamp(this.energy, 0, BALANCE.swordEnergy.max);
-    const tier = getBladeTier(lockedEnergy);
+  /** P4.1A.7：正式提交挥刀（滑动超过activationDistance后触发） */
+  private commitPendingSlash(pending: NonNullable<typeof this.pendingSlash>, firstMovePos: Vec2) {
+    this.pendingSlash = null;
+    this.startSlash(pending.startPos, pending);
+    if (this.currentSlash?.active) this.extendSlash(firstMovePos);
+  }
+
+  private startSlash(pos: Vec2, pending?: NonNullable<typeof this.pendingSlash>) {
+    const lockedEnergy = pending ? pending.lockedEnergy : clamp(this.energy, 0, BALANCE.swordEnergy.max);
+    const tier = (pending ? pending.tier : getBladeTier(lockedEnergy)) as "weak" | "normal" | "strong" | "burst";
     const stage = SWORD_STAGE_BY_ID[tier];
-    const pathMultiplier = (this.nextSoul ? PICKUP_BALANCE.soul.pathLengthMultiplier ?? 1 : 1) * this.getPathLengthMultiplier();
-    const widthMultiplier = this.nextSoul ? PICKUP_BALANCE.soul.widthMultiplier ?? 1 : 1;
+    const pathMultiplier = (pending && pending.hasSoul ? PICKUP_BALANCE.soul.pathLengthMultiplier ?? 1 : (this.nextSoul ? PICKUP_BALANCE.soul.pathLengthMultiplier ?? 1 : 1)) * this.getPathLengthMultiplier();
+    const widthMultiplier = pending && pending.hasSoul ? PICKUP_BALANCE.soul.widthMultiplier ?? 1 : (this.nextSoul ? PICKUP_BALANCE.soul.widthMultiplier ?? 1 : 1);
     const maxPathLength = stage.maxPathLength * pathMultiplier;
     const point = { x: pos.x, y: pos.y, t: this.elapsed, energyRatio: 1 };
 
-    // 一刀斩模式：本次挥刀威力×2（仅当前这一刀）
-    this._slashOneBladeBoost = this.oneBladeModeTimer > 0 ? 2.0 : 1.0;
+    // P4.1A.7：使用已锁定的一刀斩倍率
+    const oneBladeBoost = pending ? pending.oneBladeBoost : (this.oneBladeModeTimer > 0 ? 2.0 : 1.0);
+    this._slashOneBladeBoost = oneBladeBoost;
     if (this._slashOneBladeBoost > 1) {
-      this.oneBladeModeTimer = 0; // 消耗掉
+      this.oneBladeModeTimer = 0;
       this.addText(DESIGN_WIDTH / 2, 240, "⚡ 一刀斩！", "#ff6a33", 26, 1.5);
     } else {
       this._slashOneBladeBoost = 1.0;
+    }
+
+    // P4.1A.7：消耗下一刀Buff
+    if (pending) {
+      if (pending.hasSoul) this.nextSoul = false;
+      if (pending.hasOil) this.nextOil = false;
     }
 
     this.currentSlash = {
@@ -785,7 +834,6 @@ export class Game {
       this.showHint("low-energy-slash", "刀势越满，刀芒越强", DESIGN_WIDTH / 2, 118, 2);
     }
     this.particles.push(...sparkBurst(pos, tier === "burst" ? 15 : 8, stage.color));
-    this.checkSegmentHits(point, point, this.currentSlash);
   }
 
   private extendSlash(pos: Vec2) {

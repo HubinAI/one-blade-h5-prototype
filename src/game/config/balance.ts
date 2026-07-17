@@ -48,6 +48,7 @@ export const BALANCE = {
     sharpTurnExtraCost: 50,
     lowBladeRemainRatio: 0.25,
     minMoveDistance: 1.5,
+    activationDistance: 10, // P4.1A.7: 按下后至少滑动10px才正式成立挥刀
     touchHitPadding: 6
   },
 
