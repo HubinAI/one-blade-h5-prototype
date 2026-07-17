@@ -380,7 +380,11 @@ export class Game {
     const equipped = getEquippedBlades();
     this.mainBladeQuality = equipped.main?.quality ?? null;
     this.subBlades = equipped.subs.filter(b => b && b.quality);
-    this.subBladeTimers = this.subBlades.map((_, i) => -(4 + i * 2)); // 蓄势(槽0)=4s首发,破点(槽1)=6s首发
+    this.subBladeTimers = this.subBlades.map((_, i) => {
+      const cd = this.subBladeCooldowns[i];
+      const delay = i === 0 ? 4 : 6;
+      return Math.max(0, cd - delay);
+    });
     this.subBladeAnim = this.subBlades.map((_, i) => ({
       slot: i,
       phase: "idle" as const,
@@ -2256,21 +2260,24 @@ export class Game {
                 // 左刀：对endPos附近的敌人结算一次横扫伤害
                 this.applyMomentumSweepDamage({ x1: anim.endPos.x - 90, y1: anim.endPos.y + 6, x2: anim.endPos.x + 90, y2: anim.endPos.y - 6, color: "#5bc0ff", bladeIdx: 0 }, blade, stats);
               } else {
-                // P4.1A.9: 右刀验证目标，死亡时90px重锁或跳过伤害
-                const targetEnemy = anim.targetId ? this.enemies.find(e => e.id === anim.targetId && e.alive) : null;
-                if (!targetEnemy && anim.targetId) {
-                  // 目标已死亡：90px内找新目标
-                  const oldTarget = this.enemies.find(e => e.id === anim.targetId);
-                  if (oldTarget) {
-                    const newTarget = this.enemies.filter(e => e.alive && e.y >= BATTLEFIELD_ZONES.midfieldStartY && e.y <= BALANCE.battlefield.bottomDefenseY - 30)
-                      .find(e => Math.abs(e.x - oldTarget.x) <= 90 && Math.abs(e.y - oldTarget.y) <= 90);
-                    if (newTarget) {
-                      anim.targetId = newTarget.id;
-                      anim.endPos = { x: newTarget.x, y: newTarget.y - 30 };
-                    }
+                // P4.1A.10: 右刀验证目标，死亡时用endPos重锁，不依赖已过滤的enemy对象
+                let finalTarget: Enemy | null = anim.targetId ? (this.enemies.find(e => e.id === anim.targetId && e.alive) ?? null) : null;
+                if (!finalTarget) {
+                  // 死亡：从endPos附近90px搜索
+                  const pos = { x: anim.endPos.x, y: anim.endPos.y + 30 };
+                  const searchArea = this.enemies.filter(e => e.alive && e.y >= BATTLEFIELD_ZONES.midfieldStartY && e.y <= BALANCE.battlefield.bottomDefenseY - 30);
+                  const highValueOrder = ["splitter", "elite", "core", "powder", "shield"];
+                  let newTarget: Enemy | null = null;
+                  for (const kind of highValueOrder) {
+                    newTarget = searchArea.find(e => e.kind === (kind === "splitter" ? "splitter" : kind) && Math.abs(e.x - pos.x) <= 90 && Math.abs(e.y - pos.y) <= 90) ?? null;
+                    if (newTarget) break;
+                  }
+                  if (!newTarget) newTarget = searchArea.sort((a, b) => b.y - a.y).find(e => Math.abs(e.x - pos.x) <= 90 && Math.abs(e.y - pos.y) <= 90) ?? null;
+                  if (newTarget) {
+                    anim.targetId = newTarget.id;
+                    finalTarget = newTarget;
                   }
                 }
-                const finalTarget = anim.targetId ? this.enemies.find(e => e.id === anim.targetId && e.alive) : null;
                 if (finalTarget) {
                   this.applyWeakpointChaseDamage({ x1: finalTarget.x - 3, y1: finalTarget.y - 20, x2: finalTarget.x + 3, y2: finalTarget.y + 10, color: "#b58cff", bladeIdx: 1 }, blade, stats);
                 }
@@ -2513,11 +2520,10 @@ export class Game {
         const extraRefund = 5; // 击杀3+ 额外 +5%
         this.addText(s.x1 + (s.x2 - s.x1) / 2, s.y1 + (s.y2 - s.y1) / 2 - 16, `蓄势连斩 +${refund + extraRefund}%`, "#5bc0ff", 16, 1.0);
         this.energy = clamp(this.energy + refund + extraRefund, 0, BALANCE.swordEnergy.max);
-        // 击杀5+ 自加速：当前CD -20%（不低于原始CD的50%）
-        if (killCount >= 5 && s.bladeIdx < this.subBladeCooldowns.length) {
-          const origCd = BLADE_BASE_STATS[blade.quality]?.subSlashInterval ?? 5;
-          const minCd = origCd * 0.5;
-          this.subBladeCooldowns[s.bladeIdx] = Math.max(minCd, this.subBladeCooldowns[s.bladeIdx] * 0.8);
+        // P4.1A.10: 击杀5+ 只推进下一轮CD，不永久修改subBladeCooldowns
+        if (killCount >= 5 && s.bladeIdx < this.subBladeTimers.length) {
+          const cd = this.subBladeCooldowns[s.bladeIdx];
+          this.subBladeTimers[s.bladeIdx] = Math.max(this.subBladeTimers[s.bladeIdx], cd * 0.2);
         }
       } else {
         this.addText(s.x1 + (s.x2 - s.x1) / 2, s.y1 + (s.y2 - s.y1) / 2 - 16, `蓄势 +${refund}%`, "#5bc0ff", 14, 0.8);
@@ -2726,14 +2732,19 @@ export class Game {
     AudioService.slashHit();
   }
 
-  /** P4.1A.9：延迟激活一刀斩（有效战区至少4个目标才激活） */
+  /** P4.1A.9：延迟激活一刀斩（有效战区至少4个目标才激活，等待超3秒后只要有1个有效目标即可） */
   private tryActivatePendingOneBlade() {
     if (!this.act3Pending) return;
     if (this.phase !== "playing" || this.victoryTransitionActive || this.isEdictModalBlocking()) return;
     const validTargets = this.enemies.filter(e => e.alive && e.y >= BATTLEFIELD_ZONES.midfieldStartY && e.y <= BALANCE.battlefield.bottomDefenseY - 30);
-    if (validTargets.length < 4) return;
-    this.act3Pending = false;
-    this.triggerOneBladeMode();
+    // P4.1A.10: 优先等待4个，等待超3秒后只要有1个即可
+    if (validTargets.length >= 4) {
+      this.act3Pending = false;
+      this.triggerOneBladeMode();
+    } else if (this.elapsed - 45 >= 3 && validTargets.length >= 1) {
+      this.act3Pending = false;
+      this.triggerOneBladeMode();
+    }
   }
 
   /** 副刀共鸣：30s 立即清空两把副刀CD + 飘字 */
@@ -3862,7 +3873,13 @@ export class Game {
 
     this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 70);
     for (let i = 0; i < this.subBladeTimers.length; i++) {
-      this.subBladeTimers[i] = 0;
+      const anim = this.subBladeAnim[i];
+      if (!anim) continue;
+      if (anim.phase === "cooldown" || anim.phase === "idle") {
+        this.subBladeTimers[i] = this.subBladeCooldowns[i];
+        anim.phase = "ready";
+        anim.phaseTimer = 0;
+      }
     }
     this.chestMomentumTimer = Math.max(this.chestMomentumTimer, 12);
 
@@ -5527,6 +5544,21 @@ export class Game {
     const pctText = `${Math.floor(this.energy)}% ${eTierName}`;
     ctx.fillText(pctText, DESIGN_WIDTH / 2, eBarY - 4);
 
+    // P4.1A.10：一刀斩"下一刀×2"小状态（仅oneBladeModeTimer>0时显示）
+    if (this.oneBladeModeTimer > 0) {
+      ctx.save();
+      ctx.fillStyle = "#ff6a33";
+      ctx.strokeStyle = "#ff8a45";
+      ctx.lineWidth = 1;
+      ctx.font = '800 14px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      const labelX = eBarX + eBarW + 10;
+      const labelY = eBarY;
+      ctx.fillText("下一刀×2", labelX, labelY);
+      ctx.restore();
+    }
+
     ctx.restore();
 
     // 破阵就绪提示（移到屏幕顶部下方，与关卡文字分隔）
@@ -6371,9 +6403,15 @@ export class Game {
     // 第一关固定宝箱Buff：刀势回涌 + 副刀共鸣
     if (id === "chest_first_clear") {
       this.energy = Math.min(100, this.energy + 70);
-      // 两把副刀CD清零
+      // P4.1A.10: 两把副刀CD清零（冷却态→立即Ready，攻击中不打断）
       for (let i = 0; i < this.subBladeTimers.length; i++) {
-        this.subBladeTimers[i] = 0;
+        const anim = this.subBladeAnim[i];
+        if (!anim) continue;
+        if (anim.phase === "cooldown" || anim.phase === "idle") {
+          this.subBladeTimers[i] = this.subBladeCooldowns[i];
+          anim.phase = "ready";
+          anim.phaseTimer = 0;
+        }
       }
       // 三次修正：刀势回涌持续到关卡结束（用独立 flag，不显示"鼓"图标）
       this.chestMomentumTimer = Math.max(this.chestMomentumTimer, 120);

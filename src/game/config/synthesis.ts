@@ -646,6 +646,9 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
     waves.splice(6, 0, sw("双裂压迫", 26, 2, 14, false));
     waves.splice(8, 0, sw("裂潮", 36, 3, 16, false));
     waves.splice(10, 0, sw("裂潮再起", 48, 3, 18, false));
+    // P4.1A.10: 第4关插入后统一排序并归一化为3.7秒间隔
+    waves.sort((a, b) => (a.spawnAt ?? 0) - (b.spawnAt ?? 0));
+    waves.forEach((wave, index) => { wave.spawnAt = 0.5 + index * 3.7; });
   }
   // P3.3：后置波补分裂兵
   if (floor === 4 && postChestWaves) {
