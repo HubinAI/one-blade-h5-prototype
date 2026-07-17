@@ -263,7 +263,7 @@ export const WAVE_TEMPLATES: WaveTemplate[] = [
   { id: "splitter_mix", name: "裂变混阵", unlockFloor: 5, enemies: [{ kind: "infantry", count: 4 }, { kind: "splitter", count: 1 }, { kind: "powder", count: 1 }] },
   { id: "tractor_intro", name: "牵引初现", unlockFloor: 7, enemies: [{ kind: "infantry", count: 5 }, { kind: "tractor", count: 1 }] },
   { id: "core_21",    name: "阵法波", unlockFloor: 50, enemies: [{ kind: "shield", count: 4 }, { kind: "core", count: 2 }] },
-  { id: "elite_21",   name: "精英波", unlockFloor: 100,enemies: [{ kind: "elite", count: 2 }, { kind: "infantry", count: 4 }] },
+  { id: "elite_guard_21", name: "精锐护阵", unlockFloor: 100, enemies: [{ kind: "shield", count: 4 }, { kind: "tractor", count: 1 }, { kind: "infantry", count: 4 }] },
 ];
 
 /** 根据当前层数和可用模板生成一局的波次列表 */

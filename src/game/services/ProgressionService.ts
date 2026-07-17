@@ -1040,6 +1040,17 @@ export function tryRankUp(): { ok: boolean; newRank?: RankId } {
   return { ok: false };
 }
 
+/** P3.9：检查目标关卡是否被突破卡点拦截 */
+export function getBlockingGateForFloor(targetFloor: number): StageGate | null {
+  const progress = readProgress();
+  for (const gate of MAIN_STAGE_GATES) {
+    const entersNextStage = gate.nextUnlockFrom !== null && targetFloor >= gate.nextUnlockFrom;
+    const notCleared = !progress.clearedBreakthroughs.includes(gate.breakthroughId);
+    if (entersNextStage && notCleared) return gate;
+  }
+  return null;
+}
+
 /** 更新主线最高层数 */
 export function updateHighestFloor(floor: number): void {
   const progress = readProgress();
@@ -1409,6 +1420,15 @@ export function setRankById(rankId: string): void {
     progress.rankIndex = idx;
     writeProgress(progress);
   }
+}
+
+/** P3.9：统一 Debug 主线场景设置 */
+export function debugSetMainlineScenario(floor: number, completedBreakthroughIds: string[], rankIndex: number): void {
+  const progress = readProgress();
+  progress.highestFloor = floor;
+  progress.clearedBreakthroughs = completedBreakthroughIds.slice();
+  progress.rankIndex = rankIndex;
+  writeProgress(progress);
 }
 
 /** Debug: 清除某突破完成记录 */

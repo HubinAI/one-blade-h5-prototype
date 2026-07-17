@@ -592,6 +592,7 @@ export class Game {
     this.updateBuffChoiceTriggers();
     this.checkBattleEnd();
     this.updateVictoryTransition(scaledDt);
+    this.cleanupInvalidSpecialEnemies();
     this.validateEdictState();
     this.validateChestEdictState();
   }
@@ -1100,6 +1101,12 @@ export class Game {
   }
 
   /** P2.9：判断点击是否在宝箱确认按钮范围内 */
+  /** P3.9：获取逻辑关卡数（动态主线 level.id=10000+floor 返回 floor） */
+  private getLogicalFloor(): number {
+    if (this.level.id >= 10000) return this.level.id - 10000;
+    return this.level.id;
+  }
+
   /** P3.8：军令弹窗是否正在暂停战斗 */
   private isEdictModalBlocking(): boolean {
     return this.edictRewardState === "modal" && this.chestPendingConfirm;
@@ -2613,7 +2620,8 @@ export class Game {
     // ── 决定是否触发事件波（20%概率，同局不重复，第1波不触发）──
     const triggerEvent = this.wavesSpawned > 1 && Math.random() < 0.2;
     // 事件波按关卡解锁
-    const e = this.level.id;
+    // P3.9：使用逻辑层数，避免动态主线 level.id=10000+floor 误触发
+    const e = this.getLogicalFloor();
     const availableEvents: string[] = [];
     if (e >= 1)  availableEvents.push("reinforce", "inspire");
     if (e >= 6)  availableEvents.push("slowRain");
@@ -2669,10 +2677,11 @@ export class Game {
       this.addText(DESIGN_WIDTH / 2, 720, "🥁 鼓舞！", "#ffd35a", 18, 1.8);
       this.addText(DESIGN_WIDTH / 2, 746, "副刀CD临时-30%", "#f6e7bd", 13, 1.5);
     } else if (chosenEvent === "eliteStrike") {
-      this.addText(DESIGN_WIDTH / 2, 200, "👹 精英袭！", "#9b6dff", 24, 1.8);
-      this.addText(DESIGN_WIDTH / 2, 228, "精英督战出现", "#c896ff", 14, 1.5);
-      // 增加精英在wave中
-      extraEnemies.push({ kind: "elite", count: 1, x: 188, yOffset: 0 });
+      this.addText(DESIGN_WIDTH / 2, 200, "⚔ 精锐护阵！", "#9b6dff", 24, 1.8);
+      this.addText(DESIGN_WIDTH / 2, 228, "盾兵+精锐护卫出现", "#c896ff", 14, 1.5);
+      // P3.9：不再插入裸 elite，改用盾兵+步兵组合
+      extraEnemies.push({ kind: "shield", count: 3, x: 140, yOffset: 0 });
+      extraEnemies.push({ kind: "infantry", count: 4, x: 236, yOffset: 0 });
     } else if (chosenEvent === "trapFormation") {
       this.addText(DESIGN_WIDTH / 2, 200, "🔱 陷阱阵！", "#ffb15c", 24, 1.8);
       this.addText(DESIGN_WIDTH / 2, 228, "火药+阵眼组合埋伏", "#ffd67c", 14, 1.5);
@@ -2781,6 +2790,11 @@ export class Game {
 
   /** 第六轮修正：从队列 item 生成敌人（抽取为独立方法） */
   private spawnEnemyFromQueueItem(item: typeof this.subSpawnQueue[0]) {
+    // P3.9：禁止普通队列生成裸 elite/boss（缺 eliteKind/bossId 会变成残影）
+    if (item.kind === "elite" || item.kind === "boss") {
+      console.warn("[invalid generic special spawn blocked]", { kind: item.kind, levelId: this.level.id, time: this.elapsed });
+      return;
+    }
     const phase = item.battlePhase ?? this.battlePhase;
     const profile = this.getEntryProfileForEnemy(item.kind as EnemyKind, phase);
     const spawnY = profile.spawnY - (item.yOffset ?? 0);
@@ -3623,6 +3637,23 @@ export class Game {
     ctx.restore();
   }
 
+  /** P3.9：清理非法特殊怪（裸 elite/boss）兜底 */
+  private cleanupInvalidSpecialEnemies() {
+    let removed = 0;
+    for (const enemy of this.enemies) {
+      const invalidElite = enemy.kind === "elite" && !enemy.eliteKind;
+      const invalidBoss = enemy.kind === "boss" && !enemy.bossId;
+      if (invalidElite || invalidBoss) {
+        enemy.alive = false;
+        removed += 1;
+      }
+    }
+    if (removed > 0) {
+      console.warn("[invalid special enemy removed]", { removed, levelId: this.level.id, time: this.elapsed });
+      this.enemies = this.enemies.filter(enemy => enemy.alive);
+    }
+  }
+
   /** P2.9：军令Icon淡出消散 */
   private triggerEdictIconFadeOut() {
     this.particles.push(ringParticle({ x: 46, y: 78 }, "#ffd35a", 18));
@@ -3714,9 +3745,9 @@ export class Game {
     this.screenShake = Math.max(this.screenShake, 0.08);
   }
 
-  /** P2.7：精简版精英名牌（只显示5格血条，不常驻显示名字） */
+  /** P3.9：精英名牌（禁止非法精英绘制血条） */
   private drawEliteNameplate(ctx: CanvasRenderingContext2D, enemy: Enemy) {
-    if (enemy.kind !== "elite" || !enemy.alive) return;
+    if (enemy.kind !== "elite" || !enemy.eliteKind || !enemy.alive) return;
     const maxHp = Math.max(1, enemy.maxHp || enemy.hp || 1);
     const hp = Math.max(0, enemy.hp);
     const ratio = clamp(hp / maxHp, 0, 1);
@@ -4559,13 +4590,14 @@ export class Game {
         }
       }
 
-      // P2：精英名牌（在所有精英效果之上绘制）
-      if (enemy.kind === "elite") {
+      // P3.9：精英名牌（必须 eliteKind 有效，禁止空血条残影）
+      if (enemy.kind === "elite" && enemy.eliteKind) {
         this.drawEliteNameplate(ctx, enemy);
       }
 
-      // P3：分裂兵预警
+      // P3.9：分裂兵本体 + 预警
       if (enemy.kind === "splitter") {
+        this.drawSplitterBody(ctx, enemy);
         this.drawSplitterWarning(ctx, enemy);
       }
 
@@ -5444,17 +5476,23 @@ export class Game {
     ctx.restore();
   }
 
+  /** P3.9：浮字绘制（描边 + 阴影） */
   private drawFloatingTexts(ctx: CanvasRenderingContext2D) {
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
+    ctx.lineJoin = "round";
     for (const text of this.texts) {
       const alpha = clamp(text.life / text.maxLife, 0, 1);
       ctx.globalAlpha = alpha;
-      ctx.fillStyle = text.color;
       ctx.font = `700 ${text.size}px "Microsoft YaHei", sans-serif`;
+      // 深色描边提高可读性
+      ctx.lineWidth = Math.max(2, text.size * 0.16);
+      ctx.strokeStyle = "rgba(10, 7, 5, 0.88)";
       ctx.shadowColor = "rgba(0,0,0,0.55)";
       ctx.shadowBlur = 4;
+      ctx.strokeText(text.text, text.x, text.y);
+      ctx.fillStyle = text.color;
       ctx.fillText(text.text, text.x, text.y);
     }
     ctx.restore();
@@ -6102,6 +6140,86 @@ export class Game {
   public confirmChestBuff() {
     if (!this.chestPendingConfirm) return;
     this.confirmEliteChestReward();
+  }
+
+  /** P3.9：分裂兵本体绘制（实心符印+大字"裂"+裂纹） */
+  private drawSplitterBody(ctx: CanvasRenderingContext2D, enemy: Enemy) {
+    if (enemy.kind !== "splitter" || !enemy.alive) return;
+    const r = enemy.radius;
+    const pulse = 0.5 + Math.sin(this.elapsed * 4 + (enemy.wobble ?? 0)) * 0.5;
+    const isWarning = enemy.splitState === "warning";
+    const warningRatio = isWarning ? clamp((enemy.splitTimer ?? SPLITTER_CONFIG.chargeDuration) / SPLITTER_CONFIG.chargeDuration, 0, 1) : 1;
+    const scale = isWarning ? 1 + (1 - warningRatio) * 0.10 + pulse * 0.04 : 1;
+    const isDanger = isWarning && warningRatio <= 0.25;
+
+    const cx = enemy.x;
+    const cy = enemy.y;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(scale, scale);
+
+    // 底色
+    const baseColor = isWarning ? (isDanger ? "#cc3300" : "#8a3a20") : "#4a2312";
+    ctx.fillStyle = baseColor;
+    ctx.strokeStyle = isWarning ? "#ff6a33" : "#ff9d42";
+    ctx.lineWidth = 3;
+
+    // 六边形符印
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i - Math.PI / 6;
+      const px = Math.cos(angle) * r;
+      const py = Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // 橙色呼吸光
+    if (isWarning) {
+      ctx.shadowColor = "#ff6a33";
+      ctx.shadowBlur = 10 + pulse * 8;
+    } else {
+      ctx.shadowColor = "#ff8a35";
+      ctx.shadowBlur = 6 + pulse * 4;
+    }
+
+    // 中央"裂"字
+    ctx.fillStyle = isWarning ? (isDanger ? "#fff" : "#ffd08a") : "#ffc870";
+    ctx.font = `900 ${Math.round(r * 1.15)}px "Microsoft YaHei", "SimHei", sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("裂", 0, 2);
+
+    ctx.shadowBlur = 0;
+
+    // 裂纹（warning 时更粗更明显）
+    const crackWidth = isWarning ? 2 + (1 - warningRatio) * 3 : 2;
+    ctx.strokeStyle = isWarning ? (isDanger ? "#fff" : "#cc5500") : "#885533";
+    ctx.lineWidth = crackWidth;
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.3, -r * 0.1);
+    ctx.lineTo(r * 0.1, r * 0.2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.05, r * 0.15);
+    ctx.lineTo(r * 0.25, -r * 0.15);
+    ctx.stroke();
+
+    // 碎片装饰
+    const fragPulse = isWarning ? pulse * 0.5 : pulse * 0.2;
+    ctx.fillStyle = `rgba(255, 160, 60, ${0.4 + fragPulse})`;
+    ctx.beginPath();
+    ctx.arc(-r * 0.55, -r * 0.35, 3 + pulse * 1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(r * 0.6, r * 0.3, 2 + pulse * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
   }
 
   /** P3：分裂兵预警绘制 */

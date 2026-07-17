@@ -43,6 +43,7 @@ import {
   forceSetHighestFloor,
   getCurrentRunContext,
   getPendingGate,
+  getBlockingGateForFloor,
   type RunMode
 } from "./game/services/ProgressionService";
 import { logEvent } from "./game/services/Analytics";
@@ -70,7 +71,7 @@ export default function App() {
   const [home, setHome] = useState(getHomeSnapshot);
   const [currentLevel, setCurrentLevel] = useState<LevelConfig>(LEVELS[0]);
   const [lastResult, setLastResult] = useState<BattleResult | null>(null);
-  const [appVersion] = useState("V0717005");
+  const [appVersion] = useState("V0717006");
   const [runIndex, setRunIndex] = useState(0);
   const [currentMode, setCurrentMode] = useState<RunMode>("normal");
   const [reviveOffer, setReviveOffer] = useState<ReviveOffer | null>(null);
@@ -138,12 +139,18 @@ export default function App() {
   );
 
   const startMainline = useCallback(() => {
-    const floor = Math.max(1, home.highestFloor);
-    setCurrentMainlineFloor(floor);
-    // 体力消耗在 startLevel 里统一处理
-    const level = createFloorLevelConfig(floor);
+    const targetFloor = Math.max(1, getHomeSnapshot().highestFloor);
+    // P3.9：点击时重新检查突破卡点，防止绕过突破
+    const blockingGate = getBlockingGateForFloor(targetFloor);
+    if (blockingGate) {
+      const bossLevel = getBossLevelConfig(blockingGate.rankId);
+      startLevel(bossLevel, "challenge");
+      return;
+    }
+    setCurrentMainlineFloor(targetFloor);
+    const level = createFloorLevelConfig(targetFloor);
     startLevel(level, "normal");
-  }, [home.highestFloor, startLevel]);
+  }, [startLevel]);
 
   const enterBattle = useCallback(() => {
     setScreen("battle");
