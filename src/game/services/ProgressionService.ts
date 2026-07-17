@@ -72,6 +72,8 @@ export type PlayerProgress = {
   synFailCount: Record<string, number>;
   /** 已完成的突破ID列表 */
   clearedBreakthroughs: string[];
+  /** P3.10：显式待突破ID */
+  pendingBreakthroughId: string | null;
 };
 
 export type BattleRewardInput = {
@@ -201,6 +203,7 @@ function createDefaultProgress(): PlayerProgress {
     equippedSubBladeIds: [],
     synFailCount: {},
     clearedBreakthroughs: [],
+    pendingBreakthroughId: null,
   };
 }
 
@@ -232,7 +235,24 @@ function normalizeProgress(raw: Partial<PlayerProgress> | null): PlayerProgress 
     codex: Array.from(new Set(raw?.codex ?? fallback.codex)),
     daily: normalizeDaily(raw?.daily)
   };
+  repairBreakthroughProgress(progress);
   return progress;
+}
+
+/** P3.10：自动修复旧存档突破状态 */
+function repairBreakthroughProgress(progress: PlayerProgress) {
+  for (const gate of MAIN_STAGE_GATES) {
+    const nextFloor = gate.nextUnlockFrom ?? gate.afterStage + 1;
+    const hasRecord = progress.clearedBreakthroughs.includes(gate.breakthroughId);
+    // 还没通过卡点却已有完成记录 → 旧Debug脏数据
+    if (progress.highestFloor <= gate.afterStage && hasRecord) {
+      progress.clearedBreakthroughs = progress.clearedBreakthroughs.filter(id => id !== gate.breakthroughId);
+    }
+    // 已被旧版本推进到下一关但突破未完成
+    if (progress.highestFloor >= nextFloor && !progress.clearedBreakthroughs.includes(gate.breakthroughId) && !progress.pendingBreakthroughId) {
+      progress.pendingBreakthroughId = gate.breakthroughId;
+    }
+  }
 }
 
 function applyTimeProgress(progress: PlayerProgress) {
@@ -1013,6 +1033,13 @@ export function hasClearedBreakthrough(id: string): boolean {
 /** 获取当前需要突破的门(如果有) */
 export function getPendingGate(): StageGate | null {
   const progress = readProgress();
+
+  // P3.10：显式待突破状态为最高优先级
+  if (progress.pendingBreakthroughId) {
+    const gate = MAIN_STAGE_GATES.find(g => g.breakthroughId === progress.pendingBreakthroughId) ?? null;
+    if (gate) return gate;
+  }
+
   // P3.2：highestFloor 语义是"下一关可挑战" → 已通关最高关 = highestFloor - 1
   const clearedFloor = Math.max(0, progress.highestFloor - 1);
   const gate = getCurrentGate(clearedFloor);
@@ -1026,6 +1053,58 @@ export function getPendingGate(): StageGate | null {
     }
   }
   return null;
+}
+
+/** P3.10：主线通关原子函数——记录通关、处理突破 */
+export function recordMainlineClear(clearedFloor: number): { nextFloor: number; requiresBreakthrough: boolean; gate: StageGate | null } {
+  const progress = readProgress();
+  const gate = MAIN_STAGE_GATES.find(item => item.afterStage === clearedFloor) ?? null;
+
+  if (gate) {
+    const nextFloor = gate.nextUnlockFrom ?? clearedFloor + 1;
+    const legitimatelyCleared = progress.clearedBreakthroughs.includes(gate.breakthroughId) && progress.highestFloor >= nextFloor;
+
+    if (!legitimatelyCleared) {
+      // 修复旧存档中伪完成记录
+      progress.clearedBreakthroughs = progress.clearedBreakthroughs.filter(id => id !== gate.breakthroughId);
+      progress.pendingBreakthroughId = gate.breakthroughId;
+      // 第5关通关后仍停留在5，不提前解锁6
+      progress.highestFloor = Math.max(progress.highestFloor, clearedFloor);
+      writeProgress(progress);
+      return { nextFloor: clearedFloor, requiresBreakthrough: true, gate };
+    }
+  }
+
+  const nextFloor = clearedFloor + 1;
+  progress.highestFloor = Math.max(progress.highestFloor, nextFloor);
+  writeProgress(progress);
+  return { nextFloor, requiresBreakthrough: false, gate: null };
+}
+
+/** P3.10：突破完成原子函数 */
+export function completeBreakthroughProgress(breakthroughId: string): { ok: boolean; nextFloor: number } {
+  const progress = readProgress();
+  const gate = MAIN_STAGE_GATES.find(item => item.breakthroughId === breakthroughId);
+
+  if (!gate) return { ok: false, nextFloor: progress.highestFloor };
+
+  if (progress.pendingBreakthroughId && progress.pendingBreakthroughId !== breakthroughId) {
+    return { ok: false, nextFloor: progress.highestFloor };
+  }
+
+  if (!progress.clearedBreakthroughs.includes(breakthroughId)) {
+    progress.clearedBreakthroughs.push(breakthroughId);
+  }
+
+  progress.pendingBreakthroughId = null;
+  const nextFloor = gate.nextUnlockFrom ?? gate.afterStage + 1;
+  progress.highestFloor = Math.max(progress.highestFloor, nextFloor);
+
+  const rankIdx = RANK_ORDER.indexOf(gate.rankId);
+  if (rankIdx >= 0) progress.rankIndex = Math.max(progress.rankIndex, rankIdx);
+
+  writeProgress(progress);
+  return { ok: true, nextFloor };
 }
 
 /** 尝试升段 */

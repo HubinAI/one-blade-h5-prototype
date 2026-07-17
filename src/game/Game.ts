@@ -1314,10 +1314,11 @@ export class Game {
   }
 
   private handleEnemyHit(enemy: Enemy, trail: SlashTrail) {
-    // P3.4：教学分裂兵短暂保护
-    if (enemy.kind === "splitter" && (enemy.mechanicProtectedTimer ?? 0) > 0) {
-      this.addText(enemy.x, enemy.y - 34, "蓄裂中", "#ff8a3d", 14, 0.45);
-      return;
+    // P3.10：教学高亮仍显示"蓄裂中"但不再阻断伤害
+    if (enemy.kind === "splitter") {
+      if ((enemy.mechanicProtectedTimer ?? 0) > 0) {
+        this.addText(enemy.x, enemy.y - 34, "蓄裂中", "#ff8a3d", 14, 0.45);
+      }
     }
     const stage = SWORD_STAGE_BY_ID[trail.tier];
     enemy.flash = 0.25;
@@ -1400,6 +1401,19 @@ export class Game {
         this.addText(enemy.x, enemy.y - 20, "裂纹未成", "#d9b45b", 13);
         this.particles.push(ringParticle(enemy, "#d9b45b", 22));
       }
+    }
+
+    // P3.10：分裂怪伤害处理
+    if (enemy.kind === "splitter" && enemy.splitState !== "done") {
+      const rawDamage = stage.damage * bladeDmg * oneBladeMul;
+      const damage = Math.max(1, rawDamage);
+      const killed = this.damageEnemy(enemy, damage, trail, false, "splitter");
+      if (!killed && enemy.alive) {
+        enemy.flash = Math.max(enemy.flash, 0.35);
+        this.particles.push(...sparkBurst(enemy, 8, "#ff9d42"));
+        this.addText(enemy.x, enemy.y - enemy.radius - 12, `${Math.max(0, Math.ceil(enemy.hp))}/${Math.max(1, Math.ceil(enemy.maxHp))}`, "#ffd08a", 13, 0.5);
+      }
+      AudioService.slashHit();
     }
 
     // ---- 精英怪：伤害处理 ----
@@ -1659,6 +1673,11 @@ export class Game {
           this.addText(powder.x, powder.y - 16, "连锁引爆", "#ff6a33", 14, 0.8);
         }
       }
+    }
+
+    // P3.10：分裂怪击杀统一处理
+    if (enemy.kind === "splitter") {
+      this.handleSplitterKilled(enemy, source);
     }
 
     const colors = source === "core" || source === "core_chain" ? ["#e8d7ff", "#5d4a8f", "#ead8a7"] : paperColors;
@@ -2174,6 +2193,24 @@ export class Game {
     this.lastHitStopAt = this.elapsed;
     this.hitStopTimer = Math.max(this.hitStopTimer, duration);
     this.hitStopScale = Math.min(this.hitStopScale, scale);
+  }
+
+  /** P3.10：分裂怪击杀统一处理（主刀/副刀/爆炸/连锁均走此入口） */
+  private handleSplitterKilled(enemy: Enemy, source: string) {
+    if (enemy.kind !== "splitter") return;
+    const wasCharging = enemy.splitState === "warning";
+    if (wasCharging) {
+      this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 12);
+      this.addText(enemy.x, enemy.y - enemy.radius - 14, "阻裂成功 +12刀势", "#ffd35a", 18, 0.9);
+      this.triggerHitStop(0.06, 0.22, true);
+      this.particles.push(ringParticle(enemy, "#ffd35a", 34));
+    } else {
+      this.addText(enemy.x, enemy.y - enemy.radius - 12, "裂核斩碎", "#ff9d42", 15, 0.7);
+    }
+    enemy.splitState = "done";
+    enemy.splitTimer = 0;
+    enemy.mechanicProtectedTimer = 0;
+    void source;
   }
 
   /** P2.8：刀光残影 */
@@ -6039,12 +6076,9 @@ export class Game {
       this.triggerEliteChestDrop(enemy);
     }
 
-    // P3.4：分裂兵预警击杀反馈（强化）
-    if (enemy.kind === "splitter" && enemy.splitState === "warning") {
-      this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 12);
-      this.addText(enemy.x, enemy.y - 34, "阻裂！+12刀势", "#ffd35a", 20, 0.85);
-      this.triggerHitStop(0.06, 0.22, true);
-      this.particles.push(ringParticle(enemy, "#ffd35a", 30));
+    // P3.10：分裂怪击杀统一处理
+    if (enemy.kind === "splitter") {
+      this.handleSplitterKilled(enemy, source);
     }
     // P3：牵引兵预警击杀反馈
     if (enemy.kind === "tractor" && enemy.tractorState === "charging") {

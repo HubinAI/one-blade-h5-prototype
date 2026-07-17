@@ -39,11 +39,12 @@ import {
   getCurrentRankId,
   tryRankUp,
   updateHighestFloor,
-  addClearedBreakthrough,
   forceSetHighestFloor,
   getCurrentRunContext,
   getPendingGate,
   getBlockingGateForFloor,
+  recordMainlineClear,
+  completeBreakthroughProgress,
   type RunMode
 } from "./game/services/ProgressionService";
 import { logEvent } from "./game/services/Analytics";
@@ -71,7 +72,7 @@ export default function App() {
   const [home, setHome] = useState(getHomeSnapshot);
   const [currentLevel, setCurrentLevel] = useState<LevelConfig>(LEVELS[0]);
   const [lastResult, setLastResult] = useState<BattleResult | null>(null);
-  const [appVersion] = useState("V0717006");
+  const [appVersion] = useState("V0717007");
   const [runIndex, setRunIndex] = useState(0);
   const [currentMode, setCurrentMode] = useState<RunMode>("normal");
   const [reviveOffer, setReviveOffer] = useState<ReviveOffer | null>(null);
@@ -87,19 +88,15 @@ export default function App() {
   const refreshHome = useCallback(() => setHome(getHomeSnapshot()), []);
   const completeBreakthrough = useCallback(() => {
     if (!breakthroughResult) return;
-    addClearedBreakthrough(breakthroughResult.id);
-    const gate = MAIN_STAGE_GATES.find(g => g.breakthroughId === breakthroughResult.id);
-    if (gate) {
-      tryRankUp();
-      const nextFloor = gate.nextUnlockFrom ?? (gate.afterStage + 1);
-      forceSetHighestFloor(nextFloor);
-      setCurrentMainlineFloor(nextFloor);
+    const result = completeBreakthroughProgress(breakthroughResult.id);
+    if (result.ok) {
+      setCurrentMainlineFloor(result.nextFloor);
     }
     setBreakthroughResult(null);
     setCurrentMode("normal");
     const nextHome = getHomeSnapshot();
     setHome(nextHome);
-    console.log("[breakthrough complete]", { id: breakthroughResult.id, nextFloor: gate?.nextUnlockFrom, home: nextHome, pendingGate: getPendingGate() });
+    console.log("[breakthrough complete]", { id: breakthroughResult.id, nextFloor: result.nextFloor, ok: result.ok, home: nextHome, pendingGate: getPendingGate() });
     setScreen("menu");
   }, [breakthroughResult]);
 
@@ -139,8 +136,14 @@ export default function App() {
   );
 
   const startMainline = useCallback(() => {
+    // P3.10：优先检查 pendingBreakthroughId
+    const pendingGate = getPendingGate();
+    if (pendingGate) {
+      const bossLevel = getBossLevelConfig(pendingGate.rankId);
+      startLevel(bossLevel, "challenge");
+      return;
+    }
     const targetFloor = Math.max(1, getHomeSnapshot().highestFloor);
-    // P3.9：点击时重新检查突破卡点，防止绕过突破
     const blockingGate = getBlockingGateForFloor(targetFloor);
     if (blockingGate) {
       const bossLevel = getBossLevelConfig(blockingGate.rankId);
@@ -162,11 +165,11 @@ export default function App() {
       // 保存图鉴数据
       saveCodexData(result.killedElites, result.killedBoss);
       if (result.win) {
-        // 更新主线层数
+        // P3.10：使用 recordMainlineClear 原子处理突破状态
         if (result.levelId >= 10000) {
           const floor = result.levelId - 10000;
-          updateHighestFloor(floor + 1);
-          setCurrentMainlineFloor(floor + 1);
+          const transition = recordMainlineClear(floor);
+          setCurrentMainlineFloor(transition.nextFloor);
         }
         setUnlockedLevel((current) => {
           const next = Math.max(current, Math.min(LEVELS.length, result.levelId + 1));
@@ -229,10 +232,21 @@ export default function App() {
     logEvent("next_level_click", { levelId: lastResult.levelId });
     await maybeShowInterstitial();
     if (lastResult.levelId >= 10000) {
-      // 主线下一层
-      const floor = lastResult.levelId - 10000 + 1;
-      setCurrentMainlineFloor(floor);
-      const level = createFloorLevelConfig(floor);
+      // P3.10：主线下一层需检测突破卡点
+      const clearedFloor = lastResult.levelId - 10000;
+      const gate = MAIN_STAGE_GATES.find(item => item.afterStage === clearedFloor);
+      if (gate) {
+        goToMenu();
+        return;
+      }
+      const nextFloor = clearedFloor + 1;
+      const blockingGate = getBlockingGateForFloor(nextFloor);
+      if (blockingGate) {
+        goToMenu();
+        return;
+      }
+      setCurrentMainlineFloor(nextFloor);
+      const level = createFloorLevelConfig(nextFloor);
       startLevel(level);
     } else if (nextLevel) {
       startLevel(nextLevel);
