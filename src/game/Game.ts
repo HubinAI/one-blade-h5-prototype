@@ -187,6 +187,8 @@ export class Game {
   private _act2Triggered = false;
   /** 三幕制：45s 一刀斩模式 */
   private _act3Triggered = false;
+  /** P4.1A.9：一刀斩待激活（45秒到达但不一定有敌人，有4个有效目标时才激活） */
+  private act3Pending = false;
   /** 一刀斩模式剩余时间：>0时下次挥刀威力×2 */
   private oneBladeModeTimer = 0;
   /** 当前挥刀的"一刀斩"倍率（1.0或2.0），在 startSlash 时设置 */
@@ -2165,10 +2167,16 @@ export class Game {
             break;
           }
           if (i === 0 && validEnemies.length >= 3) {
-            const avgX = validEnemies.reduce((s, e) => s + e.x, 0) / validEnemies.length;
-            const avgY = validEnemies.reduce((s, e) => s + e.y, 0) / validEnemies.length;
+            // P4.1A.9: 局部80px密集群（不是全部有效敌人的平均点）
+            let bestGroup: typeof validEnemies = [];
+            for (const seed of validEnemies) {
+              const group = validEnemies.filter(e => Math.abs(e.y - seed.y) <= 40);
+              if (group.length > bestGroup.length) bestGroup = group;
+            }
+            if (bestGroup.length < 3) { anim.phaseTimer += frameDt; break; }
+            const avgX = bestGroup.reduce((s, e) => s + e.x, 0) / bestGroup.length;
+            const avgY = bestGroup.reduce((s, e) => s + e.y, 0) / bestGroup.length;
             anim.startPos = { ...home };
-            // P4.1A.6: endPos用clampSubBladeAttackY硬约束
             anim.endPos = { x: clamp(avgX, 100, DESIGN_WIDTH - 100), y: clampSubBladeAttackY(avgY - 50) };
             anim.phase = "arming";
             anim.phaseTimer = 0;
@@ -2248,10 +2256,24 @@ export class Game {
                 // 左刀：对endPos附近的敌人结算一次横扫伤害
                 this.applyMomentumSweepDamage({ x1: anim.endPos.x - 90, y1: anim.endPos.y + 6, x2: anim.endPos.x + 90, y2: anim.endPos.y - 6, color: "#5bc0ff", bladeIdx: 0 }, blade, stats);
               } else {
-                // 右刀：对锁定目标结算单点伤害
+                // P4.1A.9: 右刀验证目标，死亡时90px重锁或跳过伤害
                 const targetEnemy = anim.targetId ? this.enemies.find(e => e.id === anim.targetId && e.alive) : null;
-                const dTarget = targetEnemy ?? { x: anim.endPos.x, y: anim.endPos.y };
-                this.applyWeakpointChaseDamage({ x1: dTarget.x - 3, y1: dTarget.y - 20, x2: dTarget.x + 3, y2: dTarget.y + 10, color: "#b58cff", bladeIdx: 1 }, blade, stats);
+                if (!targetEnemy && anim.targetId) {
+                  // 目标已死亡：90px内找新目标
+                  const oldTarget = this.enemies.find(e => e.id === anim.targetId);
+                  if (oldTarget) {
+                    const newTarget = this.enemies.filter(e => e.alive && e.y >= BATTLEFIELD_ZONES.midfieldStartY && e.y <= BALANCE.battlefield.bottomDefenseY - 30)
+                      .find(e => Math.abs(e.x - oldTarget.x) <= 90 && Math.abs(e.y - oldTarget.y) <= 90);
+                    if (newTarget) {
+                      anim.targetId = newTarget.id;
+                      anim.endPos = { x: newTarget.x, y: newTarget.y - 30 };
+                    }
+                  }
+                }
+                const finalTarget = anim.targetId ? this.enemies.find(e => e.id === anim.targetId && e.alive) : null;
+                if (finalTarget) {
+                  this.applyWeakpointChaseDamage({ x1: finalTarget.x - 3, y1: finalTarget.y - 20, x2: finalTarget.x + 3, y2: finalTarget.y + 10, color: "#b58cff", bladeIdx: 1 }, blade, stats);
+                }
               }
             }
           }
@@ -2281,6 +2303,11 @@ export class Game {
           if (anim.phaseTimer >= anim.phaseDuration) {
             anim.phase = "cooldown";
             anim.phaseTimer = 0;
+            // P4.1A.9: cooldown时清空targetId和hit状态
+            anim.targetId = null;
+            anim.hitApplied = false;
+            anim.startPos = { ...home };
+            anim.endPos = { ...home };
           }
           break;
         }
@@ -2678,8 +2705,10 @@ export class Game {
     // 45s 第三幕结束 → 一刀斩模式
     if (!this._act3Triggered && this.elapsed >= 45) {
       this._act3Triggered = true;
-      this.triggerOneBladeMode();
+      this.act3Pending = true; // P4.1A.9: 延迟激活，按战斗状态才触发
     }
+    // P4.1A.9: 检查一刀斩待激活
+    if (this.act3Pending) this.tryActivatePendingOneBlade();
   }
 
   /** 满势时刻：15s 灌满刀势 + 强震屏 + 飘字 */
@@ -2695,6 +2724,16 @@ export class Game {
       this.particles.push(glowParticle({ x: DESIGN_WIDTH / 2 + (Math.random() - 0.5) * 200, y: 400 + (Math.random() - 0.5) * 300 }, "#ffd35a", 18));
     }
     AudioService.slashHit();
+  }
+
+  /** P4.1A.9：延迟激活一刀斩（有效战区至少4个目标才激活） */
+  private tryActivatePendingOneBlade() {
+    if (!this.act3Pending) return;
+    if (this.phase !== "playing" || this.victoryTransitionActive || this.isEdictModalBlocking()) return;
+    const validTargets = this.enemies.filter(e => e.alive && e.y >= BATTLEFIELD_ZONES.midfieldStartY && e.y <= BALANCE.battlefield.bottomDefenseY - 30);
+    if (validTargets.length < 4) return;
+    this.act3Pending = false;
+    this.triggerOneBladeMode();
   }
 
   /** 副刀共鸣：30s 立即清空两把副刀CD + 飘字 */
@@ -2720,7 +2759,7 @@ export class Game {
     this.screenShake = Math.max(this.screenShake, 1.2);
     this.flash = Math.max(this.flash, 0.7);
     this.slowMoTimer = Math.max(this.slowMoTimer, 0.15);
-    this.addText(DESIGN_WIDTH / 2, 280, "🗡 一刀斩", "#ff6a33", 32, 2.5);
+    // P4.1A.9: 不显示中央大字，只在挥刀时提示
     for (let i = 0; i < 16; i++) {
       this.particles.push(...sparkBurst({ x: DESIGN_WIDTH / 2 + (Math.random() - 0.5) * 240, y: 400 + (Math.random() - 0.5) * 320 }, 8, "#ff6a33"));
     }
@@ -2842,10 +2881,10 @@ export class Game {
       this._activeEventTimer = 8;
       // 给所有副刀施加临时加速
       for (let i = 0; i < this.subBladeTimers.length; i++) {
-        this.subBladeTimers[i] = Math.max(0, this.subBladeTimers[i] - 0.5); // 立即加速0.5s
+        this.subBladeTimers[i] = Math.min(this.subBladeCooldowns[i], this.subBladeTimers[i] + 0.5); // P4.1A.9: timer向上累计，改为增加
       }
       this.addText(DESIGN_WIDTH / 2, 720, "🥁 鼓舞！", "#ffd35a", 18, 1.8);
-      this.addText(DESIGN_WIDTH / 2, 746, "副刀CD临时-30%", "#f6e7bd", 13, 1.5);
+      this.addText(DESIGN_WIDTH / 2, 746, "副刀充能加速", "#f6e7bd", 13, 1.5);
     } else if (chosenEvent === "eliteStrike") {
       this.addText(DESIGN_WIDTH / 2, 200, "⚔ 精锐护阵！", "#9b6dff", 24, 1.8);
       this.addText(DESIGN_WIDTH / 2, 228, "盾兵+精锐护卫出现", "#c896ff", 14, 1.5);
