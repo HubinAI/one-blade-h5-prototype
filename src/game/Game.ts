@@ -54,6 +54,14 @@ type ReviveOfferCallback = (offer: ReviveOffer) => void;
 const paperColors = ["#ead8a7", "#caa565", "#f6e7bd", "#8f5b32", "#ffd67c"];
 const HINT_STORAGE_KEY = "one_blade_v04_seen_hints";
 
+type EdictRewardState =
+  | "none"
+  | "dropped"
+  | "modal"
+  | "flying"
+  | "active"
+  | "finished";
+
 export class Game {
   readonly level: LevelConfig;
 
@@ -243,6 +251,25 @@ export class Game {
   private victoryTransitionTimer = 0;
   private victoryTransitionDuration = 1.0;
 
+  /** P3.5：统一军令状态机切换 */
+  private setEdictRewardState(next: EdictRewardState, reason: string): boolean {
+    const prev = this.edictRewardState;
+    const allowed: Record<EdictRewardState, EdictRewardState[]> = {
+      none: ["dropped"],
+      dropped: ["modal"],
+      modal: ["flying"],
+      flying: ["active"],
+      active: ["finished"],
+      finished: []
+    };
+    if (!allowed[prev].includes(next)) {
+      console.warn("[edict invalid transition]", { prev, next, reason, time: this.elapsed });
+      return false;
+    }
+    this.edictRewardState = next;
+    return true;
+  }
+
   /** P2.9：军令图标飞行 */
   private edictIconFlying = false;
   private edictIconFlyT = 0;
@@ -253,6 +280,11 @@ export class Game {
   private edictIconActive = false;
   private edictIconTimer = 0;
   private edictIconMaxTimer = 12;
+  /** P3.5：统一军令状态机 */
+  private edictRewardState: EdictRewardState = "none";
+  private edictRewardApplied = false;
+  private edictPostWavesQueued = false;
+  private edictModalConfirmed = false;
 
   private chestFixedBuffApplied = false;
 
@@ -552,6 +584,7 @@ export class Game {
     this.updateBuffChoiceTriggers();
     this.checkBattleEnd();
     this.updateVictoryTransition(scaledDt);
+    this.validateEdictState();
   }
 
   render(ctx: CanvasRenderingContext2D) {
@@ -2949,12 +2982,16 @@ export class Game {
     // 已进入结果页
     if (this.finished) { this.battlePhase = 'result'; return; }
 
-    // 军令爆发阶段（宝箱确认后）
-    const postWaves = this.getEffectivePostChestWaves();
-    const hasEdictBurst = postWaves.length > 0;
-    if (hasEdictBurst && this.chestDone) {
+    // P3.5：军令爆发阶段（不再用 chestDone 永久锁死）
+    if (
+      this.edictRewardState === "active" &&
+      (
+        !this.allPostChestWavesSpawned ||
+        this.subSpawnQueue.length > 0 ||
+        this.enemies.some(e => e.alive)
+      )
+    ) {
       this.battlePhase = 'edict_burst';
-      this.edictBurstRoundTotal = postWaves.length;
       return;
     }
 
@@ -3288,19 +3325,20 @@ export class Game {
     }
   }
 
-  /** P2.9：军令图标飞行动画 update */
+  /** P3.5：军令图标飞行动画（只由状态机驱动） */
   private updateEdictIconFly(dt: number) {
+    if (this.edictRewardState !== "flying") return;
     if (!this.edictIconFlying) return;
     this.edictIconFlyT += dt / this.edictIconFlyDuration;
     if (this.edictIconFlyT >= 1) {
       this.edictIconFlyT = 1;
-      this.edictIconFlying = false;
       this.completeEliteChestReward();
     }
   }
 
-  /** P2.9：军令图标飞行绘制 */
+  /** P3.5：军令图标飞行绘制（只显示 flying 状态） */
   private drawEdictIconFly(ctx: CanvasRenderingContext2D) {
+    if (this.edictRewardState !== "flying") return;
     if (!this.edictIconFlying) return;
     const t = clamp(this.edictIconFlyT, 0, 1);
     const ease = 1 - Math.pow(1 - t, 3);
@@ -3324,17 +3362,49 @@ export class Game {
     ctx.restore();
   }
 
-  /** P3.3：更新军令状态 Icon（不再用倒计时决定隐藏） */
+  /** P3.5：更新军令状态——爆发结束后收尾 */
   private updateEdictStatusIcon(dt: number) {
-    const stillInEdict = this.battlePhase === "edict_burst" || this.chestMomentumTimer > 0 || this.edictIconActive;
-    if (!stillInEdict && this.edictIconActive) {
-      this.edictIconActive = false;
-      this.triggerEdictIconFadeOut();
+    // 军令爆发完成后清理状态
+    if (
+      this.edictRewardState === "active" &&
+      this.allPostChestWavesSpawned &&
+      this.subSpawnQueue.length === 0
+    ) {
+      const aliveEnemies = this.enemies.filter(e => e.alive);
+      if (aliveEnemies.length === 0) {
+        this.edictIconActive = false;
+        this.chestMomentumTimer = 0;
+        this.setEdictRewardState("finished", "edict burst finished");
+      }
     }
   }
 
-  /** P3.3：左上角军令状态 Icon（不显示倒计时，只显示状态） */
+  /** P3.5：帧级卡死守卫 */
+  private validateEdictState() {
+    // 双UI错误检测
+    const invalidDoubleUi = this.chestPendingConfirm && (this.edictIconFlying || this.edictIconActive);
+    if (invalidDoubleUi) {
+      console.warn("[edict invalid double ui]", { state: this.edictRewardState, chestPendingConfirm: this.chestPendingConfirm, edictIconFlying: this.edictIconFlying, edictIconActive: this.edictIconActive, time: this.elapsed });
+      if (this.edictRewardState === "modal") { this.edictIconFlying = false; this.edictIconActive = false; }
+    }
+    // 奖励已应用但仍在弹窗状态
+    if (this.edictRewardApplied && this.edictRewardState === "modal") {
+      console.warn("[edict applied while still modal]");
+      this.chestPendingConfirm = false;
+      this.chestOpened = false;
+      this.chestBuffRevealed = false;
+      this.setEdictRewardState("active", "auto repair applied modal");
+    }
+    // 飞行卡死保护
+    if (this.edictRewardState === "flying" && this.edictIconFlyT > 1.2) {
+      console.warn("[edict flying stuck, force complete]");
+      this.completeEliteChestReward();
+    }
+  }
+
+  /** P3.5：左上角军令状态 Icon（只显示 active 状态） */
   private drawEdictStatusIcon(ctx: CanvasRenderingContext2D) {
+    if (this.edictRewardState !== "active") return;
     const shouldShow = this.edictIconActive || this.chestMomentumTimer > 0 || this.battlePhase === "edict_burst";
     if (!shouldShow) return;
 
@@ -3377,59 +3447,74 @@ export class Game {
   }
 
   /** P2.9：完成精英宝箱奖励——应用buff + 军令Icon + 进入军令爆发 */
+  /** P3.5：飞行完成→应用军令奖励（幂等）+ 启动军令爆发 */
   private completeEliteChestReward() {
-    if (this.chestDone) return;
+    if (this.edictRewardState !== "flying") return;
+    if (!this.edictIconFlying) return;
+
+    this.edictIconFlying = false;
+    this.edictIconFlyT = 1;
     this.chestFlying = false;
     this.chestFlyT = 1;
-    this.chestDone = true;
 
-    // 应用军令效果
-    this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 70);
-    for (let i = 0; i < this.subBladeTimers.length; i++) {
-      this.subBladeTimers[i] = 0;
+    // 幂等：只应用一次军令奖励
+    if (!this.edictRewardApplied) {
+      this.edictRewardApplied = true;
+      this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 70);
+      for (let i = 0; i < this.subBladeTimers.length; i++) {
+        this.subBladeTimers[i] = 0;
+      }
+      this.chestMomentumTimer = Math.max(this.chestMomentumTimer, 12);
     }
-    this.chestMomentumTimer = Math.max(this.chestMomentumTimer, 12);
+
+    this.chestDone = true;
+    this.edictIconActive = true;
+
+    if (!this.setEdictRewardState("active", "edict reward complete")) return;
+
+    this.startEdictBurstOnce();
+  }
+
+  /** P3.5：军令爆发只入队一次 */
+  private startEdictBurstOnce() {
+    if (this.edictPostWavesQueued) return;
 
     const postWaves = this.getEffectivePostChestWaves();
-    if (postWaves.length > 0) {
-      this.battlePhase = "edict_burst";
-      this.postChestStartAt = this.elapsed;
-      this.postChestWaveIndex = 0;
-      this.allPostChestWavesSpawned = false;
-      this.edictBurstRoundIndex = 1;
-      this.edictBurstRoundTotal = postWaves.length;
-    } else {
+
+    if (postWaves.length <= 0) {
       this.allPostChestWavesSpawned = true;
       this.edictBurstRoundIndex = 0;
       this.edictBurstRoundTotal = 0;
+      return;
     }
 
-    // 启动持续军令Icon
-    const lastSpawnAt = postWaves.length > 0
-      ? Math.max(...postWaves.map(w => w.spawnAt ?? 0))
-      : 0;
-    const edictDuration = Math.max(12, lastSpawnAt + 4);
-    this.edictIconActive = true;
-    this.edictIconTimer = Math.max(this.edictIconTimer, edictDuration);
-    this.edictIconMaxTimer = Math.max(this.edictIconMaxTimer, edictDuration);
-
-    this.particles.push(ringParticle({ x: 46, y: 78 }, "#ffd35a", 30));
-    this.screenShake = Math.max(this.screenShake, 0.12);
-    this.addText(70, 102, "军令生效", "#ffd35a", 14, 0.8);
+    this.edictPostWavesQueued = true;
+    this.battlePhase = "edict_burst";
+    this.postChestStartAt = this.elapsed;
+    this.postChestWaveIndex = 0;
+    this.allPostChestWavesSpawned = false;
+    this.edictBurstRoundIndex = 1;
+    this.edictBurstRoundTotal = postWaves.length;
   }
 
-  /** P3.4：点击继续后弹窗立即关闭，图标立即飞行 */
+  /** P3.5：点击继续后弹窗立即关闭，图标立即飞行 */
   private confirmEliteChestReward() {
+    if (this.edictRewardState !== "modal") return;
     if (!this.chestPendingConfirm) return;
+
     this.chestPendingConfirm = false;
     this.chestOpened = false;
     this.chestBuffRevealed = false;
-    this.chestFlying = true;
+    this.chestFlying = false;
     this.chestFlyT = 0;
+
     this.edictIconFlying = true;
     this.edictIconFlyT = 0;
     this.edictIconFlyFrom = { x: DESIGN_WIDTH / 2, y: DESIGN_HEIGHT * 0.48 };
     this.edictIconFlyTo = { x: 46, y: 78 };
+
+    if (!this.setEdictRewardState("flying", "confirm chest reward")) return;
+
     this.addText(DESIGN_WIDTH / 2, DESIGN_HEIGHT * 0.52, "军令入体", "#ffd35a", 16, 0.45);
     this.screenShake = Math.max(this.screenShake, 0.08);
   }
@@ -5677,8 +5762,12 @@ export class Game {
   }
 
   /** 第六轮修正：统一精英宝箱掉落入口（主刀/副刀/触底共用） */
+  /** P3.5：精英死亡触发宝箱（状态机保护，防二次触发） */
   private triggerEliteChestDrop(enemy: Enemy) {
-    if (this.chestDropped) return;
+    if (this.edictRewardState !== "none") {
+      console.warn("[edict duplicate chest drop blocked]", { state: this.edictRewardState, time: this.elapsed });
+      return;
+    }
     if (enemy.kind !== "elite" || !enemy.eliteKind) return;
 
     this.killedElites.push(enemy.eliteKind);
@@ -5690,12 +5779,15 @@ export class Game {
     this.addText(enemy.x, enemy.y - 40, "宝箱掉落！", "#ffd35a", 18, 1.6);
 
     this.autoChestResolveAt = this.elapsed + 0.55;
-    // P2.8：精英死亡强反馈
+    // 精英死亡强反馈
     this.triggerHitStop(0.22, 0.08, true);
     this.triggerSlashAfterglow(0.9, 0.28);
     this.triggerEdgeFlash(0.85, 0.30);
     this.screenShake = Math.max(this.screenShake, 0.24);
     this.particles.push(ringParticle(enemy, "#ffd35a", 42));
+
+    this.chestDropped = true;
+    this.setEdictRewardState("dropped", "elite killed");
   }
 
   /** 第六轮修正：副刀/系统伤害造成的敌人死亡处理（确保精英走宝箱流程） */
@@ -5723,17 +5815,18 @@ export class Game {
     }
   }
 
-  /** P2.9：弹出宝箱军令弹窗（等待玩家主动确认） */
+  /** P3.5：弹出宝箱军令弹窗（由状态机统一管理） */
   private autoResolveEliteChestReward() {
-    if (this.chestDone) return;
+    if (this.edictRewardState !== "dropped") return;
     if (!this.chestDropped && !this.eliteKilled) return;
 
-    this.chestDropped = true;
     this.chestOpening = false;
     this.chestOpened = true;
     this.chestBuffRevealed = true;
     this.chestBuffResult = "chest_first_clear";
-    this.chestPendingConfirm = true;  // 等待玩家点击"继续"
+    this.chestPendingConfirm = true;
+
+    if (!this.setEdictRewardState("modal", "open chest modal")) return;
 
     this.addText(DESIGN_WIDTH / 2, 150, "军令激活", "#ffd35a", 24, 1.2);
     this.addText(DESIGN_WIDTH / 2, 185, "刀势回涌！副刀共鸣！", "#ffd35a", 18, 1.4);
