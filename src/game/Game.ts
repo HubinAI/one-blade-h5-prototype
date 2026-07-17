@@ -285,6 +285,8 @@ export class Game {
   private edictRewardApplied = false;
   private edictPostWavesQueued = false;
   private edictModalConfirmed = false;
+  /** P3.6：军令防重复守卫 */
+  private edictRewardStarted = false;
 
   private chestFixedBuffApplied = false;
 
@@ -585,6 +587,7 @@ export class Game {
     this.checkBattleEnd();
     this.updateVictoryTransition(scaledDt);
     this.validateEdictState();
+    this.validateChestEdictState();
   }
 
   render(ctx: CanvasRenderingContext2D) {
@@ -3402,6 +3405,29 @@ export class Game {
     }
   }
 
+  /** P3.6：卡死自检守卫 */
+  private validateChestEdictState() {
+    const doubleFlight = this.chestFlying && this.edictIconFlying;
+    if (doubleFlight) {
+      console.warn("[edict bug] double flight detected, disabling chestFlying", { time: this.elapsed, chestFlyT: this.chestFlyT, edictIconFlyT: this.edictIconFlyT });
+      this.chestFlying = false;
+      this.chestFlyT = 0;
+    }
+    const modalAndActive = this.chestPendingConfirm && (this.edictIconFlying || this.edictIconActive || this.chestDone);
+    if (modalAndActive) {
+      console.warn("[edict bug] modal overlaps active state", { time: this.elapsed, chestPendingConfirm: this.chestPendingConfirm, edictIconFlying: this.edictIconFlying, edictIconActive: this.edictIconActive, chestDone: this.chestDone });
+      if (this.chestDone || this.edictIconActive) {
+        this.chestPendingConfirm = false;
+        this.chestOpened = false;
+        this.chestBuffRevealed = false;
+      }
+    }
+    if (this.edictIconFlying && this.edictIconFlyT > 1.2) {
+      console.warn("[edict bug] edict icon flying stuck, force complete", { time: this.elapsed, edictIconFlyT: this.edictIconFlyT });
+      this.completeEliteChestReward();
+    }
+  }
+
   /** P3.5：左上角军令状态 Icon（只显示 active 状态） */
   private drawEdictStatusIcon(ctx: CanvasRenderingContext2D) {
     if (this.edictRewardState !== "active") return;
@@ -5762,8 +5788,12 @@ export class Game {
   }
 
   /** 第六轮修正：统一精英宝箱掉落入口（主刀/副刀/触底共用） */
-  /** P3.5：精英死亡触发宝箱（状态机保护，防二次触发） */
+  /** P3.6：精英死亡触发宝箱（三重防重复） */
   private triggerEliteChestDrop(enemy: Enemy) {
+    if (this.edictRewardStarted || this.chestDropped || this.chestDone) {
+      console.warn("[edict duplicate blocked]", { edictRewardStarted: this.edictRewardStarted, chestDropped: this.chestDropped, chestDone: this.chestDone, time: this.elapsed });
+      return;
+    }
     if (this.edictRewardState !== "none") {
       console.warn("[edict duplicate chest drop blocked]", { state: this.edictRewardState, time: this.elapsed });
       return;
@@ -5787,6 +5817,7 @@ export class Game {
     this.particles.push(ringParticle(enemy, "#ffd35a", 42));
 
     this.chestDropped = true;
+    this.edictRewardStarted = true;
     this.setEdictRewardState("dropped", "elite killed");
   }
 
@@ -5947,12 +5978,12 @@ export class Game {
       this.chestDropped = false;
     }
 
-    // 飞行动画更新
+    // 飞行动画更新（P3.6：旧 chestFlying 链路已废弃，不再驱动完成）
     if (this.chestFlying) {
-      this.chestFlyT += dt / 0.7; // 0.7s飞行
+      this.chestFlyT += dt / 0.7;
       if (this.chestFlyT >= 1) {
-        this.chestFlyT = 1;
-        this.finishChestFly();
+        this.chestFlying = false;
+        this.chestFlyT = 0;
       }
     }
   }
