@@ -629,19 +629,23 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
     ? { multiplier: 3.4, endY: 560, maxDuration: 2.0, spawnY: -20 }
     : undefined;
 
-  // P3.3：强制插入机制怪教学波次
+  // P3.4：强制插入机制怪教学波次
   if (floor === 4) {
-    // helper
-    const sw = (name: string, spawnAt: number, sc: number, ic: number): WaveConfig => ({
+    const sw = (name: string, spawnAt: number, sc: number, ic: number, tutorial = false): WaveConfig => ({
       name, delay: 0.2, spawnAt,
       speedMultiplier: 1 + floor * 0.005,
-      enemies: [{ kind: "infantry" as any, count: Math.ceil(ic * 0.4), x: LANES[1], yOffset: 0 }, { kind: "splitter" as any, count: sc, x: LANES[3], yOffset: 10 }, { kind: "infantry" as any, count: Math.ceil(ic * 0.6), x: LANES[5], yOffset: 22 }],
+      enemies: [
+        { kind: "infantry" as any, count: Math.ceil(ic * 0.35), x: LANES[1], yOffset: 0 },
+        { kind: "splitter" as any, count: sc, x: LANES[3], yOffset: 10, isTutorialSplitter: tutorial } as any,
+        { kind: "infantry" as any, count: Math.ceil(ic * 0.65), x: LANES[5], yOffset: 22 },
+      ]
     });
-    // 12s分裂初现(1只), 24s裂变复现(2只), 36s双裂压迫(2只), 48s裂潮(3只)
-    waves.splice(2, 0, sw("裂变初现", 12, 1, 8));
-    waves.splice(4, 0, sw("裂变复现", 24, 2, 10));
-    waves.splice(6, 0, sw("双裂压迫", 36, 2, 12));
-    waves.splice(8, 0, sw("裂潮", 48, 3, 14));
+    // 5波分裂：8s*2教学, 16s*2教学, 26s*2, 36s*3, 48s*3
+    waves.splice(2, 0, sw("裂变初现", 8, 2, 8, true));
+    waves.splice(4, 0, sw("裂变复现", 16, 2, 12, true));
+    waves.splice(6, 0, sw("双裂压迫", 26, 2, 14, false));
+    waves.splice(8, 0, sw("裂潮", 36, 3, 16, false));
+    waves.splice(10, 0, sw("裂潮再起", 48, 3, 18, false));
   }
   // P3.3：后置波补分裂兵
   if (floor === 4 && postChestWaves) {

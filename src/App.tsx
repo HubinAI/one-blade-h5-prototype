@@ -41,6 +41,7 @@ import {
   tryRankUp,
   updateHighestFloor,
   addClearedBreakthrough,
+  forceSetHighestFloor,
   getCurrentRunContext,
   getPendingGate,
   type RunMode
@@ -70,7 +71,7 @@ export default function App() {
   const [home, setHome] = useState(getHomeSnapshot);
   const [currentLevel, setCurrentLevel] = useState<LevelConfig>(LEVELS[0]);
   const [lastResult, setLastResult] = useState<BattleResult | null>(null);
-  const [appVersion] = useState("V0716017");
+  const [appVersion] = useState("V0717001");
   const [runIndex, setRunIndex] = useState(0);
   const [currentMode, setCurrentMode] = useState<RunMode>("normal");
   const [reviveOffer, setReviveOffer] = useState<ReviveOffer | null>(null);
@@ -84,7 +85,7 @@ export default function App() {
   const [showMerchant, setShowMerchant] = useState(false);
   const [pendingMerchant, setPendingMerchant] = useState(false);
   const [breakthroughResult, setBreakthroughResult] = useState<{ name: string; id: string; unlockText: string } | null>(null);
-  const pendingGate = useMemo(() => getPendingGate(), [home.highestFloor, home.rankIndex, home.runIndex]);
+  const pendingGate = getPendingGate();
 
   const refreshHome = useCallback(() => setHome(getHomeSnapshot()), []);
   const completeBreakthrough = useCallback(() => {
@@ -93,17 +94,15 @@ export default function App() {
     const gate = MAIN_STAGE_GATES.find(g => g.breakthroughId === breakthroughResult.id);
     if (gate) {
       tryRankUp();
-      // P3.2：直接按 gate.rankId 设置段位，避免 highestFloor 误判
-      if ((window as any).__progression_setRankById) {
-        try { (window as any).__progression_setRankById(gate.rankId); } catch { /* no-op */ }
-      }
       const nextFloor = gate.nextUnlockFrom ?? (gate.afterStage + 1);
-      updateHighestFloor(nextFloor);
+      forceSetHighestFloor(nextFloor);
       setCurrentMainlineFloor(nextFloor);
     }
     setBreakthroughResult(null);
     setCurrentMode("normal");
-    setHome(getHomeSnapshot());
+    const nextHome = getHomeSnapshot();
+    setHome(nextHome);
+    console.log("[breakthrough complete]", { id: breakthroughResult.id, nextFloor: gate?.nextUnlockFrom, home: nextHome, pendingGate: getPendingGate() });
     setScreen("menu");
   }, [breakthroughResult]);
 

@@ -1380,6 +1380,13 @@ export function getActiveBuffEffects(): TodayBuff[] {
 // Debug 调试函数
 // ════════════════════════════════════════════
 
+/** P3.4：强制设置 highestFloor（突破完成阶段归位） */
+export function forceSetHighestFloor(floor: number): void {
+  const progress = readProgress();
+  progress.highestFloor = Math.max(1, floor);
+  writeProgress(progress);
+}
+
 /** Debug: 设置最高主线层数 */
 export function debugSetHighestFloor(floor: number): void {
   const progress = readProgress();

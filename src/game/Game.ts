@@ -246,7 +246,7 @@ export class Game {
   /** P2.9：军令图标飞行 */
   private edictIconFlying = false;
   private edictIconFlyT = 0;
-  private edictIconFlyDuration = 0.45;
+  private edictIconFlyDuration = 0.28;
   private edictIconFlyFrom = { x: DESIGN_WIDTH / 2, y: DESIGN_HEIGHT * 0.48 };
   private edictIconFlyTo = { x: 46, y: 78 };
   /** P2.9：左上角持续军令Icon */
@@ -545,8 +545,8 @@ export class Game {
       this.autoResolveEliteChestReward();
     }
 
-    this.updateEdictIconFly(scaledDt);
-    this.updateEdictStatusIcon(scaledDt);
+    this.updateEdictIconFly(frameDt);
+    this.updateEdictStatusIcon(frameDt);
     this.updatePostChestWaves(scaledDt);
     this.updateBattlePhase();
     this.updateBuffChoiceTriggers();
@@ -1235,6 +1235,11 @@ export class Game {
   }
 
   private handleEnemyHit(enemy: Enemy, trail: SlashTrail) {
+    // P3.4：教学分裂兵短暂保护
+    if (enemy.kind === "splitter" && (enemy.mechanicProtectedTimer ?? 0) > 0) {
+      this.addText(enemy.x, enemy.y - 34, "蓄裂中", "#ff8a3d", 14, 0.45);
+      return;
+    }
     const stage = SWORD_STAGE_BY_ID[trail.tier];
     enemy.flash = 0.25;
     const bladeDmg = this.getMainBladeDamageMultiplier();
@@ -2800,8 +2805,16 @@ export class Game {
       if (enemy.y >= SPLITTER_CONFIG.triggerY) {
         enemy.splitState = "warning";
         enemy.splitTimer = SPLITTER_CONFIG.chargeDuration;
+        // P3.4：教学分裂兵短暂保护，保证玩家看到蓄力
+        if (enemy.isTutorialSplitter) {
+          enemy.mechanicProtectedTimer = SPLITTER_CONFIG.tutorialProtectedSeconds;
+        }
       }
       return;
+    }
+    // P3.4：教学保护计时衰减
+    if ((enemy.mechanicProtectedTimer ?? 0) > 0) {
+      enemy.mechanicProtectedTimer = Math.max(0, (enemy.mechanicProtectedTimer ?? 0) - dt);
     }
     if (enemy.splitState === "warning") {
       enemy.splitTimer = Math.max(0, (enemy.splitTimer ?? 0) - dt);
@@ -2809,7 +2822,7 @@ export class Game {
     }
   }
 
-  /** P3：执行分裂 */
+  /** P3.4：执行分裂（4向弹开 + 强反馈） */
   private performSplitterSplit(enemy: Enemy) {
     if (!enemy.alive) return;
     if ((enemy.splitCount ?? 0) >= SPLITTER_CONFIG.maxSplitCount) return;
@@ -2821,16 +2834,24 @@ export class Game {
     enemy.splitState = "done";
     enemy.splitCount = (enemy.splitCount ?? 0) + 1;
     enemy.alive = false;
-    const offsets = [-18, 18];
-    for (let i = 0; i < SPLITTER_CONFIG.childCount; i++) {
-      const childX = clamp(enemy.x + offsets[i], BATTLE_SAFE_X.normalMin, BATTLE_SAFE_X.normalMax);
-      const childY = enemy.y + randomRange(-8, 8);
+
+    const childOffsets = [
+      { x: -32, y: -8 },
+      { x: 32, y: -8 },
+      { x: -22, y: 24 },
+      { x: 22, y: 24 }
+    ];
+    for (let i = 0; i < Math.min(SPLITTER_CONFIG.childCount, childOffsets.length); i++) {
+      const childX = clamp(enemy.x + childOffsets[i].x, BATTLE_SAFE_X.normalMin, BATTLE_SAFE_X.normalMax);
+      const childY = enemy.y + childOffsets[i].y + randomRange(-4, 4);
       const child = this.createEnemy("infantry", childX, childY, 1, ENTRY_PROFILE_COMMON);
       child.isSplitChild = true;
       this.enemies.push(child);
     }
-    this.addText(enemy.x, enemy.y - 24, "分裂！", "#ffb85a", 16, 0.8);
-    this.particles.push(ringParticle(enemy, "#ffb85a", 24));
+    this.triggerHitStop(0.08, 0.20, true);
+    this.screenShake = Math.max(this.screenShake, 0.18);
+    this.addText(enemy.x, enemy.y - 36, "分裂！", "#ff6a33", 24, 0.9);
+    this.particles.push(ringParticle(enemy, "#ff8a3d", 42));
   }
 
   /** P3：牵引兵逻辑 */
@@ -3397,16 +3418,20 @@ export class Game {
     this.addText(70, 102, "军令生效", "#ffd35a", 14, 0.8);
   }
 
-  /** P2.9：玩家点击确认关闭军令弹窗——启动飞行动画 */
+  /** P3.4：点击继续后弹窗立即关闭，图标立即飞行 */
   private confirmEliteChestReward() {
     if (!this.chestPendingConfirm) return;
     this.chestPendingConfirm = false;
+    this.chestOpened = false;
+    this.chestBuffRevealed = false;
     this.chestFlying = true;
     this.chestFlyT = 0;
     this.edictIconFlying = true;
     this.edictIconFlyT = 0;
     this.edictIconFlyFrom = { x: DESIGN_WIDTH / 2, y: DESIGN_HEIGHT * 0.48 };
     this.edictIconFlyTo = { x: 46, y: 78 };
+    this.addText(DESIGN_WIDTH / 2, DESIGN_HEIGHT * 0.52, "军令入体", "#ffd35a", 16, 0.45);
+    this.screenShake = Math.max(this.screenShake, 0.08);
   }
 
   /** P2.7：精简版精英名牌（只显示5格血条，不常驻显示名字） */
@@ -5684,10 +5709,12 @@ export class Game {
       this.triggerEliteChestDrop(enemy);
     }
 
-    // P3：分裂兵预警击杀反馈
+    // P3.4：分裂兵预警击杀反馈（强化）
     if (enemy.kind === "splitter" && enemy.splitState === "warning") {
-      this.addText(enemy.x, enemy.y - 28, "阻裂！", "#ffd35a", 16, 0.7);
-      this.particles.push(ringParticle(enemy, "#ffd35a", 20));
+      this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 12);
+      this.addText(enemy.x, enemy.y - 34, "阻裂！+12刀势", "#ffd35a", 20, 0.85);
+      this.triggerHitStop(0.06, 0.22, true);
+      this.particles.push(ringParticle(enemy, "#ffd35a", 30));
     }
     // P3：牵引兵预警击杀反馈
     if (enemy.kind === "tractor" && enemy.tractorState === "charging") {

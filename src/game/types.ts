@@ -182,6 +182,8 @@ export type Enemy = {
   splitTimer?: number;
   splitCount?: number;
   isSplitChild?: boolean;
+  isTutorialSplitter?: boolean;
+  mechanicProtectedTimer?: number;
   /** P3：牵引兵状态 */
   tractorState?: "idle" | "charging" | "pulling" | "cooldown" | "done";
   tractorTimer?: number;
