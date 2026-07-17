@@ -1111,19 +1111,26 @@ export class Game {
     return this.edictRewardState === "modal" && this.chestPendingConfirm;
   }
 
-  /** P3.8：统一弹窗布局坐标 */
+  /** P3.13：军令弹窗紧凑布局坐标（面板面板高276，统一所有绘制/点击坐标） */
   private getEdictModalLayout() {
     const cw = DESIGN_WIDTH;
     const ch = DESIGN_HEIGHT;
     const pw = 286;  // 面板宽
-    const ph = 340;  // 面板高
+    const ph = 276;  // 面板高超短（原340→缩小，消除大空白）
     const px = (cw - pw) / 2;
-    const py = (ch - ph) / 2 - 20;  // 略向上偏移，给底部按钮留空间
+    const py = (ch - ph) / 2 - 12;
     const bw = 200;  // 按钮宽
     const bh = 48;   // 按钮高
     const bx = (cw - bw) / 2;
-    const by = py + ph - 78;
-    return { panelX: px, panelY: py, panelW: pw, panelH: ph, buttonX: bx, buttonY: by, buttonW: bw, buttonH: bh };
+    const by = py + 202;  // 按钮在面板局部坐标约202
+    return {
+      panelX: px, panelY: py, panelW: pw, panelH: ph,
+      titleY: py + 22,
+      iconY: py + 72, iconR: 34,
+      nameY: py + 122,
+      descY: py + 150,
+      buttonX: bx, buttonY: by, buttonW: bw, buttonH: bh
+    };
   }
 
   /** P3.8：点击命中弹窗面板内部 */
@@ -1133,12 +1140,8 @@ export class Game {
   }
 
   private isPointInChestConfirmButton(x: number, y: number): boolean {
-    return (
-      x >= DESIGN_WIDTH / 2 - 90 &&
-      x <= DESIGN_WIDTH / 2 + 90 &&
-      y >= DESIGN_HEIGHT * 0.58 &&
-      y <= DESIGN_HEIGHT * 0.58 + 48
-    );
+    const lay = this.getEdictModalLayout();
+    return x >= lay.buttonX && x <= lay.buttonX + lay.buttonW && y >= lay.buttonY && y <= lay.buttonY + lay.buttonH;
   }
 
   private selectBuffAt(pos: Vec2) {
@@ -1921,15 +1924,29 @@ export class Game {
       }
     }
 
-    // P3.11：统一怪物左右边界 clamp 兜底
-    for (const enemy of this.enemies) {
-      enemy.x = clamp(enemy.x, BATTLE_SAFE_X.normalMin, BATTLE_SAFE_X.normalMax);
-    }
-
     this.enemies = this.enemies.filter((enemy) => enemy.alive);
 
     // 二次打磨：怪物软分离（中场/收割区自然挤开，减少重叠）
     this.applyEnemySoftSeparation(dt);
+
+    // P3.13：所有 x 位移逻辑结束后，最后执行半径感知硬边界
+    for (const enemy of this.enemies) {
+      this.clampEnemyToVisibleArea(enemy);
+    }
+  }
+
+  /** P3.13：半径感知的边界计算 */
+  private getEnemyVisibleXBounds(enemy: Enemy): { min: number; max: number } {
+    const visualMargin = 10;
+    const min = Math.max(BATTLE_SAFE_X.absoluteMin, enemy.radius + visualMargin);
+    const max = Math.min(BATTLE_SAFE_X.absoluteMax, DESIGN_WIDTH - enemy.radius - visualMargin);
+    return { min, max };
+  }
+
+  /** P3.13：统一最终边界限制 */
+  private clampEnemyToVisibleArea(enemy: Enemy) {
+    const bounds = this.getEnemyVisibleXBounds(enemy);
+    enemy.x = clamp(enemy.x, bounds.min, bounds.max);
   }
 
   /** 怪物软分离：同屏怪物过密时轻微推开 */
@@ -1959,8 +1976,8 @@ export class Game {
         const clampedPush = Math.max(-cfg.maxCorrectionPerFrame, Math.min(cfg.maxCorrectionPerFrame, pushX));
         a.x -= clampedPush * 0.5;
         b.x += clampedPush * 0.5;
-        a.x = clamp(a.x, 10, 380);
-        b.x = clamp(b.x, 10, 380);
+        this.clampEnemyToVisibleArea(a);
+        this.clampEnemyToVisibleArea(b);
       }
     }
   }
@@ -3593,17 +3610,17 @@ export class Game {
     ctx.fill();
     ctx.stroke();
 
-    // P3.12：标题（小标签）
+    // P3.13：标题（面板局部 y=22）
     ctx.fillStyle = "#c8b896";
-    ctx.font = '500 12px "Microsoft YaHei", "SimHei", sans-serif';
+    ctx.font = '600 12px "Microsoft YaHei", "SimHei", sans-serif';
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("军令降临", lay.panelW / 2, 24);
+    ctx.fillText("军令降临", lay.panelW / 2, 22);
 
-    // 中央Icon（最大视觉焦点）
+    // 中央Icon（面板局部 y=72, r=34）
     const iconCx = lay.panelW / 2;
-    const iconCy = 78;
-    const iconR = 36;
+    const iconCy = 72;
+    const iconR = 34;
 
     ctx.shadowColor = "rgba(150, 100, 220, 0.6)";
     ctx.shadowBlur = 16 + pulse * 8;
@@ -3611,31 +3628,29 @@ export class Game {
     ctx.beginPath();
     ctx.arc(iconCx, iconCy, iconR, 0, Math.PI * 2);
     ctx.fill();
-    // 内圈
     ctx.shadowBlur = 0;
     ctx.fillStyle = "rgba(124, 58, 237, 0.6)";
     ctx.beginPath();
-    ctx.arc(iconCx, iconCy, iconR - 6, 0, Math.PI * 2);
+    ctx.arc(iconCx, iconCy, iconR - 5, 0, Math.PI * 2);
     ctx.fill();
-    // 军令首字
     ctx.fillStyle = "#fff";
-    ctx.font = '900 26px "Microsoft YaHei", "SimHei", sans-serif';
+    ctx.font = '900 24px "Microsoft YaHei", "SimHei", sans-serif';
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("令", iconCx, iconCy + 1);
 
-    // 军令名（最大字号最粗）
+    // 军令名（面板局部 y=122, 24px/900）
     ctx.shadowBlur = 0;
-    ctx.fillStyle = "#f6e7bd";
-    ctx.font = '900 22px "Microsoft YaHei", "SimHei", sans-serif';
+    ctx.fillStyle = "#fff3d0";
+    ctx.font = '900 24px "Microsoft YaHei", "SimHei", sans-serif';
     ctx.textAlign = "center";
-    ctx.fillText("军令", iconCx, 128);
+    ctx.fillText("军令", iconCx, 122);
 
-    // 描述（更小更轻）
-    ctx.fillStyle = "#a09078";
-    ctx.font = '400 12px "Microsoft YaHei", "SimHei", sans-serif';
+    // 描述（面板局部 y=150）
+    ctx.fillStyle = "rgba(230, 220, 205, 0.78)";
+    ctx.font = '400 13px "Microsoft YaHei", "SimHei", sans-serif';
     ctx.textAlign = "center";
-    ctx.fillText("刀势回涌，副刀共鸣！", iconCx, 155);
+    ctx.fillText("刀势回涌，副刀共鸣！", iconCx, 150);
 
     ctx.restore();
 
@@ -4618,9 +4633,8 @@ export class Game {
         this.drawEliteNameplate(ctx, enemy);
       }
 
-      // P3.9：分裂兵本体 + 预警
+      // P3.13：分裂兵只保留丝带/裂纹预警绘制
       if (enemy.kind === "splitter") {
-        this.drawSplitterBody(ctx, enemy);
         this.drawSplitterWarning(ctx, enemy);
       }
 
@@ -6163,86 +6177,6 @@ export class Game {
     this.confirmEliteChestReward();
   }
 
-  /** P3.9：分裂兵本体绘制（实心符印+大字"裂"+裂纹） */
-  private drawSplitterBody(ctx: CanvasRenderingContext2D, enemy: Enemy) {
-    if (enemy.kind !== "splitter" || !enemy.alive) return;
-    const r = enemy.radius;
-    const pulse = 0.5 + Math.sin(this.elapsed * 4 + (enemy.wobble ?? 0)) * 0.5;
-    const isWarning = enemy.splitState === "warning";
-    const warningRatio = isWarning ? clamp((enemy.splitTimer ?? SPLITTER_CONFIG.chargeDuration) / SPLITTER_CONFIG.chargeDuration, 0, 1) : 1;
-    const scale = isWarning ? 1 + (1 - warningRatio) * 0.10 + pulse * 0.04 : 1;
-    const isDanger = isWarning && warningRatio <= 0.25;
-
-    const cx = enemy.x;
-    const cy = enemy.y;
-
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.scale(scale, scale);
-
-    // 底色
-    const baseColor = isWarning ? (isDanger ? "#cc3300" : "#8a3a20") : "#4a2312";
-    ctx.fillStyle = baseColor;
-    ctx.strokeStyle = isWarning ? "#ff6a33" : "#ff9d42";
-    ctx.lineWidth = 3;
-
-    // 六边形符印
-    ctx.beginPath();
-    for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i - Math.PI / 6;
-      const px = Math.cos(angle) * r;
-      const py = Math.sin(angle) * r;
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // 橙色呼吸光
-    if (isWarning) {
-      ctx.shadowColor = "#ff6a33";
-      ctx.shadowBlur = 10 + pulse * 8;
-    } else {
-      ctx.shadowColor = "#ff8a35";
-      ctx.shadowBlur = 6 + pulse * 4;
-    }
-
-    // 中央"裂"字
-    ctx.fillStyle = isWarning ? (isDanger ? "#fff" : "#ffd08a") : "#ffc870";
-    ctx.font = `900 ${Math.round(r * 1.15)}px "Microsoft YaHei", "SimHei", sans-serif`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("裂", 0, 2);
-
-    ctx.shadowBlur = 0;
-
-    // 裂纹（warning 时更粗更明显）
-    const crackWidth = isWarning ? 2 + (1 - warningRatio) * 3 : 2;
-    ctx.strokeStyle = isWarning ? (isDanger ? "#fff" : "#cc5500") : "#885533";
-    ctx.lineWidth = crackWidth;
-    ctx.beginPath();
-    ctx.moveTo(-r * 0.3, -r * 0.1);
-    ctx.lineTo(r * 0.1, r * 0.2);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(-r * 0.05, r * 0.15);
-    ctx.lineTo(r * 0.25, -r * 0.15);
-    ctx.stroke();
-
-    // 碎片装饰
-    const fragPulse = isWarning ? pulse * 0.5 : pulse * 0.2;
-    ctx.fillStyle = `rgba(255, 160, 60, ${0.4 + fragPulse})`;
-    ctx.beginPath();
-    ctx.arc(-r * 0.55, -r * 0.35, 3 + pulse * 1, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(r * 0.6, r * 0.3, 2 + pulse * 0.5, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.restore();
-  }
-
   /** P3：分裂兵预警绘制 */
   private drawSplitterWarning(ctx: CanvasRenderingContext2D, enemy: Enemy) {
     if (enemy.kind !== "splitter" || enemy.splitState !== "warning") return;
@@ -6369,63 +6303,7 @@ export class Game {
     }
 
     // 2) 揭示后等待确认：在屏幕中央绘制大图标
-    if (this.chestBuffRevealed && this.chestPendingConfirm && this.chestBuffResult) {
-      const buff = RUN_BUFF_BY_ID[this.chestBuffResult];
-      if (buff) {
-        // 半透明背景遮罩（强调"请确认"）
-        ctx.save();
-        ctx.fillStyle = "rgba(10, 7, 5, 0.55)";
-        ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
-        // 中心位置（更大，离地更高）
-        const cx = DESIGN_WIDTH / 2;
-        const cy = 360;
-        // 脉动光晕
-        const pulse = Math.sin(this.elapsed * 4) * 0.5 + 0.5;
-        // 外圈光晕
-        const grad = ctx.createRadialGradient(cx, cy, 20, cx, cy, 100 + pulse * 20);
-        grad.addColorStop(0, buff.color + "66");
-        grad.addColorStop(0.5, buff.color + "22");
-        grad.addColorStop(1, "transparent");
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(cx, cy, 120, 0, Math.PI * 2);
-        ctx.fill();
-        // 大圆形主体
-        ctx.shadowColor = buff.color;
-        ctx.shadowBlur = 24 + pulse * 8;
-        ctx.fillStyle = buff.color;
-        ctx.beginPath();
-        ctx.arc(cx, cy, 50, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        // 边框
-        ctx.strokeStyle = "#fff";
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.arc(cx, cy, 50, 0, Math.PI * 2);
-        ctx.stroke();
-        // 军令大字符
-        ctx.fillStyle = "#fff";
-        ctx.font = '900 36px "Microsoft YaHei", sans-serif';
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(buff.name.charAt(0), cx, cy + 2);
-        // 路线名+军令名
-        ctx.fillStyle = buff.color;
-        ctx.font = '800 16px "Microsoft YaHei", sans-serif';
-        ctx.fillText(`${ROUTE_NAMES[buff.route]}·${buff.name}`, cx, cy + 80);
-        // 描述
-        ctx.fillStyle = "rgba(246, 231, 189, 0.85)";
-        ctx.font = '500 11px "Microsoft YaHei", sans-serif';
-        ctx.fillText(buff.description, cx, cy + 102, 280);
-        // 提示文字（点关闭）
-        ctx.fillStyle = "rgba(255, 211, 90, 0.7)";
-        ctx.font = '600 11px "Microsoft YaHei", sans-serif';
-        ctx.fillText("点击空白处关闭", cx, cy + 140);
-        ctx.restore();
-        return;
-      }
-    }
+    // P3.13：旧确认绘制已删除，军令弹窗唯一由 drawEdictRewardModal 绘制
 
     // 3) 默认流程：落点处绘制（开箱前/开箱中）
     const cx = this.chestDropX;
