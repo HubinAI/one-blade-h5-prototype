@@ -2348,13 +2348,12 @@ export class Game {
     ctx.restore();
   }
 
-  /** P4.1：副刀浮空位置（角色两侧上方） */
+  /** P4.1A.2：副刀浮空位置（以槽位为锚点） */
   private getSubBladeFloatingPos(slotIndex: number): Vec2 {
-    const cx = DESIGN_WIDTH / 2;
-    const cy = BALANCE.battlefield.warriorY;
-    const offX = slotIndex === 0 ? -62 : 62;
-    const offY = -28;
-    return { x: cx + offX, y: cy + offY };
+    const slot = this.getSubBladeLaunchOrigin(slotIndex);
+    const offX = slotIndex === 0 ? 4 : -4;
+    const offY = -38;
+    return { x: slot.x + offX, y: slot.y + offY };
   }
 
   /** P2.6：副刀槽位发射起点 */
@@ -4930,22 +4929,33 @@ export class Game {
       let rot: number;
       let bladeAlpha: number;
       let bladeScale: number;
+      // A.2 尺寸（左34px/6px宽, 右38px/4px宽）
+      const bladeLen = isLeft ? 34 : 38;
+      const bladeW = isLeft ? 6 : 4;
+      const bladeH = bladeLen * 0.6;
+      const handleLen = 8;
+      const tipLen = isLeft ? 7 : 10;
 
       if (anim.phase === "idle") {
-        // 悬浮摆动
-        const sx = Math.sin(this.elapsed * 2.4 + i * 1.3) * 2;
-        const sy = Math.sin(this.elapsed * 3.1 + i * 0.7) * 2;
+        // A.2 Idle/Ready 呼吸悬浮
+        const idl = this.subBladeTimers[i] >= this.subBladeCooldowns[i];
+        const sx = Math.sin(this.elapsed * (idl ? 2.0 : 2.2) + i * 1.3) * (idl ? 1.4 : 2.5);
+        const sy = Math.sin(this.elapsed * (idl ? 2.6 : 3.0) + i * 0.7) * (idl ? 1.4 : 2.0);
         drawPos = { x: home.x + sx, y: home.y + sy };
-        rot = Math.sin(this.elapsed * 2.2 + i) * 0.04;
-        bladeAlpha = this.subBladeTimers[i] >= this.subBladeCooldowns[i] ? 0.85 : 0.35;
-        bladeScale = 1;
+        rot = Math.sin(this.elapsed * 2.0 + i) * (idl ? 0.02 : 0.045);
+        bladeAlpha = idl ? 0.92 : (isLeft ? 0.55 : 0.58);
+        bladeScale = idl ? (isLeft ? 1.05 : 1.06) : 1;
       } else if (anim.phase === "arming") {
         const t = clamp(anim.phaseTimer / anim.phaseDuration, 0, 1);
-        const eased = t * t; // easeOutQuad inline
-        drawPos = { x: home.x, y: home.y - t * 6 };
-        rot = -Math.PI / 2 * eased;
+        // A.2 Arming: 上提→转竖→放大
+        const lift = t <= 0.3 ? t / 0.3 * 6 : 6;
+        const rotProgress = clamp((t - 0.2) / 0.55, 0, 1);
+        const retreat = t >= 0.45 && t <= 0.8 ? (t - 0.45) / 0.35 * 4 : (t > 0.8 ? 4 : 0);
+        const dir = isLeft ? -1 : 1;
+        drawPos = { x: home.x - retreat * dir, y: home.y - lift };
+        rot = -Math.PI / 2 * Math.min(1, rotProgress);
         bladeAlpha = 0.85 + t * 0.15;
-        bladeScale = 1 + eased * 0.08;
+        bladeScale = isLeft ? 1.00 + t * 0.12 : 1.00 + t * 0.14;
       } else {
         // outbound/attacking/returning/settling: draw at anim position
         drawPos = { x: anim.startPos.x + (anim.endPos.x - anim.startPos.x) * clamp(anim.phaseTimer / anim.phaseDuration, 0, 1), y: anim.startPos.y + (anim.endPos.y - anim.startPos.y) * clamp(anim.phaseTimer / anim.phaseDuration, 0, 1) };
@@ -4954,13 +4964,18 @@ export class Game {
         bladeScale = 1;
       }
 
-      // 连接线：从飞刀底部到槽位
+      // A.2 连接线：状态自适应
+      const connAlpha = anim.phase === "idle" ? (this.subBladeTimers[i] >= this.subBladeCooldowns[i] ? 0.42 : 0.18) : (anim.phase === "arming" ? 0.72 : 0);
+      const connWidth = anim.phase === "arming" ? 1.5 : 1;
+      const connShadow = anim.phase === "idle" ? (this.subBladeTimers[i] >= this.subBladeCooldowns[i] ? 4 : 1) : (anim.phase === "arming" ? 8 : 0);
       ctx.save();
-      ctx.strokeStyle = (this.subBladeTimers[i] >= this.subBladeCooldowns[i] ? readyColor : baseColor) + (anim.phase === "arming" ? "BB" : "44");
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = `rgba(${isLeft ? "91,192,255" : "181,140,255"},${connAlpha})`;
+      ctx.lineWidth = connWidth;
       ctx.setLineDash([3, 4]);
+      ctx.shadowColor = baseColor;
+      ctx.shadowBlur = connShadow;
       ctx.beginPath();
-      ctx.moveTo(drawPos.x, drawPos.y + 10);
+      ctx.moveTo(drawPos.x, drawPos.y + handleLen + 2);
       ctx.lineTo(slotPos.x, slotPos.y);
       ctx.stroke();
       ctx.setLineDash([]);
@@ -4973,32 +4988,46 @@ export class Game {
       ctx.scale(bladeScale, bladeScale);
       ctx.globalAlpha = bladeAlpha;
 
-      // 刀身：不同颜色
-      const bladeW = isLeft ? 5 : 3.5;
-      const bladeH = 14;
       ctx.shadowColor = baseColor;
-      ctx.shadowBlur = (this.subBladeTimers[i] >= this.subBladeCooldowns[i]) ? 10 : 3;
+      ctx.shadowBlur = (this.subBladeTimers[i] >= this.subBladeCooldowns[i]) ? 12 : (anim.phase === "idle" ? 3 : 8);
 
+      // 刀身
       ctx.fillStyle = baseColor;
       ctx.beginPath();
       ctx.moveTo(0, -bladeH);
       ctx.lineTo(-bladeW, 2);
-      ctx.lineTo(0, bladeH);
+      ctx.lineTo(0, bladeLen * 0.25);
       ctx.lineTo(bladeW, 2);
       ctx.closePath();
       ctx.fill();
 
-      // 刀柄
+      // 刀尖高光
       ctx.shadowBlur = 0;
-      ctx.fillStyle = "#3a2818";
-      ctx.fillRect(-3, -8, 6, 4);
+      ctx.fillStyle = isLeft ? "#B8F4FF" : "#FFB45C";
+      ctx.beginPath();
+      ctx.moveTo(0, -bladeH);
+      ctx.lineTo(-bladeW * 0.4, 2 - tipLen);
+      ctx.lineTo(bladeW * 0.4, 2 - tipLen);
+      ctx.closePath();
+      ctx.fill();
 
-      // Ready 时刀尖发光
-      if (this.subBladeTimers[i] >= this.subBladeCooldowns[i]) {
+      // 刀柄
+      ctx.fillStyle = "#3a2818";
+      ctx.beginPath();
+      ctx.moveTo(-3, -handleLen);
+      ctx.lineTo(3, -handleLen);
+      ctx.lineTo(4, -2);
+      ctx.lineTo(-4, -2);
+      ctx.closePath();
+      ctx.fill();
+
+      // Ready 刀尖发光
+      if (this.subBladeTimers[i] >= this.subBladeCooldowns[i] && anim.phase === "idle") {
+        const tipPulse = 0.3 + Math.sin(this.elapsed * (isLeft ? 7.85 : 8.15)) * 0.3;
         ctx.shadowBlur = 0;
-        ctx.fillStyle = readyColor;
+        ctx.fillStyle = isLeft ? "#B8F4FF" : "#FFB45C";
         ctx.beginPath();
-        ctx.arc(0, -bladeH - 2, 2.5, 0, Math.PI * 2);
+        ctx.arc(0, -bladeH - 2, 2.5 + tipPulse * 0.5, 0, Math.PI * 2);
         ctx.fill();
       }
 
