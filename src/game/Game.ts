@@ -62,6 +62,12 @@ type EdictRewardState =
   | "active"
   | "finished";
 
+/** P4.1A.5：副刀动作速度层级参数（集中配置） */
+const SUB_BLADE_MOTION = {
+  left: { readyMinHold: 0.12, arming: 0.28, outbound: 0.16, attacking: 0.30, normalHitHold: 0.04, specialHitHold: 0.06, returning: 0.34, settling: 0.18, highValueWait: 0 },
+  right: { readyMinHold: 0.08, highValueWait: 0.35, arming: 0.20, outbound: 0.12, attacking: 0.18, normalHitHold: 0.05, specialHitHold: 0.07, returning: 0.26, settling: 0.14 }
+};
+
 export class Game {
   readonly level: LevelConfig;
 
@@ -2091,12 +2097,12 @@ export class Game {
       const home = this.getSubBladeFloatingPos(i);
       const cd = this.subBladeCooldowns[i];
       const frameDt = Math.min(dt, 0.04);
+      const M = SUB_BLADE_MOTION[i === 0 ? "left" : "right"];
 
-      // P4.1A.4：switch状态机，每帧更新不受CD阻断
+      // P4.1A.5：switch状态机，细化速度层级
       switch (anim.phase) {
         case "cooldown":
         case "idle": {
-          // 兼容旧phase名
           if (anim.phase === "idle") anim.phase = "cooldown";
           const inspireMul = this._currentEventType === "inspire" ? 1.3 : 1;
           this.subBladeTimers[i] += dt * inspireMul;
@@ -2108,33 +2114,47 @@ export class Game {
         }
         case "ready": {
           const validEnemies = this.enemies.filter(e => e.alive && e.y >= BATTLEFIELD_ZONES.midfieldStartY && e.y <= BALANCE.battlefield.bottomDefenseY - 30);
+          // P4.1A.5: 最短Ready展示
+          if (anim.phaseTimer < M.readyMinHold) {
+            anim.phaseTimer += frameDt;
+            break;
+          }
           if (i === 0 && validEnemies.length >= 3) {
-            // 左副刀：密集群
             const avgX = validEnemies.reduce((s, e) => s + e.x, 0) / validEnemies.length;
             const avgY = validEnemies.reduce((s, e) => s + e.y, 0) / validEnemies.length;
             anim.startPos = { ...home };
             anim.endPos = { x: avgX, y: Math.max(BATTLEFIELD_ZONES.midfieldStartY, avgY - 50) };
             anim.phase = "arming";
             anim.phaseTimer = 0;
-            anim.phaseDuration = 0.18;
+            anim.phaseDuration = M.arming;
           } else if (i === 1) {
-            // 右副刀：1.5s等待高价值，兜底防线兵
-            const highVal = this.enemies.find(e => e.alive && ((e.kind === "splitter" && e.splitState === "warning") || e.kind === "elite")) ?? null;
+            // P4.1A.5: 高价值优先 + 紧急兜底
+            const highValPriorityOrder = ["splitter", "elite", "core", "powder", "shield"];
+            let highVal = null;
+            for (const kind of highValPriorityOrder) {
+              if (kind === "splitter") highVal = this.enemies.find(e => e.alive && e.kind === "splitter" && e.splitState === "warning");
+              else highVal = this.enemies.find(e => e.alive && e.kind === kind);
+              if (highVal) break;
+            }
             if (highVal) {
               anim.startPos = { ...home };
               anim.endPos = { x: highVal.x, y: highVal.y - 30 };
               anim.phase = "arming";
               anim.phaseTimer = 0;
-              anim.phaseDuration = 0.15;
+              anim.phaseDuration = M.arming;
             } else {
+              // 紧急：防线近或敌群多
+              const nearest = validEnemies.sort((a, b) => b.y - a.y)[0];
+              const isUrgent = nearest && (nearest.y >= BALANCE.battlefield.bottomDefenseY - 120 || validEnemies.length >= 4);
               anim.phaseTimer += frameDt;
-              if (anim.phaseTimer >= 1.5 && validEnemies.length > 0) {
-                const nearest = validEnemies.sort((a, b) => b.y - a.y)[0];
-                anim.startPos = { ...home };
-                anim.endPos = { x: nearest.x, y: nearest.y - 30 };
-                anim.phase = "arming";
-                anim.phaseTimer = 0;
-                anim.phaseDuration = 0.15;
+              if (isUrgent || anim.phaseTimer >= M.highValueWait) {
+                if (nearest) {
+                  anim.startPos = { ...home };
+                  anim.endPos = { x: nearest.x, y: nearest.y - 30 };
+                  anim.phase = "arming";
+                  anim.phaseTimer = 0;
+                  anim.phaseDuration = M.arming;
+                }
               }
             }
           }
@@ -2145,9 +2165,8 @@ export class Game {
           if (anim.phaseTimer >= anim.phaseDuration) {
             anim.phase = "outbound";
             anim.phaseTimer = 0;
-            anim.phaseDuration = i === 0 ? 0.22 : 0.17;
+            anim.phaseDuration = M.outbound;
             anim.startPos = { ...home };
-            // 发刀瞬间：槽位短促光
             const sl = this.getSubBladeSlotLayout(i);
             this.particles.push(ringParticle({ x: sl.centerX, y: sl.centerY }, i === 0 ? "#5bc0ff" : "#b58cff", 20));
           }
@@ -2156,30 +2175,34 @@ export class Game {
         case "outbound": {
           anim.phaseTimer += frameDt;
           if (anim.phaseTimer >= anim.phaseDuration) {
-            // outbound完成 → attacking（实际触发伤害）
+            // P4.1A.5: outbound → attacking（不再直接returning）
             this.subBladeTimers[i] = 0;
             const stats = BLADE_BASE_STATS[blade.quality];
             if (stats) {
               if (i === 0) this.triggerMomentumSweep(blade, anim.endPos.x, anim.endPos.y, stats);
               else this.triggerWeakpointChase(blade, anim.endPos.x, anim.endPos.y, stats);
             }
-            anim.phase = "returning";
+            anim.phase = "attacking";
             anim.phaseTimer = 0;
-            anim.phaseDuration = i === 0 ? 0.28 : 0.22;
+            anim.phaseDuration = M.attacking;
             anim.startPos = { ...anim.endPos };
-            anim.endPos = { ...home };
           }
           break;
         }
         case "attacking": {
-          // 与outbound合并，保持兼容
           anim.phaseTimer += frameDt;
+          // P4.1A.5: 命中停顿在 attacking 前段
+          const hitHold = M.specialHitHold;
+          if (anim.phaseTimer >= hitHold && !anim.hitApplied) {
+            anim.hitApplied = true;
+          }
           if (anim.phaseTimer >= anim.phaseDuration) {
             anim.phase = "returning";
             anim.phaseTimer = 0;
-            anim.phaseDuration = i === 0 ? 0.28 : 0.22;
+            anim.phaseDuration = M.returning;
             anim.startPos = { ...anim.endPos };
             anim.endPos = { ...home };
+            anim.hitApplied = false;
           }
           break;
         }
@@ -2188,9 +2211,8 @@ export class Game {
           if (anim.phaseTimer >= anim.phaseDuration) {
             anim.phase = "settling";
             anim.phaseTimer = 0;
-            anim.phaseDuration = i === 0 ? 0.14 : 0.11;
-            const overshoot = i === 0 ? 7 : 9;
-            anim.startPos = { x: home.x, y: home.y + overshoot };
+            anim.phaseDuration = M.settling;
+            anim.startPos = { x: home.x, y: home.y + (i === 0 ? 7 : 9) };
             anim.endPos = { ...home };
           }
           break;
@@ -5904,6 +5926,7 @@ export class Game {
       `Sub0: ${this.subBladeAnim[0]?.phase ?? "-"} (t:${(this.subBladeAnim[0]?.phaseTimer ?? 0).toFixed(2)}/${(this.subBladeAnim[0]?.phaseDuration ?? 0).toFixed(2)})`,
       `Sub1: ${this.subBladeAnim[1]?.phase ?? "-"} (t:${(this.subBladeAnim[1]?.phaseTimer ?? 0).toFixed(2)}/${(this.subBladeAnim[1]?.phaseDuration ?? 0).toFixed(2)})`,
       `readyWait: ${(this.subBladeAnim[1]?.phaseTimer ?? 0).toFixed(2)}s`,
+      `Sub spd: ${this.subBladeAnim.map((a, idx) => idx === 0 ? "-" : "-").join("/")}`,
     ];
 
     ctx.save();
