@@ -1,9 +1,8 @@
 import { useCallback, useMemo, useState } from "react";
 import { GameCanvas } from "./game/GameCanvas";
 import { LEVELS } from "./data/levels";
-import type { BattleResult, BuffId, LevelConfig } from "./game/types";
+import type { BattleResult, LevelConfig } from "./game/types";
 import { MainMenu } from "./components/MainMenu";
-import { RUN_BUFF_BY_ID, ROUTE_NAMES, ROUTE_ICONS } from "./game/config/buffs";
 import { LevelSelect } from "./components/LevelSelect";
 import { ResultScreen } from "./components/ResultScreen";
 import { AdOverlay } from "./components/AdOverlay";
@@ -71,14 +70,11 @@ export default function App() {
   const [home, setHome] = useState(getHomeSnapshot);
   const [currentLevel, setCurrentLevel] = useState<LevelConfig>(LEVELS[0]);
   const [lastResult, setLastResult] = useState<BattleResult | null>(null);
-  const [appVersion] = useState("V0717003");
+  const [appVersion] = useState("V0717004");
   const [runIndex, setRunIndex] = useState(0);
   const [currentMode, setCurrentMode] = useState<RunMode>("normal");
   const [reviveOffer, setReviveOffer] = useState<ReviveOffer | null>(null);
   const [reviveSignal, setReviveSignal] = useState(0);
-  const [pendingBuff, setPendingBuff] = useState<string | null>(null);
-  const [confirmBuffSignal, setConfirmBuffSignal] = useState(0);
-  const [activeBuffs, setActiveBuffs] = useState<string[]>([]);
   const [declineReviveSignal, setDeclineReviveSignal] = useState(0);
   const [showCodex, setShowCodex] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -251,19 +247,6 @@ export default function App() {
     setLastResult(claimAdChest(lastResult));
     refreshHome();
   }, [lastResult, refreshHome]);
-
-  const handleBuffReveal = useCallback((buffId: BuffId) => {
-    setPendingBuff(buffId);
-  }, []);
-
-  const handleConfirmBuff = useCallback(() => {
-    if (!pendingBuff) return;
-    // 添加到本局生效buffs
-    setActiveBuffs((prev) => [...prev, pendingBuff]);
-    // 通知游戏开始飞行动画
-    setConfirmBuffSignal((v) => v + 1);
-    setPendingBuff(null);
-  }, [pendingBuff]);
 
   const handleRevive = useCallback(async () => {
     if (!reviveOffer) return;
@@ -448,11 +431,9 @@ export default function App() {
             level={currentLevel}
             onFinish={handleFinish}
             onReviveOffer={setReviveOffer}
-            onBuffReveal={handleBuffReveal}
             reviveSignal={reviveSignal}
             declineReviveSignal={declineReviveSignal}
-            confirmBuffSignal={confirmBuffSignal}
-            paused={paused || Boolean(reviveOffer) || Boolean(pendingBuff)}
+            paused={paused || Boolean(reviveOffer)}
           />
           {!reviveOffer && !paused && (
             <button
@@ -482,41 +463,6 @@ export default function App() {
                   放弃复活，进入结算
                 </button>
               </div>
-            </div>
-          )}
-          {pendingBuff && (() => {
-            const buff = RUN_BUFF_BY_ID[pendingBuff as keyof typeof RUN_BUFF_BY_ID];
-            if (!buff) return null;
-            return (
-              <div className="buff-modal" onClick={handleConfirmBuff}>
-                <div className="buff-modal-content" onClick={(e) => e.stopPropagation()}>
-                  <div className="buff-modal-tag" style={{ background: buff.color + "22", color: buff.color, borderColor: buff.color + "66" }}>
-                    {ROUTE_ICONS[buff.route]} {ROUTE_NAMES[buff.route]}路线
-                  </div>
-                  <div className="buff-modal-icon" style={{ background: buff.color, boxShadow: `0 0 32px ${buff.color}88` }}>
-                    <span className="buff-modal-char">{buff.name.charAt(0)}</span>
-                  </div>
-                  <h2 className="buff-modal-name" style={{ color: buff.color }}>{buff.name}</h2>
-                  <p className="buff-modal-desc">{buff.description}</p>
-                  <button className="buff-modal-btn" onClick={handleConfirmBuff} style={{ background: buff.color }}>
-                    收下军令
-                  </button>
-                  <p className="buff-modal-tip">点击空白处也可关闭</p>
-                </div>
-              </div>
-            );
-          })()}
-          {activeBuffs.length > 0 && (
-            <div className="active-buff-list">
-              {activeBuffs.map((bid, i) => {
-                const buff = RUN_BUFF_BY_ID[bid as keyof typeof RUN_BUFF_BY_ID];
-                if (!buff) return null;
-                return (
-                  <div key={i} className="active-buff-chip" style={{ borderColor: buff.color, background: buff.color + "33" }}>
-                    <span style={{ color: buff.color }}>{buff.name.charAt(0)}</span>
-                  </div>
-                );
-              })}
             </div>
           )}
         </section>
