@@ -2099,19 +2099,77 @@ export class Game {
         }
       }
       if (this.subBladeTimers[i] < cd) continue;
-      this.subBladeTimers[i] = 0;
-      const stats = BLADE_BASE_STATS[blade.quality];
-      if (!stats) continue;
 
-      const cx = DESIGN_WIDTH / 2;
-      const cy = BALANCE.battlefield.warriorY;
+      // P4.1A.3：状态机接管攻击链路
+      const anim = this.subBladeAnim[i];
+      const home = this.getSubBladeFloatingPos(i);
+      const frameDt = Math.min(dt, 0.04);
 
-      if (i === 0) {
-        // 蓄势横扫：找敌群最密集的横向区域
-        this.triggerMomentumSweep(blade, cx, cy, stats);
-      } else {
-        // 破点追击：锁定高价值目标
-        this.triggerWeakpointChase(blade, cx, cy, stats);
+      if (anim.phase === "idle") {
+        // CD完成 → ready → 搜索目标
+        const validEnemies = this.enemies.filter(e => e.alive && e.y >= BATTLEFIELD_ZONES.midfieldStartY && e.y <= BALANCE.battlefield.bottomDefenseY - 30);
+        let hasTarget = false;
+
+        if (i === 0 && validEnemies.length >= 3) {
+          // 左副刀：寻找密集群
+          const avgX = validEnemies.reduce((s, e) => s + e.x, 0) / validEnemies.length;
+          const avgY = validEnemies.reduce((s, e) => s + e.y, 0) / validEnemies.length;
+          anim.startPos = { ...home };
+          anim.endPos = { x: avgX, y: Math.max(BATTLEFIELD_ZONES.midfieldStartY, avgY - 50) };
+          hasTarget = true;
+        } else if (i === 1) {
+          // 右副刀：高价值优先
+          const highVal = this.enemies.find(e => e.alive && ((e.kind === "splitter" && e.splitState === "warning") || e.kind === "elite")) ?? null;
+          if (highVal) {
+            anim.startPos = { ...home };
+            anim.endPos = { x: highVal.x, y: highVal.y - 30 };
+            hasTarget = true;
+          } else if (validEnemies.length > 0) {
+            const nearest = validEnemies.sort((a, b) => b.y - a.y)[0];
+            anim.startPos = { ...home };
+            anim.endPos = { x: nearest.x, y: nearest.y - 30 };
+            hasTarget = true;
+          }
+        }
+
+        if (hasTarget) {
+          // 进入arming
+          this.subBladeTimers[i] = 0;
+          anim.phase = "arming";
+          anim.phaseTimer = 0;
+          anim.phaseDuration = i === 0 ? 0.15 : 0.12;
+        }
+      } else if (anim.phase === "arming") {
+        anim.phaseTimer += frameDt;
+        if (anim.phaseTimer >= anim.phaseDuration) {
+          // 触发攻击
+          const stats = BLADE_BASE_STATS[blade.quality];
+          if (stats) {
+            if (i === 0) this.triggerMomentumSweep(blade, anim.endPos.x, anim.endPos.y, stats);
+            else this.triggerWeakpointChase(blade, anim.endPos.x, anim.endPos.y, stats);
+          }
+          anim.phase = "returning";
+          anim.phaseTimer = 0;
+          anim.phaseDuration = i === 0 ? 0.30 : 0.25;
+          anim.startPos = { ...anim.endPos };
+          anim.endPos = { ...home };
+        }
+      } else if (anim.phase === "returning") {
+        anim.phaseTimer += frameDt;
+        if (anim.phaseTimer >= anim.phaseDuration) {
+          anim.phase = "settling";
+          anim.phaseTimer = 0;
+          anim.phaseDuration = i === 0 ? 0.13 : 0.10;
+          anim.startPos = { x: home.x, y: home.y + (i === 0 ? 7 : 9) };
+          anim.endPos = { ...home };
+        }
+      } else if (anim.phase === "settling") {
+        anim.phaseTimer += frameDt;
+        if (anim.phaseTimer >= anim.phaseDuration) {
+          anim.phase = "idle";
+          anim.phaseTimer = 0;
+          anim.rotation = 0;
+        }
       }
     }
   }
@@ -2348,12 +2406,22 @@ export class Game {
     ctx.restore();
   }
 
-  /** P4.1A.2：副刀浮空位置（以槽位为锚点） */
+  /** P4.1A.3：副刀槽位统一布局 */
+  private getSubBladeSlotLayout(slotIndex: number) {
+    const iconR = 26;
+    const topY = BALANCE.battlefield.warriorY + 5;
+    const leftX = 24;
+    const rightX = DESIGN_WIDTH - 76;
+    const boxX = slotIndex === 0 ? leftX : rightX;
+    return { boxX, boxY: topY, iconR, centerX: boxX + iconR, centerY: topY + iconR };
+  }
+
+  /** P4.1A.3：副刀浮空位置（以真实槽位中心为锚点） */
   private getSubBladeFloatingPos(slotIndex: number): Vec2 {
-    const slot = this.getSubBladeLaunchOrigin(slotIndex);
-    const offX = slotIndex === 0 ? 4 : -4;
-    const offY = -38;
-    return { x: slot.x + offX, y: slot.y + offY };
+    const slot = this.getSubBladeSlotLayout(slotIndex);
+    const offX = slotIndex === 0 ? 3 : -3;
+    const offY = -24;
+    return { x: slot.centerX + offX, y: slot.centerY + offY };
   }
 
   /** P2.6：副刀槽位发射起点 */
@@ -4929,12 +4997,12 @@ export class Game {
       let rot: number;
       let bladeAlpha: number;
       let bladeScale: number;
-      // A.2 尺寸（左34px/6px宽, 右38px/4px宽）
-      const bladeLen = isLeft ? 34 : 38;
-      const bladeW = isLeft ? 6 : 4;
+      // P4.1A.3 尺寸（左44px/8px宽, 右48px/5.5px宽）
+      const bladeLen = isLeft ? 44 : 48;
+      const bladeW = isLeft ? 8 : 5.5;
       const bladeH = bladeLen * 0.6;
-      const handleLen = 8;
-      const tipLen = isLeft ? 7 : 10;
+      const handleLen = isLeft ? 9 : 8;
+      const tipLen = isLeft ? 8 : 12;
 
       if (anim.phase === "idle") {
         // A.2 Idle/Ready 呼吸悬浮
@@ -5307,10 +5375,11 @@ export class Game {
     // 右下角临时效果图标（鼓/魂/油）— 含圆形倒计时
     this.drawPickupBuffs(ctx);
 
-    // 副刀槽位1（蓄势）：战士左侧
-    this.drawSubBladeSlot(ctx, 0, 24, BALANCE.battlefield.warriorY + 5, 26, 0x5bc0ff);
-    // 副刀槽位2（破点）：战士右侧
-    this.drawSubBladeSlot(ctx, 1, DESIGN_WIDTH - 76, BALANCE.battlefield.warriorY + 5, 26, 0xff6a33);
+    // P4.1A.3：副刀槽位使用统一布局（左紫/右紫+橙金强调）
+    const leftSlot = this.getSubBladeSlotLayout(0);
+    const rightSlot = this.getSubBladeSlotLayout(1);
+    this.drawSubBladeSlot(ctx, 0, leftSlot.boxX, leftSlot.boxY, leftSlot.iconR, 0x5bc0ff);
+    this.drawSubBladeSlot(ctx, 1, rightSlot.boxX, rightSlot.boxY, rightSlot.iconR, 0xb58cff);
 
     // 刀势三段能量条 —— 屏幕底部居中（窄条）
     const eBarW = 200;
@@ -5758,6 +5827,8 @@ export class Game {
       `eliteKilled: ${this.eliteKilled}`,
       `chestDone: ${this.chestDone}`,
       `allPostSpawned: ${this.allPostChestWavesSpawned}`,
+      `Sub0: ${this.subBladeAnim[0]?.phase ?? "-"} (t:${(this.subBladeAnim[0]?.phaseTimer ?? 0).toFixed(2)})`,
+      `Sub1: ${this.subBladeAnim[1]?.phase ?? "-"} (t:${(this.subBladeAnim[1]?.phaseTimer ?? 0).toFixed(2)})`,
     ];
 
     ctx.save();
