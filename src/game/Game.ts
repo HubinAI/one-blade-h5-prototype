@@ -665,7 +665,6 @@ export class Game {
     this.drawParticles(ctx);
     this.drawDefenseAndWarrior(ctx);
     this.drawSubBladeVisual(ctx);
-    this.drawSubRunes(ctx);
     this.drawEdictIconFly(ctx);
     this.drawHud(ctx);
     this.drawEdictStatusIcon(ctx);
@@ -913,24 +912,20 @@ export class Game {
     // 主刀高击杀减少副刀 CD
     const cdReduction = getSubBladeCDReduction(trail.kills);
     if (cdReduction.seconds > 0 || cdReduction.ratio > 0) {
-      if (cdReduction.seconds > 0) {
-        for (let i = 0; i < this.subBladeTimers.length; i++) {
-          this.subBladeTimers[i] = Math.max(0, this.subBladeTimers[i] - cdReduction.seconds);
-        }
-      } else if (cdReduction.ratio > 0) {
-        for (let i = 0; i < this.subBladeTimers.length; i++) {
-          const cd = this.subBladeCooldowns[i];
-          if (cd > 0) {
-            this.subBladeTimers[i] = Math.max(this.subBladeTimers[i], cd * (1 - cdReduction.ratio));
-          }
+      for (let i = 0; i < this.subBladeTimers.length; i++) {
+        const anim = this.subBladeAnim[i];
+        // P4.1A.8: 只对cooldown状态生效，已Ready/攻击中不重复加速
+        if (!anim || (anim.phase !== "cooldown" && anim.phase !== "idle")) continue;
+        const cd = this.subBladeCooldowns[i];
+        if (cdReduction.seconds > 0) {
+          this.subBladeTimers[i] = Math.min(cd, this.subBladeTimers[i] + cdReduction.seconds);
+        } else if (cdReduction.ratio > 0 && cd > 0) {
+          const remaining = Math.max(0, cd - this.subBladeTimers[i]);
+          this.subBladeTimers[i] = Math.min(cd, this.subBladeTimers[i] + remaining * cdReduction.ratio);
         }
       }
-      // 副刀加速视觉反馈：浮字 + 图标光圈闪烁
-      if (trail.kills >= 5 && !this.hasRecentText("副刀共鸣", 0.5)) {
-        // 副刀共鸣：靠近两个副刀槽位（左右下）
-        this.addText(60, 720, "副刀共鸣", "#5bc0ff", 11, 0.6);
-        this.addText(DESIGN_WIDTH - 60, 720, "副刀共鸣", "#ff6a33", 11, 0.6);
-        // 触发所有副刀光圈闪烁
+      // P4.1A.8: 删除双份"副刀共鸣"文字，只保留槽位脉冲
+      if (trail.kills >= 5) {
         for (let i = 0; i < 2; i++) {
           this.subReadyPing.push({ slot: i, life: 0.3, maxLife: 0.3 });
         }
@@ -2121,7 +2116,7 @@ export class Game {
       s.life -= dt;
       if (!s.damaged && s.life <= s.maxLife * 0.5) {
         s.damaged = true;
-        this.applySubSlashDamage(s);
+        // P4.1A.8: subSlash仍用于轨迹，但伤害已由attacking阶段直接结算，此处不再调用
       }
     }
     this.subSlash = this.subSlash.filter(s => s.life > 0);
@@ -2139,9 +2134,6 @@ export class Game {
     // 副刀cd光圈提示
     for (const p of this.subReadyPing) p.life -= dt;
     this.subReadyPing = this.subReadyPing.filter(p => p.life > 0);
-
-    for (const r of this.subRune) r.life -= dt;
-    this.subRune = this.subRune.filter(r => r.life > 0);
 
     for (let i = 0; i < 2; i++) {
       const blade = this.subBlades[i];
@@ -2182,27 +2174,28 @@ export class Game {
             anim.phaseTimer = 0;
             anim.phaseDuration = M.arming;
           } else if (i === 1) {
-            // P4.1A.5: 高价值优先 + 紧急兜底
+            // P4.1A.8: 高价值优先，全部限制在有效战区
             const highValPriorityOrder = ["splitter", "elite", "core", "powder", "shield"];
             let highVal = null;
             for (const kind of highValPriorityOrder) {
-              if (kind === "splitter") highVal = this.enemies.find(e => e.alive && e.kind === "splitter" && e.splitState === "warning");
-              else highVal = this.enemies.find(e => e.alive && e.kind === kind);
+              if (kind === "splitter") highVal = validEnemies.find(e => e.kind === "splitter" && e.splitState === "warning");
+              else highVal = validEnemies.find(e => e.kind === kind);
               if (highVal) break;
             }
             if (highVal) {
+              anim.targetId = highVal.id;
               anim.startPos = { ...home };
               anim.endPos = { x: highVal.x, y: highVal.y - 30 };
               anim.phase = "arming";
               anim.phaseTimer = 0;
               anim.phaseDuration = M.arming;
             } else {
-              // 紧急：防线近或敌群多
               const nearest = validEnemies.sort((a, b) => b.y - a.y)[0];
               const isUrgent = nearest && (nearest.y >= BALANCE.battlefield.bottomDefenseY - 120 || validEnemies.length >= 4);
               anim.phaseTimer += frameDt;
               if (isUrgent || anim.phaseTimer >= M.highValueWait) {
                 if (nearest) {
+                  anim.targetId = nearest.id;
                   anim.startPos = { ...home };
                   anim.endPos = { x: nearest.x, y: nearest.y - 30 };
                   anim.phase = "arming";
@@ -2245,10 +2238,22 @@ export class Game {
         }
         case "attacking": {
           anim.phaseTimer += frameDt;
-          // P4.1A.5: 命中停顿在 attacking 前段
-          const hitHold = M.specialHitHold;
-          if (anim.phaseTimer >= hitHold && !anim.hitApplied) {
+          // P4.1A.8: attacking阶段在命中时刻直接结算伤害（不再依赖subSlash）
+          const hitMoment = M.specialHitHold;
+          if (anim.phaseTimer >= hitMoment && !anim.hitApplied) {
             anim.hitApplied = true;
+            const stats = BLADE_BASE_STATS[blade.quality];
+            if (stats) {
+              if (i === 0) {
+                // 左刀：对endPos附近的敌人结算一次横扫伤害
+                this.applyMomentumSweepDamage({ x1: anim.endPos.x - 90, y1: anim.endPos.y + 6, x2: anim.endPos.x + 90, y2: anim.endPos.y - 6, color: "#5bc0ff", bladeIdx: 0 }, blade, stats);
+              } else {
+                // 右刀：对锁定目标结算单点伤害
+                const targetEnemy = anim.targetId ? this.enemies.find(e => e.id === anim.targetId && e.alive) : null;
+                const dTarget = targetEnemy ?? { x: anim.endPos.x, y: anim.endPos.y };
+                this.applyWeakpointChaseDamage({ x1: dTarget.x - 3, y1: dTarget.y - 20, x2: dTarget.x + 3, y2: dTarget.y + 10, color: "#b58cff", bladeIdx: 1 }, blade, stats);
+              }
+            }
           }
           if (anim.phaseTimer >= anim.phaseDuration) {
             anim.phase = "returning";
@@ -2284,106 +2289,15 @@ export class Game {
   }
 
   /** 蓄势横扫 —— 横向扫过敌群最密集区域 */
-  /** P4.1A.6：左副刀横扫（使用锁定位置cx/cy，不移除旧findDensestYBand调用，但不再生成独立subSlash/subRune） */
+  /** P4.1A.8：左副刀横扫（不再生成假subSlash，由attacking阶段直接结算） */
   private triggerMomentumSweep(blade: Blade, cx: number, cy: number, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]) {
-    // P4.1A.6: 使用Ready阶段锁定的位置，不再调用findDensestYBand
-    const sweepY = clampSubBladeAttackY(cy);
-    const sweepX = clamp(cx, 100, DESIGN_WIDTH - 100);
-    const span = 90;
-    const tailX = clamp(sweepX - span, 32, DESIGN_WIDTH - 32);
-    const tipX = clamp(sweepX + span, 32, DESIGN_WIDTH - 32);
-    const tailY = clampSubBladeAttackY(sweepY + 6);
-    const tipY = clampSubBladeAttackY(sweepY - 6);
-
-    const color = "#5bc0ff";
-    // P4.1A.6: 不再生成独立subRune/subSlash —— 由飞刀实体Attacking阶段驱动
-    // 伤害由outbound→attacking状态机中的applyMomentumSweepDamageFromPlan处理
-    // 为兼容旧applySubSlashDamage，仍push一条极短轨迹，长度0.01让damaged=true立即触发
-    this.subSlash.push({
-      x1: (tailX + tipX) / 2 - 0.5, y1: (tailY + tipY) / 2,
-      x2: (tailX + tipX) / 2 + 0.5, y2: (tailY + tipY) / 2,
-      color,
-      life: 0.01, maxLife: 0.01,
-      bladeIdx: 0,
-      damaged: false,
-      slotType: 'momentum_sweep'
-    });
+    // P4.1A.8: 不再创建任何subSlash/subRune，伤害由attacking阶段调用applyMomentumSweepDamage
   }
 
   /** 破点追击 —— 锁定高价值目标 */
-  /** P4.1A.6：右副刀追击（使用锁定位置cx/cy，不再重新找目标） */
+  /** P4.1A.8：右副刀追击（不再生成假subSlash和_pendingWeakpointChaseTarget） */
   private triggerWeakpointChase(blade: Blade, cx: number, cy: number, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]) {
-    // P4.1A.6: cx/cy就是Ready阶段锁定的目标位置，不再findHighValueTarget
-    const targetX = clamp(cx, 32, DESIGN_WIDTH - 32);
-    const targetY = clampSubBladeAttackY(cy);
-
-    const color = "#b58cff";
-    // P4.1A.6: 不再生成独立subRune/subSlash，由飞刀实体驱动
-    this.subSlash.push({
-      x1: targetX - 0.5, y1: targetY,
-      x2: targetX + 0.5, y2: targetY,
-      color,
-      life: 0.01, maxLife: 0.01,
-      bladeIdx: 1,
-      damaged: false,
-      slotType: 'weakpoint_chase'
-    });
-
-    // 仍保留pending目标标记供applySubSlashDamage使用
-    this._pendingWeakpointChaseTarget = { x: targetX, y: targetY, kind: "unknown" };
-  }
-
-  // 临时存储破点追击的目标（在 applySubSlashDamage 中使用）
-  private _pendingWeakpointChaseTarget: { x: number; y: number; id?: string; kind: string } | null = null;
-
-  /** 找敌人最密集的 y 区间 */
-  private findDensestYBand(): number {
-    const alive = this.enemies.filter(e => e.alive);
-    if (alive.length === 0) return 300;
-    // 把 y 分成 3 个区间，找敌人最多的区间的中心 y
-    const bands = [0, 0, 0]; // [0-200, 200-400, 400-600]
-    for (const e of alive) {
-      if (e.y < 200) bands[0]++;
-      else if (e.y < 400) bands[1]++;
-      else bands[2]++;
-    }
-    const maxIdx = bands.indexOf(Math.max(...bands));
-    return [100, 300, 500][maxIdx];
-  }
-
-  /** 找高价值目标（阵眼 > 火药 > 精英 > 盾兵 > 最近敌人） */
-  private findHighValueTarget(): Enemy | null {
-    const alive = this.enemies.filter(e => e.alive);
-    if (alive.length === 0) return null;
-    const priority: EnemyKind[] = ["core", "powder", "elite", "shield"];
-    for (const kind of priority) {
-      const found = alive.find(e => e.kind === kind);
-      if (found) return found;
-    }
-    return null;
-  }
-
-  /** 找离防线最近的敌人 */
-  private findClosestEnemy(): Enemy | null {
-    const alive = this.enemies.filter(e => e.alive);
-    if (alive.length === 0) return null;
-    return alive.reduce((a, b) => a.y > b.y ? a : b);
-  }
-
-  /** 在弧线中点结算副刀伤害 */
-  private applySubSlashDamage(s: { x1: number; y1: number; x2: number; y2: number; color: string; bladeIdx: number; slotType?: 'momentum_sweep' | 'weakpoint_chase' }) {
-    if (this.phase !== "playing") return;
-    const blade = this.subBlades[s.bladeIdx];
-    if (!blade) return;
-    const stats = BLADE_BASE_STATS[blade.quality];
-    if (!stats) return;
-    const slotType = s.slotType ?? (s.bladeIdx === 0 ? 'momentum_sweep' : 'weakpoint_chase');
-
-    if (slotType === 'momentum_sweep') {
-      this.applyMomentumSweepDamage(s, blade, stats);
-    } else {
-      this.applyWeakpointChaseDamage(s, blade, stats);
-    }
+    // P4.1A.8: 不再创建subSlash/subRune/_pendingWeakpointChaseTarget，伤害由attacking阶段直接结算
   }
 
   /** P2.8：hit stop 普通触发（有冷却，force=true 可无视冷却） */
@@ -5237,43 +5151,8 @@ export class Game {
     }
   }
 
-  /** 绘制副刀符阵（方案B：旋转符文提示） */
-  private drawSubRunes(ctx: CanvasRenderingContext2D) {
-    if (this.subRune.length === 0) return;
-    for (const r of this.subRune) {
-      const t = r.life / r.maxLife;
-      const alpha = Math.min(1, t * 4) * 0.6;
-      const pulse = Math.sin(this.elapsed * 8 + r.x) * 0.5 + 0.5;
-      ctx.save();
-      ctx.translate(r.x, r.y);
-      ctx.globalAlpha = alpha;
-      // 外圈符文环（旋转）
-      const rotAngle = this.elapsed * 4;
-      ctx.strokeStyle = r.color;
-      ctx.lineWidth = 2;
-      ctx.shadowColor = r.color;
-      ctx.shadowBlur = 8;
-      // 外圆
-      ctx.beginPath();
-      ctx.arc(0, 0, 8 + pulse * 4, 0, Math.PI * 2);
-      ctx.stroke();
-      // 内圈8个小圆
-      for (let i = 0; i < 8; i++) {
-        const a = rotAngle + (Math.PI * 2 / 8) * i;
-        const rx = Math.cos(a) * 10;
-        const ry = Math.sin(a) * 10;
-        ctx.beginPath();
-        ctx.arc(rx, ry, 2.5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      // 中心点
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(0, 0, 3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-  }
+  /** @deprecated P4.1A.8：副刀符阵已停用 */
+  private drawSubRunes(ctx: CanvasRenderingContext2D) { }
 
   private drawBladeTip(ctx: CanvasRenderingContext2D, pos: Vec2, angle: number, length: number, width: number, color: string, ratio: number) {
     const x2 = pos.x + Math.cos(angle) * length;
@@ -5963,8 +5842,9 @@ export class Game {
       `allPostSpawned: ${this.allPostChestWavesSpawned}`,
       `Sub0: ${this.subBladeAnim[0]?.phase ?? "-"} (t:${(this.subBladeAnim[0]?.phaseTimer ?? 0).toFixed(2)}/${(this.subBladeAnim[0]?.phaseDuration ?? 0).toFixed(2)})`,
       `Sub1: ${this.subBladeAnim[1]?.phase ?? "-"} (t:${(this.subBladeAnim[1]?.phaseTimer ?? 0).toFixed(2)}/${(this.subBladeAnim[1]?.phaseDuration ?? 0).toFixed(2)})`,
+      `Sub0 target: ${this.subBladeAnim[0]?.targetId?.slice(0, 6) ?? "-"}`,
+      `Sub1 target: ${this.subBladeAnim[1]?.targetId?.slice(0, 6) ?? "-"}`,
       `readyWait: ${(this.subBladeAnim[1]?.phaseTimer ?? 0).toFixed(2)}s`,
-      `Sub spd: ${(this.subBladeAnim[0]?.phaseTimer ?? 0) > 0 ? ((this.subBladeAnim[0].phaseTimer / Math.max(0.001, this.subBladeAnim[0].phaseDuration)) * 100).toFixed(0) + "%" : "-"}/${(this.subBladeAnim[1]?.phaseTimer ?? 0) > 0 ? ((this.subBladeAnim[1].phaseTimer / Math.max(0.001, this.subBladeAnim[1].phaseDuration)) * 100).toFixed(0) + "%" : "-"}`,
     ];
 
     ctx.save();
