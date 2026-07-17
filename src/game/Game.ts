@@ -1922,6 +1922,11 @@ export class Game {
       }
     }
 
+    // P3.11：统一怪物左右边界 clamp 兜底
+    for (const enemy of this.enemies) {
+      enemy.x = clamp(enemy.x, BATTLE_SAFE_X.normalMin, BATTLE_SAFE_X.normalMax);
+    }
+
     this.enemies = this.enemies.filter((enemy) => enemy.alive);
 
     // 二次打磨：怪物软分离（中场/收割区自然挤开，减少重叠）
@@ -2321,9 +2326,10 @@ export class Game {
     blade: Blade, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]
   ) {
     const hits: Enemy[] = [];
-    // 横扫判定范围更大（radius + 32）
+    // P3.11：副刀只攻击中下段区域（中场起始~防线上方）
     for (const enemy of this.enemies) {
       if (!enemy.alive) continue;
+      if (enemy.y < BATTLEFIELD_ZONES.midfieldStartY) continue;
       const dist = distanceToSegment(enemy, { x: s.x1, y: s.y1 }, { x: s.x2, y: s.y2 });
       if (dist < enemy.radius + 32) hits.push(enemy);
     }
@@ -2373,9 +2379,10 @@ export class Game {
     blade: Blade, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]
   ) {
     const hits: Enemy[] = [];
-    // 破点判定范围更精确（radius + 24）
+    // P3.11：副刀只攻击中下段区域
     for (const enemy of this.enemies) {
       if (!enemy.alive) continue;
+      if (enemy.y < BATTLEFIELD_ZONES.midfieldStartY) continue;
       const dist = distanceToSegment(enemy, { x: s.x1, y: s.y1 }, { x: s.x2, y: s.y2 });
       if (dist < enemy.radius + 24) hits.push(enemy);
     }
@@ -2587,7 +2594,7 @@ export class Game {
     this.screenShake = Math.max(this.screenShake, 1.2);
     this.flash = Math.max(this.flash, 0.7);
     this.slowMoTimer = Math.max(this.slowMoTimer, 0.15);
-    this.addText(DESIGN_WIDTH / 2, 280, "🗡 一刀斩模式", "#ff6a33", 32, 2.5);
+    this.addText(DESIGN_WIDTH / 2, 280, "🗡 一刀斩", "#ff6a33", 32, 2.5);
     for (let i = 0; i < 16; i++) {
       this.particles.push(...sparkBurst({ x: DESIGN_WIDTH / 2 + (Math.random() - 0.5) * 240, y: 400 + (Math.random() - 0.5) * 320 }, 8, "#ff6a33"));
     }
@@ -3587,22 +3594,16 @@ export class Game {
     ctx.fill();
     ctx.stroke();
 
-    // 顶部路线标签
-    ctx.fillStyle = "rgba(150, 100, 220, 0.2)";
-    ctx.strokeStyle = "rgba(150, 100, 220, 0.5)";
-    ctx.lineWidth = 1;
-    roundRect(ctx, lay.panelW / 2 - 60, 14, 120, 24, 12);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "#b58cff";
-    ctx.font = '700 12px "Microsoft YaHei", "SimHei", sans-serif';
+    // 标题
+    ctx.fillStyle = "#f6e7bd";
+    ctx.font = '700 16px "Microsoft YaHei", "SimHei", sans-serif';
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("⚡ 军令路线", lay.panelW / 2, 26);
+    ctx.fillText("军令降临", lay.panelW / 2, 28);
 
-    // 中央紫色发光圆形主视觉
+    // P3.11：中央紫色发光圆形主视觉
     const iconCx = lay.panelW / 2;
-    const iconCy = 100;
+    const iconCy = 80;
     const iconR = 36;
 
     ctx.shadowColor = "rgba(150, 100, 220, 0.6)";
@@ -3624,32 +3625,17 @@ export class Game {
     ctx.textBaseline = "middle";
     ctx.fillText("令", iconCx, iconCy + 1);
 
-    // 军令名称
+    // 军令效果名
     ctx.shadowBlur = 0;
     ctx.fillStyle = "#f6e7bd";
     ctx.font = '700 18px "Microsoft YaHei", "SimHei", sans-serif';
     ctx.textAlign = "center";
-    ctx.fillText("军令", iconCx, 152);
+    ctx.fillText("军令", iconCx, 138);
 
-    // 说明
+    // 一句话描述
     ctx.fillStyle = "#c8b896";
-    ctx.font = '400 13px "Microsoft YaHei", "SimHei", sans-serif';
-    ctx.fillText("刀势回涌！副刀共鸣！", iconCx, 178);
-
-    // 分隔线
-    ctx.strokeStyle = "rgba(150, 100, 220, 0.2)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(30, 195);
-    ctx.lineTo(lay.panelW - 30, 195);
-    ctx.stroke();
-
-    // 效果详情
-    ctx.fillStyle = "#f6e7bd";
-    ctx.font = '400 12px "Microsoft YaHei", "SimHei", sans-serif';
-    ctx.fillText("• 立即恢复 70% 刀势", iconCx, 218);
-    ctx.fillText("• 两把副刀 CD 清零", iconCx, 237);
-    ctx.fillText("• 军令爆发怪潮入场", iconCx, 256);
+    ctx.font = '400 14px "Microsoft YaHei", "SimHei", sans-serif';
+    ctx.fillText("刀势回涌，副刀共鸣！", iconCx, 167);
 
     ctx.restore();
 
@@ -3778,7 +3764,7 @@ export class Game {
       return;
     }
 
-    this.addText(DESIGN_WIDTH / 2, DESIGN_HEIGHT * 0.52, "军令入体", "#ffd35a", 16, 0.45);
+    this.addText(DESIGN_WIDTH / 2, DESIGN_HEIGHT * 0.52, "军令已生效", "#ffd35a", 16, 0.45);
     this.screenShake = Math.max(this.screenShake, 0.08);
   }
 
@@ -6051,6 +6037,7 @@ export class Game {
     this.startChestDrop(enemy.x, enemy.y - 10);
     this.particles.push(glowParticle(enemy, "#ffd35a", 25, 50));
     this.addText(enemy.x, enemy.y - 40, "宝箱掉落！", "#ffd35a", 18, 1.6);
+    // P3.11：精简文本，只保留"军令降临"一条
 
     this.autoChestResolveAt = this.elapsed + 0.55;
     // 精英死亡强反馈
@@ -6100,8 +6087,7 @@ export class Game {
 
     if (!this.setEdictRewardState("modal", "open chest modal")) return;
 
-    this.addText(DESIGN_WIDTH / 2, 150, "军令激活", "#ffd35a", 24, 1.2);
-    this.addText(DESIGN_WIDTH / 2, 185, "刀势回涌！副刀共鸣！", "#ffd35a", 18, 1.4);
+    this.addText(DESIGN_WIDTH / 2, 150, "军令降临", "#ffd35a", 24, 1.2);
     this.screenShake = Math.max(this.screenShake, 0.25);
   }
 
