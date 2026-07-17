@@ -68,6 +68,11 @@ const SUB_BLADE_MOTION = {
   right: { readyMinHold: 0.08, highValueWait: 0.35, arming: 0.20, outbound: 0.12, attacking: 0.18, normalHitHold: 0.05, specialHitHold: 0.07, returning: 0.26, settling: 0.14 }
 };
 
+/** P4.1A.6：副刀攻击Y轴硬约束（禁止进入顶部刷怪区） */
+function clampSubBladeAttackY(y: number): number {
+  return clamp(y, BATTLEFIELD_ZONES.midfieldStartY + 12, BALANCE.battlefield.bottomDefenseY - 42);
+}
+
 export class Game {
   readonly level: LevelConfig;
 
@@ -2123,7 +2128,8 @@ export class Game {
             const avgX = validEnemies.reduce((s, e) => s + e.x, 0) / validEnemies.length;
             const avgY = validEnemies.reduce((s, e) => s + e.y, 0) / validEnemies.length;
             anim.startPos = { ...home };
-            anim.endPos = { x: avgX, y: Math.max(BATTLEFIELD_ZONES.midfieldStartY, avgY - 50) };
+            // P4.1A.6: endPos用clampSubBladeAttackY硬约束
+            anim.endPos = { x: clamp(avgX, 100, DESIGN_WIDTH - 100), y: clampSubBladeAttackY(avgY - 50) };
             anim.phase = "arming";
             anim.phaseTimer = 0;
             anim.phaseDuration = M.arming;
@@ -2230,27 +2236,26 @@ export class Game {
   }
 
   /** 蓄势横扫 —— 横向扫过敌群最密集区域 */
+  /** P4.1A.6：左副刀横扫（使用锁定位置cx/cy，不移除旧findDensestYBand调用，但不再生成独立subSlash/subRune） */
   private triggerMomentumSweep(blade: Blade, cx: number, cy: number, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]) {
-    // 找敌人最密集的 y 区间
-    const denseY = this.findDensestYBand();
-    // 中场化：从中场横向扫过（不再从玩家身上发出）
-    const sweepY = Math.min(denseY, 580); // 中场密区y轴
-    const sweepX = DESIGN_WIDTH / 2; // 横向居中
-    // 从左到右横扫
-    const span = 180;
-    const tailX = sweepX - span;
-    const tipX = sweepX + span;
-    const tailY = sweepY + 8;
-    const tipY = sweepY - 4;
+    // P4.1A.6: 使用Ready阶段锁定的位置，不再调用findDensestYBand
+    const sweepY = clampSubBladeAttackY(cy);
+    const sweepX = clamp(cx, 100, DESIGN_WIDTH - 100);
+    const span = 90;
+    const tailX = clamp(sweepX - span, 32, DESIGN_WIDTH - 32);
+    const tipX = clamp(sweepX + span, 32, DESIGN_WIDTH - 32);
+    const tailY = clampSubBladeAttackY(sweepY + 6);
+    const tipY = clampSubBladeAttackY(sweepY - 6);
 
     const color = "#5bc0ff";
-    // 方案B：副刀符阵（起点+终点各一个旋转符文）
-    this.subRune.push({ x: tailX, y: tailY, color, life: 0.3, maxLife: 0.3 });
-    this.subRune.push({ x: tipX, y: tipY, color, life: 0.3, maxLife: 0.3 });
+    // P4.1A.6: 不再生成独立subRune/subSlash —— 由飞刀实体Attacking阶段驱动
+    // 伤害由outbound→attacking状态机中的applyMomentumSweepDamageFromPlan处理
+    // 为兼容旧applySubSlashDamage，仍push一条极短轨迹，长度0.01让damaged=true立即触发
     this.subSlash.push({
-      x1: tailX, y1: tailY, x2: tipX, y2: tipY,
+      x1: (tailX + tipX) / 2 - 0.5, y1: (tailY + tipY) / 2,
+      x2: (tailX + tipX) / 2 + 0.5, y2: (tailY + tipY) / 2,
       color,
-      life: 0.35, maxLife: 0.35,
+      life: 0.01, maxLife: 0.01,
       bladeIdx: 0,
       damaged: false,
       slotType: 'momentum_sweep'
@@ -2258,41 +2263,26 @@ export class Game {
   }
 
   /** 破点追击 —— 锁定高价值目标 */
+  /** P4.1A.6：右副刀追击（使用锁定位置cx/cy，不再重新找目标） */
   private triggerWeakpointChase(blade: Blade, cx: number, cy: number, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]) {
-    let target = this.findHighValueTarget();
-    if (!target) {
-      // 无高价值目标 → 退化为攻击最近敌人
-      const fallback = this.findClosestEnemy();
-      if (!fallback) return;
-      target = fallback;
-    }
-    // 从 warrior 飞向目标
-    const dx = target.x - cx;
-    const dy = target.y - cy;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist < 10) return;
-    // 中场化：从天而降追击（不再从玩家身上发出）
-    const tipX = target.x;
-    const tipY = target.y + 10;
-    const tailX = target.x + (Math.random() - 0.5) * 60;
-    const tailY = Math.max(70, target.y - 80); // 从目标上方追下
+    // P4.1A.6: cx/cy就是Ready阶段锁定的目标位置，不再findHighValueTarget
+    const targetX = clamp(cx, 32, DESIGN_WIDTH - 32);
+    const targetY = clampSubBladeAttackY(cy);
 
-    const color = "#ff6a33"; // 金色——破点副刀
-    // 方案B：副刀符阵（目标上方旋转符文）
-    this.subRune.push({ x: tipX, y: tipY - 40, color, life: 0.3, maxLife: 0.3 });
-    this.subRune.push({ x: tailX, y: tailY, color, life: 0.3, maxLife: 0.3 });
+    const color = "#b58cff";
+    // P4.1A.6: 不再生成独立subRune/subSlash，由飞刀实体驱动
     this.subSlash.push({
-      x1: tailX, y1: tailY, x2: tipX, y2: tipY,
+      x1: targetX - 0.5, y1: targetY,
+      x2: targetX + 0.5, y2: targetY,
       color,
-      life: 0.40, maxLife: 0.40,
+      life: 0.01, maxLife: 0.01,
       bladeIdx: 1,
       damaged: false,
-      slotType: 'weakpoint_chase',
-      lockOnEnemyId: target.id
+      slotType: 'weakpoint_chase'
     });
 
-    // 标记高价值目标弱点的前置：命中后由 applySubSlashDamage 处理
-    this._pendingWeakpointChaseTarget = target;
+    // 仍保留pending目标标记供applySubSlashDamage使用
+    this._pendingWeakpointChaseTarget = { x: targetX, y: targetY, kind: "unknown" };
   }
 
   // 临时存储破点追击的目标（在 applySubSlashDamage 中使用）
@@ -5926,7 +5916,7 @@ export class Game {
       `Sub0: ${this.subBladeAnim[0]?.phase ?? "-"} (t:${(this.subBladeAnim[0]?.phaseTimer ?? 0).toFixed(2)}/${(this.subBladeAnim[0]?.phaseDuration ?? 0).toFixed(2)})`,
       `Sub1: ${this.subBladeAnim[1]?.phase ?? "-"} (t:${(this.subBladeAnim[1]?.phaseTimer ?? 0).toFixed(2)}/${(this.subBladeAnim[1]?.phaseDuration ?? 0).toFixed(2)})`,
       `readyWait: ${(this.subBladeAnim[1]?.phaseTimer ?? 0).toFixed(2)}s`,
-      `Sub spd: ${this.subBladeAnim.map((a, idx) => idx === 0 ? "-" : "-").join("/")}`,
+      `Sub spd: ${(this.subBladeAnim[0]?.phaseTimer ?? 0) > 0 ? ((this.subBladeAnim[0].phaseTimer / Math.max(0.001, this.subBladeAnim[0].phaseDuration)) * 100).toFixed(0) + "%" : "-"}/${(this.subBladeAnim[1]?.phaseTimer ?? 0) > 0 ? ((this.subBladeAnim[1].phaseTimer / Math.max(0.001, this.subBladeAnim[1].phaseDuration)) * 100).toFixed(0) + "%" : "-"}`,
     ];
 
     ctx.save();
