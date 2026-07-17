@@ -864,7 +864,7 @@ export class Game {
     const stage = SWORD_STAGE_BY_ID[trail.tier];
     const praise = this.getSlashPraise(trail, reason);
     if (praise) {
-      this.addText(DESIGN_WIDTH / 2, 136, praise, stage.color, praise === "一刀破阵" ? 26 : 20);
+      this.addText(DESIGN_WIDTH / 2, 136, praise, stage.color, praise === "神之一刀" ? 26 : 20);
     // 漂亮一刀：首次 5+ 击杀
     if (this.isFirstRun && trail.kills >= 5 && !this.firstRunPrettySlashShown) {
       this.firstRunPrettySlashShown = true;
@@ -874,14 +874,13 @@ export class Game {
       this.flash = Math.max(this.flash, 0.6);
     }
     // 首次触发阵眼崩散
-    if (this.isFirstRun && trail.coreCollapseCount > 0 && !this.firstRunCoreBoomShown) {
+    if (trail.coreCollapseCount > 0 && !this.firstRunCoreBoomShown) {
       this.firstRunCoreBoomShown = true;
-      this.addText(DESIGN_WIDTH / 2, 104, "一刀破阵！", "#ffd35a", 30, 1.8);
       this.slowMoTimer = Math.max(this.slowMoTimer, 0.2);
       this.screenShake = Math.max(this.screenShake, 0.65);
       this.flash = Math.max(this.flash, 0.8);
     }
-      if (praise === "一刀破阵") {
+      if (praise === "神之一刀") {
       this.stats.oneBladeBreaks += 1;
       AudioService.oneBladeBreak();
     }
@@ -986,8 +985,8 @@ export class Game {
   private getSlashPraise(trail: SlashTrail, fallback: string) {
     if (trail.tier === "burst" && trail.kills >= 12) return "神之一刀";
     if (trail.tier === "burst" && trail.kills >= 8) return "一刀破军";
-    if (trail.coreCollapseCount > 0 && trail.tier === "burst") return "一刀破阵";
-    if (trail.kills >= 13) return "一刀破阵";
+    if (trail.coreCollapseCount > 0 && trail.tier === "burst") return "神之一刀";
+    if (trail.kills >= 13) return "神之一刀";
     if (trail.coreCollapseCount > 0) return "阵破";
     if (trail.explosionCount >= 2) return "连爆";
     if (trail.kills >= 8) return "破阵";
@@ -3594,16 +3593,16 @@ export class Game {
     ctx.fill();
     ctx.stroke();
 
-    // 标题
-    ctx.fillStyle = "#f6e7bd";
-    ctx.font = '700 16px "Microsoft YaHei", "SimHei", sans-serif';
+    // P3.12：标题（小标签）
+    ctx.fillStyle = "#c8b896";
+    ctx.font = '500 12px "Microsoft YaHei", "SimHei", sans-serif';
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("军令降临", lay.panelW / 2, 28);
+    ctx.fillText("军令降临", lay.panelW / 2, 24);
 
-    // P3.11：中央紫色发光圆形主视觉
+    // 中央Icon（最大视觉焦点）
     const iconCx = lay.panelW / 2;
-    const iconCy = 80;
+    const iconCy = 78;
     const iconR = 36;
 
     ctx.shadowColor = "rgba(150, 100, 220, 0.6)";
@@ -3625,17 +3624,18 @@ export class Game {
     ctx.textBaseline = "middle";
     ctx.fillText("令", iconCx, iconCy + 1);
 
-    // 军令效果名
+    // 军令名（最大字号最粗）
     ctx.shadowBlur = 0;
     ctx.fillStyle = "#f6e7bd";
-    ctx.font = '700 18px "Microsoft YaHei", "SimHei", sans-serif';
+    ctx.font = '900 22px "Microsoft YaHei", "SimHei", sans-serif';
     ctx.textAlign = "center";
-    ctx.fillText("军令", iconCx, 138);
+    ctx.fillText("军令", iconCx, 128);
 
-    // 一句话描述
-    ctx.fillStyle = "#c8b896";
-    ctx.font = '400 14px "Microsoft YaHei", "SimHei", sans-serif';
-    ctx.fillText("刀势回涌，副刀共鸣！", iconCx, 167);
+    // 描述（更小更轻）
+    ctx.fillStyle = "#a09078";
+    ctx.font = '400 12px "Microsoft YaHei", "SimHei", sans-serif';
+    ctx.textAlign = "center";
+    ctx.fillText("刀势回涌，副刀共鸣！", iconCx, 155);
 
     ctx.restore();
 
@@ -4863,31 +4863,32 @@ export class Game {
   }
 
   /** 副刀cd将好：warrior 身上召唤光圈（0.4s） */
+  /** P3.12：副刀就绪提示（缩小，贴近角色两侧，短时强化） */
   private drawSubReadyPings(ctx: CanvasRenderingContext2D) {
     if (this.subReadyPing.length === 0) return;
     const cx = DESIGN_WIDTH / 2;
     const cy = BALANCE.battlefield.warriorY;
     for (const p of this.subReadyPing) {
-      const t = 1 - p.life / p.maxLife; // 0→1
+      const t = 1 - p.life / p.maxLife;
       const slot = p.slot;
       const baseColor = "#a8e6cf";
-      const ringR = 38 + t * 24; // 从38扩大到62
-      const alpha = (1 - t) * 0.85;
+      const ringR = 20 + t * 12; // 缩至20~32，不再扩大到62
+      const alpha = (1 - t) * 0.65; // 透明度降低
       ctx.save();
       ctx.strokeStyle = baseColor + Math.floor(alpha * 255).toString(16).padStart(2, "0");
       ctx.shadowColor = baseColor;
-      ctx.shadowBlur = 18;
-      ctx.lineWidth = 3.5;
-      // 偏左/右（匹配 slot 0/1 角度）
-      const offX = slot === 0 ? -34 : 34;
-      const offY = -8;
+      ctx.shadowBlur = 8; // 减弱光晕
+      ctx.lineWidth = 2; // 更细
+      // 更贴近角色两侧
+      const offX = slot === 0 ? -20 : 20;
+      const offY = -4;
       ctx.beginPath();
       ctx.arc(cx + offX, cy + offY, ringR, 0, Math.PI * 2);
       ctx.stroke();
       // 中心小光点
-      ctx.fillStyle = baseColor + Math.floor(alpha * 200).toString(16).padStart(2, "0");
+      ctx.fillStyle = baseColor + Math.floor(alpha * 160).toString(16).padStart(2, "0");
       ctx.beginPath();
-      ctx.arc(cx + offX, cy + offY, 6, 0, Math.PI * 2);
+      ctx.arc(cx + offX, cy + offY, 4, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
