@@ -8,7 +8,7 @@ export type EnemyKind = "infantry" | "shield" | "powder" | "core" | "elite" | "b
 export type EliteKind = "fireRing" | "heal" | "aura";
 export type BossId = "yaoWang" | "moXiu" | "huaYao";
 export type PickupKind = "drum" | "soul" | "oil";
-export type GamePhase = "playing" | "buffChoice" | "revive" | "won" | "lost" | "chestOpen";
+export type GamePhase = "playing" | "buffChoice" | "revive" | "won" | "lost" | "chestOpen" | "paused_for_chest";
 export type RatingGrade = "C" | "B" | "A" | "S" | "SS" | "神之一刀";
 
 // ---- 战术指令路线系统 ----

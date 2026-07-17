@@ -496,6 +496,14 @@ export class Game {
     }
     this.slowMoTimer = Math.max(0, this.slowMoTimer - frameDt);
 
+    // P3.8：军令弹窗期间暂停战斗模拟，不推进时间
+    if (this.isEdictModalBlocking()) {
+      this.phase = "chestOpen";
+      this.validateEdictState();
+      this.validateChestEdictState();
+      return;
+    }
+
     if (this.phase === "buffChoice") {
       this.buffChoicePause = Math.max(0, this.buffChoicePause - frameDt);
       this.updateParticles(frameDt);
@@ -616,6 +624,7 @@ export class Game {
     this.drawFloatingTexts(ctx);
     this.drawWaveProgress(ctx);
     this.drawChestDrop(ctx);
+    this.drawEdictRewardModal(ctx);
     this.drawMidfieldEventBorder(ctx);
     this.drawIntroOverlay(ctx);
     // P2.8：战斗层之后绘制边缘金光和破阵过渡
@@ -638,9 +647,12 @@ export class Game {
       this.selectBuffAt(pos);
       return;
     }
-    // P2.9：宝箱弹窗期间，只处理"继续"按钮点击
+    // P3.8：军令弹窗期间，按钮或面板内部均可确认
     if (this.chestPendingConfirm) {
-      if (this.isPointInChestConfirmButton(pos.x, pos.y)) {
+      if (
+        this.isPointInChestConfirmButton(pos.x, pos.y) ||
+        this.isPointInEdictModalPanel(pos.x, pos.y)
+      ) {
         this.confirmEliteChestReward();
       }
       return;
@@ -1088,6 +1100,32 @@ export class Game {
   }
 
   /** P2.9：判断点击是否在宝箱确认按钮范围内 */
+  /** P3.8：军令弹窗是否正在暂停战斗 */
+  private isEdictModalBlocking(): boolean {
+    return this.edictRewardState === "modal" && this.chestPendingConfirm;
+  }
+
+  /** P3.8：统一弹窗布局坐标 */
+  private getEdictModalLayout() {
+    const cw = DESIGN_WIDTH;
+    const ch = DESIGN_HEIGHT;
+    const pw = 286;  // 面板宽
+    const ph = 340;  // 面板高
+    const px = (cw - pw) / 2;
+    const py = (ch - ph) / 2 - 20;  // 略向上偏移，给底部按钮留空间
+    const bw = 200;  // 按钮宽
+    const bh = 48;   // 按钮高
+    const bx = (cw - bw) / 2;
+    const by = py + ph - 78;
+    return { panelX: px, panelY: py, panelW: pw, panelH: ph, buttonX: bx, buttonY: by, buttonW: bw, buttonH: bh };
+  }
+
+  /** P3.8：点击命中弹窗面板内部 */
+  private isPointInEdictModalPanel(x: number, y: number): boolean {
+    const lay = this.getEdictModalLayout();
+    return x >= lay.panelX && x <= lay.panelX + lay.panelW && y >= lay.panelY && y <= lay.panelY + lay.panelH;
+  }
+
   private isPointInChestConfirmButton(x: number, y: number): boolean {
     return (
       x >= DESIGN_WIDTH / 2 - 90 &&
@@ -3471,6 +3509,116 @@ export class Game {
     ctx.font = '700 10px "Microsoft YaHei", "SimHei", sans-serif';
     ctx.fillStyle = "#ffd35a";
     ctx.fillText(inBurst ? "爆发中" : "已激活", 0, 29);
+
+    ctx.restore();
+  }
+
+  /** P3.8：绘制军令弹窗（紫色框体完整版） */
+  private drawEdictRewardModal(ctx: CanvasRenderingContext2D) {
+    if (!this.isEdictModalBlocking()) return;
+
+    const lay = this.getEdictModalLayout();
+    const cx = DESIGN_WIDTH / 2;
+    const pulse = 0.5 + Math.sin(this.elapsed * 4) * 0.5;
+
+    // 暗色遮罩
+    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+    ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+
+    ctx.save();
+    ctx.translate(lay.panelX, lay.panelY);
+
+    // 面板背景
+    ctx.fillStyle = "rgba(20, 14, 8, 0.94)";
+    ctx.strokeStyle = "rgba(120, 80, 200, 0.5)";
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, 0, 0, lay.panelW, lay.panelH, 14);
+    ctx.fill();
+    ctx.stroke();
+
+    // 顶部路线标签
+    ctx.fillStyle = "rgba(150, 100, 220, 0.2)";
+    ctx.strokeStyle = "rgba(150, 100, 220, 0.5)";
+    ctx.lineWidth = 1;
+    roundRect(ctx, lay.panelW / 2 - 60, 14, 120, 24, 12);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#b58cff";
+    ctx.font = '700 12px "Microsoft YaHei", "SimHei", sans-serif';
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("⚡ 军令路线", lay.panelW / 2, 26);
+
+    // 中央紫色发光圆形主视觉
+    const iconCx = lay.panelW / 2;
+    const iconCy = 100;
+    const iconR = 36;
+
+    ctx.shadowColor = "rgba(150, 100, 220, 0.6)";
+    ctx.shadowBlur = 16 + pulse * 8;
+    ctx.fillStyle = "#7c3aed";
+    ctx.beginPath();
+    ctx.arc(iconCx, iconCy, iconR, 0, Math.PI * 2);
+    ctx.fill();
+    // 内圈
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(124, 58, 237, 0.6)";
+    ctx.beginPath();
+    ctx.arc(iconCx, iconCy, iconR - 6, 0, Math.PI * 2);
+    ctx.fill();
+    // 军令首字
+    ctx.fillStyle = "#fff";
+    ctx.font = '900 26px "Microsoft YaHei", "SimHei", sans-serif';
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("令", iconCx, iconCy + 1);
+
+    // 军令名称
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#f6e7bd";
+    ctx.font = '700 18px "Microsoft YaHei", "SimHei", sans-serif';
+    ctx.textAlign = "center";
+    ctx.fillText("军令", iconCx, 152);
+
+    // 说明
+    ctx.fillStyle = "#c8b896";
+    ctx.font = '400 13px "Microsoft YaHei", "SimHei", sans-serif';
+    ctx.fillText("刀势回涌！副刀共鸣！", iconCx, 178);
+
+    // 分隔线
+    ctx.strokeStyle = "rgba(150, 100, 220, 0.2)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(30, 195);
+    ctx.lineTo(lay.panelW - 30, 195);
+    ctx.stroke();
+
+    // 效果详情
+    ctx.fillStyle = "#f6e7bd";
+    ctx.font = '400 12px "Microsoft YaHei", "SimHei", sans-serif';
+    ctx.fillText("• 立即恢复 70% 刀势", iconCx, 218);
+    ctx.fillText("• 两把副刀 CD 清零", iconCx, 237);
+    ctx.fillText("• 军令爆发怪潮入场", iconCx, 256);
+
+    ctx.restore();
+
+    // 底部紫色主按钮
+    ctx.save();
+    ctx.shadowColor = "rgba(124, 58, 237, 0.4)";
+    ctx.shadowBlur = 6 + pulse * 4;
+    ctx.fillStyle = "#7c3aed";
+    ctx.strokeStyle = "rgba(150, 100, 220, 0.4)";
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, lay.buttonX, lay.buttonY, lay.buttonW, lay.buttonH, 10);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#fff";
+    ctx.font = '700 16px "Microsoft YaHei", "SimHei", sans-serif';
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("收下军令", cx, lay.buttonY + lay.buttonH / 2);
 
     ctx.restore();
   }
