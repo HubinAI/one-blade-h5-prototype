@@ -229,6 +229,8 @@ export type Enemy = {
   tractorTimer?: number;
   tractorPullCount?: number;
   tractorTargetRefs?: Enemy[];
+  /** P4.3A.3: 敌人来源 */
+  spawnSource?: "normal" | "edict" | "split" | "elite" | "direct";
   /** P4.3A: 战场流动状态 */
   flow?: EnemyFlowState;
 };

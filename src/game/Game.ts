@@ -165,7 +165,7 @@ export class Game {
     attackEndPos: Vec2;
   }[] = [];
   // 多波多次刷新队列：每个子刷新有时间戳，到时间就spawn
-  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number }[] = [];
+  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number }[] = [];
 
   private pointerDown = false;
   private pointerPos?: Vec2;
@@ -230,6 +230,11 @@ export class Game {
   private nearEmptyTimer = 0;
   /** P4.3A.1: 波次提前推进锁 */
   private waveAdvanceLockedUntil = 0;
+  /** P4.3A.3: 军令波提前推进锁 */
+  private postChestAdvanceLockedUntil = 0;
+  private postChestLastWaveQueuedAt = -999;
+  private postChestActionableEmptyTimer = 0;
+  private postChestLastAdvanceReason: "scheduled" | "low_pressure" | "empty_guard" | null = null;
   /** 当前波次对应的中场事件（仅作用于本波敌人生效） */
   private _currentWaveEvent: 'gather' | 'charge_pause' | null = null;
 
@@ -2440,51 +2445,113 @@ export class Game {
     return { rear, mid, front, total: rear.length + mid.length + front.length };
   }
 
-  /** P4.3A.2: 投影压力（actual + entry权重 + incoming权重） */
-  private getProjectedPressure(lookAhead = 1.5) {
-    // actual (完成入场)
+  /** P4.3A.2+3: 投影压力（按source过滤，修正actual漏算） */
+  private getProjectedPressure(lookAhead = 1.5, source?: "normal" | "edict") {
     const actual = { rear: 0, mid: 0, front: 0 };
     for (const e of this.enemies) {
       if (!e.alive || e.kind === "boss") continue;
-      if (e.entryPhase && e.entryPhase.completed) {
+      if (source && e.spawnSource && e.spawnSource !== source) continue;
+      // 修复：无entryPhase或已完成entry的计入actual
+      if (!e.entryPhase || e.entryPhase.completed) {
         const l = this.getPressureLayer(e.y);
         if (l === "rear") actual.rear++; else if (l === "mid") actual.mid++; else actual.front++;
       }
     }
-    // entry (正在入场，按剩余时间给权重)
     const entry = { rear: 0, mid: 0, front: 0 };
     for (const e of this.enemies) {
       if (!e.alive || !e.entryPhase || e.entryPhase.completed) continue;
+      if (source && e.spawnSource && e.spawnSource !== source) continue;
       const remain = Math.max(0, e.entryPhase.maxDuration - e.entryPhase.elapsed);
       const weight = remain <= 0.6 ? 1.0 : remain <= 1.2 ? 0.7 : 0.4;
-      // 正在入场的敌人预计将补到mid（远场）
       entry.mid += weight * 0.7;
       entry.rear += weight * 0.3;
     }
-    // incoming (未来队列)
+    // incoming只用于人口预算，不直接算front压力
     const incoming = { vanguard: 0, main: 0, reserve: 0 };
     for (const q of this.subSpawnQueue) {
       if (q.time - this.elapsed > lookAhead) continue;
+      if (source && q.source && q.source !== source) continue;
       const role = q.flowRole ?? "main";
       if (role === "vanguard") incoming.vanguard++;
       else if (role === "main") incoming.main++;
       else incoming.reserve++;
     }
-    // 映射
-    const incomingRear = incoming.vanguard * 0 + incoming.main * 0.4 + incoming.reserve * 1;
-    const incomingMid = incoming.vanguard * 0.6 + incoming.main * 0.6 + incoming.reserve * 0;
-    const incomingFront = incoming.vanguard * 0.4 + incoming.main * 0 + incoming.reserve * 0;
-    // 投影 = actual + entry + incoming
+    // 未生成队列不直接映射到front
     const projected = {
-      rear: actual.rear + entry.rear + incomingRear,
-      mid: actual.mid + entry.mid + incomingMid,
-      front: actual.front + entry.front + incomingFront,
+      rear: actual.rear + entry.rear,
+      mid: actual.mid + entry.mid,
+      front: actual.front + entry.front,
     };
-    return { actual, entry: { rear: entry.rear, mid: entry.mid, front: entry.front }, incoming, projected, totalActual: actual.rear + actual.mid + actual.front, totalProjected: projected.rear + projected.mid + projected.front };
+    return { actual, entry, incoming, projected,
+      totalActual: actual.rear + actual.mid + actual.front,
+      totalProjected: projected.rear + projected.mid + projected.front,
+      actionableNow: actual.mid + actual.front,
+    };
   }
 
-  /** P4.3A.2: 是否允许提前推进下一波 */
-  private shouldAdvanceNextWave(pressure: ReturnType<typeof this.getProjectedPressure>): boolean {
+  /** P4.3A.3: 可行动压力（只看当前/即将到mid的敌人） */
+  private estimateEnemyEtaToMid(enemy: Enemy): number {
+    if (enemy.y >= BATTLEFIELD_ZONES.midfieldStartY) return 0;
+    if (enemy.entryPhase?.active && !enemy.entryPhase.completed) {
+      return Math.max(0, enemy.entryPhase.maxDuration - enemy.entryPhase.elapsed) * 0.5;
+    }
+    const dist = BATTLEFIELD_ZONES.midfieldStartY - enemy.y;
+    const speed = enemy.speed * (enemy.flow?.currentSpeedMultiplier ?? 1);
+    return speed > 0 ? dist / speed : 99;
+  }
+
+  private getCombatPressure(scope: "all" | "normal" | "edict" = "all", horizon = 1.5) {
+    const source = scope === "all" ? undefined : scope;
+    const proj = this.getProjectedPressure(horizon, source);
+    let actionableNow = 0;
+    let arrivesMidWithin07 = 0;
+    let nearestMidEta = 99;
+    for (const e of this.enemies) {
+      if (!e.alive || e.kind === "boss") continue;
+      if (source && e.spawnSource && e.spawnSource !== source) continue;
+      if (!e.entryPhase || e.entryPhase.completed) {
+        const layer = this.getPressureLayer(e.y);
+        if (layer === "mid" || layer === "front") actionableNow++;
+      }
+      const eta = this.estimateEnemyEtaToMid(e);
+      if (eta < nearestMidEta) nearestMidEta = eta;
+      if (eta <= 0.7 && eta > 0) arrivesMidWithin07++;
+    }
+    // 未来队列ETA
+    let queueMidEta07 = 0;
+    for (const q of this.subSpawnQueue) {
+      if (q.time - this.elapsed > horizon) continue;
+      if (source && q.source && q.source !== source) continue;
+      const waitTime = Math.max(0, q.time - this.elapsed);
+      if (waitTime < 0.7) queueMidEta07++;
+    }
+    return {
+      proj,
+      actionableNow,
+      actionableSoon: actionableNow + arrivesMidWithin07 + queueMidEta07,
+      nearestMidEta,
+      arrivesMidWithin07,
+    };
+  }
+
+  /** P4.3A.3: 普通波提前推进（军令active时暂停） */
+  private shouldAdvanceNextWave(): boolean {
+    if (this.edictRewardState === "active" || this.battlePhase === "edict_burst") return false;
+    const pressure = this.getCombatPressure("normal");
+    const activeThreat = pressure.proj.projected.mid + pressure.proj.projected.front;
+    const tooLow = activeThreat <= 3;
+    const noNearThreat = pressure.proj.projected.front < 0.8;
+    const lockExpired = this.elapsed >= this.waveAdvanceLockedUntil;
+    const enoughGap = this.elapsed - this._lastWaveElapsed >= 0.60;
+    if (!tooLow || !noNearThreat || !lockExpired || !enoughGap) return false;
+    if (this.chestPendingConfirm || this.phase !== "playing") return false;
+    if (this.wavesSpawned >= this.level.waves.length) return false;
+    const aliveCount = this.enemies.filter(e => e.alive).length;
+    if (aliveCount + this.subSpawnQueue.length > 40) return false;
+    return true;
+  }
+
+  private shouldAdvanceNextWaveOld(pressure: ReturnType<typeof this.getProjectedPressure>): boolean {
     const activeThreat = pressure.projected.mid + pressure.projected.front;
     const tooLow = activeThreat <= 3;
     const noNearThreat = pressure.projected.front < 0.8;
@@ -3102,34 +3169,70 @@ export class Game {
     }
   }
 
-  /** V0715008: 宝箱后爆发怪潮生成 (第一轮修正：使用 postChestStartAt 时间基准) */
+  /** P4.3A.3: 军令波改为截止时间+压力提前接力 */
   private updatePostChestWaves(dt: number) {
     const postWaves = this.getEffectivePostChestWaves();
     if (!postWaves || postWaves.length === 0) return;
     if (!this.chestDone) return;
     if (this.postChestStartAt === null) return;
     if (this.allPostChestWavesSpawned) return;
-
     const wave = postWaves[this.postChestWaveIndex];
     if (!wave) { this.allPostChestWavesSpawned = true; return; }
+    const total = postWaves.length;
+    this.edictBurstRoundTotal = total;
 
     const postElapsed = this.elapsed - this.postChestStartAt;
+    const scheduledTime = wave.spawnAt ?? 0;
+    const pressure = this.getCombatPressure("edict");
+    const enoughTimeSinceLast = this.elapsed - this.postChestLastWaveQueuedAt >= 1.35;
+    const lockExpired = this.elapsed >= this.postChestAdvanceLockedUntil;
+    const currentRoundVanguardLeft = pressure.proj.incoming.vanguard;
+    const currentRoundMainLeft = pressure.proj.incoming.main;
+    const tooLowMidFront = pressure.actionableNow + pressure.arrivesMidWithin07 <= 2;
+    const vanguardMainNearlyDone = currentRoundVanguardLeft + currentRoundMainLeft <= 3;
+    const alivePlusQueue = this.enemies.filter(e => e.alive).length + this.subSpawnQueue.length;
 
-    if (postElapsed >= (wave.spawnAt ?? 0)) {
-      const total = postWaves.length;
-      this.edictBurstRoundTotal = total;
+    // 空场保护
+    const isCompletelyEmpty = pressure.actionableNow === 0 && pressure.actionableSoon <= 0;
 
-      // 第三轮修正：生成前设置 index，1-based，clamp 到 total
-      this.edictBurstRoundIndex = Math.min(this.postChestWaveIndex + 1, total);
+    let shouldAdvance = false;
+    let reason: "scheduled" | "low_pressure" | "empty_guard" | null = null;
 
-      this.spawnPostChestWave(wave);
-
-      this.postChestWaveIndex += 1;
-
-      if (this.postChestWaveIndex >= total) {
-        this.allPostChestWavesSpawned = true;
-        this.edictBurstRoundIndex = total;
+    // 条件1：固定截止时间（spawnAt作为最晚时间）
+    if (postElapsed >= scheduledTime) {
+      shouldAdvance = true;
+      reason = "scheduled";
+    }
+    // 条件2：低压力提前（仅当前轮次已运行足够时间且锁已过期）
+    else if (enoughTimeSinceLast && lockExpired && tooLowMidFront && vanguardMainNearlyDone && alivePlusQueue < 45) {
+      shouldAdvance = true;
+      reason = "low_pressure";
+    }
+    // 条件3：完全空场保护
+    if (!shouldAdvance && isCompletelyEmpty && lockExpired) {
+      this.postChestActionableEmptyTimer += dt;
+      if (this.postChestActionableEmptyTimer >= 0.40) {
+        shouldAdvance = true;
+        reason = "empty_guard";
       }
+    } else if (!isCompletelyEmpty) {
+      this.postChestActionableEmptyTimer = 0;
+    }
+
+    if (!shouldAdvance) { this.postChestLastAdvanceReason = null; return; }
+
+    // 执行生成
+    this.edictBurstRoundIndex = Math.min(this.postChestWaveIndex + 1, total);
+    this.spawnPostChestWave(wave);
+    this.postChestWaveIndex += 1;
+    this.postChestLastWaveQueuedAt = this.elapsed;
+    this.postChestAdvanceLockedUntil = this.elapsed + randomRange(0.85, 1.10);
+    this.postChestLastAdvanceReason = reason;
+    this.postChestActionableEmptyTimer = 0;
+
+    if (this.postChestWaveIndex >= total) {
+      this.allPostChestWavesSpawned = true;
+      this.edictBurstRoundIndex = total;
     }
   }
 
@@ -3294,6 +3397,7 @@ export class Game {
       this.subSpawnQueue.push({
         time, kind: enemy.kind, x: enemy.x, speedMultiplier, yOffset: enemy.yOffset,
         battlePhase: this.battlePhase, flowRole: role, spawnGroupId: waveId, spawnOrder: order++, entryEndYOffset: entryOff,
+        source: this.battlePhase === "edict_burst" ? "edict" : "normal",
       } as any);
     }
 
@@ -3379,6 +3483,8 @@ export class Game {
     this.enemies.push(enemy);
     this.discoveredEnemies.add(item.kind as any);
     this.particles.push(glowParticle({ x: item.x, y: spawnY }, "#5c4a3a", 10, 16));
+    // P4.3A.3: 记录敌人来源
+    enemy.spawnSource = item.source ?? "normal";
     // P4.3A: 初始化流动状态（Boss除外）
     if (item.kind !== "boss" && BATTLEFIELD_FLOW.enabled) {
       const flowRole = item.flowRole ?? "main";
@@ -4375,11 +4481,12 @@ export class Game {
             speedMultiplier: 1,
             yOffset: rowYOffset,
             battlePhase: "edict_burst",
-            // P4.3A.1: 军令爆发采用vanguard密集风格
             flowRole: batch < 1 ? "vanguard" : batch < 2 ? "main" : "reserve",
-            spawnGroupId: `post-${this.postChestWaveIndex}`,
+            spawnGroupId: `edict:${this.postChestWaveIndex + 1}:${this.postChestWaveIndex}`,
             spawnOrder: i,
             entryEndYOffset: batch < 1 ? 30 : batch < 2 ? 6 : -24,
+            source: "edict",
+            roundIndex: this.postChestWaveIndex + 1,
           } as any);
         }
       }
