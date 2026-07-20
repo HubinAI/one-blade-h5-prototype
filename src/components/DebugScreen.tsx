@@ -6,6 +6,7 @@ import {
 import { generateBlade, type Blade } from "../game/services/BladeService";
 import {
   debugSetHighestFloor,
+  debugJumpToFloor,
   debugSetRankIndex,
   debugRemoveClearedBreakthrough,
   debugAddClearedBreakthrough,
@@ -152,11 +153,11 @@ export function DebugScreen({ onBack }: DebugScreenProps) {
         <div className="debug-section">
           <h3>主线测试</h3>
           <div className="debug-btn-grid">
-            <button className="debug-btn" onClick={() => { debugSetHighestFloor(1); refresh(); }}>跳到第1关</button>
-            <button className="debug-btn" onClick={() => { debugSetHighestFloor(4); refresh(); }}>跳到第4关：分裂兵教学</button>
-            <button className="debug-btn" onClick={() => { debugSetHighestFloor(5); refresh(); }}>跳到第5关：分裂巩固</button>
-            <button className="debug-btn" onClick={() => { debugSetHighestFloor(6); refresh(); }}>跳到第6关：突破后主线</button>
-            <button className="debug-btn" onClick={() => { debugSetHighestFloor(7); refresh(); }}>跳到第7关：牵引兵教学</button>
+            <button className="debug-btn" onClick={() => { debugJumpToFloor(1); refresh(); }}>跳到第1关</button>
+            <button className="debug-btn" onClick={() => { debugJumpToFloor(4); refresh(); }}>跳到第4关：分裂兵教学</button>
+            <button className="debug-btn" onClick={() => { debugJumpToFloor(5); refresh(); }}>跳到第5关：分裂巩固</button>
+            <button className="debug-btn" onClick={() => { debugJumpToFloor(6); refresh(); }}>跳到第6关：突破后主线</button>
+            <button className="debug-btn" onClick={() => { debugJumpToFloor(7); refresh(); }}>跳到第7关：牵引兵教学</button>
           </div>
         </div>
 

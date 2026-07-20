@@ -1484,6 +1484,20 @@ export function debugSetHighestFloor(floor: number): void {
   writeProgress(progress);
 }
 
+/** P4.1A.13: Debug原子跳关（清理突破状态） */
+export function debugJumpToFloor(floor: number): void {
+  const progress = readProgress();
+  progress.highestFloor = Math.max(1, floor);
+  progress.pendingBreakthroughId = null;
+  progress.rankIndex = 0;
+  if (floor <= 5) {
+    progress.clearedBreakthroughs = [];
+  } else {
+    progress.clearedBreakthroughs = ["breakthrough_lianqi"];
+  }
+  writeProgress(progress);
+}
+
 /** Debug: 设置段位索引 */
 export function debugSetRankIndex(index: number): void {
   const progress = readProgress();

@@ -127,8 +127,7 @@ export class Game {
   private currentSlash?: SlashTrail;
   // 副刀cd已好，等待下一帧释放（光圈提示用）
   private subReadyPing: { slot: number; life: number; maxLife: number }[] = [];
-  /** 副刀符阵（方案B）：攻击前0.3s的旋转符文提示 */
-  private subRune: { x: number; y: number; color: string; life: number; maxLife: number }[] = [];
+  /** @deprecated P4.1A.13: subRune已删除 */
   /** P4.1：副刀飞行/回弹动画状态 */
   private subBladeAnim: {
     slot: number;
@@ -142,6 +141,10 @@ export class Game {
     rotation: number;        // 当前旋转角度（弧度）
     visualScale: number;
     hitApplied: boolean;
+    /** P4.1A.13: 左刀横扫路径 */
+    currentPos: Vec2;
+    attackStartPos: Vec2;
+    attackEndPos: Vec2;
   }[] = [];
   // 多波多次刷新队列：每个子刷新有时间戳，到时间就spawn
   private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase }[] = [];
@@ -401,7 +404,11 @@ export class Game {
       homePos: this.getSubBladeFloatingPos(i),
       rotation: 0,
       visualScale: 1,
-      hitApplied: false
+      hitApplied: false,
+      // P4.1A.13: 左刀横扫路径
+      currentPos: { x: 0, y: 0 },
+      attackStartPos: { x: 0, y: 0 },
+      attackEndPos: { x: 0, y: 0 }
     }));
     this.weakpointMarks = new Map();
     this._breakReadyNotified = false;
@@ -2178,8 +2185,9 @@ export class Game {
             const exitPos = { x: clamp(centerX + 90, 32, DESIGN_WIDTH - 32), y: clampSubBladeAttackY(centerY - 6) };
             anim.startPos = { ...home };
             anim.endPos = { ...entryPos };
-            // 将出口存在targetId关联字段（复用）
-            (anim as any)._sweepExit = exitPos;
+            // P4.1A.13: attackStartPos/attackEndPos 用于attacking阶段真实横扫
+            anim.attackStartPos = { ...entryPos };
+            anim.attackEndPos = { ...exitPos };
             anim.phase = "arming";
             anim.phaseTimer = 0;
             anim.phaseDuration = M.arming;
@@ -2243,8 +2251,8 @@ export class Game {
             anim.phaseDuration = M.attacking;
             // P4.1A.11: 左刀startPos为横扫入口，attacking结束从出口返回
             if (i === 0) {
-              const sweepExit = (anim as any)._sweepExit ?? { x: anim.endPos.x + 180, y: anim.endPos.y };
-              anim.startPos = { ...sweepExit };
+              const sweepEnd = anim.attackEndPos ?? { x: anim.endPos.x + 180, y: anim.endPos.y };
+              anim.startPos = { ...sweepEnd };
             } else {
               anim.startPos = { ...anim.endPos };
             }
@@ -2256,11 +2264,11 @@ export class Game {
           // P4.1A.11: attacking阶段飞刀实体沿真实路径运动
           const aT = clamp(anim.phaseTimer / anim.phaseDuration, 0, 1);
           if (i === 0) {
-            // 左刀：从outbound终点（entry）到出口（exit）
-            const sweepEntry = anim.endPos;
-            const sweepExit = (anim as any)._sweepExit ?? { x: anim.endPos.x + 180, y: anim.endPos.y };
-            const easeT = aT < 0.5 ? 2 * aT * aT : 1 - Math.pow(-2 * aT + 2, 2) / 2; // easeInOutQuad
-            anim.startPos = { x: sweepEntry.x + (sweepExit.x - sweepEntry.x) * easeT, y: sweepEntry.y + (sweepExit.y - sweepEntry.y) * easeT };
+            // P4.1A.13: 左刀从attackStartPos到attackEndPos横扫
+            const sweepStart = anim.attackStartPos ?? { x: anim.endPos.x - 90, y: anim.endPos.y };
+            const sweepEnd = anim.attackEndPos ?? { x: anim.endPos.x + 90, y: anim.endPos.y };
+            const easeT = aT < 0.5 ? 2 * aT * aT : 1 - Math.pow(-2 * aT + 2, 2) / 2;
+            anim.currentPos = { x: sweepStart.x + (sweepEnd.x - sweepStart.x) * easeT, y: sweepStart.y + (sweepEnd.y - sweepStart.y) * easeT };
           }
           // P4.1A.8: attacking阶段在命中时刻直接结算伤害（不再依赖subSlash）
           const hitMoment = M.specialHitHold;
@@ -2296,7 +2304,8 @@ export class Game {
                   }
                 }
                 if (rightTarget) {
-                  this.applyWeakpointChaseDamage({ x1: rightTarget.x - 3, y1: rightTarget.y - 20, x2: rightTarget.x + 3, y2: rightTarget.y + 10, color: "#b58cff", bladeIdx: 1 }, blade, stats);
+                  // P4.1A.13: 右刀严格单目标伤害
+                  this.applyWeakpointDamageByTarget(rightTarget, blade, stats);
                 }
               }
             }
@@ -2473,20 +2482,6 @@ export class Game {
   }
 
   /** P2.6：副刀槽位发射起点 */
-  private getSubBladeLaunchOrigin(slotIndex: number) {
-    if (slotIndex === 0) {
-      return { x: 56, y: DESIGN_HEIGHT - 92 };
-    }
-    return { x: DESIGN_WIDTH - 56, y: DESIGN_HEIGHT - 92 };
-  }
-
-  /** P2.6：优先攻击中下段敌人 */
-  private getPreferredSubBladeTargets(): Enemy[] {
-    const preferred = this.enemies.filter(e => e.alive && e.y >= 360);
-    if (preferred.length > 0) return preferred;
-    return this.enemies.filter(e => e.alive);
-  }
-
   /** 蓄势横扫伤害结算 */
   private applyMomentumSweepDamage(
     s: { x1: number; y1: number; x2: number; y2: number; color: string; bladeIdx: number },
@@ -2583,6 +2578,34 @@ export class Game {
         this.energy = clamp(this.energy + 5, 0, BALANCE.swordEnergy.max);
         this.addText(target.x, target.y - 36, "+5%刀势", "#ffd35a", 14, 0.8);
       }
+    }
+  }
+
+  /** P4.1A.13: 右刀严格单目标伤害 */
+  private applyWeakpointDamageByTarget(target: Enemy, blade: Blade, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]) {
+    if (!target.alive) return;
+    const damage = stats.damageMultiplier * 1.0;
+    target.hp -= Math.max(1, Math.ceil(damage));
+    target.flash = 0.2;
+    if (target.kind === "elite") {
+      this.triggerEliteHitFeedback(target);
+      this.checkEliteLowHpFeedback(target);
+    }
+    const killed = target.hp <= 0;
+    if (killed) {
+      this.handleDirectEnemyKilledBySystem(target, "sub_weakpoint");
+      this.particles.push(...paperBurst(target, 6, ["#ff6a33", "#ffd35a"]));
+    }
+    this.particles.push(ringParticle({ x: target.x, y: target.y }, "#b58cff", 22));
+    if (blade.affix) this.applySubAffixEffect(blade.affix, target, killed, 'weakpoint_chase');
+    const highValue: EnemyKind[] = ["core", "powder", "elite", "shield"];
+    if (highValue.includes(target.kind) && !killed) {
+      this.weakpointMarks.set(target.id, 2.0);
+      this.addText(target.x, target.y - 20, "+ 破绽", "#ff6a33", 16, 1.2);
+    }
+    if (killed && highValue.includes(target.kind)) {
+      this.energy = clamp(this.energy + 5, 0, BALANCE.swordEnergy.max);
+      this.addText(target.x, target.y - 36, "+5%刀势", "#ffd35a", 14, 0.8);
     }
   }
 
@@ -4887,7 +4910,7 @@ export class Game {
     this.drawEnemyHealthOverlays(ctx, sorted.filter(e => e.alive));
   }
 
-  /** P4.1A.12: 屏幕空间血条/名牌层（不继承怪物局部坐标） */
+  /** P4.1A.13: 屏幕空间血条/名牌层（不继承怪物局部坐标） */
   private drawEnemyHealthOverlays(ctx: CanvasRenderingContext2D, enemies: any[]) {
     if (enemies.length === 0) return;
     ctx.save();
@@ -4898,9 +4921,9 @@ export class Game {
     ctx.globalCompositeOperation = "source-over";
     for (const enemy of enemies) {
       if (!enemy.alive) continue;
-      // 精英分段血条 + 名牌
+      // 精英分段血条 + 名牌（绝对坐标）
       if (enemy.kind === "elite" && enemy.eliteKind) {
-        this.drawEliteNameplate(ctx, enemy);
+        this.drawEliteHealthOverlay(ctx, enemy);
       }
       // Boss简短血条（屏幕空间）
       if (enemy.kind === "boss" && enemy.bossId) {
@@ -4920,6 +4943,30 @@ export class Game {
         ctx.restore();
       }
     }
+    ctx.restore();
+  }
+
+  /** P4.1A.13: 精英血条（绝对坐标，不继承怪物局部旋转） */
+  private drawEliteHealthOverlay(ctx: CanvasRenderingContext2D, enemy: Enemy) {
+    if (!enemy.alive || enemy.kind !== "elite" || !enemy.eliteKind) return;
+    const plateW = 58;
+    const plateH = 14;
+    const centerX = clamp(enemy.x, plateW / 2 + 8, DESIGN_WIDTH - plateW / 2 - 8);
+    const topY = clamp(enemy.y - enemy.radius - 56, 90, BALANCE.battlefield.bottomDefenseY - plateH - 12);
+    const x0 = centerX - plateW / 2;
+    const y0 = topY;
+    // 血条背景
+    ctx.save();
+    ctx.fillStyle = "rgba(10, 7, 5, 0.75)";
+    ctx.fillRect(x0, y0, plateW, plateH);
+    // 血条填充
+    const hpRatio = Math.max(0, Math.min(1, enemy.hp / Math.max(1, enemy.maxHp)));
+    ctx.fillStyle = hpRatio > 0.5 ? "#2ecc71" : hpRatio > 0.25 ? "#f39c12" : "#e74c3c";
+    ctx.fillRect(x0, y0, plateW * hpRatio, plateH);
+    // 边框
+    ctx.strokeStyle = "#fff3c0";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x0, y0, plateW, plateH);
     ctx.restore();
   }
 
@@ -5020,7 +5067,6 @@ export class Game {
     for (let i = 0; i < this.subBlades.length; i++) {
       const anim = this.subBladeAnim[i];
       const home = this.getSubBladeFloatingPos(i);
-      const slotPos = this.getSubBladeLaunchOrigin(i);
       const isLeft = i === 0;
       const baseColor = isLeft ? "#5bc0ff" : "#b58cff";
       const readyColor = isLeft ? "#8ad4ff" : "#d4a8ff";
@@ -5062,6 +5108,12 @@ export class Game {
         if (t < 0.25) bladeScale = 0.96;
         else bladeScale = 0.96 + (t - 0.25) / 0.75 * (isLeft ? 0.14 : 0.18);
         bladeAlpha = 0.85 + t * 0.15;
+      } else if (anim.phase === "attacking") {
+        // P4.1A.13: 用currentPos绘制，不再从startPos插值
+        drawPos = anim.currentPos ?? { x: anim.endPos.x, y: anim.endPos.y };
+        bladeAlpha = 0.92;
+        bladeScale = 1;
+        rot = anim.rotation;
       } else {
         // P4.1A.4: Outbound/Returning/Settling with non-linear easing
         const t = clamp(anim.phaseTimer / anim.phaseDuration, 0, 1);

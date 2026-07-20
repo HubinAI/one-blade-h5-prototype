@@ -34,11 +34,11 @@ export function MainMenu({
   onBreakthrough,
 }: MainMenuProps) {
   const isFirstPlay = unlockedLevel <= 1 && home.coins === 0;
-  const randomTip = useRandomTip();
+  const floor = Math.max(1, home.highestFloor);
+  const randomTip = useRandomTip(floor, Boolean(pendingGate));
 
   // 关卡信息
   const stageName = getStageNameByFloor(Math.max(1, home.highestFloor));
-  const floor = Math.max(1, home.highestFloor);
 
   // 挂机奖励计数（每分钟加1，最多60个=1小时）
   // 自动累积挂机收益到 idleCoins/blades（每分钟一次，无须玩家点击）

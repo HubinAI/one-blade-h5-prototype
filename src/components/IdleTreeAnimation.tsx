@@ -1,27 +1,29 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 
-/** 20条游戏攻略tips池 */
-const TIPS_POOL = [
-  "按住屏幕拖动，松开即可挥出斩击",
-  "刀势越满，一刀伤害越高",
-  "火药兵会爆炸，靠近时小心连锁",
-  "阵眼崩坏会带走周围所有敌人",
-  "副刀自动战斗，前期即可获得强援",
-  "满刀势触发「一刀破阵」伤害翻倍",
-  "每天看广告可获得体力与挂机翻倍",
-  "5关之后要挑战练气突破才能继续",
-  "精品刀在练气突破之后才开始掉落",
-  "副刀越强，自动战斗贡献越大",
-  "离线也能获得金币和刀胚挂机收益",
-  "深蹲屏震 + 慢动作 = 一刀破军的爽点",
-  "刀胚合成会随机提升品质",
-  "主线可无限往上突破，共有8大境界",
-  "挑战Boss关卡是境界突破的唯一途径",
-  "BOSS战前先练满刀势，胜算更高",
-  "图鉴会记录你击杀过的所有敌人",
-  "Boss图鉴满后可开启对应的成就奖励",
-  "精品以上的刀可以相互合成升级",
-  "挂机奖励每分钟自动累积1份"
+/** P4.1A.13: 带条件过滤的游戏攻略tips池 */
+type MenuTip = { text: string; minFloor?: number; maxFloor?: number; pendingGateOnly?: boolean };
+
+const TIPS_POOL: MenuTip[] = [
+  { text: "按住屏幕拖动，松开即可挥出斩击", maxFloor: 3 },
+  { text: "刀势越满，一刀伤害越高" },
+  { text: "火药兵会爆炸，靠近时小心连锁" },
+  { text: "阵眼崩坏会带走周围所有敌人" },
+  { text: "副刀自动战斗，前期即可获得强援" },
+  { text: "满刀势触发「一刀破阵」伤害翻倍" },
+  { text: "每天看广告可获得体力与挂机翻倍" },
+  { text: "5关之后要挑战练气突破才能继续", minFloor: 5 },
+  { text: "精品刀在练气突破之后才开始掉落", minFloor: 5 },
+  { text: "副刀越强，自动战斗贡献越大" },
+  { text: "离线也能获得金币和刀胚挂机收益" },
+  { text: "深蹲屏震 + 慢动作 = 一刀破军的爽点" },
+  { text: "刀胚合成会随机提升品质" },
+  { text: "主线可无限往上突破，共有8大境界", minFloor: 5 },
+  { text: "挑战Boss关卡是境界突破的唯一途径", minFloor: 5, pendingGateOnly: true },
+  { text: "BOSS战前先练满刀势，胜算更高", minFloor: 5, pendingGateOnly: true },
+  { text: "图鉴会记录你击杀过的所有敌人" },
+  { text: "Boss图鉴满后可开启对应的成就奖励", minFloor: 5, pendingGateOnly: true },
+  { text: "精品以上的刀可以相互合成升级" },
+  { text: "挂机奖励每分钟自动累积1份" }
 ];
 
 /** 砍树动画：循环播放 树摇晃→倒→重生 */
@@ -138,9 +140,15 @@ export function FlyingReward({ trigger, onComplete }: { trigger: number; onCompl
 }
 
 /** 随机tips hook */
-export function useRandomTip(): string {
+export function useRandomTip(floor: number, pendingGate: boolean): string {
   return useMemo(() => {
-    const idx = Math.floor(Math.random() * TIPS_POOL.length);
-    return TIPS_POOL[idx];
-  }, []);
+    const available = TIPS_POOL.filter(tip => {
+      if (tip.minFloor !== undefined && floor < tip.minFloor) return false;
+      if (tip.maxFloor !== undefined && floor > tip.maxFloor) return false;
+      if (tip.pendingGateOnly && !pendingGate) return false;
+      return true;
+    });
+    const pool = available.length > 0 ? available : TIPS_POOL.filter(tip => !tip.pendingGateOnly);
+    return pool[Math.floor(Math.random() * pool.length)].text;
+  }, [floor, pendingGate]);
 }
