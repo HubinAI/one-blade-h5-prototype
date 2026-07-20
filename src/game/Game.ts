@@ -1478,6 +1478,7 @@ export class Game {
         this.handleEnemyHit(enemy, trail);
         // P4.4A.2: Boss 护甲命中检测
         if (enemy.kind === "boss" && enemy.bossId === "thunderGeneral" && this.bossController) {
+          console.log(`[BossHit] ✅ 刀路命中 Boss Enemy slash=${trail.id} a=(${a.x.toFixed(0)},${a.y.toFixed(0)}) b=(${b.x.toFixed(0)},${b.y.toFixed(0)}) bossR=${enemy.radius}+reach=${bladeReach.toFixed(0)}`);
           const armorResult = this.bossController.checkSlashSegmentHit(a, b, trail.id);
           if (armorResult.hit) {
             console.log(`[BossArmor] ✅ HIT slash=${trail.id} target=${armorResult.targetId} dist=${armorResult.minDistance.toFixed(1)} r=${armorResult.hitRadius}`);
