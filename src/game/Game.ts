@@ -2490,14 +2490,33 @@ export class Game {
   }
 
   /** P4.3A.3: 可行动压力（只看当前/即将到mid的敌人） */
+  /** P4.3A.4: 敌人到mid的真实ETA（包含入场剩余+到mid距离） */
   private estimateEnemyEtaToMid(enemy: Enemy): number {
     if (enemy.y >= BATTLEFIELD_ZONES.midfieldStartY) return 0;
     if (enemy.entryPhase?.active && !enemy.entryPhase.completed) {
-      return Math.max(0, enemy.entryPhase.maxDuration - enemy.entryPhase.elapsed) * 0.5;
+      const entryRemain = Math.max(0, enemy.entryPhase.maxDuration - enemy.entryPhase.elapsed);
+      const entryEndY = enemy.entryPhase.endY;
+      const afterEntryDist = Math.max(0, BATTLEFIELD_ZONES.midfieldStartY - entryEndY);
+      const spd = enemy.speed * (enemy.flow?.currentSpeedMultiplier ?? 1);
+      return entryRemain + afterEntryDist / Math.max(spd, 1);
     }
     const dist = BATTLEFIELD_ZONES.midfieldStartY - enemy.y;
     const speed = enemy.speed * (enemy.flow?.currentSpeedMultiplier ?? 1);
     return speed > 0 ? dist / speed : 99;
+  }
+
+  /** P4.3A.4: 队列敌人到mid的真实ETA（等待生成+入场+到mid移动） */
+  private estimateQueueItemEtaToMid(item: typeof this.subSpawnQueue[number]): number {
+    const waitTime = Math.max(0, item.time - this.elapsed);
+    const phase = item.battlePhase ?? this.battlePhase;
+    const profile = this.getEntryProfileForEnemy(item.kind as EnemyKind, phase);
+    const entryEndY = profile.entryEndY + (item.entryEndYOffset ?? 0);
+    const entryDuration = profile.entryMaxDuration;
+    const baseSpeed = ENEMY_BALANCE[item.kind as EnemyKind]?.speed ?? 48;
+    const role = item.flowRole ?? "main";
+    const roleSpeed = BATTLEFIELD_FLOW.roleSpeed[role];
+    const afterEntryDist = Math.max(0, BATTLEFIELD_ZONES.midfieldStartY - entryEndY);
+    return waitTime + entryDuration + afterEntryDist / Math.max(baseSpeed * roleSpeed * (item.speedMultiplier ?? 1), 1);
   }
 
   private getCombatPressure(scope: "all" | "normal" | "edict" = "all", horizon = 1.5) {
@@ -2517,20 +2536,24 @@ export class Game {
       if (eta < nearestMidEta) nearestMidEta = eta;
       if (eta <= 0.7 && eta > 0) arrivesMidWithin07++;
     }
-    // 未来队列ETA
+    // 未来队列ETA（真实估算：包含生成等待+入场+到mid）
     let queueMidEta07 = 0;
+    let queueMidEta12 = 0;
     for (const q of this.subSpawnQueue) {
       if (q.time - this.elapsed > horizon) continue;
-      if (source && q.source && q.source !== source) continue;
-      const waitTime = Math.max(0, q.time - this.elapsed);
-      if (waitTime < 0.7) queueMidEta07++;
+      if (source && q.source !== source) continue;
+      const eta = this.estimateQueueItemEtaToMid(q);
+      if (eta <= 0.7) queueMidEta07++;
+      if (eta <= 1.2) queueMidEta12++;
     }
     return {
       proj,
       actionableNow,
-      actionableSoon: actionableNow + arrivesMidWithin07 + queueMidEta07,
+      actionableSoon07: actionableNow + arrivesMidWithin07 + queueMidEta07,
+      actionableSoon12: actionableNow + arrivesMidWithin07 + queueMidEta12,
       nearestMidEta,
       arrivesMidWithin07,
+      arrivesMidWithin12: arrivesMidWithin07 + queueMidEta12,
     };
   }
 
@@ -2546,21 +2569,6 @@ export class Game {
     if (!tooLow || !noNearThreat || !lockExpired || !enoughGap) return false;
     if (this.chestPendingConfirm || this.phase !== "playing") return false;
     if (this.wavesSpawned >= this.level.waves.length) return false;
-    const aliveCount = this.enemies.filter(e => e.alive).length;
-    if (aliveCount + this.subSpawnQueue.length > 40) return false;
-    return true;
-  }
-
-  private shouldAdvanceNextWaveOld(pressure: ReturnType<typeof this.getProjectedPressure>): boolean {
-    const activeThreat = pressure.projected.mid + pressure.projected.front;
-    const tooLow = activeThreat <= 3;
-    const noNearThreat = pressure.projected.front < 0.8;
-    const lockExpired = this.elapsed >= this.waveAdvanceLockedUntil;
-    const enoughGap = this.elapsed - this._lastWaveElapsed >= 0.60;
-    if (!tooLow || !noNearThreat || !lockExpired || !enoughGap) return false;
-    if (this.chestPendingConfirm || this.phase !== "playing") return false;
-    if (this.wavesSpawned >= this.level.waves.length) return false;
-    // 检查性能
     const aliveCount = this.enemies.filter(e => e.alive).length;
     if (aliveCount + this.subSpawnQueue.length > 40) return false;
     return true;
@@ -3145,27 +3153,18 @@ export class Game {
     AudioService.oneBladeBreak();
   }
 
+  /** P4.3A.4: 普通波调度——固定截止时间+压力提前接入 */
   private updateWaves(dt: number) {
     if (this.wavesSpawned >= this.level.waves.length) return;
+    // 军令阶段停止普通波提前推进
+    if (this.edictRewardState === "active" || this.battlePhase === "edict_burst") return;
     const wave = this.level.waves[this.wavesSpawned];
-
-    // P4.1A.11: 第4关空窗守卫（前5关低阈值+完全空场强制补波）
-    const logicalFloor = this.getLogicalFloor();
-    const lowPressureThreshold = logicalFloor <= 5 ? 4 : 3;
-    const refillGap = logicalFloor <= 5 ? 0.8 : 1.2;
-    const visibleCount = this.enemies.filter(e => e.alive && e.y >= 100 && e.y < BALANCE.battlefield.bottomDefenseY).length;
-    const incomingSoon = this.subSpawnQueue.some(item => item.time <= this.elapsed + 0.65);
-    if (visibleCount === 0) this.visibleEmptyTimer += dt;
-    else this.visibleEmptyTimer = 0;
-    const emptyGuard = visibleCount === 0 && !incomingSoon && this.visibleEmptyTimer >= 0.55 && this.phase === "playing" && !this.isEdictModalBlocking() && !this.victoryTransitionActive;
-
     const reachedSpawnAt = wave.spawnAt !== undefined && this.elapsed >= wave.spawnAt;
-    const enoughGap = this.elapsed - (this._lastWaveElapsed ?? 0) >= refillGap;
-    const lowPressure = visibleCount <= lowPressureThreshold && enoughGap;
-
-    if (reachedSpawnAt || lowPressure || emptyGuard) {
+    const shouldAdvance = this.shouldAdvanceNextWave();
+    if (reachedSpawnAt || shouldAdvance) {
       this.spawnCurrentWave(wave);
-      this.visibleEmptyTimer = 0;
+      this.waveAdvanceLockedUntil = this.elapsed + randomRange(0.65, 0.90);
+      if (!reachedSpawnAt) this.waveAdvanceLockedUntil = this.elapsed + randomRange(0.65, 0.90);
     }
   }
 
@@ -3193,7 +3192,7 @@ export class Game {
     const alivePlusQueue = this.enemies.filter(e => e.alive).length + this.subSpawnQueue.length;
 
     // 空场保护
-    const isCompletelyEmpty = pressure.actionableNow === 0 && pressure.actionableSoon <= 0;
+    const isCompletelyEmpty = pressure.actionableNow === 0 && pressure.actionableSoon07 <= 0;
 
     let shouldAdvance = false;
     let reason: "scheduled" | "low_pressure" | "empty_guard" | null = null;
