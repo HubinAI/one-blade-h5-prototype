@@ -235,6 +235,9 @@ export class Game {
   private postChestLastWaveQueuedAt = -999;
   private postChestActionableEmptyTimer = 0;
   private postChestLastAdvanceReason: "scheduled" | "low_pressure" | "empty_guard" | null = null;
+  /** P4.3A.5: 尾队加速 */
+  private edictTailCatchupTimer = 0;
+  private edictTailCatchupCooldownUntil = 0;
   /** 当前波次对应的中场事件（仅作用于本波敌人生效） */
   private _currentWaveEvent: 'gather' | 'charge_pause' | null = null;
 
@@ -692,6 +695,8 @@ export class Game {
     this.updateEdictIconFly(frameDt);
     this.updateEdictStatusIcon(frameDt);
     this.updatePostChestWaves(scaledDt);
+    // P4.3A.5: 尾队加速（最后一轮队列提前）
+    this.updateEdictTailCatchup(scaledDt);
     // P4.2: 统一播报更新
     this.updateBattleNotice(scaledDt);
     this.updateBattlePhase();
@@ -2557,10 +2562,10 @@ export class Game {
     };
   }
 
-  /** P4.3A.3: 普通波提前推进（军令active时暂停） */
+  /** P4.3A.3+5: 普通波提前推进（军令active时暂停） */
   private shouldAdvanceNextWave(): boolean {
     if (this.edictRewardState === "active" || this.battlePhase === "edict_burst") return false;
-    const pressure = this.getCombatPressure("normal");
+    const pressure = this.getCombatPressure("normal", 1.2);
     const activeThreat = pressure.proj.projected.mid + pressure.proj.projected.front;
     const tooLow = activeThreat <= 3;
     const noNearThreat = pressure.proj.projected.front < 0.8;
@@ -2571,6 +2576,8 @@ export class Game {
     if (this.wavesSpawned >= this.level.waves.length) return false;
     const aliveCount = this.enemies.filter(e => e.alive).length;
     if (aliveCount + this.subSpawnQueue.length > 40) return false;
+    // P4.3A.5: 未来1.2秒已有足够敌人时不提前
+    if (pressure.actionableSoon12 >= 3) return false;
     return true;
   }
 
@@ -3221,8 +3228,9 @@ export class Game {
     if (!shouldAdvance) { this.postChestLastAdvanceReason = null; return; }
 
     // 执行生成
-    this.edictBurstRoundIndex = Math.min(this.postChestWaveIndex + 1, total);
-    this.spawnPostChestWave(wave);
+    const roundIndex = this.postChestWaveIndex + 1;
+    this.edictBurstRoundIndex = Math.min(roundIndex, total);
+    this.spawnPostChestWave(wave, roundIndex);
     this.postChestWaveIndex += 1;
     this.postChestLastWaveQueuedAt = this.elapsed;
     this.postChestAdvanceLockedUntil = this.elapsed + randomRange(0.85, 1.10);
@@ -3236,8 +3244,9 @@ export class Game {
   }
 
   /** 第四轮微调：军令爆发怪潮改为分批入队subSpawnQueue */
-  private spawnPostChestWave(wave: typeof this.level.waves[0]) {
-    this.enqueuePostChestWave(wave);
+  /** P4.3A.5: 军令爆发入队 */
+  private spawnPostChestWave(wave: typeof this.level.waves[0], roundIndex: number) {
+    this.enqueuePostChestWave(wave, roundIndex);
   }
 
   private spawnCurrentWave(wave: typeof this.level.waves[0]) {
@@ -4452,7 +4461,7 @@ export class Game {
   }
 
   /** 第四轮微调：军令爆发怪潮分批入队（拆 2-4 批，有间隔和前后排） */
-  private enqueuePostChestWave(wave: typeof this.level.waves[0]) {
+  private enqueuePostChestWave(wave: typeof this.level.waves[0], roundIndex: number) {
     const totalSpawns = wave.enemies;
     let localDelay = 0;
     for (const spawn of totalSpawns) {
@@ -4734,6 +4743,29 @@ export class Game {
   private activateBattleNotice(notice: BattleNotice) {
     this.activeBattleNotice = notice;
     this.battleNoticeCooldowns.set(notice.dedupeKey, this.elapsed + notice.cooldown);
+  }
+
+  /** P4.3A.5: 最后一轮同队列尾队加速 */
+  private updateEdictTailCatchup(dt: number) {
+    if (this.battlePhase !== "edict_burst" || !this.allPostChestWavesSpawned) return;
+    if (this.phase !== "playing" || this.isEdictModalBlocking() || this.victoryTransitionActive) return;
+    const pressure = this.getCombatPressure("edict");
+    const hasNonBoss = this.enemies.some(e => e.alive && e.kind !== "boss");
+    const hasEdictQueue = this.subSpawnQueue.some(q => q.source === "edict");
+    if (!hasEdictQueue || hasNonBoss) return;
+    if (this.elapsed < this.edictTailCatchupCooldownUntil) return;
+    if (pressure.actionableNow > 0 || pressure.actionableSoon07 > 0) { this.edictTailCatchupTimer = 0; return; }
+    this.edictTailCatchupTimer += dt;
+    if (this.edictTailCatchupTimer < 0.40) return;
+    let acc = 0;
+    for (let i = 0; i < this.subSpawnQueue.length && acc < 2; i++) {
+      const q = this.subSpawnQueue[i];
+      if (q.source !== "edict" || q.time <= this.elapsed) continue;
+      q.time = this.elapsed + randomRange(0.05, 0.12);
+      acc++;
+    }
+    this.edictTailCatchupTimer = 0;
+    this.edictTailCatchupCooldownUntil = this.elapsed + randomRange(0.45, 0.65);
   }
 
   private updateBattleNotice(dt: number) {
