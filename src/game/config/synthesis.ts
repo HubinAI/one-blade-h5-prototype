@@ -201,7 +201,7 @@ export type RankConfig = {
 };
 
 export const RANK_CONFIG: Record<RankId, RankConfig> = {
-  qiRefining:       { id: "qiRefining",       name: "练气", unlockQuality: "green",  bossId: "yaoWang" },
+  qiRefining:       { id: "qiRefining",       name: "练气", unlockQuality: "green",  bossId: "thunderGeneral" },
   foundation:       { id: "foundation",       name: "筑基", unlockQuality: "blue",   bossId: "yaoWang" },
   coreFormation:    { id: "coreFormation",    name: "结丹", unlockQuality: "purple", bossId: "moXiu" },
   nascentSoul:      { id: "nascentSoul",      name: "元婴", unlockQuality: "gold",   bossId: "huaYao" },

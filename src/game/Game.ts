@@ -770,6 +770,8 @@ export class Game {
   }
 
   handlePointerDown(pos: Vec2) {
+    // P4.4A: Boss开场期间阻断输入
+    if (this.bossController?.isIntroActive) return;
     if (this.phase === "buffChoice") {
       this.selectBuffAt(pos);
       return;
@@ -808,6 +810,8 @@ export class Game {
   }
 
   handlePointerMove(pos: Vec2) {
+    // P4.4A: Boss开场期间阻断输入
+    if (this.bossController?.isIntroActive) return;
     if (this.phase !== "playing" || !this.pointerDown) return;
     const next = this.clampPointer(pos);
     this.pointerPos = next;
@@ -824,6 +828,8 @@ export class Game {
   }
 
   handlePointerUp() {
+    // P4.4A: Boss开场期间阻断输入
+    if (this.bossController?.isIntroActive) return;
     if (this.phase !== "playing") return;
     this.pointerDown = false;
     if (this.currentSlash?.active) {
@@ -2186,6 +2192,8 @@ export class Game {
 
   /** 副刀自动攻击 - 蓄势横扫(槽0) + 破点追击(槽1) */
   private updateSubBlades(dt: number) {
+    // P4.4A: Boss开场期间副刀保持待机
+    if (this.bossController?.isIntroActive) return;
     // P4.1A.12: subSlash子系统已删除
     // 破绽标记衰减
     for (const [enemyId, timeLeft] of this.weakpointMarks) {
@@ -3178,6 +3186,8 @@ export class Game {
 
   /** P4.3A.4: 普通波调度——固定截止时间+压力提前接入 */
   private updateWaves(dt: number) {
+    // P4.4A: Boss开场期间阻断波次生成
+    if (this.bossController?.isIntroActive) return;
     if (this.wavesSpawned >= this.level.waves.length) return;
     // 军令阶段停止普通波提前推进
     if (this.edictRewardState === "active" || this.battlePhase === "edict_burst") return;
@@ -5037,6 +5047,9 @@ export class Game {
   }
 
   private drawHud(ctx: CanvasRenderingContext2D) {
+    // P4.4A: Boss战期间隐藏标准HUD（由BossController绘制专属HUD）
+    if (this.bossController) return;
+
     ctx.fillStyle = "rgba(18, 12, 8, 0.78)";
     ctx.fillRect(0, 0, DESIGN_WIDTH, HUD_HEIGHT);
     ctx.strokeStyle = "rgba(255, 214, 124, 0.35)";
@@ -6722,48 +6735,48 @@ export class Game {
 
   /** Boss生成 */
   private updateBossSpawn() {
-    // P4.4A Debug: ?boss=thunderGeneral 可绕过 bossId 检查
-    const debugBossParam = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get("boss") : null;
-    const debugBossOverride = debugBossParam === "thunderGeneral";
-    if (this.bossSpawned || (!this.level.bossId && !debugBossOverride)) return;
-    // 突破战(boss关): Boss开场即出（0.5秒后）
+    // 原 debugBossOverride 参数已移除（突破配置改为直接使用 thunderGeneral）
+    if (this.bossSpawned || !this.level.bossId) return;
     const isChallengeBreakthrough = this.currentRunMode === "challenge";
     if (isChallengeBreakthrough) {
       if (this.elapsed < 0.5) return;
       this.bossSpawned = true;
     } else {
-      // 普通主线不会有 boss（由 levels.ts 配置控制）
-      // Boss在最后一波敌人出波完成后才出
       if (this.wavesSpawned < this.level.waves.length) return;
       if (this.elapsed < this.wavesFinishedAt + 5) return;
       this.bossSpawned = true;
     }
     const bid = this.level.bossId;
 
-    // P4.4A Debug 覆盖: 使用 debugBossOverride 确定effectiveBossId
-    const effectiveBossId: import("../game/types").BossId = (debugBossOverride ? "thunderGeneral" : bid) as import("../game/types").BossId;
-
     // P4.4A: thunderGeneral 使用新的BossController系统
-    if (effectiveBossId === "thunderGeneral") {
-      const enemy = this.createBoss(effectiveBossId);
+    if (bid === "thunderGeneral") {
+      // 清空场上非Boss敌人（突破战只有护卫兵）
+      for (const e of this.enemies) {
+        if (e.kind !== "boss") e.alive = false;
+      }
+      this.enemies = this.enemies.filter(e => e.alive);
+      // 重置指针状态（防止误触残留）
+      this.pointerDown = false;
+      this.pendingSlash = null;
+
+      const enemy = this.createBoss(bid);
+      enemy.y = -80; // 开场从上方进入
       this.enemies.push(enemy);
-      const controller = new BossController(effectiveBossId);
+      const controller = new BossController(bid);
       controller.attachBoss(enemy);
       this.bossController = controller;
       this.discoveredEnemies.add("boss");
-      // P4.4A: 开场由BossController管理intro演出
-      this.screenShake = Math.max(this.screenShake, 0.8);
-      this.flash = Math.max(this.flash, 0.65);
-      logEvent("boss_spawn", { levelId: this.level.id, bossId: effectiveBossId, time: this.elapsed });
+      this.screenShake = Math.max(this.screenShake, 0.6);
+      this.flash = Math.max(this.flash, 0.5);
+      logEvent("boss_spawn", { levelId: this.level.id, bossId: bid, time: this.elapsed });
       return;
     }
 
-    // 原有Boss系统（yaoWang/moXiu/huaYao）— 此时 bid 一定非空（thunderGeneral 已在上方 return）
+    // 原有Boss系统（yaoWang/moXiu/huaYao）
     const bossId = bid as import("../game/types").BossId;
     const enemy = this.createBoss(bossId);
     this.enemies.push(enemy);
     this.discoveredEnemies.add("boss");
-    // P4.2A.2: Boss出场使用noticeTitle（兜底退化为introText）
     const bossIntroTitle = BOSS_CONFIG[bossId].noticeTitle ?? BOSS_CONFIG[bossId].name;
     this.showBattleNotice({ text: bossIntroTitle, subtext: BOSS_CONFIG[bossId].noticeSubtitle, layout: "boss-intro", priority: "S", category: "boss", style: "danger", duration: 1.8, dedupeKey: `boss-intro:${bossId}`, cooldown: 10, interrupt: true });
     this.phase = "playing";

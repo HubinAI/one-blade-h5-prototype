@@ -1,123 +1,143 @@
-import type { BossId, BossPhaseState, Enemy, Vec2 } from "../types";
+import type { BossId, BossPhaseState, Enemy } from "../types";
 import { BOSS_CONFIG, type BossConfig } from "../config/bosses";
 import { BOSS_VISUAL_DEFS } from "../../data/bosses";
-import { DESIGN_WIDTH, DESIGN_HEIGHT } from "../config/constants";
 import { BALANCE } from "../config/balance";
-import { glowParticle, ringParticle, sparkBurst } from "./particleSystem";
-import type { Particle } from "../types";
+import { DESIGN_WIDTH, DESIGN_HEIGHT } from "../config/constants";
 
-/** P4.4A: Boss专属状态控制器 */
+// ========================================================================
+// P4.4A.1: BossController — 独立状态机，管理玄甲雷将从开场到战斗的全流程
+// 不参与普通关 Flow / 军令 / 副刀系统
+// ========================================================================
+
+/** 护甲部件索引 */
+const ARMOR_LEFT = 0;
+const ARMOR_RIGHT = 1;
+const ARMOR_CHEST = 2;
+
+/** Boss 安全区 Y（落位后的目标 Y） */
+const BOSS_LAND_Y = 165;
+
+/** 开场持续秒数 */
+const INTRO_DURATION = 3.0;
+
 export class BossController {
-  /** 当前状态机阶段 */
+  // ---- 基础状态 ----
   private _phase: BossPhaseState = "intro";
   get phase(): BossPhaseState { return this._phase; }
 
-  /** Boss 配置 */
-  private bossConfig: BossConfig;
-  get config(): BossConfig { return this.bossConfig; }
-
-  /** 关联的 Enemy 对象 */
   private _boss: Enemy | null = null;
   get boss(): Enemy | null { return this._boss; }
 
-  /** 开场经过时间 */
-  private introElapsed = 0;
+  private bossConfig: BossConfig;
+  readonly bossId: BossId;
 
-  /** 开场是否被跳过 */
+  // ---- 开场动画 ----
+  private introElapsed = 0;
   private _introSkipped = false;
   get introSkipped(): boolean { return this._introSkipped; }
 
-  /** 粒子列表（BossController 独立管理） */
-  particles: Particle[] = [];
+  /** 开场期间暂停外部系统 */
+  get isIntroActive(): boolean { return this._phase === "intro" && !this._introSkipped; }
 
-  /** 开场的目标 Y 坐标 */
-  private readonly targetY = 140;
+  // ---- 护甲占位（P4.4A.2 完整实现） ----
+  private armorProgress = 0;
+  private readonly maxArmor = 3;
+  /** 当前激活的护甲索引（0=左肩,1=右肩,2=胸甲） */
+  private activeArmorIndex = 0;
 
-  /** 开场总时长 */
-  static readonly INTRO_DURATION = 3.2;
-
-  /** 当前阶段提示 */
-  private phaseHintText = "";
+  // ---- HUD 动画 ----
+  private hudSlideProgress = 0;
   private phaseHintAlpha = 0;
   private phaseHintElapsed = 0;
 
-  /** HUD 动画 */
-  private hudSlideProgress = 0;
-
-  /** Boss ID */
-  readonly bossId: BossId;
-
-  /** P4.4A.2: 破甲进度 */
-  private armorProgress = 0;
-  private readonly maxArmorProgress = 3;
-
-  /** 开启Debug */
-  debugSkipEnabled = false;
-
-  /** 开场演出粒子 */
+  // ---- 开场粒子 ----
   private introParticles: { x: number; y: number; alpha: number; life: number; size: number; color: string }[] = [];
+
+  // ---- 视觉 ----
+  /** Boss 当前渲染 Y（从出场到落位动态变化） */
+  private renderY = -100;
+  private shakeTimer = 0;
 
   constructor(bossId: BossId) {
     this.bossId = bossId;
     this.bossConfig = BOSS_CONFIG[bossId];
   }
 
-  /** 关联到 Game.ts 创建的 Boss Enemy */
+  /** 关联 Enemy */
   attachBoss(enemy: Enemy): void {
     this._boss = enemy;
+    this.renderY = enemy.y;
   }
 
-  /** 跳过开场 */
+  /** 跳过开场（Debug） */
   skipIntro(): void {
     if (this._phase !== "intro") return;
     this._introSkipped = true;
-    this.introElapsed = BossController.INTRO_DURATION;
-    if (this._boss) {
-      this._boss.y = this.targetY;
-    }
+    this.introElapsed = INTRO_DURATION;
+    this.renderY = BOSS_LAND_Y;
+    if (this._boss) this._boss.y = BOSS_LAND_Y;
     this.transitionTo("armor");
   }
 
-  /** 更新 */
+  // ====================================================================
+  // update
+  // ====================================================================
   update(dt: number): void {
-    // 无效更新
     if (!this._boss) return;
 
-    // 更新粒子
-    this.particles = this.particles.filter(p => {
+    // 开场粒子衰减
+    this.introParticles = this.introParticles.filter(p => {
       p.life -= dt;
       return p.life > 0;
     });
-
-    this.updateIntroParticles(dt);
 
     switch (this._phase) {
       case "intro": {
         this.introElapsed += dt;
 
-        // Boss 从上方滑入
-        if (this._boss) {
-          const progress = Math.min(this.introElapsed / 1.5, 1);
-          const easeOut = 1 - Math.pow(1 - progress, 2);
-          this._boss.y = BALANCE.battlefield.enemySpawnY + (this.targetY - BALANCE.battlefield.enemySpawnY) * easeOut;
+        // 1) Boss 从上方入场（前 1.2s 下降至落位点）
+        if (this.introElapsed <= 1.2) {
+          const t = this.introElapsed / 1.2;
+          const easeOut = 1 - Math.pow(1 - t, 3);
+          this.renderY = -80 + (BOSS_LAND_Y + 80) * easeOut;
+        } else {
+          this.renderY = BOSS_LAND_Y;
         }
 
-        // 开场粒子
-        if (this.introElapsed < 2.0) {
-          this.spawnIntroParticles();
+        // 2) Boss 落位时震屏
+        if (this.introElapsed >= 1.1 && this.introElapsed <= 1.4) {
+          this.shakeTimer = 0.3;
+        } else {
+          this.shakeTimer = Math.max(0, this.shakeTimer - dt);
         }
 
-        // 开场结束
-        if (this.introElapsed >= BossController.INTRO_DURATION) {
+        // 3) 同步 Enemy 坐标
+        if (this._boss) this._boss.y = this.renderY;
+
+        // 4) 开场粒子
+        if (this.introElapsed < 2.5 && Math.random() > 0.12) {
+          this.spawnIntroParticle();
+        }
+
+        // 5) 开场结束 → 转入 armor
+        if (this.introElapsed >= INTRO_DURATION) {
           this.transitionTo("armor");
         }
         break;
       }
 
       case "armor": {
-        // P4.4A.2 将实现：破甲判定
-        this.updatePhaseHint("切发亮护甲", dt);
-        this.updateHudSlide(dt);
+        // P4.4A.2 完整实现破甲判定
+        // 当前仅保持护甲激活状态和提示
+        this.phaseHintElapsed += dt;
+        if (this.phaseHintElapsed < 0.3) {
+          this.phaseHintAlpha = this.phaseHintElapsed / 0.3;
+        } else if (this.phaseHintElapsed > 4.0) {
+          this.phaseHintAlpha = Math.max(0, this.phaseHintAlpha - dt * 0.4);
+        } else {
+          this.phaseHintAlpha = 1;
+        }
+        this.hudSlideProgress = Math.min(1, this.hudSlideProgress + dt * 3);
         break;
       }
 
@@ -126,274 +146,299 @@ export class BossController {
     }
   }
 
-  /** 渲染Boss专属UI */
+  // ====================================================================
+  // render
+  // ====================================================================
   render(ctx: CanvasRenderingContext2D): void {
     if (!this._boss) return;
 
-    this.renderVignette(ctx);
-    this.renderIntroBoss(ctx);
+    const cx = DESIGN_WIDTH / 2;
+    const cy = this.renderY;
 
+    // 1) 四角暗角
+    this.drawVignette(ctx);
+
+    // 2) 顶部雷光
     if (this._phase === "intro") {
-      this.renderIntroText(ctx);
-    } else {
-      this.renderBossHud(ctx);
-      this.renderPhaseHint(ctx);
+      this.drawTopLightning(ctx);
+    }
+
+    // 3) Boss 主体
+    this.drawBossBody(ctx, cx, cy);
+
+    // 4) 护甲部件
+    this.drawArmorPieces(ctx, cx, cy);
+
+    // 5) 胸口雷核
+    this.drawCore(ctx, cx, cy);
+
+    // 6) 开场文字
+    if (this._phase === "intro") {
+      this.drawIntroText(ctx);
+    }
+
+    // 7) Boss 专属 HUD
+    if (this._phase !== "intro") {
+      this.drawBossHud(ctx);
+      // 8) 目标提示
+      if (this.phaseHintAlpha > 0) {
+        this.drawPhaseHint(ctx);
+      }
     }
   }
 
-  // ============ 私有方法 ============
-
-  /** 阶段切换 */
+  // ====================================================================
+  // 内部
+  // ====================================================================
   private transitionTo(newPhase: BossPhaseState): void {
     this._phase = newPhase;
     this.phaseHintElapsed = 0;
-    if (this._boss) {
-      this._boss.y = this.targetY;
-    }
+    this.phaseHintAlpha = 0;
+    this.hudSlideProgress = 0;
+    if (this._boss) this._boss.y = this.renderY;
   }
 
-  /** 更新阶段提示文字 */
-  private updatePhaseHint(text: string, dt: number): void {
-    this.phaseHintText = text;
-    this.phaseHintElapsed += dt;
-    if (this.phaseHintElapsed < 0.3) {
-      this.phaseHintAlpha = this.phaseHintElapsed / 0.3;
-    } else if (this.phaseHintElapsed > 3.5) {
-      this.phaseHintAlpha = Math.max(0, this.phaseHintAlpha - dt * 0.5);
-    } else {
-      this.phaseHintAlpha = 1;
-    }
-  }
-
-  /** 更新 HUD 滑入动画 */
-  private updateHudSlide(dt: number): void {
-    this.hudSlideProgress = Math.min(1, this.hudSlideProgress + dt * 3);
-  }
-
-  /** 生成开场粒子 */
-  private spawnIntroParticles(): void {
-    if (Math.random() > 0.15) return;
+  private spawnIntroParticle(): void {
     this.introParticles.push({
-      x: (this._boss?.x ?? DESIGN_WIDTH / 2) + (Math.random() - 0.5) * 100,
-      y: (this._boss?.y ?? 0) - 20 + (Math.random() - 0.5) * 80,
-      alpha: 0.3 + Math.random() * 0.5,
-      life: 0.5 + Math.random() * 0.8,
-      size: 2 + Math.random() * 4,
-      color: Math.random() > 0.5 ? "#f0e130" : "#6c3483"
+      x: DESIGN_WIDTH / 2 + (Math.random() - 0.5) * 180,
+      y: this.renderY - 40 + (Math.random() - 0.5) * 120,
+      alpha: 0.2 + Math.random() * 0.4,
+      life: 0.4 + Math.random() * 0.6,
+      size: 1.5 + Math.random() * 3,
+      color: Math.random() > 0.5 ? "#f0e130" : "#8e44ad"
     });
   }
 
-  /** 更新开场粒子 */
-  private updateIntroParticles(dt: number): void {
-    for (const p of this.introParticles) {
-      p.life -= dt;
-      p.y += 20 * dt;
-    }
-    this.introParticles = this.introParticles.filter(p => p.life > 0);
-  }
-
-  // ============ 渲染 ============
-
-  /** 渲染四角暗角 + 幕布压暗 */
-  private renderVignette(ctx: CanvasRenderingContext2D): void {
-    if (this._phase !== "intro" && this._phase !== "armor") return;
-
+  // ====================================================================
+  // 渲染: 暗角
+  // ====================================================================
+  private drawVignette(ctx: CanvasRenderingContext2D): void {
     const intensity = this._phase === "intro"
-      ? Math.min(this.introElapsed / 0.8, 0.45)
-      : 0.2;
+      ? Math.min(this.introElapsed / 0.6, 0.50)
+      : 0.22;
 
     if (intensity <= 0) return;
 
     const grd = ctx.createRadialGradient(
-      DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2, 60,
-      DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2, 320
+      DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2, 40,
+      DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2, 340
     );
     grd.addColorStop(0, "rgba(0,0,0,0)");
-    grd.addColorStop(0.6, `rgba(42,8,56,${intensity * 0.4})`);
+    grd.addColorStop(0.55, `rgba(30, 6, 40, ${intensity * 0.35})`);
     grd.addColorStop(1, `rgba(0,0,0,${intensity})`);
     ctx.fillStyle = grd;
     ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
   }
 
-  /** 渲染开场Boss本体 */
-  private renderIntroBoss(ctx: CanvasRenderingContext2D): void {
-    if (!this._boss) return;
-    const e = this._boss;
-    const conf = this.bossConfig;
-    const vis = BOSS_VISUAL_DEFS[this.bossId];
-    const cx = e.x;
-    const cy = e.y;
-    const r = this._phase === "intro"
-      ? conf.radius + Math.sin(this.introElapsed * 3) * 2
-      : conf.radius;
-
-    // === 雷光外层（只在开场或播放时） ===
-    if (this._phase === "intro") {
-      // 外围雷光
-      const flashAlpha = 0.1 + Math.sin(this.introElapsed * 8) * 0.08;
-      ctx.save();
-      ctx.strokeStyle = `rgba(240, 225, 48, ${flashAlpha})`;
-      ctx.lineWidth = 2;
-      ctx.shadowColor = "#f0e130";
-      ctx.shadowBlur = 20;
-      ctx.beginPath();
-      ctx.arc(cx, cy, r + 8, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-
-      // 暗紫光晕
-      ctx.save();
-      const glow = ctx.createRadialGradient(cx - 10, cy - 10, 0, cx, cy, r * 1.6);
-      glow.addColorStop(0, `rgba(108, 52, 131, ${0.15 + Math.sin(this.introElapsed * 2) * 0.05})`);
-      glow.addColorStop(1, "rgba(108,52,131,0)");
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.arc(cx, cy, r * 1.6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-
-    // === 主体圆盘 ===
+  // ====================================================================
+  // 渲染: 顶部雷光
+  // ====================================================================
+  private drawTopLightning(ctx: CanvasRenderingContext2D): void {
+    if (this.introElapsed < 0.3) return;
+    const flashAlpha = 0.06 + Math.sin(this.introElapsed * 12) * 0.04;
     ctx.save();
+    ctx.fillStyle = `rgba(200, 200, 255, ${flashAlpha})`;
+    ctx.fillRect(0, 0, DESIGN_WIDTH, 60);
 
-    // 主躯干（暗紫重甲）
-    const bodyGrd = ctx.createRadialGradient(cx - 8, cy - 8, 2, cx, cy, r);
-    bodyGrd.addColorStop(0, "#5b2c6f");
-    bodyGrd.addColorStop(0.6, "#3d1a4a");
-    bodyGrd.addColorStop(1, "#2c0e37");
-    ctx.fillStyle = bodyGrd;
-    ctx.shadowColor = "#4a235a";
-    ctx.shadowBlur = 15;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fill();
-
-    // === 装甲护甲板（三块） ===
-    // 左肩甲
-    this.drawArmorPlate(ctx, cx - r * 0.5, cy - r * 0.3, r * 0.3, r * 0.2, -0.2);
-    // 右肩甲
-    this.drawArmorPlate(ctx, cx + r * 0.5, cy - r * 0.3, r * 0.3, r * 0.2, 0.2);
-    // 胸甲（中心）
-    this.drawArmorPlate(ctx, cx, cy + r * 0.1, r * 0.35, r * 0.35, 0);
-
-    // === 金色裂纹 ===
-    this.drawGoldenCracks(ctx, cx, cy, r);
-
-    // === 胸口雷核 ===
-    const coreR = r * 0.22;
-    const corePulse = 0.85 + Math.sin(this.introElapsed * 4) * 0.15;
-    const coreGrd = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR * corePulse);
-    coreGrd.addColorStop(0, "#ffffff");
-    coreGrd.addColorStop(0.3, "#f0e130");
-    coreGrd.addColorStop(0.7, "#e67e22");
-    coreGrd.addColorStop(1, "#c0392b");
-    ctx.fillStyle = coreGrd;
-    ctx.shadowColor = "#f0e130";
-    ctx.shadowBlur = 20 + Math.sin(this.introElapsed * 5) * 10;
-    ctx.beginPath();
-    ctx.arc(cx, cy, coreR * corePulse, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.restore();
-
-    // === 雷光闪电 ===
-    if (this._phase === "intro" && this.introElapsed > 0.5) {
-      this.drawLightning(ctx, cx, cy, r);
+    // 闪电光斑
+    for (let i = 0; i < 3; i++) {
+      const lx = DESIGN_WIDTH * 0.2 + Math.random() * DESIGN_WIDTH * 0.6;
+      const ly = 10 + Math.random() * 20;
+      ctx.fillStyle = `rgba(240, 225, 255, ${0.1 + Math.random() * 0.15})`;
+      ctx.beginPath();
+      ctx.arc(lx, ly, 8 + Math.random() * 14, 0, Math.PI * 2);
+      ctx.fill();
     }
+    ctx.restore();
   }
 
-  /** 绘制装甲板 */
-  private drawArmorPlate(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, rot: number): void {
+  // ====================================================================
+  // 渲染: Boss 主体（分层剪影）
+  // ====================================================================
+  private drawBossBody(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
+    const R = 70; // 主体半径 ~33% 屏幕宽
+
+    // 脉动呼吸
+    const breathe = this._phase === "intro"
+      ? 1 + Math.sin(this.introElapsed * 2.5) * 0.03
+      : 1 + Math.sin(Date.now() / 300) * 0.02;
+
+    ctx.save();
+
+    // ---- 身体（大椭圆躯干） ----
+    const bodyGrd = ctx.createRadialGradient(cx - 10, cy - 5, 2, cx, cy, R * breathe);
+    bodyGrd.addColorStop(0, "#4a2a5e");
+    bodyGrd.addColorStop(0.5, "#3d1a4a");
+    bodyGrd.addColorStop(1, "#1c0a26");
+    ctx.fillStyle = bodyGrd;
+    ctx.shadowColor = "#4a235a";
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, R * 0.65 * breathe, R * breathe, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // ---- 头部（头顶小圆） ----
+    const headY = cy - R * 0.85;
+    ctx.fillStyle = "#5b2c6f";
+    ctx.strokeStyle = "#6c3483";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, headY, R * 0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // ====================================================================
+  // 渲染: 护甲部件
+  // ====================================================================
+  private drawArmorPieces(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
+    const R = 70;
+
+    // ---- 左肩甲 ----
+    const lx = cx - R * 0.55;
+    const ly = cy - R * 0.35;
+    this.drawShoulderArmor(ctx, lx, ly, R * 0.32, R * 0.22, -0.3, this.activeArmorIndex === ARMOR_LEFT);
+
+    // ---- 右肩甲 ----
+    const rx = cx + R * 0.55;
+    const ry = cy - R * 0.35;
+    this.drawShoulderArmor(ctx, rx, ry, R * 0.32, R * 0.22, 0.3, this.activeArmorIndex === ARMOR_RIGHT);
+
+    // ---- 胸甲（中心） ----
+    this.drawChestArmor(ctx, cx, cy + R * 0.08, R * 0.38, R * 0.32, this.activeArmorIndex === ARMOR_CHEST);
+  }
+
+  /** 单个肩甲 */
+  private drawShoulderArmor(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, rot: number, active: boolean): void {
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rot);
-    const grd = ctx.createLinearGradient(-w, -h, w, h);
-    grd.addColorStop(0, "#4a2a5e");
-    grd.addColorStop(0.5, "#6c3483");
-    grd.addColorStop(1, "#2c0e37");
-    ctx.fillStyle = grd;
-    ctx.strokeStyle = "#f0e130";
-    ctx.lineWidth = 1.5;
+
+    // 底
+    const baseColor = active ? "#5b2c6f" : "#2c0e37";
+    const edgeColor = active ? "#f0e130" : "#4a235a";
+    ctx.fillStyle = baseColor;
+    ctx.strokeStyle = edgeColor;
+    ctx.lineWidth = active ? 3 : 1.5;
+
+    // 多边形肩甲
     ctx.beginPath();
-    ctx.ellipse(0, 0, w, h, 0, 0, Math.PI * 2);
+    ctx.moveTo(-w, 0);
+    ctx.lineTo(-w * 0.5, -h);
+    ctx.lineTo(w * 0.5, -h);
+    ctx.lineTo(w, 0);
+    ctx.lineTo(w * 0.5, h);
+    ctx.lineTo(-w * 0.5, h);
+    ctx.closePath();
     ctx.fill();
     ctx.stroke();
+
+    // 激活态发光
+    if (active) {
+      ctx.shadowColor = "#f0e130";
+      ctx.shadowBlur = 16;
+      ctx.strokeStyle = "rgba(240, 225, 48, 0.5)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-w, 0);
+      ctx.lineTo(-w * 0.5, -h);
+      ctx.lineTo(w * 0.5, -h);
+      ctx.lineTo(w, 0);
+      ctx.lineTo(w * 0.5, h);
+      ctx.lineTo(-w * 0.5, h);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+
     ctx.restore();
   }
 
-  /** 绘制金色裂纹 */
-  private drawGoldenCracks(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
+  /** 胸甲 */
+  private drawChestArmor(ctx: CanvasRenderingContext2D, cx: number, cy: number, w: number, h: number, active: boolean): void {
     ctx.save();
-    ctx.strokeStyle = "rgba(240, 225, 48, 0.3)";
-    ctx.lineWidth = 1.5;
-    const crackPoints = [
-      { x: cx - r * 0.3, y: cy - r * 0.5 },
-      { x: cx - r * 0.1, y: cy - r * 0.3 },
-      { x: cx, y: cy - r * 0.4 },
-      { x: cx + r * 0.2, y: cy - r * 0.2 },
-    ];
-    for (const p of crackPoints) {
+
+    const baseColor = active ? "#5b2c6f" : "#2c0e37";
+    const edgeColor = active ? "#f0e130" : "#4a235a";
+    ctx.fillStyle = baseColor;
+    ctx.strokeStyle = edgeColor;
+    ctx.lineWidth = active ? 3 : 1.5;
+
+    // 菱形胸甲
+    ctx.beginPath();
+    ctx.moveTo(cx - w, cy);
+    ctx.lineTo(cx, cy - h);
+    ctx.lineTo(cx + w, cy);
+    ctx.lineTo(cx, cy + h);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // 激活态发光
+    if (active) {
+      ctx.shadowColor = "#f0e130";
+      ctx.shadowBlur = 16;
+      ctx.strokeStyle = "rgba(240, 225, 48, 0.5)";
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(p.x, p.y);
+      ctx.moveTo(cx - w, cy);
+      ctx.lineTo(cx, cy - h);
+      ctx.lineTo(cx + w, cy);
+      ctx.lineTo(cx, cy + h);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+
+    // 金色裂纹（非激活时也有少量）
+    if (!active) {
+      ctx.strokeStyle = "rgba(240, 225, 48, 0.15)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx - w * 0.3, cy - h * 0.1);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(cx + w * 0.2, cy + h * 0.15);
       ctx.stroke();
     }
+
     ctx.restore();
   }
 
-  /** 绘制雷光闪电 */
-  private drawLightning(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
-    if (Math.random() > 0.05) return;
+  // ====================================================================
+  // 渲染: 胸口雷核
+  // ====================================================================
+  private drawCore(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
+    const R = 70;
+    const coreR = R * 0.18;
+    const pulse = this._phase === "intro"
+      ? 0.85 + Math.sin(this.introElapsed * 5) * 0.15
+      : 0.88 + Math.sin(Date.now() / 200) * 0.12;
+
     ctx.save();
-    ctx.strokeStyle = "rgba(240, 225, 48, 0.4)";
-    ctx.lineWidth = 1.5;
+    const grd = ctx.createRadialGradient(cx, cy + R * 0.08, 0, cx, cy + R * 0.08, coreR * pulse);
+    grd.addColorStop(0, "#ffffff");
+    grd.addColorStop(0.3, "#f0e130");
+    grd.addColorStop(0.6, "#e67e22");
+    grd.addColorStop(1, "#c0392b");
+    ctx.fillStyle = grd;
     ctx.shadowColor = "#f0e130";
-    ctx.shadowBlur = 8;
-    const endX = cx + (Math.random() - 0.5) * r * 2;
-    const endY = cy - r - Math.random() * 30;
-    const midX = cx + (Math.random() - 0.5) * r * 1.2;
-    const midY = (cy + endY) / 2 + (Math.random() - 0.5) * 20;
+    ctx.shadowBlur = this._phase === "intro" ? 20 + Math.sin(this.introElapsed * 5) * 10 : 14;
     ctx.beginPath();
-    ctx.moveTo(cx, cy - r * 0.5);
-    ctx.lineTo(midX, midY);
-    ctx.lineTo(endX, endY);
-    ctx.stroke();
+    ctx.arc(cx, cy + R * 0.08, coreR * pulse, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
 
-  /** 渲染开场文字 */
-  private renderIntroText(ctx: CanvasRenderingContext2D): void {
-    const progress = this.introElapsed / BossController.INTRO_DURATION;
+  // ====================================================================
+  // 渲染: 开场文字
+  // ====================================================================
+  private drawIntroText(ctx: CanvasRenderingContext2D): void {
+    const progress = this.introElapsed / INTRO_DURATION;
 
-    // "境界镇守者" — 从 2.0s 开始淡入
-    if (progress >= 0.62) {
-      const alpha = Math.min(1, (progress - 0.62) / 0.1);
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = "#e8d5f5";
-      ctx.font = "bold 18px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("境界镇守者", DESIGN_WIDTH / 2, 240);
-      ctx.restore();
-    }
-
-    // "玄甲雷将" — 从 2.3s 开始淡入（大字）
-    if (progress >= 0.72) {
-      const alpha = Math.min(1, (progress - 0.72) / 0.1);
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = "#f0e130";
-      ctx.font = "bold 28px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.shadowColor = "#f0e130";
-      ctx.shadowBlur = 12;
-      ctx.fillText("玄甲雷将", DESIGN_WIDTH / 2, 282);
-      ctx.restore();
-    }
-
-    // 开场粒子
+    // 粒子
     for (const p of this.introParticles) {
       if (p.life <= 0) continue;
       ctx.save();
@@ -406,123 +451,139 @@ export class BossController {
       ctx.fill();
       ctx.restore();
     }
+
+    // "境界镇守者" (2.0s 左右)
+    if (progress >= 0.65) {
+      const alpha = Math.min(1, (progress - 0.65) / 0.1);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = "#d7bde2";
+      ctx.font = 'bold 18px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.shadowColor = "rgba(107, 52, 131, 0.6)";
+      ctx.shadowBlur = 10;
+      ctx.fillText("境界镇守者", DESIGN_WIDTH / 2, 240);
+      ctx.restore();
+    }
+
+    // "玄甲雷将" (2.3s 左右，大字)
+    if (progress >= 0.75) {
+      const alpha = Math.min(1, (progress - 0.75) / 0.1);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = "#f0e130";
+      ctx.font = '700 30px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.shadowColor = "#f0e130";
+      ctx.shadowBlur = 16;
+      ctx.fillText("玄甲雷将", DESIGN_WIDTH / 2, 285);
+      ctx.restore();
+    }
   }
 
-  /** 渲染Boss专属顶部HUD */
-  private renderBossHud(ctx: CanvasRenderingContext2D): void {
+  // ====================================================================
+  // 渲染: Boss 专属顶部 HUD
+  // ====================================================================
+  private drawBossHud(ctx: CanvasRenderingContext2D): void {
     if (!this._boss) return;
-
     const e = this._boss;
-    const conf = this.bossConfig;
-    const vis = BOSS_VISUAL_DEFS[this.bossId];
-    const hudTop = 8;
-    const hudW = DESIGN_WIDTH - 16;
-    const hudX = 8;
+    const hpRatio = e.hp / Math.max(1, e.maxHp);
     const slideX = (1 - this.hudSlideProgress) * 30;
+    const hudTop = 6;
+    const hudW = DESIGN_WIDTH - 12;
+    const hudX = 6;
 
     ctx.save();
 
-    // === 背景 ===
-    ctx.globalAlpha = 0.88;
-    ctx.fillStyle = "rgba(30, 16, 40, 0.85)";
-    ctx.shadowColor = "rgba(108, 52, 131, 0.3)";
-    ctx.shadowBlur = 8;
-    roundRect(ctx, hudX + slideX, hudTop, hudW, 66, 6);
+    // ---- 背景面板 ----
+    ctx.globalAlpha = 0.90;
+    ctx.fillStyle = "rgba(26, 12, 36, 0.88)";
+    ctx.shadowColor = "rgba(108, 52, 131, 0.25)";
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.roundRect(hudX + slideX, hudTop, hudW, 72, 6);
     ctx.fill();
     ctx.shadowBlur = 0;
+    ctx.strokeStyle = "rgba(108, 52, 131, 0.3)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(hudX + slideX, hudTop, hudW, 72, 6);
+    ctx.stroke();
 
-    // === Boss名称 ===
+    // ---- Boss 名称 ----
     ctx.globalAlpha = 1;
     ctx.fillStyle = "#f0e130";
-    ctx.font = "bold 16px sans-serif";
+    ctx.font = '700 15px "Microsoft YaHei", sans-serif';
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
-    ctx.fillText(conf.name, hudX + 14 + slideX, hudTop + 6);
+    ctx.shadowColor = "#f0e130";
+    ctx.shadowBlur = 6;
+    ctx.fillText("玄甲雷将", hudX + 12 + slideX, hudTop + 5);
+    ctx.shadowBlur = 0;
 
-    // === Boss主血条 ===
+    // ---- 超宽血条 ----
     const barTop = hudTop + 26;
-    const barLeft = hudX + 14 + slideX;
-    const barW = hudW - 28;
-    const barH = 8;
-    const hpRatio = e.hp / e.maxHp;
+    const barLeft = hudX + 12 + slideX;
+    const barW = hudW - 24;
+    const barH = 9;
 
-    // 血条背景
-    ctx.fillStyle = "rgba(40, 20, 20, 0.8)";
-    roundRect(ctx, barLeft, barTop, barW, barH, 4);
+    // 背景
+    ctx.fillStyle = "rgba(40, 18, 18, 0.85)";
+    ctx.beginPath();
+    ctx.roundRect(barLeft, barTop, barW, barH, 4);
     ctx.fill();
 
-    // 血条填充
-    const hpColor = hpRatio > 0.5 ? "#6c3483" : hpRatio > 0.25 ? "#e67e22" : "#c0392b";
+    // 填充
+    const hpColor = hpRatio > 0.66 ? "#6c3483" : hpRatio > 0.33 ? "#e67e22" : "#c0392b";
     ctx.fillStyle = hpColor;
     ctx.shadowColor = hpColor;
-    ctx.shadowBlur = 4;
-    roundRect(ctx, barLeft, barTop, barW * hpRatio, barH, 4);
+    ctx.shadowBlur = 5;
+    ctx.beginPath();
+    ctx.roundRect(barLeft, barTop, barW * hpRatio, barH, 4);
     ctx.fill();
     ctx.shadowBlur = 0;
 
-    // === 阶段标签 & 进度 ===
-    const stageLabel = this.getPhaseLabel();
-    ctx.fillStyle = "#e8d5f5";
-    ctx.font = "bold 12px sans-serif";
+    // 血条边框
+    ctx.strokeStyle = "rgba(240, 225, 48, 0.25)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(barLeft, barTop, barW, barH, 4);
+    ctx.stroke();
+
+    // ---- 阶段标签 + 进度 ----
+    const labelY = barTop + barH + 5;
+    ctx.fillStyle = "#d7bde2";
+    ctx.font = 'bold 12px "Microsoft YaHei", sans-serif';
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
-    ctx.fillText(stageLabel, barLeft, barTop + barH + 4);
+    ctx.fillText("阶段 1 · 破甲", barLeft, labelY);
 
-    // 阶段进度
-    const progressText = this.getPhaseProgressText();
     ctx.fillStyle = "#a569bd";
-    ctx.font = "12px sans-serif";
+    ctx.font = '12px "Microsoft YaHei", sans-serif';
     ctx.textAlign = "right";
-    ctx.fillText(progressText, hudX + hudW - 14 + slideX, barTop + barH + 4);
+    ctx.fillText(`护甲 ${this.armorProgress}/${this.maxArmor}`, hudX + hudW - 12 + slideX, labelY);
 
     ctx.restore();
   }
 
-  /** 获取阶段标签 */
-  private getPhaseLabel(): string {
-    switch (this._phase) {
-      case "intro": return "降临";
-      case "armor": return "阶段 1 · 破甲";
-      case "armor_break": return "破甲成功";
-      case "pursuit": return "阶段 2 · 追击";
-      case "core_break": return "核心击破";
-      case "execution": return "阶段 3 · 终结";
-      case "victory_show": return "破境成功";
-      case "fail": return "失败";
-      default: return "";
-    }
-  }
+  // ====================================================================
+  // 渲染: 阶段目标提示
+  // ====================================================================
+  private drawPhaseHint(ctx: CanvasRenderingContext2D): void {
+    if (this.phaseHintAlpha <= 0.01) return;
 
-  /** 获取阶段进度文本 */
-  private getPhaseProgressText(): string {
-    switch (this._phase) {
-      case "armor": return `护甲 ${this.armorProgress}/${this.maxArmorProgress}`;
-      case "pursuit": return `追击 0/3`;
-      case "execution": return `终结 0/4`;
-      default: return "";
-    }
-  }
-
-  /** 渲染阶段提示（目标文字） */
-  private renderPhaseHint(ctx: CanvasRenderingContext2D): void {
-    if (this.phaseHintAlpha <= 0) return;
-
-    const hintY = 140;
+    // "切发亮护甲"
     ctx.save();
     ctx.globalAlpha = this.phaseHintAlpha;
     ctx.fillStyle = "#f0e130";
-    ctx.font = "bold 16px sans-serif";
+    ctx.font = 'bold 16px "Microsoft YaHei", sans-serif';
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.shadowColor = "#f0e130";
-    ctx.shadowBlur = 6;
-    ctx.fillText(this.phaseHintText, DESIGN_WIDTH / 2, hintY);
+    ctx.shadowBlur = 8;
+    ctx.fillText("切发亮护甲", DESIGN_WIDTH / 2, 100);
     ctx.restore();
   }
-}
-
-/** 辅助：roundRect */
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
-  ctx.beginPath();
-  ctx.roundRect(x, y, w, h, r);
 }
