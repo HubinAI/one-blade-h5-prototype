@@ -165,7 +165,7 @@ export class Game {
     attackEndPos: Vec2;
   }[] = [];
   // 多波多次刷新队列：每个子刷新有时间戳，到时间就spawn
-  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number }[] = [];
+  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number }[] = [];
 
   private pointerDown = false;
   private pointerPos?: Vec2;
@@ -228,6 +228,8 @@ export class Game {
   private visibleEmptyTimer = 0;
   /** P4.3A: 近场连续空场计时 */
   private nearEmptyTimer = 0;
+  /** P4.3A.1: 波次提前推进锁 */
+  private waveAdvanceLockedUntil = 0;
   /** 当前波次对应的中场事件（仅作用于本波敌人生效） */
   private _currentWaveEvent: 'gather' | 'charge_pause' | null = null;
 
@@ -2439,12 +2441,31 @@ export class Game {
 
   private getTargetLayerCounts(total: number, phase: BattlePhase): { rear: number; mid: number; front: number } {
     const ratios = (BATTLEFIELD_FLOW.layerRatios as any)[phase] ?? BATTLEFIELD_FLOW.layerRatios.main_waves;
-    if (total <= 2) return { rear: 0, mid: 0, front: Math.min(1, total) };
-    if (total <= 5) return { rear: 0, mid: Math.min(1, total - 1), front: Math.min(1, total - 1) };
-    return {
-      front: Math.max(1, Math.round(total * ratios.front)),
-      mid: Math.max(1, Math.round(total * ratios.mid)),
-      rear: Math.max(1, total - Math.round(total * ratios.front) - Math.round(total * ratios.mid)),
+    if (total <= 0) return { rear: 0, mid: 0, front: 0 };
+    if (total === 1) return { rear: 0, mid: 0, front: 1 };
+    if (total === 2) return { rear: 0, mid: 1, front: 1 };
+    if (total === 3) return { rear: 1, mid: 1, front: 1 };
+    // 4只以上：最大余数法，保证和为total
+    let front = Math.round(total * ratios.front);
+    let mid = Math.round(total * ratios.mid);
+    let rear = total - front - mid;
+    if (rear < 0) { mid += rear; rear = 0; }
+    if (mid < 0) { front += mid; mid = 0; }
+    return { rear: Math.max(0, rear), mid: Math.max(1, mid), front: Math.max(1, front) };
+  }
+
+  /** P4.3A.1: 为直接生成的敌人挂接Flow（覆盖所有非Boss直接创建路径） */
+  private attachEnemyFlow(enemy: Enemy, role: EnemyFlowRole = "main", groupId: string = "direct", order: number = 0) {
+    if (enemy.kind === "boss" || !BATTLEFIELD_FLOW.enabled) return;
+    enemy.flow = {
+      role,
+      currentLayer: this.getPressureLayer(enemy.y),
+      targetSpeedMultiplier: BATTLEFIELD_FLOW.roleSpeed[role],
+      currentSpeedMultiplier: BATTLEFIELD_FLOW.roleSpeed[role],
+      spacingMultiplier: 1,
+      spawnGroupId: groupId,
+      spawnOrder: order,
+      depthSeed: Math.random(),
     };
   }
 
@@ -2452,6 +2473,12 @@ export class Game {
     const snap = this.getPressureSnapshot();
     const targets = this.getTargetLayerCounts(snap.total, this.battlePhase);
     const flow = BATTLEFIELD_FLOW;
+
+    // Y向纵深间距更新
+    this.updateEnemyDepthSpacing(dt);
+
+    // 近场补位候选人选择（只加速1-2只，非整层齐冲）
+    const frontRefillCandidates = this.selectFrontRefillCandidates(snap);
 
     for (const enemy of this.enemies) {
       if (!enemy.alive || !enemy.flow || enemy.kind === "boss") continue;
@@ -2474,19 +2501,66 @@ export class Game {
         targetSpeed = clamp(targetSpeed * 1.12, flow.minSpeedMultiplier, flow.maxSpeedMultiplier);
       }
 
-      // 近场为空一段时间后加速中场
-      if (layer === "mid" && snap.front.length === 0 && this.nearEmptyTimer > flow.nearEmptyGrace) {
-        targetSpeed = clamp(targetSpeed * 1.15, flow.minSpeedMultiplier, flow.maxSpeedMultiplier);
+      // 近场为空时：只加速选中补位者
+      if (layer === "mid" && frontRefillCandidates.includes(enemy)) {
+        targetSpeed = clamp(targetSpeed * 1.18, flow.minSpeedMultiplier, flow.maxSpeedMultiplier);
+      } else if (layer === "mid" && snap.front.length === 0 && this.nearEmptyTimer > flow.nearEmptyGrace) {
+        // 非补位者但近场空时略加速
+        targetSpeed = clamp(targetSpeed * 1.04, flow.minSpeedMultiplier, flow.maxSpeedMultiplier);
       }
 
       f.targetSpeedMultiplier = targetSpeed;
-      // 平滑速度
+      // 平滑速度（含spacingMultiplier）
       f.currentSpeedMultiplier = f.currentSpeedMultiplier + (f.targetSpeedMultiplier * f.spacingMultiplier - f.currentSpeedMultiplier) * (1 - Math.exp(-flow.speedLerp * dt));
     }
 
     // 近场空场计时
     if (snap.front.length === 0) this.nearEmptyTimer += dt;
     else this.nearEmptyTimer = 0;
+  }
+
+  /** P4.3A.1: 选择近场补位候选人（只选1-2只） */
+  private selectFrontRefillCandidates(snap: { front: Enemy[]; mid: Enemy[] }): Enemy[] {
+    if (snap.front.length > 0) return [];
+    const candidates: Enemy[] = [];
+    const mids = [...snap.mid].sort((a, b) => {
+      const aRole = a.flow?.role ?? "main"; const bRole = b.flow?.role ?? "main";
+      const order = { vanguard: 1, main: 2, reserve: 3 };
+      const roleDiff = (order[aRole as keyof typeof order] || 2) - (order[bRole as keyof typeof order] || 2);
+      if (roleDiff !== 0) return roleDiff;
+      return b.y - a.y; // 更靠前优先
+    });
+    for (const e of mids) {
+      if (candidates.length >= 2) break;
+      if (e.kind === "splitter" && e.splitState === "warning") continue;
+      if (e.kind === "core" || e.kind === "tractor") continue;
+      candidates.push(e);
+    }
+    return candidates;
+  }
+
+  /** P4.3A.1: Y向纵深间距控制（只减速后排，不推坐标） */
+  private updateEnemyDepthSpacing(dt: number) {
+    const alive = this.enemies.filter(e => e.alive && e.flow && e.kind !== "boss").sort((a, b) => b.y - a.y);
+    const spacing = BATTLEFIELD_FLOW.spacing;
+    for (let i = 0; i < alive.length; i++) {
+      const rear = alive[i];
+      if (!rear.flow) continue;
+      // 特殊状态排除
+      if (rear.rushTimer !== undefined || rear.tractorState === "pulling" || (rear.kind === "splitter" && rear.splitState === "warning")) {
+        rear.flow.spacingMultiplier = 1;
+        continue;
+      }
+      let tooClose = false;
+      for (let j = i - 1; j >= 0 && j > i - 6; j--) {
+        const front = alive[j];
+        if (Math.abs(front.x - rear.x) > spacing.xRadius) continue;
+        const gap = front.y - rear.y;
+        if (gap < spacing.minYGap && gap > -5) { tooClose = true; break; }
+      }
+      const desired = tooClose ? spacing.closeMultiplier : 1;
+      rear.flow.spacingMultiplier = rear.flow.spacingMultiplier + (desired - rear.flow.spacingMultiplier) * (1 - Math.exp(-spacing.recoverSpeed * dt));
+    }
   }
 
   private triggerHitStop(duration: number, scale = 0.18, force = false) {
@@ -3050,40 +3124,60 @@ export class Game {
     }
 
     const speedMultiplier = extraSpeedMul;
-    // 如果是增援潮，敌人数量×1.5
     const countMul = chosenEvent === "reinforce" ? 1.5 : 1;
+    const waveId = `${this.wavesSpawned}-${Date.now()}`;
 
-    // 多波多次刷新：把每个 spawn 拆成 2~3 次 sub-spawn
-    const subInterval = randomRange(0.8, 1.2);
-    let subDelay = 0;
+    // P4.3A.1: 整波扁平化并分配三种流动角色
     const allSpawns = [...wave.enemies, ...extraEnemies];
+    const flatEnemies: { kind: string; x: number; yOffset: number }[] = [];
     for (const spawn of allSpawns) {
       const cnt = Math.max(1, Math.ceil((spawn.count ?? 1) * countMul));
-      const subGroups = Math.min(3, Math.max(2, Math.ceil(cnt / 3)));
-      const perGroup = Math.ceil(cnt / subGroups);
       const lanes = [BATTLE_SAFE_X.extendedMin, 120, 168, 216, 264, BATTLE_SAFE_X.extendedMax];
-
-      let enemyIdx = 0;
-      for (let g = 0; g < subGroups; g++) {
-        const subDelayAt = subDelay;
-        subDelay += subInterval;
-        const startK = g * perGroup;
-        const endK = Math.min(cnt, (g + 1) * perGroup);
-        for (let k = startK; k < endK; k++) {
-          const baseX = spawn.x ?? lanes[enemyIdx % lanes.length];
-          const x = this.getSpawnXForGroupedEnemy(baseX, k - startK, endK - startK);
-          const xJ = (Math.random() - 0.5) * 40;
-          this.subSpawnQueue.push({
-            time: this.elapsed + subDelayAt,
-            kind: spawn.kind,
-            x: x + xJ,
-            speedMultiplier,
-            yOffset: spawn.yOffset ?? 0,
-            battlePhase: this.battlePhase
-          });
-          enemyIdx++;
-        }
+      for (let i = 0; i < cnt; i++) {
+        const baseX = spawn.x ?? lanes[i % lanes.length];
+        flatEnemies.push({ kind: spawn.kind as string, x: baseX + (Math.random() - 0.5) * 40, yOffset: spawn.yOffset ?? 0 });
       }
+    }
+    // 按角色比例分配
+    const isEdictBurst = this.battlePhase === "edict_burst";
+    const rolePct = isEdictBurst ? { vanguard: 0.45, main: 0.35, reserve: 0.20 } : { vanguard: 0.25, main: 0.50, reserve: 0.25 };
+    const total = flatEnemies.length;
+    const vCount = Math.max(1, Math.round(total * rolePct.vanguard));
+    const mCount = Math.max(1, Math.round(total * rolePct.main));
+    const rCount = total - vCount - mCount;
+    const roles: EnemyFlowRole[] = [];
+    for (let i = 0; i < total; i++) {
+      if (i < vCount) roles.push("vanguard");
+      else if (i < vCount + mCount) roles.push("main");
+      else roles.push("reserve");
+    }
+    // 在角色内随机打乱（避免同类型怪全部集中）
+    for (let i = roles.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1)); [roles[i], roles[j]] = [roles[j], roles[i]];
+    }
+    // 分别计算各梯队的时间
+    const vangTime = isEdictBurst ? 0.0 : 0.0;
+    const mainTime = isEdictBurst ? 0.55 : 0.80;
+    const resvTime = isEdictBurst ? 1.15 : 1.70;
+    const vangSpread = isEdictBurst ? 0.15 : 0.18;
+    const mainSpread = isEdictBurst ? 0.30 : 0.25;
+    const resvSpread = isEdictBurst ? 0.40 : 0.30;
+    // 梯队entry纵深
+    const vangEntryOff = 30;
+    const mainEntryOff = 6;
+    const resvEntryOff = -24;
+    let order = 0;
+    for (let i = 0; i < total; i++) {
+      const enemy = flatEnemies[i];
+      const role = roles[i];
+      const baseDelay = role === "vanguard" ? vangTime : role === "main" ? mainTime : resvTime;
+      const spread = role === "vanguard" ? vangSpread : role === "main" ? mainSpread : resvSpread;
+      const time = this.elapsed + baseDelay + Math.random() * spread;
+      const entryOff = role === "vanguard" ? vangEntryOff : role === "main" ? mainEntryOff : resvEntryOff;
+      this.subSpawnQueue.push({
+        time, kind: enemy.kind, x: enemy.x, speedMultiplier, yOffset: enemy.yOffset,
+        battlePhase: this.battlePhase, flowRole: role, spawnGroupId: waveId, spawnOrder: order++, entryEndYOffset: entryOff,
+      } as any);
     }
 
     // 每日挑战特殊逻辑
@@ -3155,7 +3249,9 @@ export class Game {
       return;
     }
     const phase = item.battlePhase ?? this.battlePhase;
-    const profile = this.getEntryProfileForEnemy(item.kind as EnemyKind, phase);
+    const baseProfile = this.getEntryProfileForEnemy(item.kind as EnemyKind, phase);
+    // P4.3A.1: 角色化entryEndY纵深
+    const profile = { ...baseProfile, entryEndY: baseProfile.entryEndY + (item.entryEndYOffset ?? 0) };
     const spawnY = profile.spawnY - (item.yOffset ?? 0);
     // P2.7：安全区约束
     const safeX = this.clampSpawnXByPhaseAndKind(item.x, item.kind as EnemyKind, phase);
@@ -4161,8 +4257,13 @@ export class Game {
             x,
             speedMultiplier: 1,
             yOffset: rowYOffset,
-            battlePhase: "edict_burst"
-          });
+            battlePhase: "edict_burst",
+            // P4.3A.1: 军令爆发采用vanguard密集风格
+            flowRole: batch < 1 ? "vanguard" : batch < 2 ? "main" : "reserve",
+            spawnGroupId: `post-${this.postChestWaveIndex}`,
+            spawnOrder: i,
+            entryEndYOffset: batch < 1 ? 30 : batch < 2 ? 6 : -24,
+          } as any);
         }
       }
       localDelay += randomRange(0.18, 0.32);
