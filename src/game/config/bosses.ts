@@ -61,7 +61,7 @@ export const BOSS_CONFIG: Record<BossId, BossConfig> = {
     color: "#c0392b",
     accentColor: "#f5b7b1",
     introText: "吼——区区散修，也敢犯我领地？",
-    noticeTitle: "妖王·现身",
+    noticeTitle: "练气大妖·现身",
     noticeSubtitle: "区区散修，也敢犯我领地",
     phases: [
       {

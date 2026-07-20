@@ -13,6 +13,9 @@ export type EliteConfig = {
   accentColor: string;
   /** 出场播报文字 */
   introText: string;
+  /** P4.2A.3: 播报标题（不超过8字） */
+  noticeTitle: string;
+  noticeSubtitle?: string;
   /** 技能名称 */
   skillName: string;
   /** 技能冷却时间（秒） */
@@ -34,6 +37,7 @@ export const ELITE_CONFIG: Record<EliteKind, EliteConfig> = {
     color: "#e67e22",
     accentColor: "#f39c12",
     introText: "火环将 现身 — 烈焰三环！",
+    noticeTitle: "火环将·现身",
     skillName: "烈焰三环",
     skillCooldown: 0,
     skillDescription: "自身60px半径三团火焰旋转，触碰刀芒损耗50%刀势"
@@ -50,6 +54,7 @@ export const ELITE_CONFIG: Record<EliteKind, EliteConfig> = {
     color: "#27ae60",
     accentColor: "#a9dfbf",
     introText: "回血将 现身 — 阵中续命！",
+    noticeTitle: "回血将·现身",
     skillName: "续命波纹",
     skillCooldown: 3,
     skillDescription: "每3秒释放150px波纹，范围内敌军回1HP"
@@ -66,6 +71,7 @@ export const ELITE_CONFIG: Record<EliteKind, EliteConfig> = {
     color: "#8e44ad",
     accentColor: "#d7bde2",
     introText: "氛围将 现身 — 众兵护体！",
+    noticeTitle: "氛围将·现身",
     skillName: "众兵护体",
     skillCooldown: 0,
     skillDescription: "场上每存在1个其他敌军，护盾+1（上限6）"

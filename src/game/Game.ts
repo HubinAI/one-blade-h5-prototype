@@ -4184,6 +4184,19 @@ export class Game {
     size: number,
     life: number = BALANCE.feedback.floatingTextLife
   ) {
+    // P4.2A.3: addText仅允许13px以下的小型文字，且不能出现在上半区
+    // P4.2A.3: 禁用旧世界文字清单
+    const BANNED_WORLD_TEXTS = new Set(["军令宝箱","宝箱倒计时","军令已生效","冰霜横扫","冰霜锁定","烈火横扫","烈火追击","雷暴横扫","雷暴锁定","破甲横扫","破甲点杀","+破绽"]);
+    const BANNED_PREFIXES = ["蓄势 ","蓄势连斩 ","破点斩 "];
+    if (BANNED_WORLD_TEXTS.has(text) || BANNED_PREFIXES.some(p => text.startsWith(p))) {
+      console.warn("[P4.2 banned world text]", text);
+      return;
+    }
+    const allowedLegacy = size <= 13 && y >= 330;
+    if (!allowedLegacy) {
+      console.warn("[P4.2 legacy addText blocked]", { text, x, y, size });
+      return;
+    }
     // P4.2A.2: 正式环境阻止中央大字通过addText
     if (Math.abs(x - DESIGN_WIDTH / 2) < 56 && y < 330 && size >= 18) {
       console.warn("[P4.2 blocked central addText]", { text, x, y, size });
@@ -4284,7 +4297,7 @@ export class Game {
   }
 
   /** P4.2: 统一中央播报 */
-  private showBattleNotice(input: { text: string; subtext?: string; priority: BattleNoticePriority; category: BattleNoticeCategory; style: BattleNoticeStyle; duration?: number; dedupeKey: string; cooldown?: number; interrupt?: boolean }) {
+  private showBattleNotice(input: { text: string; subtext?: string; priority: BattleNoticePriority; category: BattleNoticeCategory; style: BattleNoticeStyle; duration?: number; dedupeKey: string; cooldown?: number; interrupt?: boolean; anchorY?: number; layout?: "default" | "boss-intro" | "boss-phase" | "elite" }) {
     const now = this.elapsed;
     const cooldownUntil = this.battleNoticeCooldowns.get(input.dedupeKey) ?? 0;
     if (now < cooldownUntil) return;
@@ -4358,11 +4371,19 @@ export class Game {
     const remain = notice.duration - notice.elapsed;
     const fadeOut = clamp(remain / cfg.fadeOut, 0, 1);
     const alpha = Math.min(fadeIn, fadeOut);
-    const y = cfg.centerY;
+    const y = notice.anchorY ?? cfg.centerY;
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
+    // P4.2A.3: Boss布局增加半透明背景
+    if (notice.layout === "boss-intro" || notice.layout === "boss-phase") {
+      const bgW = 280; const bgH = notice.subtext ? 62 : 44;
+      ctx.fillStyle = "rgba(10, 7, 5, 0.38)";
+      ctx.beginPath();
+      roundRect(ctx, DESIGN_WIDTH / 2 - bgW / 2, y - bgH / 2, bgW, bgH, 8);
+      ctx.fill();
+    }
     ctx.font = notice.priority === "S" ? '900 30px "Microsoft YaHei", sans-serif' : '900 23px "Microsoft YaHei", sans-serif';
     ctx.lineWidth = 5;
     ctx.strokeStyle = "rgba(10,7,5,0.90)";
@@ -6188,8 +6209,8 @@ export class Game {
     this.enemies.push(enemy);
     this.discoveredEnemies.add("elite");
     // 出场播报（0.85秒）
-    // P4.2: 使用统一播报系统
-    this.showBattleNotice({ text: conf.introText, priority: "A", category: "elite", style: "purple", duration: 0.9, dedupeKey: `elite:${ek}`, cooldown: 3, interrupt: false });
+    // P4.2A.3: 精英播报使用noticeTitle（不超过8字）
+    this.showBattleNotice({ text: conf.noticeTitle, priority: "A", category: "elite", style: "purple", duration: 0.85, dedupeKey: `elite:${ek}`, cooldown: 3, interrupt: false });
     // P3.2：标记已播报出场
     this.eliteSpawnAnnounced = true;
     // 出场特效强化
@@ -6228,7 +6249,7 @@ export class Game {
     this.discoveredEnemies.add("boss");
     // P4.2A.2: Boss出场使用noticeTitle（兜底退化为introText）
     const bossIntroTitle = BOSS_CONFIG[bid].noticeTitle ?? BOSS_CONFIG[bid].name;
-    this.showBattleNotice({ text: bossIntroTitle, subtext: BOSS_CONFIG[bid].noticeSubtitle, priority: "S", category: "boss", style: "danger", duration: 1.8, dedupeKey: `boss-intro:${bid}`, cooldown: 10, interrupt: true });
+    this.showBattleNotice({ text: bossIntroTitle, subtext: BOSS_CONFIG[bid].noticeSubtitle, layout: "boss-intro", priority: "S", category: "boss", style: "danger", duration: 1.8, dedupeKey: `boss-intro:${bid}`, cooldown: 10, interrupt: true });
     this.phase = "playing";
     this.screenShake = Math.max(this.screenShake, 0.8);
     this.flash = Math.max(this.flash, 0.65);
@@ -6294,7 +6315,10 @@ export class Game {
         const phaseTitle = phaseConf.noticeTitle;
         if (phaseTitle) {
           this.clearBossNoticeScope(enemy.id);
-          this.showBattleNotice({ text: phaseTitle, subtext: phaseConf.noticeSubtitle, priority: "S", category: "boss", style: "danger", duration: 1.25, dedupeKey: `boss-phase:${enemy.id}:${newPhase}`, cooldown: 3, interrupt: true });
+          // P4.2A.3: Boss阶段计算安全Y（与血条保持间距）
+          const bossBarTop = enemy.y - enemy.radius - 36;
+          const safeNoticeY = clamp(bossBarTop - 92, 150, 185);
+          this.showBattleNotice({ text: phaseTitle, subtext: phaseConf.noticeSubtitle, layout: "boss-phase", anchorY: safeNoticeY, priority: "S", category: "boss", style: "danger", duration: 1.25, dedupeKey: `boss-phase:${enemy.id}:${newPhase}`, cooldown: 3, interrupt: true });
         }
         AudioService.oneBladeBreak();
       }

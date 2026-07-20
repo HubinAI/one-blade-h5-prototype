@@ -28,6 +28,10 @@ export type BattleNotice = {
   cooldown: number;
   interrupt: boolean;
   createdAt: number;
+  /** P4.2A.3: 自定义Y坐标 */
+  anchorY?: number;
+  /** P4.2A.3: 布局类型 */
+  layout?: "default" | "boss-intro" | "boss-phase" | "elite";
 };
 
 export type CombatFloatCategory = "damage" | "mechanic" | "pickup" | "energy" | "status" | "tutorial" | "blade-tier";
