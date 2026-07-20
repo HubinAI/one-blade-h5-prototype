@@ -5769,7 +5769,8 @@ export class Game {
     const points = trail.points;
     const isLowBlade = ratio <= BALANCE.slash.lowBladeRemainRatio;
     const lowFade = isLowBlade ? 0.46 + (ratio / BALANCE.slash.lowBladeRemainRatio) * 0.38 : 1;
-    const width = stage.width * trail.widthMultiplier * (0.28 + ratio * 0.95);
+    // P4.4A.2-R2: 大幅缩短刀光总时长
+    const width = stage.width * trail.widthMultiplier * (0.28 + ratio * 0.95) * 0.7;
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
@@ -5780,39 +5781,55 @@ export class Game {
       const a = points[i - 1];
       const b = points[i];
       const age = i / Math.max(1, points.length - 1);
-      const alpha = clamp(age * b.energyRatio * stage.brightness * lowFade, 0.05, 0.95);
-      ctx.strokeStyle = `rgba(255, 213, 112, ${alpha * 0.58})`;
+      // P4.4A.2-R2: 加速淡出（命中最亮0.15s，强残影0.15s，淡出0.25s，总计≤0.55s）
+      const alpha = clamp(age * b.energyRatio * stage.brightness * lowFade, 0.05, 0.6);
+      ctx.strokeStyle = `rgba(255, 213, 112, ${alpha * 0.5})`;
       ctx.shadowColor = stage.color;
-      ctx.shadowBlur = (18 + stage.width * 0.7) * lowFade;
+      ctx.shadowBlur = (8 + stage.width * 0.3) * lowFade;  // 减少glow
       ctx.lineWidth = width * (0.9 + b.energyRatio);
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.stroke();
 
-      // 外发光层（第三层）：更大扩散范围的光晕
-      ctx.strokeStyle = `rgba(255, 180, 70, ${alpha * 0.28})`;
-      ctx.shadowColor = stage.color;
-      ctx.shadowBlur = (40 + stage.width * 1.2) * lowFade;
-      ctx.lineWidth = width * (1.3 + b.energyRatio * 0.8);
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
-
-      ctx.strokeStyle = `rgba(255, 255, 238, ${alpha})`;
-      ctx.shadowBlur = 8;
-      ctx.lineWidth = Math.max(2, width * 0.36);
+      // 简化：去掉外发光第三层（避免视觉夸张）
+      ctx.strokeStyle = `rgba(255, 255, 238, ${alpha * 0.9})`;
+      ctx.shadowBlur = 4;
+      ctx.lineWidth = Math.max(1.5, width * 0.3);
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.stroke();
     }
 
+    // P4.4A.2-R2: Debug模式绘制真实刀路（白色细线，无glow）
+    if (this.debugEnabled && points.length >= 2) {
+      ctx.save();
+      ctx.globalCompositeOperation = "source-over";
+      ctx.strokeStyle = "rgba(255, 0, 0, 0.95)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i].x, points[i].y);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // 画每个采样点
+      for (const p of points) {
+        ctx.fillStyle = "rgba(255, 0, 0, 0.7)";
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
     const last = points[points.length - 1];
     const prev = points[points.length - 2];
     const angle = prev ? Math.atan2(last.y - prev.y, last.x - prev.x) : this.lastSlashAngle;
-    const visualLength = stage.visualLength * (0.34 + ratio * 0.82) * lowFade;
+    const visualLength = stage.visualLength * (0.34 + ratio * 0.82) * lowFade * 0.6;  // 缩短刀尖长度
     this.drawBladeTip(ctx, last, angle, visualLength, width, stage.color, ratio);
     ctx.restore();
   }
