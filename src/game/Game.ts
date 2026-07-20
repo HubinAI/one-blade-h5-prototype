@@ -230,11 +230,7 @@ export class Game {
   // ---- 精英/Boss 系统 ----
   private eliteSpawned = false;
   private bossSpawned = false;
-  private bossIntroTimer = 0;
-  private eliteIntroTimer = 0;
-  private eliteIntroText = "";
-  private bossIntroText = "";
-  /** P4.2: 统一中央播报调度器 */
+  /** P4.2A.1: 统一中央播报调度器 */
   private activeBattleNotice: BattleNotice | null = null;
   private battleNoticeQueue: BattleNotice[] = [];
   private battleNoticeCooldowns: Map<string, number> = new Map();
@@ -390,8 +386,6 @@ export class Game {
     this.currentRunMode = this.runContext.mode;
 
     // P3.2：重置精英播报状态，防止上一关残留
-    this.eliteIntroTimer = 0;
-    this.eliteIntroText = "";
     this.elitePreviewShown = false;
     this.eliteSpawnAnnounced = false;
 
@@ -443,7 +437,6 @@ export class Game {
     this._act3Triggered = false;
     this.act3Pending = false;
     this.oneBladeModeTimer = 0;
-    this.shownBladeTierPrompts = new Set();
     this.shownBladeTierPrompts = new Set();
     // P4.2: 重置播报调度器状态
     this.activeBattleNotice = null;
@@ -634,8 +627,7 @@ export class Game {
     this.warDrumNoDecayTimer = Math.max(0, this.warDrumNoDecayTimer - scaledDt);
     this.warriorDrawTimer = Math.max(0, this.warriorDrawTimer - scaledDt);
     this.warriorSheathTimer = Math.max(0, this.warriorSheathTimer - scaledDt);
-    this.eliteIntroTimer = Math.max(0, this.eliteIntroTimer - scaledDt);
-    this.bossIntroTimer = Math.max(0, this.bossIntroTimer - scaledDt);
+    // P4.2A.1: bossIntroTimer/eliteIntroTimer/eliteIntroText/bossIntroText已删除
     // P2.8：慢镜头 visual 衰减（用原始 frameDt，不随慢镜头变慢）
     if (this.slashAfterglowTimer > 0) {
       this.slashAfterglowTimer -= frameDt;
@@ -1015,9 +1007,15 @@ export class Game {
       this.screenShake = Math.max(this.screenShake, 0.65);
       this.flash = Math.max(this.flash, 0.8);
     }
-      if (praise === "神之一刀") {
+    // P4.2A.1: 统一神之一刀判定（>=15杀 或 破阵锋+阵眼崩塌）
+    const triggeredGodSlash = trail.kills >= 15 || (trail.tier === "burst" && trail.coreCollapseCount > 0);
+    if (triggeredGodSlash) {
       this.stats.oneBladeBreaks += 1;
+      this.showBattleNotice({ text: "神之一刀", priority: "A", category: "milestone", style: "gold", duration: 0.9, dedupeKey: `god-slash:${trail.id}`, cooldown: 1.2, interrupt: false });
       AudioService.oneBladeBreak();
+      this.slowMoTimer = Math.max(this.slowMoTimer, 0.12);
+      this.flash = Math.max(this.flash, 0.8);
+      this.screenShake = Math.max(this.screenShake, 0.55);
     }
     if (praise === "阵破") AudioService.coreCollapse();
     if (praise === "连爆" || praise === "破阵") AudioService.explosion();
@@ -1091,14 +1089,11 @@ export class Game {
         this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 4, "#ffffff"));
       }
     }
+    // P4.2A.1: 神之一刀的播报与统计已统一迁移至统一判定，此处只保留特效
     if (kills >= 15) {
-      // 15+：短慢镜头 + 强刀光残影 + "神之一刀"
       this.slowMoTimer = Math.max(this.slowMoTimer, 0.12);
       this.screenShake = Math.max(this.screenShake, 0.75);
-      if (kills >= 15 && !this.hasRecentText("神之一刀", 2)) {
-        this.addText(DESIGN_WIDTH / 2, 136, "神之一刀", "#ffd35a", 32, 2.0);
-        this.flash = Math.max(this.flash, 1.0);
-      }
+      this.flash = Math.max(this.flash, 1.0);
     }
     if (kills >= 20) {
       // 20+：全屏边缘金光 + "神之一刀"（已涵盖15+）
@@ -1853,7 +1848,9 @@ export class Game {
       this.stats.killedBoss = enemy.bossId;
       this.flash = Math.max(this.flash, 1);
       this.screenShake = Math.max(this.screenShake, 1.2);
-      this.addText(DESIGN_WIDTH / 2, 200, `${BOSS_CONFIG[enemy.bossId].name}·讨伐！`, "#ffd35a", 30, 2.5);
+      // P4.2A.1: Boss击败改为S级BattleNotice，清除同Boss阶段提示
+      this.clearBossNoticeScope(enemy.bossId);
+      this.showBattleNotice({ text: `${BOSS_CONFIG[enemy.bossId].name}·讨伐`, priority: "S", category: "boss", style: "gold", duration: 1.6, dedupeKey: `boss-defeat:${enemy.bossId}`, cooldown: 10, interrupt: true });
       AudioService.victory();
     }
 
@@ -2143,25 +2140,8 @@ export class Game {
     this.splitFlashes = this.splitFlashes.filter((sf) => sf.life > 0);
   }
 
-  /** 中场提示：强斩时机 + 破阵良机（4秒冷却） */
-  private updateMidfieldHints(dt: number) {
-    this._midfieldHintTimer = Math.max(0, this._midfieldHintTimer - dt);
-    if (this._midfieldHintTimer > 0) return;
-    // 计数中场敌人（使用 BATTLEFIELD_ZONES 配置）
-    const enemiesInMidfield = this.enemies.filter(e => e.alive && e.y >= BATTLEFIELD_ZONES.midfieldStartY && e.y < BATTLEFIELD_ZONES.harvestStartY).length;
-    if (this.energy >= 90 && enemiesInMidfield > 0) {
-      // 检查是否有高价值目标
-      const hasHighValue = this.enemies.some(e => e.alive && e.y >= BATTLEFIELD_ZONES.midfieldStartY && e.y < BATTLEFIELD_ZONES.harvestStartY &&
-        (e.kind === "powder" || e.kind === "core" || e.kind === "elite"));
-      if (hasHighValue) {
-        this.addText(DESIGN_WIDTH / 2, 252, "破阵良机", "#ffd35a", 14, 0.8);
-        this._midfieldHintTimer = 4;
-      }
-    } else if (this.energy >= 40 && enemiesInMidfield >= 6) {
-      this.addText(DESIGN_WIDTH / 2, 252, "强斩时机", "#5bc0ff", 14, 0.8);
-      this._midfieldHintTimer = 4;
-    }
-  }
+  /** @deprecated P4.2A.1: 强斩时机/破阵良机已删除 */
+  private updateMidfieldHints(dt: number) { }
 
   /** 副刀自动攻击 - 蓄势横扫(槽0) + 破点追击(槽1) */
   private updateSubBlades(dt: number) {
@@ -2462,13 +2442,12 @@ export class Game {
 
   /** P2.8：一刀结算后触发综合反馈 */
   private triggerSlashKillFeedback(slashKills: number, lastX?: number, lastY?: number) {
+    // P4.2A.1: 神之一刀的播报/统计已统一迁移至endSlash
     if (slashKills >= 20) {
       this.triggerHitStop(0.18, 0.10);
       this.triggerSlashAfterglow(0.8, 0.25);
       this.triggerEdgeFlash(0.75, 0.25);
       this.screenShake = Math.max(this.screenShake, 0.22);
-      // P4.2: 通过统一播报系统
-      this.showBattleNotice({ text: "神之一刀", priority: "A", category: "milestone", style: "gold", duration: 0.9, dedupeKey: `god-slash:${this.stats.slashes}`, cooldown: 1.5, interrupt: false });
     } else if (slashKills >= 12) {
       this.triggerHitStop(0.10, 0.18);
       this.triggerSlashAfterglow(0.45, 0.16);
@@ -2789,14 +2768,13 @@ export class Game {
     if (this.act3Pending) this.tryActivatePendingOneBlade();
   }
 
-  /** 满势时刻：15s 灌满刀势 + 强震屏 + 飘字 */
+  /** P4.2A.1: 满势时刻——只保留刀势灌满、震屏、粒子，删除中央大字 */
   private triggerMomentumBurst() {
     this.energy = BALANCE.swordEnergy.max;
-    this._breakReadyNotified = true; // 满势时不再触发单独的破阵提示
+    this._breakReadyNotified = true;
     this.screenShake = Math.max(this.screenShake, 0.9);
     this.flash = Math.max(this.flash, 0.5);
     this.slowMoTimer = Math.max(this.slowMoTimer, 0.12);
-    this.addText(DESIGN_WIDTH / 2, 280, "⚡ 满势时刻", "#ffd35a", 30, 2.0);
     // 满屏光晕粒子
     for (let i = 0; i < 12; i++) {
       this.particles.push(glowParticle({ x: DESIGN_WIDTH / 2 + (Math.random() - 0.5) * 200, y: 400 + (Math.random() - 0.5) * 300 }, "#ffd35a", 18));
@@ -2947,12 +2925,8 @@ export class Game {
     // ── 中场事件触发（wave配置）──
     if (wave.midfieldEventType && wave.midfieldEventType !== 'none') {
       this._currentWaveEvent = wave.midfieldEventType;
-      this.addText(DESIGN_WIDTH / 2, 180,
-        wave.midfieldEventType === 'gather' ? "敌军聚阵" : "敌军蓄冲",
-        wave.midfieldEventType === 'gather' ? "#5bc0ff" : "#ff6a33", 22, 1.2);
-      this.addText(DESIGN_WIDTH / 2, 208,
-        wave.midfieldEventType === 'gather' ? "等它们靠近，一刀更爽" : "快斩，不然冲下来",
-        "#f6e7bd", 13, 1.0);
+      // P4.2A.1: 改为单条A级播报
+      this.showBattleNotice({ text: wave.midfieldEventType === 'gather' ? "敌军聚阵" : "敌军蓄冲", priority: "A", category: "mechanic", style: wave.midfieldEventType === 'gather' ? "blue" : "danger", duration: 0.8, dedupeKey: `midfield:${wave.midfieldEventType}:${this.wavesSpawned}`, cooldown: 2, interrupt: false });
       this.flash = Math.max(this.flash, 0.15);
       // 屏幕边缘提示色（蓄冲=红，聚阵=青）
       const ringColor = wave.midfieldEventType === 'gather' ? "91,192,255" : "255,106,51";
@@ -2963,32 +2937,25 @@ export class Game {
 
     if (chosenEvent === "reinforce") {
       extraSpeedMul *= 1.2;
-      // 清除事件波计时器不算在局内
-      this.addText(DESIGN_WIDTH / 2, 200, "⚡ 增援潮！", "#ff6a33", 24, 1.8);
-      this.addText(DESIGN_WIDTH / 2, 228, "敌人数×1.5，速度↑", "#ff9e7a", 14, 1.5);
+      // P4.2A.1: 改为单条A级播报
+      this.showBattleNotice({ text: "增援潮", priority: "A", category: "mechanic", style: "danger", duration: 0.8, dedupeKey: `event:reinforce:${this.wavesSpawned}`, cooldown: 2, interrupt: false });
       this.screenShake = Math.max(this.screenShake, 0.4);
     } else if (chosenEvent === "slowRain") {
-      this._activeEventTimer = 0.5; // 减速雨持续 0.5s
-      this.addText(DESIGN_WIDTH / 2, 200, "🌧 减速雨！", "#5bc0ff", 24, 1.8);
-      this.addText(DESIGN_WIDTH / 2, 228, "主刀路径减速50%", "#7fb1ff", 14, 1.5);
+      this._activeEventTimer = 0.5;
+      // P4.2A.1: 减速雨只通过HUD状态图标表达，不播文字
     } else if (chosenEvent === "inspire") {
       // 鼓舞：副刀CD临时-30%，持续8秒
       this._activeEventTimer = 8;
-      // 给所有副刀施加临时加速
       for (let i = 0; i < this.subBladeTimers.length; i++) {
-        this.subBladeTimers[i] = Math.min(this.subBladeCooldowns[i], this.subBladeTimers[i] + 0.5); // P4.1A.9: timer向上累计，改为增加
+        this.subBladeTimers[i] = Math.min(this.subBladeCooldowns[i], this.subBladeTimers[i] + 0.5);
       }
-      this.addText(DESIGN_WIDTH / 2, 720, "🥁 鼓舞！", "#ffd35a", 18, 1.8);
-      this.addText(DESIGN_WIDTH / 2, 746, "副刀充能加速", "#f6e7bd", 13, 1.5);
     } else if (chosenEvent === "eliteStrike") {
-      this.addText(DESIGN_WIDTH / 2, 200, "⚔ 精锐护阵！", "#9b6dff", 24, 1.8);
-      this.addText(DESIGN_WIDTH / 2, 228, "盾兵+精锐护卫出现", "#c896ff", 14, 1.5);
-      // P3.9：不再插入裸 elite，改用盾兵+步兵组合
+      // P4.2A.1: 改为单条A级播报
+      this.showBattleNotice({ text: "精锐护阵", priority: "A", category: "mechanic", style: "purple", duration: 0.8, dedupeKey: `event:eliteStrike:${this.wavesSpawned}`, cooldown: 2, interrupt: false });
       extraEnemies.push({ kind: "shield", count: 3, x: 140, yOffset: 0 });
       extraEnemies.push({ kind: "infantry", count: 4, x: 236, yOffset: 0 });
     } else if (chosenEvent === "trapFormation") {
-      this.addText(DESIGN_WIDTH / 2, 200, "🔱 陷阱阵！", "#ffb15c", 24, 1.8);
-      this.addText(DESIGN_WIDTH / 2, 228, "火药+阵眼组合埋伏", "#ffd67c", 14, 1.5);
+      this.showBattleNotice({ text: "陷阱阵", priority: "A", category: "mechanic", style: "danger", duration: 0.8, dedupeKey: `event:trapFormation:${this.wavesSpawned}`, cooldown: 2, interrupt: false });
       // 增加火药+阵眼
       extraEnemies.push({ kind: "powder", count: 2, x: 140, yOffset: 0 });
       extraEnemies.push({ kind: "core", count: 1, x: 284, yOffset: 0 });
@@ -4209,6 +4176,11 @@ export class Game {
     size: number,
     life: number = BALANCE.feedback.floatingTextLife
   ) {
+    // P4.2A.1: 调试守卫——中央大字禁止使用addText
+    if (this.debugEnabled && Math.abs(x - DESIGN_WIDTH / 2) < 48 && y < 320 && size >= 18) {
+      console.warn("[P4.2 central addText blocked]", { text, x, y, size });
+      return;
+    }
     // 文字去重：相同内容已存在则不重复添加
     if (this.texts.some(t => t.text === text && t.life > life * 0.5)) {
       return;
@@ -4359,6 +4331,17 @@ export class Game {
     }
   }
 
+  /** P4.2A.1: Boss阶段/死亡队列清理 */
+  private clearBossNoticeScope(bossId: string, keepDefeat = false) {
+    if (this.activeBattleNotice?.dedupeKey.startsWith(`boss-phase:${bossId}:`)) {
+      this.activeBattleNotice = null;
+    }
+    this.battleNoticeQueue = this.battleNoticeQueue.filter(notice => {
+      if (notice.dedupeKey.startsWith(`boss-phase:${bossId}:`)) return false;
+      return true;
+    });
+  }
+
   private drawBattleNotice(ctx: CanvasRenderingContext2D) {
     const notice = this.activeBattleNotice;
     if (!notice) return;
@@ -4389,11 +4372,12 @@ export class Game {
     ctx.restore();
   }
 
-  /** P4.2: 局部浮字入口（支持分类/优先级/合并/轨道） */
+  /** P4.2A.1: 局部浮字入口（支持分类/优先级/合并/轨道） */
   private addCombatFloat(input: { x: number; y: number; text: string; color: string; size: number; duration: number; category: CombatFloatCategory; priority: CombatFloatPriority; mergeKey?: string; targetId?: string }) {
-    // 同类同目标0.25秒内合并
-    if (input.mergeKey && input.targetId) {
-      const existing = this.texts.find(t => t.mergeKey === input.mergeKey && t.targetId === input.targetId && t.life > t.maxLife - 0.25);
+    // 同类同目标0.25秒内合并（使用完整mergeKey）
+    const effectiveMergeKey = input.mergeKey ? `${input.mergeKey}:${input.targetId ?? "global"}` : null;
+    if (effectiveMergeKey) {
+      const existing = this.texts.find(t => t.mergeKey === effectiveMergeKey && t.life > t.maxLife - 0.25);
       if (existing) {
         existing.life = input.duration;
         existing.text = input.text;
@@ -4402,15 +4386,22 @@ export class Game {
         return;
       }
     }
-    // 同屏上限：优先淘汰C、其次最旧B
-    const worldFloats = this.texts.filter(t => t.priority && t.priority !== "A");
+    // 同屏上限：全部计入总量，优先淘汰C、其次最旧B
+    const worldFloats = this.texts.filter(t => t.category !== undefined);
     if (worldFloats.length >= 6) {
+      const aCount = worldFloats.filter(t => t.priority === "A").length;
       const cFloats = worldFloats.filter(t => t.priority === "C");
-      if (cFloats.length > 0) { this.texts = this.texts.filter(t => t.id !== cFloats[0].id); }
-      else { this.texts = this.texts.filter(t => t.id !== worldFloats[0].id); }
+      const bFloats = worldFloats.filter(t => t.priority === "B");
+      if (cFloats.length > 0) {
+        this.texts = this.texts.filter(t => t.id !== cFloats[0].id);
+      } else if (input.priority !== "A" && bFloats.length > 0) {
+        this.texts = this.texts.filter(t => t.id !== bFloats[0].id);
+      } else if (input.priority === "A" && bFloats.length > 0) {
+        this.texts = this.texts.filter(t => t.id !== bFloats[0].id);
+      } else if (aCount >= 6) { return; } // 全是A则拒绝新entry
     }
-    // 轨道选择
-    const lane = input.targetId ? (input.targetId.charCodeAt(0) % 3) : Math.floor(Math.random() * 3);
+    // 完整字符串Hash轨道选择
+    const lane = input.targetId ? this.hashTextLane(input.targetId) : (this.texts.length % 3);
     const laneOffsets = [-18, 0, 18];
     this.texts.push({
       id: this.nextId("float"),
@@ -4418,8 +4409,14 @@ export class Game {
       text: input.text, color: input.color, size: input.size,
       life: input.duration, maxLife: input.duration,
       category: input.category, priority: input.priority,
-      mergeKey: input.mergeKey, targetId: input.targetId, lane,
+      mergeKey: effectiveMergeKey ?? undefined, targetId: input.targetId, lane,
     });
+  }
+
+  private hashTextLane(value: string): number {
+    let hash = 0;
+    for (let i = 0; i < value.length; i++) { hash = ((hash * 31 + value.charCodeAt(i)) | 0); }
+    return Math.abs(hash) % 3;
   }
 
   private clampPointer(pos: Vec2): Vec2 {
@@ -6159,8 +6156,7 @@ export class Game {
       const previewLead = 0.75;
       if (this.elapsed >= this.level.eliteSpawnAt - previewLead && this.elapsed < this.level.eliteSpawnAt) {
         this.elitePreviewShown = true;
-        this.eliteIntroText = "精英来袭";
-        this.eliteIntroTimer = 0.75;
+        // P4.2A.1: 精英预览文字已删除，出场使用showBattleNotice
       }
     }
 
@@ -6216,10 +6212,9 @@ export class Game {
     const enemy = this.createBoss(bid);
     this.enemies.push(enemy);
     this.discoveredEnemies.add("boss");
-    // 出场播报（带暂停效果）
-    this.bossIntroTimer = 3;
-    this.bossIntroText = BOSS_CONFIG[bid].introText;
-    this.phase = "playing"; // 确保不误用buffChoice
+    // P4.2A.1: Boss出场改为S级BattleNotice
+    this.showBattleNotice({ text: BOSS_CONFIG[bid].introText, priority: "S", category: "boss", style: "danger", duration: 1.8, dedupeKey: `boss-intro:${bid}`, cooldown: 10, interrupt: true });
+    this.phase = "playing";
     this.screenShake = Math.max(this.screenShake, 0.8);
     this.flash = Math.max(this.flash, 0.65);
     this.particles.push(glowParticle({ x: DESIGN_WIDTH / 2, y: BALANCE.battlefield.enemySpawnY }, BOSS_CONFIG[bid].color, 40, 80));
