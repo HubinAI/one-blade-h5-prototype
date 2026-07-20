@@ -165,7 +165,7 @@ export class Game {
     attackEndPos: Vec2;
   }[] = [];
   // 多波多次刷新队列：每个子刷新有时间戳，到时间就spawn
-  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number }[] = [];
+  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number; isTailCatchup?: boolean }[] = [];
 
   private pointerDown = false;
   private pointerPos?: Vec2;
@@ -3481,6 +3481,12 @@ export class Game {
     const baseProfile = this.getEntryProfileForEnemy(item.kind as EnemyKind, phase);
     // P4.3A.1: 角色化entryEndY纵深
     const profile = { ...baseProfile, entryEndY: baseProfile.entryEndY + (item.entryEndYOffset ?? 0) };
+    // P4.3A.6: 尾队预接力快速入场
+    if (item.isTailCatchup) {
+      profile.entryMultiplier *= 1.35;
+      profile.entryMaxDuration *= 0.68;
+      profile.entryEndY += 24;
+    }
     const spawnY = profile.spawnY - (item.yOffset ?? 0);
     // P2.7：安全区约束
     const safeX = this.clampSpawnXByPhaseAndKind(item.x, item.kind as EnemyKind, phase);
@@ -4490,11 +4496,11 @@ export class Game {
             yOffset: rowYOffset,
             battlePhase: "edict_burst",
             flowRole: batch < 1 ? "vanguard" : batch < 2 ? "main" : "reserve",
-            spawnGroupId: `edict:${this.postChestWaveIndex + 1}:${this.postChestWaveIndex}`,
+            spawnGroupId: `edict:${roundIndex}:${roundIndex}`,
             spawnOrder: i,
             entryEndYOffset: batch < 1 ? 30 : batch < 2 ? 6 : -24,
             source: "edict",
-            roundIndex: this.postChestWaveIndex + 1,
+            roundIndex,
           } as any);
         }
       }
@@ -4745,27 +4751,44 @@ export class Game {
     this.battleNoticeCooldowns.set(notice.dedupeKey, this.elapsed + notice.cooldown);
   }
 
-  /** P4.3A.5: 最后一轮同队列尾队加速 */
+  /** P4.3A.6: 尾队预接力——基于可行动压力+真实ETA */
   private updateEdictTailCatchup(dt: number) {
     if (this.battlePhase !== "edict_burst" || !this.allPostChestWavesSpawned) return;
     if (this.phase !== "playing" || this.isEdictModalBlocking() || this.victoryTransitionActive) return;
-    const pressure = this.getCombatPressure("edict");
-    const hasNonBoss = this.enemies.some(e => e.alive && e.kind !== "boss");
-    const hasEdictQueue = this.subSpawnQueue.some(q => q.source === "edict");
-    if (!hasEdictQueue || hasNonBoss) return;
+    const isFinalRound = this.edictBurstRoundIndex >= this.edictBurstRoundTotal;
+    if (!isFinalRound) return;
     if (this.elapsed < this.edictTailCatchupCooldownUntil) return;
-    if (pressure.actionableNow > 0 || pressure.actionableSoon07 > 0) { this.edictTailCatchupTimer = 0; return; }
+
+    const pressure = this.getCombatPressure("edict", 1.2);
+    // 尾队候选筛选：当前轮，按vanguard/main优先
+    const candidates = this.subSpawnQueue
+      .filter(q => q.source === "edict" && q.roundIndex === this.edictBurstRoundIndex && q.time > this.elapsed)
+      .sort((a, b) => {
+        const o = { vanguard: 0, main: 1, reserve: 2 };
+        return (o[a.flowRole ?? "main"] - o[b.flowRole ?? "main"]) || (a.time - b.time);
+      });
+    if (candidates.length === 0) { this.edictTailCatchupTimer = 0; return; }
+
+    // 触发条件：可行动压力低 + 远场ETA大
+    const shouldTrigger = pressure.actionableNow <= 1 && pressure.actionableSoon07 === 0 && pressure.nearestMidEta > 0.75;
+    if (!shouldTrigger) { this.edictTailCatchupTimer = 0; return; }
+
     this.edictTailCatchupTimer += dt;
-    if (this.edictTailCatchupTimer < 0.40) return;
+    if (this.edictTailCatchupTimer < 0.30) return;
+
+    // 加速1~2只
     let acc = 0;
-    for (let i = 0; i < this.subSpawnQueue.length && acc < 2; i++) {
-      const q = this.subSpawnQueue[i];
-      if (q.source !== "edict" || q.time <= this.elapsed) continue;
-      q.time = this.elapsed + randomRange(0.05, 0.12);
+    for (const q of candidates) {
+      if (acc >= 2) break;
+      q.time = this.elapsed + randomRange(0.03, 0.08);
+      q.isTailCatchup = true;
+      // reserve临时升级为vanguard入场
+      if (q.flowRole === "reserve") q.flowRole = "vanguard";
+      q.entryEndYOffset = Math.max(q.entryEndYOffset ?? 0, 28);
       acc++;
     }
     this.edictTailCatchupTimer = 0;
-    this.edictTailCatchupCooldownUntil = this.elapsed + randomRange(0.45, 0.65);
+    this.edictTailCatchupCooldownUntil = this.elapsed + randomRange(0.45, 0.60);
   }
 
   private updateBattleNotice(dt: number) {
