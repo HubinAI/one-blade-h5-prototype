@@ -770,6 +770,23 @@ export class Game {
       this.bossController.render(ctx);
     }
     if (this.debugEnabled) this.drawDebugPanel(ctx);
+    // P4.4A.2-R2: 调试十字准星——显示系统记录的触摸位置
+    if (this.debugEnabled && this.pointerPos) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(255, 0, 0, 0.7)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(this.pointerPos.x - 12, this.pointerPos.y);
+      ctx.lineTo(this.pointerPos.x + 12, this.pointerPos.y);
+      ctx.moveTo(this.pointerPos.x, this.pointerPos.y - 12);
+      ctx.lineTo(this.pointerPos.x, this.pointerPos.y + 12);
+      ctx.stroke();
+      ctx.fillStyle = "#ff0000";
+      ctx.font = '10px "Consolas", monospace';
+      ctx.textAlign = "left";
+      ctx.fillText(`touch: (${this.pointerPos.x.toFixed(0)}, ${this.pointerPos.y.toFixed(0)})`, this.pointerPos.x + 16, this.pointerPos.y + 4);
+      ctx.restore();
+    }
     this.drawBuffChoice(ctx);
     this.drawRevivePause(ctx);
 
