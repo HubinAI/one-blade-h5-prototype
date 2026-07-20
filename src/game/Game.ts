@@ -1468,6 +1468,35 @@ export class Game {
       if (segmentHitCircle(a, b, enemy, enemy.radius + bladeReach)) {
         trail.hitEnemyIds.add(enemy.id);
         this.handleEnemyHit(enemy, trail);
+        // P4.4A.2: Boss 护甲命中检测
+        if (enemy.kind === "boss" && enemy.bossId === "thunderGeneral" && this.bossController) {
+          const armorResult = this.bossController.checkSlashSegmentHit(a, b, trail.id);
+          if (armorResult.hit) {
+            // 正确命中护甲
+            const progress = this.bossController.recordArmorHit(armorResult.targetId);
+            this.flash = Math.max(this.flash, 0.35);
+            this.screenShake = Math.max(this.screenShake, 0.25);
+            // 碎甲粒子
+            const shards = this.bossController.getArmorShardParticles(6, "#f0e130");
+            this.particles.push(...sparkBurst({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, 8, "#f0e130"));
+            // 世界坐标"破甲"文字
+            const worldPos = this.bossController.getActiveArmorWorldPos();
+            if (worldPos) {
+              this.addText(worldPos.x, worldPos.y - 20, "破甲", "#f0e130", 16, 0.6);
+            }
+            // HUD 进度已在 BossController 中更新
+            if (progress.completed) {
+              // 破甲完成——BossController会自行触发armor_break演出
+              this.screenShake = Math.max(this.screenShake, 0.6);
+              this.flash = Math.max(this.flash, 0.5);
+            }
+          } else if (enemy.y > -50) {
+            // 未命中护甲（但砍中了Boss身体）→ 弹刀
+            this.bossController.recordMissHit();
+            this.particles.push(...sparkBurst({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, 6, "#6c3483"));
+            this.screenShake = Math.max(this.screenShake, 0.15);
+          }
+        }
         // 破绽检测：主刀命中带破绽标记的敌人
         const remaining = this.weakpointMarks.get(enemy.id) ?? 0;
         if (remaining > 0) {
