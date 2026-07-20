@@ -2119,8 +2119,8 @@ export class Game {
         this.activateMidfieldTrait(enemy);
       }
 
-      // P4.4A.1-R3: Boss模式不扣防线伤害
-      if (this.gameMode === "boss") {
+      // P4.4A.2-R2: Boss模式不扣防线伤害（Boss自己不能死）
+      if (this.gameMode === "boss" && enemy.kind !== "boss") {
         enemy.alive = false;
         continue;
       }
