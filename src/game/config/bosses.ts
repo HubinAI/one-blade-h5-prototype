@@ -45,6 +45,10 @@ export type BossConfig = {
     cooldown: number;
     description: string;
   };
+  /** P4.4A: Boss 专属HUD背景色 */
+  hudColor?: string;
+  /** P4.4A: Boss 介绍标题（短，不超过10字） */
+  introTitle?: string;
 };
 
 export const BOSS_CONFIG: Record<BossId, BossConfig> = {
@@ -179,6 +183,62 @@ export const BOSS_CONFIG: Record<BossId, BossConfig> = {
       name: "花葬",
       cooldown: 6,
       description: "释放花瓣小兵，不给能量"
+    }
+  },
+  /** P4.4A: 玄甲雷将 — 首个Boss */
+  thunderGeneral: {
+    id: "thunderGeneral",
+    name: "玄甲雷将",
+    title: "境界镇守者",
+    maxHp: 16,
+    speed: 18,
+    radius: 44,
+    defenseDamage: 2,
+    score: 200,
+    energyGain: 30,
+    color: "#6c3483",
+    accentColor: "#f0e130",
+    introText: "来者止步——此境非汝可渡！",
+    introTitle: "境界镇守者",
+    noticeTitle: "玄甲雷将·降临",
+    noticeSubtitle: "来者止步——此境非汝可渡",
+    hudColor: "#5b2c6f",
+    phases: [
+      {
+        hpRatioTrigger: 0.66,
+        name: "破甲",
+        announce: "破甲阶段 — 切发亮护甲",
+        noticeTitle: "破甲",
+        noticeSubtitle: "切发亮护甲",
+        speedMultiplier: 1,
+        defenseDamage: 2,
+        burstDamageMultiplier: 1
+      },
+      {
+        hpRatioTrigger: 0.33,
+        name: "追击",
+        announce: "追击阶段 — 趁弱点显现时追击",
+        noticeTitle: "追击",
+        noticeSubtitle: "趁弱点显现时追击",
+        speedMultiplier: 1.1,
+        defenseDamage: 3,
+        burstDamageMultiplier: 1.5
+      },
+      {
+        hpRatioTrigger: 0,
+        name: "终结",
+        announce: "终结阶段 — 连续斩碎残片",
+        noticeTitle: "终结",
+        noticeSubtitle: "连续斩碎残片",
+        speedMultiplier: 0.8,
+        defenseDamage: 1,
+        burstDamageMultiplier: 2
+      }
+    ],
+    skill: {
+      name: "雷击",
+      cooldown: 6,
+      description: "玄甲雷将召唤天雷，对大范围敌方造成麻痹"
     }
   }
 };

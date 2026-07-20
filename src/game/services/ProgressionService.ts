@@ -1551,7 +1551,7 @@ export function debugResetBreakthroughs(): void {
 /** 生成段位Boss关的LevelConfig */
 export function getBossLevelConfig(rankId: RankId): LevelConfig {
   const rank = RANK_CONFIG[rankId];
-  const bossNames: Record<BossId, string> = { yaoWang: "练气大妖", moXiu: "筑基魔修", huaYao: "灵月圣女" };
+  const bossNames: Record<BossId, string> = { yaoWang: "练气大妖", moXiu: "筑基魔修", huaYao: "灵月圣女", thunderGeneral: "玄甲雷将" };
   const bossName = rank ? bossNames[rank.bossId] ?? "Boss" : "Boss";
   const rankIdx = RANK_ORDER.indexOf(rankId);
   const hpBonus = rankIdx * 2; // 越往后Boss战时间越长

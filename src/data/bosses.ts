@@ -33,5 +33,13 @@ export const BOSS_VISUAL_DEFS: Record<BossId, BossVisualDef> = {
     hint: "花葬如雨，裙下谁能不败？需一刀破阵。",
     color: "#e74c3c",
     accent: "#fadbd8"
+  },
+  thunderGeneral: {
+    id: "thunderGeneral",
+    name: "玄甲雷将",
+    title: "境界镇守者",
+    hint: "重甲守境，破甲后方可追击弱点。",
+    color: "#6c3483",
+    accent: "#f0e130"
   }
 };

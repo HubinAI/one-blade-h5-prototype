@@ -70,6 +70,9 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
       } else if (event.key.toLowerCase() === "w") {
         // 调试用：强制给所有敌人加破绽标记
         gameRef.current?.debugForceWeakpoint();
+      } else if (event.key.toLowerCase() === "i") {
+        // P4.4A: 调试用跳过Boss开场
+        gameRef.current?.debugSkipBossIntro();
       }
     };
 

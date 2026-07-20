@@ -14,6 +14,7 @@ import { REWARD_CONFIG } from "./config/rewards";
 import { getBladeTier, getBladeTierName, getTierConfig, canSlash, consumeEnergyByTier, calculateMomentumRefund, getSubBladeCDReduction, recoverEnergy } from "./systems/bladeEnergySystem";
 import { isSharpTurn, segmentHitCircle } from "./systems/collisionSystem";
 import { paperBurst, ringParticle, sparkBurst, glowParticle, explosionBurst, coreCollapseBurst } from "./systems/particleSystem";
+import { BossController } from "./systems/BossController";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
 import { BLADE_BASE_STATS, QUALITY_ORDER } from "./config/synthesis";
 import type { Blade } from "./services/BladeService";
@@ -244,6 +245,8 @@ export class Game {
   // ---- 精英/Boss 系统 ----
   private eliteSpawned = false;
   private bossSpawned = false;
+  /** P4.4A: Boss控制器（新状态机系统） */
+  private bossController: import("./systems/BossController").BossController | null = null;
   /** P4.2A.1: 统一中央播报调度器 */
   private activeBattleNotice: BattleNotice | null = null;
   private battleNoticeQueue: BattleNotice[] = [];
@@ -563,6 +566,14 @@ export class Game {
     this.addText(DESIGN_WIDTH / 2, 240, "+ 破绽 调试触发", "#ff6a33", 18, 1.2);
   }
 
+  /** P4.4A: 调试用跳过Boss开场（按 I 触发） */
+  debugSkipBossIntro() {
+    if (this.bossController) {
+      this.bossController.skipIntro();
+      console.log("[Boss Debug] 开场已跳过");
+    }
+  }
+
   reviveFromRewardedAd() {
     if (this.phase !== "revive") return;
     this.phase = "playing";
@@ -683,6 +694,7 @@ export class Game {
     this.updateBossSpawn();
     this.updateEliteSkills(scaledDt);
     this.updateBossSkills(scaledDt);
+    this.updateBossController(scaledDt);
     this.updateMechanicEnemies(scaledDt);
     this.updateChestDrop(scaledDt);
 
@@ -741,6 +753,10 @@ export class Game {
     // P2.8：战斗层之后绘制边缘金光和破阵过渡
     this.drawEdgeFlash(ctx);
     this.drawVictoryTransition(ctx);
+    // P4.4A: Boss控制器渲染（HUD覆盖层/开场演出/暗角等）
+    if (this.bossController) {
+      this.bossController.render(ctx);
+    }
     if (this.debugEnabled) this.drawDebugPanel(ctx);
     this.drawBuffChoice(ctx);
     this.drawRevivePause(ctx);
@@ -5461,6 +5477,8 @@ export class Game {
 
       // ---- Boss渲染 ----
       if (enemy.kind === "boss" && enemy.bossId) {
+        // P4.4A: thunderGeneral 由 BossController 渲染
+        if (enemy.bossId === "thunderGeneral") continue;
         const visDef = BOSS_VISUAL_DEFS[enemy.bossId];
         const phase = enemy.bossPhase ?? 0;
         const phaseColors = ["#c0392b", "#e74c3c", "#922b21"];
@@ -5547,7 +5565,7 @@ export class Game {
         this.drawEliteHealthOverlay(ctx, enemy);
       }
       // Boss简短血条（屏幕空间）
-      if (enemy.kind === "boss" && enemy.bossId) {
+      if (enemy.kind === "boss" && enemy.bossId && enemy.bossId !== "thunderGeneral") {
         const hpRatio = enemy.hp / enemy.maxHp;
         const barW = 96;
         const barH = 7;
@@ -6704,7 +6722,10 @@ export class Game {
 
   /** Boss生成 */
   private updateBossSpawn() {
-    if (this.bossSpawned || !this.level.bossId) return;
+    // P4.4A Debug: ?boss=thunderGeneral 可绕过 bossId 检查
+    const debugBossParam = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get("boss") : null;
+    const debugBossOverride = debugBossParam === "thunderGeneral";
+    if (this.bossSpawned || (!this.level.bossId && !debugBossOverride)) return;
     // 突破战(boss关): Boss开场即出（0.5秒后）
     const isChallengeBreakthrough = this.currentRunMode === "challenge";
     if (isChallengeBreakthrough) {
@@ -6718,17 +6739,38 @@ export class Game {
       this.bossSpawned = true;
     }
     const bid = this.level.bossId;
-    const enemy = this.createBoss(bid);
+
+    // P4.4A Debug 覆盖: 使用 debugBossOverride 确定effectiveBossId
+    const effectiveBossId: import("../game/types").BossId = (debugBossOverride ? "thunderGeneral" : bid) as import("../game/types").BossId;
+
+    // P4.4A: thunderGeneral 使用新的BossController系统
+    if (effectiveBossId === "thunderGeneral") {
+      const enemy = this.createBoss(effectiveBossId);
+      this.enemies.push(enemy);
+      const controller = new BossController(effectiveBossId);
+      controller.attachBoss(enemy);
+      this.bossController = controller;
+      this.discoveredEnemies.add("boss");
+      // P4.4A: 开场由BossController管理intro演出
+      this.screenShake = Math.max(this.screenShake, 0.8);
+      this.flash = Math.max(this.flash, 0.65);
+      logEvent("boss_spawn", { levelId: this.level.id, bossId: effectiveBossId, time: this.elapsed });
+      return;
+    }
+
+    // 原有Boss系统（yaoWang/moXiu/huaYao）— 此时 bid 一定非空（thunderGeneral 已在上方 return）
+    const bossId = bid as import("../game/types").BossId;
+    const enemy = this.createBoss(bossId);
     this.enemies.push(enemy);
     this.discoveredEnemies.add("boss");
     // P4.2A.2: Boss出场使用noticeTitle（兜底退化为introText）
-    const bossIntroTitle = BOSS_CONFIG[bid].noticeTitle ?? BOSS_CONFIG[bid].name;
-    this.showBattleNotice({ text: bossIntroTitle, subtext: BOSS_CONFIG[bid].noticeSubtitle, layout: "boss-intro", priority: "S", category: "boss", style: "danger", duration: 1.8, dedupeKey: `boss-intro:${bid}`, cooldown: 10, interrupt: true });
+    const bossIntroTitle = BOSS_CONFIG[bossId].noticeTitle ?? BOSS_CONFIG[bossId].name;
+    this.showBattleNotice({ text: bossIntroTitle, subtext: BOSS_CONFIG[bossId].noticeSubtitle, layout: "boss-intro", priority: "S", category: "boss", style: "danger", duration: 1.8, dedupeKey: `boss-intro:${bossId}`, cooldown: 10, interrupt: true });
     this.phase = "playing";
     this.screenShake = Math.max(this.screenShake, 0.8);
     this.flash = Math.max(this.flash, 0.65);
-    this.particles.push(glowParticle({ x: DESIGN_WIDTH / 2, y: BALANCE.battlefield.enemySpawnY }, BOSS_CONFIG[bid].color, 40, 80));
-    logEvent("boss_spawn", { levelId: this.level.id, bossId: bid, time: this.elapsed });
+    this.particles.push(glowParticle({ x: DESIGN_WIDTH / 2, y: BALANCE.battlefield.enemySpawnY }, BOSS_CONFIG[bossId].color, 40, 80));
+    logEvent("boss_spawn", { levelId: this.level.id, bossId: bossId, time: this.elapsed });
   }
 
   /** 精英怪技能更新 */
@@ -6774,6 +6816,8 @@ export class Game {
   private updateBossSkills(dt: number) {
     for (const enemy of this.enemies) {
       if (!enemy.alive || enemy.kind !== "boss" || !enemy.bossId) continue;
+      // P4.4A: thunderGeneral 由 BossController 管理
+      if (enemy.bossId === "thunderGeneral") continue;
       const conf = BOSS_CONFIG[enemy.bossId];
       const prevPhase = enemy.bossPhase ?? 0;
       const newPhase = getBossPhase(conf, enemy.hp);
@@ -6881,6 +6925,13 @@ export class Game {
         }
       }
     }
+  }
+
+  /** P4.4A: Boss控制器更新 */
+  private updateBossController(dt: number) {
+    if (!this.bossController) return;
+    this.bossController.update(dt);
+    // thunderGeneral 不进入旧Boss技能系统
   }
 
   /** 创建精英怪 */
