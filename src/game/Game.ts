@@ -986,6 +986,9 @@ export class Game {
     if (!trail?.active) return;
 
     trail.active = false;
+
+    // P4.4A.2-R1: Boss模式跳过所有普通挥刀反馈（防止"破阵斩"等旧文字出现）
+    if (this.gameMode === "boss") return;
     this.resolvePendingSlash(trail);
     const last = trail.points[trail.points.length - 1];
 
@@ -6829,9 +6832,9 @@ export class Game {
       this.wavesSpawned = 0;
       this.subSpawnQueue = [];
 
-      // 创建 Boss Enemy（仅用于战斗结束检测）
+      // 创建 Boss Enemy（可见位置，供刀路碰撞检测用）
       const enemy = this.createBoss(bid);
-      enemy.y = -200; // 隐藏（BossController 自行绘制）
+      enemy.y = 195; // 可见位置（BossController 同名坐标）
       this.enemies.push(enemy);
 
       // 创建并启动 BossController
