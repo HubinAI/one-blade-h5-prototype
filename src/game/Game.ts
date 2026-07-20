@@ -235,6 +235,8 @@ export class Game {
   private battleNoticeQueue: BattleNotice[] = [];
   private battleNoticeCooldowns: Map<string, number> = new Map();
   private shownBladeTierPrompts: Set<string> = new Set();
+  /** P4.2A.2: 神之一刀中央播报每局最多1次 */
+  private godSlashNoticeShown = false;
   /** P3.2：精英预告/出场播报防重复 */
   private elitePreviewShown = false;
   private eliteSpawnAnnounced = false;
@@ -438,6 +440,7 @@ export class Game {
     this.act3Pending = false;
     this.oneBladeModeTimer = 0;
     this.shownBladeTierPrompts = new Set();
+    this.godSlashNoticeShown = false;
     // P4.2: 重置播报调度器状态
     this.activeBattleNotice = null;
     this.battleNoticeQueue = [];
@@ -1007,11 +1010,15 @@ export class Game {
       this.screenShake = Math.max(this.screenShake, 0.65);
       this.flash = Math.max(this.flash, 0.8);
     }
-    // P4.2A.1: 统一神之一刀判定（>=15杀 或 破阵锋+阵眼崩塌）
-    const triggeredGodSlash = trail.kills >= 15 || (trail.tier === "burst" && trail.coreCollapseCount > 0);
+    // P4.2A.2: 统一神之一刀判定（使用REWARD_CONFIG阈值），中央播报每局最多1次
+    const triggeredGodSlash = trail.kills >= REWARD_CONFIG.godSlashThreshold || (trail.tier === "burst" && trail.coreCollapseCount > 0);
     if (triggeredGodSlash) {
       this.stats.oneBladeBreaks += 1;
-      this.showBattleNotice({ text: "神之一刀", priority: "A", category: "milestone", style: "gold", duration: 0.9, dedupeKey: `god-slash:${trail.id}`, cooldown: 1.2, interrupt: false });
+      if (!this.godSlashNoticeShown) {
+        this.godSlashNoticeShown = true;
+        this.showBattleNotice({ text: "神之一刀", priority: "A", category: "milestone", style: "gold", duration: 0.85, dedupeKey: "god-slash:first", cooldown: 999, interrupt: false });
+      }
+      // 每次触发保留特效
       AudioService.oneBladeBreak();
       this.slowMoTimer = Math.max(this.slowMoTimer, 0.12);
       this.flash = Math.max(this.flash, 0.8);
@@ -1848,9 +1855,8 @@ export class Game {
       this.stats.killedBoss = enemy.bossId;
       this.flash = Math.max(this.flash, 1);
       this.screenShake = Math.max(this.screenShake, 1.2);
-      // P4.2A.1: Boss击败改为S级BattleNotice，清除同Boss阶段提示
+      // P4.2A.2: Boss击败通知直接进入胜利过渡，不额外播报中央
       this.clearBossNoticeScope(enemy.bossId);
-      this.showBattleNotice({ text: `${BOSS_CONFIG[enemy.bossId].name}·讨伐`, priority: "S", category: "boss", style: "gold", duration: 1.6, dedupeKey: `boss-defeat:${enemy.bossId}`, cooldown: 10, interrupt: true });
       AudioService.victory();
     }
 
@@ -2463,9 +2469,10 @@ export class Game {
     if (this.victoryTransitionActive || this.phase === "won") return;
     this.victoryTransitionActive = true;
     this.victoryTransitionTimer = 0;
-    // P4.2: 清空中央播报队列 + 只保留drawVictoryTransition
+    // P4.2A.2: 清空中央播报和世界浮字
     this.activeBattleNotice = null;
     this.battleNoticeQueue = [];
+    this.texts = [];
     this.triggerHitStop(0.18, 0.08, true);
     this.triggerSlashAfterglow(1.0, 0.35);
     this.triggerEdgeFlash(1.0, 0.35);
@@ -2495,7 +2502,8 @@ export class Game {
     ctx.fillStyle = "#ffd35a";
     ctx.shadowColor = "rgba(255, 210, 90, 0.9)";
     ctx.shadowBlur = 18;
-    ctx.fillText("破阵成功！", DESIGN_WIDTH / 2, DESIGN_HEIGHT * 0.38);
+    const victoryText = this.currentRunMode === "challenge" ? "突破成功！" : "破阵成功！";
+    ctx.fillText(victoryText, DESIGN_WIDTH / 2, DESIGN_HEIGHT * 0.38);
     ctx.restore();
   }
 
@@ -4176,9 +4184,9 @@ export class Game {
     size: number,
     life: number = BALANCE.feedback.floatingTextLife
   ) {
-    // P4.2A.1: 调试守卫——中央大字禁止使用addText
-    if (this.debugEnabled && Math.abs(x - DESIGN_WIDTH / 2) < 48 && y < 320 && size >= 18) {
-      console.warn("[P4.2 central addText blocked]", { text, x, y, size });
+    // P4.2A.2: 正式环境阻止中央大字通过addText
+    if (Math.abs(x - DESIGN_WIDTH / 2) < 56 && y < 330 && size >= 18) {
+      console.warn("[P4.2 blocked central addText]", { text, x, y, size });
       return;
     }
     // 文字去重：相同内容已存在则不重复添加
@@ -4386,19 +4394,25 @@ export class Game {
         return;
       }
     }
-    // 同屏上限：全部计入总量，优先淘汰C、其次最旧B
+    // P4.2A.2: 淘汰规则修正——A计入总量，淘汰顺序C→B→A
     const worldFloats = this.texts.filter(t => t.category !== undefined);
     if (worldFloats.length >= 6) {
-      const aCount = worldFloats.filter(t => t.priority === "A").length;
       const cFloats = worldFloats.filter(t => t.priority === "C");
       const bFloats = worldFloats.filter(t => t.priority === "B");
+      const aFloats = worldFloats.filter(t => t.priority === "A");
       if (cFloats.length > 0) {
         this.texts = this.texts.filter(t => t.id !== cFloats[0].id);
-      } else if (input.priority !== "A" && bFloats.length > 0) {
+      } else if (input.priority !== "C" && bFloats.length > 0) {
         this.texts = this.texts.filter(t => t.id !== bFloats[0].id);
       } else if (input.priority === "A" && bFloats.length > 0) {
         this.texts = this.texts.filter(t => t.id !== bFloats[0].id);
-      } else if (aCount >= 6) { return; } // 全是A则拒绝新entry
+      } else if (input.priority === "A" && aFloats.length > 0) {
+        this.texts = this.texts.filter(t => t.id !== aFloats[0].id);
+      } else if (input.priority === "C") {
+        return; // 新C没有旧C可替换，放弃
+      } else {
+        return;
+      }
     }
     // 完整字符串Hash轨道选择
     const lane = input.targetId ? this.hashTextLane(input.targetId) : (this.texts.length % 3);
@@ -6212,8 +6226,9 @@ export class Game {
     const enemy = this.createBoss(bid);
     this.enemies.push(enemy);
     this.discoveredEnemies.add("boss");
-    // P4.2A.1: Boss出场改为S级BattleNotice
-    this.showBattleNotice({ text: BOSS_CONFIG[bid].introText, priority: "S", category: "boss", style: "danger", duration: 1.8, dedupeKey: `boss-intro:${bid}`, cooldown: 10, interrupt: true });
+    // P4.2A.2: Boss出场使用noticeTitle（兜底退化为introText）
+    const bossIntroTitle = BOSS_CONFIG[bid].noticeTitle ?? BOSS_CONFIG[bid].name;
+    this.showBattleNotice({ text: bossIntroTitle, subtext: BOSS_CONFIG[bid].noticeSubtitle, priority: "S", category: "boss", style: "danger", duration: 1.8, dedupeKey: `boss-intro:${bid}`, cooldown: 10, interrupt: true });
     this.phase = "playing";
     this.screenShake = Math.max(this.screenShake, 0.8);
     this.flash = Math.max(this.flash, 0.65);
@@ -6274,8 +6289,14 @@ export class Game {
         enemy.flash = 0.5;
         this.screenShake = Math.max(this.screenShake, 0.6);
         this.flash = Math.max(this.flash, 0.55);
-        this.addText(DESIGN_WIDTH / 2, 160, conf.phases[newPhase].announce, conf.color, 22, 2);
-        AudioService.oneBladeBreak(); // 借用
+        // P4.2A.2: Boss阶段使用BattleNotice + 清除旧阶段
+        const phaseConf = conf.phases[newPhase];
+        const phaseTitle = phaseConf.noticeTitle;
+        if (phaseTitle) {
+          this.clearBossNoticeScope(enemy.id);
+          this.showBattleNotice({ text: phaseTitle, subtext: phaseConf.noticeSubtitle, priority: "S", category: "boss", style: "danger", duration: 1.25, dedupeKey: `boss-phase:${enemy.id}:${newPhase}`, cooldown: 3, interrupt: true });
+        }
+        AudioService.oneBladeBreak();
       }
 
       // 更新阶段属性

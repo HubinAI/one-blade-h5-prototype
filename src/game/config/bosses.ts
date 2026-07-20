@@ -7,6 +7,10 @@ export type BossPhaseConfig = {
   name: string;
   /** 触发时的屏幕播报文字 */
   announce: string;
+  /** P4.2A.2: 播报标题（短行） */
+  noticeTitle?: string;
+  /** P4.2A.2: 播报副标题（可选） */
+  noticeSubtitle?: string;
   /** 移速倍率 */
   speedMultiplier: number;
   /** 触线伤害 */
@@ -29,6 +33,10 @@ export type BossConfig = {
   accentColor: string;
   /** 出场播报文字 */
   introText: string;
+  /** P4.2A.2: 播报标题（短行，不超过8字） */
+  noticeTitle?: string;
+  /** P4.2A.2: 播报副标题（可选，不超过14字） */
+  noticeSubtitle?: string;
   /** Boss阶段配置 */
   phases: BossPhaseConfig[];
   /** 专属技能 */
@@ -53,11 +61,15 @@ export const BOSS_CONFIG: Record<BossId, BossConfig> = {
     color: "#c0392b",
     accentColor: "#f5b7b1",
     introText: "吼——区区散修，也敢犯我领地？",
+    noticeTitle: "妖王·现身",
+    noticeSubtitle: "区区散修，也敢犯我领地",
     phases: [
       {
         hpRatioTrigger: 0.5,
         name: "暴怒",
         announce: "大妖·暴怒 — 刀势不足寸步难行",
+        noticeTitle: "大妖·暴怒",
+        noticeSubtitle: "刀势不足寸步难行",
         speedMultiplier: 1,
         defenseDamage: 2,
         burstDamageMultiplier: 1
@@ -66,6 +78,8 @@ export const BOSS_CONFIG: Record<BossId, BossConfig> = {
         hpRatioTrigger: 0,
         name: "狂化",
         announce: "大妖·狂化 — 破阵锋方能斩之！",
+        noticeTitle: "大妖·狂化",
+        noticeSubtitle: "破阵锋方能斩之",
         speedMultiplier: 1.2,
         defenseDamage: 4,
         burstDamageMultiplier: 2
