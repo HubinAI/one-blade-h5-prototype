@@ -1414,6 +1414,11 @@ export class Game {
   }
 
   private checkSegmentHits(a: Vec2, b: Vec2, trail: SlashTrail) {
+    // P4.4A.2-R2: 高层诊断日志
+    if (this.gameMode === "boss" && trail.tier !== "weak") {
+      const bossEnemy = this.enemies.find(e => e.kind === "boss");
+      console.log(`[CSH] game=boss a=(${a.x.toFixed(0)},${a.y.toFixed(0)})→b=(${b.x.toFixed(0)},${b.y.toFixed(0)}) enemiesTotal=${this.enemies.length} bossFound=${!!bossEnemy} bossPos=(${bossEnemy?.x.toFixed(0)},${bossEnemy?.y.toFixed(0)}) slashId=${trail.id}`);
+    }
     const stage = SWORD_STAGE_BY_ID[trail.tier];
     const ratio = Math.max(0.06, this.getSlashRatio(trail));
     const bladeReach = BALANCE.slash.touchHitPadding + stage.width * trail.widthMultiplier * (0.75 + ratio);
