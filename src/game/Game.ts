@@ -395,23 +395,25 @@ export class Game {
     this.subBladeTimers = this.subBlades.map((_, i) =>
       this.subBladeCooldowns[i] - firstReadyDelay[i]
     );
-    this.subBladeAnim = this.subBlades.map((_, i) => ({
+    this.subBladeAnim = this.subBlades.map((_, i) => {
+      const home = this.getSubBladeFloatingPos(i);
+      return {
       slot: i,
       phase: "idle" as const,
       phaseTimer: 0,
       phaseDuration: 0.2,
-      startPos: { x: 0, y: 0 },
-      endPos: { x: 0, y: 0 },
+      startPos: { ...home },
+      endPos: { ...home },
       targetId: null,
-      homePos: this.getSubBladeFloatingPos(i),
+      homePos: { ...home },
       rotation: 0,
       visualScale: 1,
       hitApplied: false,
       // P4.1A.13: 左刀横扫路径
-      currentPos: { x: 0, y: 0 },
-      attackStartPos: { x: 0, y: 0 },
-      attackEndPos: { x: 0, y: 0 }
-    }));
+      currentPos: { ...home },
+      attackStartPos: { ...home },
+      attackEndPos: { ...home }
+    }});
     this.subBladeReadyAfterAction = this.subBlades.map(() => false);
     this.weakpointMarks = new Map();
     this._breakReadyNotified = false;
@@ -797,11 +799,9 @@ export class Game {
       this._slashOneBladeBoost = 1.0;
     }
 
-    // P4.1A.7：消耗下一刀Buff
-    if (pending) {
-      if (pending.hasSoul) this.nextSoul = false;
-      if (pending.hasOil) this.nextOil = false;
-    }
+    // P4.1A.15: 先保存本刀Buff，再创建SlashTrail，最后消耗
+    const slashHasSoul = pending ? pending.hasSoul : this.nextSoul;
+    const slashHasOil = pending ? pending.hasOil : this.nextOil;
 
     this.currentSlash = {
       id: this.nextId("slash"),
@@ -824,11 +824,15 @@ export class Game {
       pendingExplosionIds: new Set(),
       pendingCoreIds: new Set(),
       oilTriggeredIds: new Set(),
-      hasOil: this.nextOil,
+      hasOil: slashHasOil,
       kills: 0,
       chain: 0,
       active: true
     };
+
+    // P4.1A.15: SlashTrail创建后再消耗全局状态
+    if (slashHasSoul) this.nextSoul = false;
+    if (slashHasOil) this.nextOil = false;
 
     this.energy = consumeEnergyByTier(this.energy, tier);
     this.regenDelayTimer = BALANCE.swordEnergy.regenDelayAfterSlash;
@@ -2258,6 +2262,10 @@ export class Game {
               anim.rotation = Math.atan2(anim.attackEndPos.y - anim.attackStartPos.y, anim.attackEndPos.x - anim.attackStartPos.x) + Math.PI / 2;
               anim.startPos = { ...anim.attackEndPos };
             } else {
+              // P4.1A.15: 右刀进入attacking时初始化rotation
+              const dx = anim.endPos.x - anim.startPos.x;
+              const dy = anim.endPos.y - anim.startPos.y;
+              anim.rotation = Math.atan2(dy, dx) + Math.PI / 2;
               anim.currentPos = { ...anim.endPos };
               anim.startPos = { ...anim.endPos };
             }
@@ -2275,16 +2283,14 @@ export class Game {
             const easeT = aT < 0.5 ? 2 * aT * aT : 1 - Math.pow(-2 * aT + 2, 2) / 2;
             anim.currentPos = { x: sweepStart.x + (sweepEnd.x - sweepStart.x) * easeT, y: sweepStart.y + (sweepEnd.y - sweepStart.y) * easeT };
           } else if (i === 1 && anim.targetId) {
-            // P4.1A.14: 右刀攻击阶段持续追踪存活目标
+            // P4.1A.15: 右刀攻击阶段持续追踪存活目标（使用统一同步函数）
             const target = this.enemies.find(e => e.id === anim.targetId && e.alive);
-            if (target) {
-              anim.currentPos = { x: target.x, y: target.y - 30 };
-              anim.endPos = { ...anim.currentPos };
-            }
+            if (target) this.syncWeakpointBladeToTarget(anim, target);
           }
-          // P4.1A.8: attacking阶段在命中时刻直接结算伤害（不再依赖subSlash）
-          const hitMoment = M.specialHitHold;
-          if (anim.phaseTimer >= hitMoment && !anim.hitApplied) {
+          // P4.1A.15: 左右刀使用命中进度（左52%，右45%）代替固定0.06s
+          const attackProgress = clamp(anim.phaseTimer / anim.phaseDuration, 0, 1);
+          const hitProgress = i === 0 ? 0.52 : 0.45;
+          if (attackProgress >= hitProgress && !anim.hitApplied) {
             anim.hitApplied = true;
             const stats = BLADE_BASE_STATS[blade.quality];
             if (stats) {
@@ -2306,8 +2312,8 @@ export class Game {
                   for (const kind of orders) { rightTarget = candidates.find(e => e.kind === kind && Math.abs(e.x - searchPos.x) <= 90 && Math.abs(e.y - searchPos.y) <= 90) ?? null; if (rightTarget) break; }
                   if (!rightTarget) rightTarget = candidates.sort((a, b) => b.y - a.y).find(e => Math.abs(e.x - searchPos.x) <= 90 && Math.abs(e.y - searchPos.y) <= 90) ?? null;
                   if (rightTarget) {
-                    anim.targetId = rightTarget.id;
-                    anim.endPos = { x: rightTarget.x, y: rightTarget.y - 30 };
+                    // P4.1A.15: 重锁同步targetId/currentPos/endPos/rotation
+                    this.syncWeakpointBladeToTarget(anim as any, rightTarget);
                   } else {
                     // 无目标：回收+返还75%CD
                     this.subBladeTimers[i] = this.subBladeCooldowns[i] * 0.75;
@@ -2514,6 +2520,19 @@ export class Game {
   }
 
   /** P2.6：副刀槽位发射起点 */
+  /** P4.1A.15: 右刀同步到目标位置 */
+  private syncWeakpointBladeToTarget(anim: typeof this.subBladeAnim[0], target: Enemy) {
+    const nextPos = { x: target.x, y: target.y - 30 };
+    const dx = nextPos.x - anim.currentPos.x;
+    const dy = nextPos.y - anim.currentPos.y;
+    anim.targetId = target.id;
+    anim.currentPos = { ...nextPos };
+    anim.endPos = { ...nextPos };
+    if (Math.abs(dx) + Math.abs(dy) > 0.001) {
+      anim.rotation = Math.atan2(dy, dx) + Math.PI / 2;
+    }
+  }
+
   /** 蓄势横扫伤害结算 */
   private applyMomentumSweepDamage(
     s: { x1: number; y1: number; x2: number; y2: number; color: string; bladeIdx: number },
@@ -3970,50 +3989,6 @@ export class Game {
   }
 
   /** P3.9：精英名牌（禁止非法精英绘制血条） */
-  private drawEliteNameplate(ctx: CanvasRenderingContext2D, enemy: Enemy) {
-    if (enemy.kind !== "elite" || !enemy.eliteKind || !enemy.alive) return;
-    const maxHp = Math.max(1, enemy.maxHp || enemy.hp || 1);
-    const hp = Math.max(0, enemy.hp);
-    const ratio = clamp(hp / maxHp, 0, 1);
-    const segments = 5;
-    const filled = Math.ceil(ratio * segments);
-    const plateW = 58;
-    const plateH = 14;
-    const x0 = -plateW / 2;
-    const y0 = -enemy.radius - 50;
-
-    ctx.save();
-    ctx.fillStyle = "rgba(24, 12, 8, 0.76)";
-    ctx.strokeStyle = "rgba(255, 211, 90, 0.42)";
-    ctx.lineWidth = 1;
-    roundRect(ctx, x0, y0, plateW, plateH, 5);
-    ctx.fill();
-    ctx.stroke();
-
-    const barW = 46;
-    const barH = 5;
-    const gap = 2;
-    const segW = (barW - gap * (segments - 1)) / segments;
-    const bx0 = -barW / 2;
-    const by0 = y0 + 5;
-
-    for (let i = 0; i < segments; i++) {
-      const x = bx0 + i * (segW + gap);
-      if (i < filled) {
-        const lowHp = ratio <= 0.25;
-        const pulse = 0.5 + Math.sin(this.elapsed * 8) * 0.5;
-        ctx.fillStyle = lowHp
-          ? `rgba(255, ${90 + pulse * 80}, 70, 0.95)`
-          : "rgba(255, 211, 90, 0.95)";
-      } else {
-        ctx.fillStyle = "rgba(255, 255, 255, 0.16)";
-      }
-      roundRect(ctx, x, by0, segW, barH, 2);
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-
   /** P2.5：精英名牌显示名称 */
   private getEliteDisplayName(enemy: Enemy): string {
     switch (enemy.eliteKind) {
@@ -4930,7 +4905,7 @@ export class Game {
     ctx.restore();
   }
 
-  /** P4.1A.13: 精英血条（绝对坐标，不继承怪物局部旋转） */
+  /** P4.1A.15: 精英血条（绝对坐标 + 5段式） */
   private drawEliteHealthOverlay(ctx: CanvasRenderingContext2D, enemy: Enemy) {
     if (!enemy.alive || enemy.kind !== "elite" || !enemy.eliteKind) return;
     const plateW = 58;
@@ -4939,18 +4914,36 @@ export class Game {
     const topY = clamp(enemy.y - enemy.radius - 56, 90, BALANCE.battlefield.bottomDefenseY - plateH - 12);
     const x0 = centerX - plateW / 2;
     const y0 = topY;
-    // 血条背景
-    ctx.save();
-    ctx.fillStyle = "rgba(10, 7, 5, 0.75)";
-    ctx.fillRect(x0, y0, plateW, plateH);
-    // 血条填充
+    const maxSegments = 5;
     const hpRatio = Math.max(0, Math.min(1, enemy.hp / Math.max(1, enemy.maxHp)));
-    ctx.fillStyle = hpRatio > 0.5 ? "#2ecc71" : hpRatio > 0.25 ? "#f39c12" : "#e74c3c";
-    ctx.fillRect(x0, y0, plateW * hpRatio, plateH);
-    // 边框
-    ctx.strokeStyle = "#fff3c0";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x0, y0, plateW, plateH);
+    const filledSegments = Math.ceil(hpRatio * maxSegments);
+    const segW = 10;
+    const segGap = 1.5;
+    const totalW = maxSegments * segW + (maxSegments - 1) * segGap;
+    const segStartX = centerX - totalW / 2;
+    ctx.save();
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    for (let seg = 0; seg < maxSegments; seg++) {
+      const sx = segStartX + seg * (segW + segGap);
+      const filled = seg < filledSegments;
+      if (hpRatio < 0.25 && filled) {
+        // 低血脉冲
+        const pulse = 0.6 + Math.sin(this.elapsed * 10) * 0.4;
+        ctx.fillStyle = `rgba(231, 76, 60, ${pulse})`;
+      } else if (hpRatio < 0.5 && filled) {
+        ctx.fillStyle = "#f39c12";
+      } else {
+        ctx.fillStyle = filled ? "#ffd35a" : "rgba(60, 50, 40, 0.5)";
+      }
+      ctx.fillRect(sx, y0, segW, plateH);
+      if (filled) {
+        ctx.strokeStyle = "rgba(255, 255, 200, 0.25)";
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(sx, y0, segW, plateH);
+      }
+    }
     ctx.restore();
   }
 
