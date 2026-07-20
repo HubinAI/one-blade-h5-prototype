@@ -173,6 +173,8 @@ export class Game {
   private wavesSpawned = 0;
   private wavesFinishedAt = 0; // 最后一波生成完成时 elapsed
   private currentRunMode: "normal" | "challenge" | "dailyChallenge" | "freeBurst" | "highYield" = "normal";
+  /** P4.4A.1-R3: 游戏模式隔离 */
+  private gameMode: "normal" | "boss" = "normal";
   private nextWaveTimer: number = BALANCE.waves.firstWaveDelay;
   private screenShake = 0;
   private flash = 0;
@@ -572,6 +574,16 @@ export class Game {
       this.bossController.skipIntro();
       console.log("[Boss Debug] 开场已跳过");
     }
+  }
+
+  /** P4.4A.1-R3: 调试用触发Boss胜利（按 V 触发） */
+  debugForceBossVictory() {
+    if (this.gameMode !== "boss") return;
+    // 强制清除Boss并触发胜利
+    this.bossController = null;
+    this.gameMode = "normal";
+    this.finish(true);
+    console.log("[Boss Debug] 强制Boss胜利");
   }
 
   reviveFromRewardedAd() {
@@ -2069,8 +2081,8 @@ export class Game {
         this.activateMidfieldTrait(enemy);
       }
 
-      // P4.4A.1: Boss开场期间不扣防线伤害
-      if (this.bossController?.isIntroActive) {
+      // P4.4A.1-R3: Boss模式不扣防线伤害
+      if (this.gameMode === "boss") {
         enemy.alive = false;
         continue;
       }
@@ -3191,8 +3203,8 @@ export class Game {
 
   /** P4.3A.4: 普通波调度——固定截止时间+压力提前接入 */
   private updateWaves(dt: number) {
-    // P4.4A: Boss开场期间阻断波次生成
-    if (this.bossController?.isIntroActive) return;
+    // P4.4A.1-R3: Boss模式阻断所有波次
+    if (this.gameMode === "boss") return;
     if (this.wavesSpawned >= this.level.waves.length) return;
     // 军令阶段停止普通波提前推进
     if (this.edictRewardState === "active" || this.battlePhase === "edict_burst") return;
@@ -3472,6 +3484,8 @@ export class Game {
   /** 处理 sub-spawn 队列（多波多次刷新） */
   /** 紧急修正：子刷新队列处理（三路拆分，禁止重复复制） */
   private updateSubSpawnQueue() {
+    // P4.4A.1-R3: Boss模式阻断子刷新队列
+    if (this.gameMode === "boss") return;
     if (this.subSpawnQueue.length === 0) return;
     const aliveCount = this.enemies.filter(e => e.alive).length;
     // 性能保护：达到上限时不处理队列（延迟生成）
@@ -3548,6 +3562,8 @@ export class Game {
 
   /** 判定是否应立刻胜利结算（二次打磨：检查 battlePhase） */
   private shouldFinishVictory(): boolean {
+    // P4.4A.1-R3: Boss模式禁止自然胜利，只能由BossController/Debug触发
+    if (this.gameMode === "boss") return false;
     const allWavesDone = this.wavesSpawned >= this.level.waves.length;
     const noAliveEnemies = !this.enemies.some(e => e.alive);
     const notResolving = !this.currentSlash;
@@ -3802,6 +3818,8 @@ export class Game {
   }
 
   private checkBattleEnd() {
+    // P4.4A.1-R3: Boss模式自然失败阻断
+    if (this.gameMode === "boss") return;
     if (this.hp <= 0) {
       // ---- 魂返(soulReturn)buff：首次HP归零自动复活 ----
       if (this.hasBuff("soulReturn") && !this.soulReturnUsed) {
@@ -6602,6 +6620,17 @@ export class Game {
       `eliteKilled: ${this.eliteKilled}`,
       `chestDone: ${this.chestDone}`,
       `allPostSpawned: ${this.allPostChestWavesSpawned}`,
+      ...(this.bossController ? [
+        `--- Boss Debug ---`,
+        `Game Mode: ${this.gameMode}`,
+        `Boss State: ${this.bossController.debugSnapshot["Boss State"]}`,
+        `Input Locked: ${this.bossController.debugSnapshot["Input Locked"]}`,
+        `Player Invuln: ${this.bossController.debugSnapshot["Player Invuln"]}`,
+        `Alive Normal: ${this.enemies.filter(e => e.alive && e.kind !== "boss").length}`,
+        `Boss HP: ${this.bossController.debugSnapshot["Boss HP"]}`,
+        `Active Armor: ${this.bossController.debugSnapshot["Active Armor"]}`,
+        `Armor Progress: ${this.bossController.debugSnapshot["Armor Progress"]}`,
+      ] : []),
       `Sub0: ${this.subBladeAnim[0]?.phase ?? "-"} (t:${(this.subBladeAnim[0]?.phaseTimer ?? 0).toFixed(2)}/${(this.subBladeAnim[0]?.phaseDuration ?? 0).toFixed(2)})`,
       `Sub1: ${this.subBladeAnim[1]?.phase ?? "-"} (t:${(this.subBladeAnim[1]?.phaseTimer ?? 0).toFixed(2)}/${(this.subBladeAnim[1]?.phaseDuration ?? 0).toFixed(2)})`,
       `Sub0 target: ${this.subBladeAnim[0]?.targetId?.slice(0, 6) ?? "-"}`,
@@ -6755,6 +6784,8 @@ export class Game {
 
     // P4.4A.1-R2: thunderGeneral 使用新 BossController 系统
     if (bid === "thunderGeneral") {
+      // P4.4A.1-R3: 切换游戏模式
+      this.gameMode = "boss";
       // 清空场上所有非Boss敌人
       for (const e of this.enemies) { e.alive = false; }
       this.enemies = [];

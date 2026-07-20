@@ -306,139 +306,207 @@ export class BossController {
   }
 
   // ================================================================
-  // 渲染: Boss 武将剪影
+  // 渲染: Boss 武将剪影（皮影风格—整体黑金剪影）
   // ================================================================
   private drawBoss(ctx: CanvasRenderingContext2D): void {
-    const cx = DESIGN_WIDTH / 2;
-    const cy = this.renderY;
+    const cx = 0; // translate 已处理中心偏移
+    const cy = 0;
     const s = this.bossRenderScale;
     const shakeX = this.shakeTimer > 0 ? (Math.random() - 0.5) * 4 : 0;
     const shakeY = this.shakeTimer > 0 ? (Math.random() - 0.5) * 3 : 0;
 
     ctx.save();
-    ctx.translate(cx + shakeX, cy + shakeY);
+    // 先translate到屏幕中心+渲染Y，再应用scale
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.translate(DESIGN_WIDTH / 2 + shakeX, this.renderY + shakeY);
     ctx.scale(s, s);
 
-    // ---- 披风/下摆 ----
-    this.drawCloak(ctx);
+    const R = 72; // 整体半宽基准
 
-    // ---- 躯干（梯形上宽下收） ----
-    ctx.fillStyle = "#2c1038";
-    ctx.strokeStyle = "#4a2060";
+    // ---- 外发光（统御全轮廓） ----
+    ctx.save();
+    ctx.shadowColor = "rgba(108, 52, 131, 0.3)";
+    ctx.shadowBlur = 18;
+
+    // ---- 1. 主体剪影（深紫黑一体轮廓） ----
+    ctx.fillStyle = "#1a0a26";
+    this.drawBodySilhouette(ctx, R);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    // ---- 2. 边缘描边（突显武将轮廓） ----
+    ctx.save();
+    ctx.strokeStyle = "rgba(108, 52, 131, 0.35)";
     ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(-42, -40);
-    ctx.lineTo(42, -40);
-    ctx.lineTo(36, 30);
-    ctx.lineTo(-36, 30);
-    ctx.closePath();
-    ctx.fill();
+    this.drawBodySilhouette(ctx, R);
     ctx.stroke();
+    ctx.restore();
 
-    // ---- 头盔 ----
-    ctx.fillStyle = "#3d1a50";
-    ctx.strokeStyle = "#6c3483";
-    ctx.lineWidth = 2;
-    // 盔体
-    ctx.beginPath();
-    ctx.roundRect(-18, -70, 36, 24, 6);
-    ctx.fill();
-    ctx.stroke();
-    // 盔缨（顶部尖角）
-    ctx.fillStyle = "#6c3483";
-    ctx.beginPath();
-    ctx.moveTo(-4, -70);
-    ctx.lineTo(0, -86);
-    ctx.lineTo(4, -70);
-    ctx.closePath();
-    ctx.fill();
+    // ---- 3. 头盔细部 ----
+    this.drawHelmetDetail(ctx, R);
 
-    // ---- 肩甲（左右宽大三角形） ----
-    this.drawShoulder(ctx, -1, -42, -58, -48, -72, -32);   // 左
-    this.drawShoulder(ctx, 1, 42, 58, -48, 72, -32);       // 右
+    // ---- 4. 左右肩甲（独立绘制，支持激活态高亮） ----
+    const leftActive = this.activeArmorIndex === ARMOR_L;
+    const rightActive = this.activeArmorIndex === ARMOR_R;
+    this.drawShoulderPlate(ctx, -1, R, leftActive);  // 左
+    this.drawShoulderPlate(ctx, 1, R, rightActive);   // 右
 
-    // ---- 胸甲（菱形） ----
+    // ---- 5. 胸甲（菱形，支持激活态） ----
     const chestActive = this.activeArmorIndex === ARMOR_C;
-    ctx.fillStyle = chestActive ? "#4a2060" : "#1a0a26";
-    ctx.strokeStyle = chestActive ? "#f0e130" : "#3d1a4a";
-    ctx.lineWidth = chestActive ? 3 : 1.5;
-    ctx.shadowColor = chestActive ? "#f0e130" : "transparent";
-    ctx.shadowBlur = chestActive ? 14 : 0;
-    ctx.beginPath();
-    ctx.moveTo(0, -32);
-    ctx.lineTo(24, -4);
-    ctx.lineTo(0, 24);
-    ctx.lineTo(-24, -4);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    // 胸甲上裂纹
+    this.drawChestGuard(ctx, R, chestActive);
+
+    // ---- 6. 雷核（低亮，不抢焦点） ----
+    this.drawCoreLow(ctx, R);
+
+    // ---- 7. 金色裂纹装饰 ----
     if (!chestActive) {
-      ctx.strokeStyle = "rgba(240, 225, 48, 0.12)";
+      ctx.strokeStyle = "rgba(240, 225, 48, 0.10)";
       ctx.lineWidth = 1;
-      ctx.shadowBlur = 0;
       ctx.beginPath();
-      ctx.moveTo(-10, -8);
-      ctx.lineTo(0, -4);
-      ctx.lineTo(8, 4);
+      ctx.moveTo(-12, -6);
+      ctx.lineTo(-4, 0);
+      ctx.lineTo(6, 6);
       ctx.stroke();
     }
-    ctx.shadowBlur = 0;
-
-    // ---- 雷核（第一阶段保持低亮） ----
-    const coreR = 9;
-    const corePulse = 0.88 + Math.sin(this.introElapsed * 4) * 0.12;
-    ctx.globalAlpha = chestActive ? 0.3 : 0.5;
-    const grd = ctx.createRadialGradient(0, -4, 0, 0, -4, coreR * corePulse);
-    grd.addColorStop(0, "#8e44ad");
-    grd.addColorStop(0.5, "#6c3483");
-    grd.addColorStop(1, "#4a2060");
-    ctx.fillStyle = grd;
-    ctx.shadowColor = "#6c3483";
-    ctx.shadowBlur = 6;
-    ctx.beginPath();
-    ctx.arc(0, -4, coreR * corePulse, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.globalAlpha = 1;
 
     ctx.restore();
   }
 
-  /** 绘制单个肩甲（三角形带内部纹路） */
-  private drawShoulder(ctx: CanvasRenderingContext2D, dir: number, x1: number, x2: number, y1: number, x3: number, y2: number): void {
-    const active = (dir < 0 && this.activeArmorIndex === ARMOR_L) || (dir > 0 && this.activeArmorIndex === ARMOR_R);
-    ctx.fillStyle = active ? "#4a2060" : "#2c1038";
+  /** 武将主体轮廓路径 */
+  private drawBodySilhouette(ctx: CanvasRenderingContext2D, R: number): void {
+    ctx.beginPath();
+    // 从头盔顶部开始
+    ctx.moveTo(-14, -86);               // 盔缨顶部
+    ctx.lineTo(-4, -70);
+    ctx.lineTo(-18, -58);               // 头盔左侧
+    ctx.lineTo(-22, -44);               // 脖子左侧
+    // 左肩
+    ctx.lineTo(-62, -42);               // 左肩外扩
+    ctx.lineTo(-68, -32);               // 左肩外侧
+    ctx.lineTo(-58, -28);               // 左肩下缘
+    // 左臂
+    ctx.lineTo(-44, -16);
+    ctx.lineTo(-40, 16);                // 左臂外侧
+    ctx.lineTo(-32, 18);                // 左臂底
+    // 左腰
+    ctx.lineTo(-32, 22);
+    ctx.lineTo(-28, 40);               // 左甲裙
+    // 左腿
+    ctx.lineTo(-24, 62);               // 左腿外侧
+    ctx.lineTo(-14, 64);               // 左脚
+    // 裆部
+    ctx.lineTo(-8, 48);
+    ctx.lineTo(8, 48);
+    // 右腿
+    ctx.lineTo(14, 64);                // 右脚
+    ctx.lineTo(24, 62);                // 右腿外侧
+    // 右腰
+    ctx.lineTo(28, 40);
+    ctx.lineTo(32, 22);
+    // 右臂
+    ctx.lineTo(32, 18);                // 右臂底
+    ctx.lineTo(40, 16);
+    ctx.lineTo(44, -16);               // 右臂外侧
+    // 右肩
+    ctx.lineTo(58, -28);               // 右肩下缘
+    ctx.lineTo(68, -32);               // 右肩外侧
+    ctx.lineTo(62, -42);               // 右肩内缘
+    // 脖子右侧到头顶
+    ctx.lineTo(22, -44);
+    ctx.lineTo(18, -58);               // 头盔右侧
+    ctx.lineTo(4, -70);
+    ctx.lineTo(14, -86);               // 盔缨右侧
+    ctx.closePath();
+  }
+
+  /** 头盔细部 */
+  private drawHelmetDetail(ctx: CanvasRenderingContext2D, R: number): void {
+    // 头盔下部（面部区域）
+    ctx.save();
+    ctx.fillStyle = "#0d0515";
+    ctx.beginPath();
+    ctx.roundRect(-12, -56, 24, 12, 4);
+    ctx.fill();
+    // 盔缨（顶部尖角，使用亮色）
+    ctx.fillStyle = "#6c3483";
+    ctx.beginPath();
+    ctx.moveTo(-5, -70);
+    ctx.lineTo(0, -88);
+    ctx.lineTo(5, -70);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /** 肩甲（带激活态高亮） */
+  private drawShoulderPlate(ctx: CanvasRenderingContext2D, dir: number, R: number, active: boolean): void {
+    ctx.save();
+    const xOff = dir * 45;
+    const yOff = -38;
+    const w = 28;
+    const h = 20;
+
+    // 肩甲底色
+    ctx.fillStyle = active ? "#3d1a50" : "#150a20";
     ctx.strokeStyle = active ? "#f0e130" : "#3d1a4a";
     ctx.lineWidth = active ? 3 : 1.5;
     ctx.shadowColor = active ? "#f0e130" : "transparent";
     ctx.shadowBlur = active ? 12 : 0;
+
     ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y1 + 16);
-    ctx.lineTo(x3, y2);
-    ctx.lineTo(x2 - dir * 6, y1 + 6);
+    // 肩甲弧形轮廓
+    ctx.ellipse(xOff, yOff, w, h, dir * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // 肩甲内部装饰线条
+    if (active) {
+      ctx.strokeStyle = "rgba(240, 225, 48, 0.4)";
+      ctx.lineWidth = 1;
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.ellipse(xOff + dir * 4, yOff, w * 0.6, h * 0.5, dir * 0.3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /** 胸甲 */
+  private drawChestGuard(ctx: CanvasRenderingContext2D, R: number, active: boolean): void {
+    ctx.save();
+    ctx.fillStyle = active ? "#3d1a50" : "#150a20";
+    ctx.strokeStyle = active ? "#f0e130" : "#3d1a4a";
+    ctx.lineWidth = active ? 3 : 1.5;
+    ctx.shadowColor = active ? "#f0e130" : "transparent";
+    ctx.shadowBlur = active ? 12 : 0;
+
+    ctx.beginPath();
+    ctx.moveTo(0, -18);
+    ctx.lineTo(20, 2);
+    ctx.lineTo(0, 22);
+    ctx.lineTo(-20, 2);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
     ctx.shadowBlur = 0;
+    ctx.restore();
   }
 
-  /** 披风/下摆 */
-  private drawCloak(ctx: CanvasRenderingContext2D): void {
-    ctx.fillStyle = "#1a0a26";
+  /** 雷核（第一阶段保持低亮） */
+  private drawCoreLow(ctx: CanvasRenderingContext2D, R: number): void {
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    const coreR = 8;
+    const pulse = 0.9 + Math.sin(this.introElapsed * 3) * 0.1;
+    const grd = ctx.createRadialGradient(0, 2, 0, 0, 2, coreR * pulse);
+    grd.addColorStop(0, "#6c3483");
+    grd.addColorStop(1, "#3d1a50");
+    ctx.fillStyle = grd;
     ctx.beginPath();
-    ctx.moveTo(-32, 24);
-    ctx.lineTo(-44, 52);
-    ctx.lineTo(-38, 58);
-    ctx.lineTo(-20, 40);
-    ctx.lineTo(0, 50);
-    ctx.lineTo(20, 40);
-    ctx.lineTo(38, 58);
-    ctx.lineTo(44, 52);
-    ctx.lineTo(32, 24);
-    ctx.closePath();
+    ctx.arc(0, 2, coreR * pulse, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
   }
 
   // ================================================================
