@@ -87,9 +87,9 @@ export class BossController {
 
   private initArmorTargets(): void {
     this.armorTargets = [
-      { id: ARMOR_L, name: "左肩", relX: -52, relY: -36, hitRadius: 24, active: false, broken: false, animTimer: 0, lastHitSlashId: "" },
-      { id: ARMOR_R, name: "右肩", relX: 52, relY: -36, hitRadius: 24, active: false, broken: false, animTimer: 0, lastHitSlashId: "" },
-      { id: ARMOR_C, name: "胸甲", relX: 0, relY: 2, hitRadius: 26, active: false, broken: false, animTimer: 0, lastHitSlashId: "" },
+      { id: ARMOR_L, name: "左肩", relX: -50, relY: -30, hitRadius: 38, active: false, broken: false, animTimer: 0, lastHitSlashId: "" },
+      { id: ARMOR_R, name: "右肩", relX: 50, relY: -30, hitRadius: 38, active: false, broken: false, animTimer: 0, lastHitSlashId: "" },
+      { id: ARMOR_C, name: "胸甲", relX: 0, relY: 6, hitRadius: 40, active: false, broken: false, animTimer: 0, lastHitSlashId: "" },
     ];
   }
 
@@ -449,8 +449,8 @@ export class BossController {
     ctx.restore();
 
     // 肩甲（激活态发光）
-    this.drawArmorPiece(ctx, this.armorTargets[ARMOR_L], -52, -36, 26, 18);
-    this.drawArmorPiece(ctx, this.armorTargets[ARMOR_R], 52, -36, 26, 18);
+    this.drawArmorPiece(ctx, this.armorTargets[ARMOR_L], -50, -30, 30, 22);
+    this.drawArmorPiece(ctx, this.armorTargets[ARMOR_R], 50, -30, 30, 22);
 
     // 胸甲
     this.drawChestPiece(ctx, this.armorTargets[ARMOR_C]);
@@ -464,6 +464,26 @@ export class BossController {
     ctx.fillStyle = coreGrd;
     ctx.beginPath(); ctx.arc(0, 2, 8, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
+
+    // P4.4A.2-R2: Debug 模式下绘制 Hit Area 边界
+    if (this._debugShowHitArea) {
+      for (const t of this.armorTargets) {
+        if (!t.active && !t.broken) continue;
+        ctx.save();
+        ctx.strokeStyle = t.broken ? "rgba(120, 120, 120, 0.4)" : "rgba(240, 225, 48, 0.6)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.arc(t.relX, t.relY, t.hitRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = "rgba(240, 225, 48, 0.7)";
+        ctx.font = '9px "Consolas", monospace';
+        ctx.textAlign = "center";
+        ctx.fillText(`${t.name} r=${t.hitRadius}`, t.relX, t.relY - t.hitRadius - 4);
+        ctx.restore();
+      }
+    }
 
     ctx.restore();
   }
@@ -662,6 +682,9 @@ export class BossController {
     ctx.fillText(`护甲 ${this.armorProgress}/${this.maxArmor}`, DESIGN_WIDTH - 14, labelY);
     ctx.restore();
   }
+
+  /** P4.4A.2-R2: 是否显示 Hit Area 边界 */
+  private _debugShowHitArea = true;
 
   // ================================================================
   // 外部方法

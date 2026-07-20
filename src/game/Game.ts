@@ -1506,10 +1506,20 @@ export class Game {
             // 碎甲粒子
             const shards = this.bossController.getArmorShardParticles(6, "#f0e130");
             this.particles.push(...sparkBurst({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, 8, "#f0e130"));
-            // 世界坐标"破甲"文字
+            // 世界坐标"破甲"文字 — 改用addCombatFloat绕过addText守卫
             const worldPos = this.bossController.getActiveArmorWorldPos();
             if (worldPos) {
-              this.addText(worldPos.x, worldPos.y - 20, "破甲", "#f0e130", 16, 0.6);
+              this.addCombatFloat({
+                x: worldPos.x,
+                y: worldPos.y - 20,
+                text: "破甲",
+                color: "#f0e130",
+                size: 18,
+                duration: 0.6,
+                category: "mechanic",
+                priority: "A",
+                mergeKey: `armor-hit-${trail.id}`
+              });
             }
             // HUD 进度已在 BossController 中更新
             if (progress.completed) {
