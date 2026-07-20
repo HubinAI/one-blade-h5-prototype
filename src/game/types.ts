@@ -11,6 +11,28 @@ export type PickupKind = "drum" | "soul" | "oil";
 export type GamePhase = "playing" | "buffChoice" | "revive" | "won" | "lost" | "chestOpen" | "paused_for_chest";
 export type RatingGrade = "C" | "B" | "A" | "S" | "SS" | "神之一刀";
 
+// ---- P4.2: 统一播报调度 ----
+export type BattleNoticePriority = "S" | "A" | "B";
+export type BattleNoticeCategory = "victory" | "defeat" | "boss" | "elite" | "mechanic" | "milestone" | "system";
+export type BattleNoticeStyle = "gold" | "danger" | "purple" | "blue" | "neutral";
+export type BattleNotice = {
+  id: string;
+  text: string;
+  subtext?: string;
+  priority: BattleNoticePriority;
+  category: BattleNoticeCategory;
+  style: BattleNoticeStyle;
+  duration: number;
+  elapsed: number;
+  dedupeKey: string;
+  cooldown: number;
+  interrupt: boolean;
+  createdAt: number;
+};
+
+export type CombatFloatCategory = "damage" | "mechanic" | "pickup" | "energy" | "status" | "tutorial" | "blade-tier";
+export type CombatFloatPriority = "A" | "B" | "C";
+
 // ---- 战术指令路线系统 ----
 export type TacticalRoute = "scorch" | "pierce" | "ironWall";
 
@@ -257,6 +279,12 @@ export type FloatingText = Vec2 & {
   maxLife: number;
   color: string;
   size: number;
+  // P4.2: 信息降噪字段
+  category?: CombatFloatCategory;
+  priority?: CombatFloatPriority;
+  mergeKey?: string;
+  targetId?: string;
+  lane?: number;
 };
 
 export type BattleStats = {

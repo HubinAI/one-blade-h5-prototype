@@ -40,7 +40,13 @@ import type {
   SlashTrail,
   SkillScores,
   TacticalRoute,
-  Vec2
+  Vec2,
+  BattleNotice,
+  BattleNoticePriority,
+  BattleNoticeCategory,
+  BattleNoticeStyle,
+  CombatFloatCategory,
+  CombatFloatPriority,
 } from "./types";
 import { choose, clamp, distance, distanceToSegment, randomRange } from "../utils/math";
 
@@ -74,6 +80,16 @@ function clampSubBladeAttackY(y: number): number {
 }
 
 export class Game {
+  /** P4.2: 统一播报配置 */
+  private static BATTLE_NOTICE_CONFIG = {
+    maxQueue: 4,
+    priorityValue: { S: 100, A: 70, B: 40 },
+    defaultDuration: { S: 1.6, A: 0.95, B: 0.7 },
+    defaultCooldown: { S: 2.0, A: 1.2, B: 0.7 },
+    centerY: 205,
+    fadeIn: 0.12,
+    fadeOut: 0.18,
+  } as const;
   readonly level: LevelConfig;
 
   private readonly onFinish: FinishCallback;
@@ -218,6 +234,11 @@ export class Game {
   private eliteIntroTimer = 0;
   private eliteIntroText = "";
   private bossIntroText = "";
+  /** P4.2: 统一中央播报调度器 */
+  private activeBattleNotice: BattleNotice | null = null;
+  private battleNoticeQueue: BattleNotice[] = [];
+  private battleNoticeCooldowns: Map<string, number> = new Map();
+  private shownBladeTierPrompts: Set<string> = new Set();
   /** P3.2：精英预告/出场播报防重复 */
   private elitePreviewShown = false;
   private eliteSpawnAnnounced = false;
@@ -420,7 +441,14 @@ export class Game {
     this._act1Triggered = false;
     this._act2Triggered = false;
     this._act3Triggered = false;
+    this.act3Pending = false;
     this.oneBladeModeTimer = 0;
+    this.shownBladeTierPrompts = new Set();
+    this.shownBladeTierPrompts = new Set();
+    // P4.2: 重置播报调度器状态
+    this.activeBattleNotice = null;
+    this.battleNoticeQueue = [];
+    this.battleNoticeCooldowns.clear();
     this._usedEvents = new Set();
     this._activeEventTimer = 0;
     this._slowRainMultiplier = 1;
@@ -655,6 +683,8 @@ export class Game {
     this.updateEdictIconFly(frameDt);
     this.updateEdictStatusIcon(frameDt);
     this.updatePostChestWaves(scaledDt);
+    // P4.2: 统一播报更新
+    this.updateBattleNotice(scaledDt);
     this.updateBattlePhase();
     this.updateBuffChoiceTriggers();
     this.checkBattleEnd();
@@ -688,11 +718,12 @@ export class Game {
     this.drawEdictStatusIcon(ctx);
     this.drawSplitFlashes(ctx);
     this.drawFloatingTexts(ctx);
+    this.drawBattleNotice(ctx);
     this.drawWaveProgress(ctx);
     this.drawChestDrop(ctx);
     this.drawEdictRewardModal(ctx);
     this.drawMidfieldEventBorder(ctx);
-    this.drawIntroOverlay(ctx);
+    // P4.2: drawIntroOverlay已删除，由BattleNotice系统替代
     // P2.8：战斗层之后绘制边缘金光和破阵过渡
     this.drawEdgeFlash(ctx);
     this.drawVictoryTransition(ctx);
@@ -846,8 +877,10 @@ export class Game {
     this.lastSlashAngle = this.angleFromWarrior(pos);
     logEvent("slash_start", { levelId: this.level.id, energy: lockedEnergy, stage: stage.name });
     AudioService.slashDraw(tier);
-    if (!this.hasRecentText(stage.prompt, 1.2)) {
-      this.addText(pos.x, pos.y - 18, stage.prompt, stage.color, 16, BALANCE.feedback.stageTextLife);
+    // P4.2: 段位提示每局每段位最多一次（强斩/破阵斩），弱斩/普通不显示
+    if ((tier === "strong" || tier === "burst") && !this.shownBladeTierPrompts.has(tier)) {
+      this.shownBladeTierPrompts.add(tier);
+      this.addCombatFloat({ x: pos.x, y: pos.y - 18, text: stage.prompt, color: stage.color, size: 14, duration: 0.5, category: "blade-tier", priority: "B", mergeKey: `blade-tier:${tier}` });
     }
     if (lockedEnergy < 25) {
       this.showHint("low-energy-slash", "刀势越满，刀芒越强", DESIGN_WIDTH / 2, 118, 2);
@@ -963,9 +996,10 @@ export class Game {
     this.screenShake = Math.max(this.screenShake, trail.chain > 0 ? 0.5 : 0.18);
 
     const stage = SWORD_STAGE_BY_ID[trail.tier];
+    // P4.2: 段位评价使用addCombatFloat局部反馈，不进入中央
     const praise = this.getSlashPraise(trail, reason);
-    if (praise) {
-      this.addText(DESIGN_WIDTH / 2, 136, praise, stage.color, praise === "神之一刀" ? 26 : 20);
+    if (praise && trail.kills >= 1) {
+      this.addCombatFloat({ x: last?.x ?? DESIGN_WIDTH / 2, y: (last?.y ?? 280) - 18, text: praise, color: stage.color, size: 15, duration: 0.6, category: "blade-tier", priority: "B", mergeKey: `praise:${this.stats.slashes}` });
     // 漂亮一刀：首次 5+ 击杀
     if (this.isFirstRun && trail.kills >= 5 && !this.firstRunPrettySlashShown) {
       this.firstRunPrettySlashShown = true;
@@ -1084,10 +1118,10 @@ export class Game {
   }
 
   private getSlashPraise(trail: SlashTrail, fallback: string) {
-    if (trail.tier === "burst" && trail.kills >= 12) return "神之一刀";
+    // P4.2: "神之一刀"由triggerSlashKillFeedback统一里程碑播报，此处不重复
     if (trail.tier === "burst" && trail.kills >= 8) return "一刀破军";
-    if (trail.coreCollapseCount > 0 && trail.tier === "burst") return "神之一刀";
-    if (trail.kills >= 13) return "神之一刀";
+    if (trail.coreCollapseCount > 0 && trail.tier === "burst") return "破阵";
+    if (trail.kills >= 13) return "破阵";
     if (trail.coreCollapseCount > 0) return "阵破";
     if (trail.explosionCount >= 2) return "连爆";
     if (trail.kills >= 8) return "破阵";
@@ -2433,7 +2467,8 @@ export class Game {
       this.triggerSlashAfterglow(0.8, 0.25);
       this.triggerEdgeFlash(0.75, 0.25);
       this.screenShake = Math.max(this.screenShake, 0.22);
-      this.addText(DESIGN_WIDTH / 2, 220, "神之一刀", "#ffd35a", 24, 0.9);
+      // P4.2: 通过统一播报系统
+      this.showBattleNotice({ text: "神之一刀", priority: "A", category: "milestone", style: "gold", duration: 0.9, dedupeKey: `god-slash:${this.stats.slashes}`, cooldown: 1.5, interrupt: false });
     } else if (slashKills >= 12) {
       this.triggerHitStop(0.10, 0.18);
       this.triggerSlashAfterglow(0.45, 0.16);
@@ -2449,11 +2484,13 @@ export class Game {
     if (this.victoryTransitionActive || this.phase === "won") return;
     this.victoryTransitionActive = true;
     this.victoryTransitionTimer = 0;
+    // P4.2: 清空中央播报队列 + 只保留drawVictoryTransition
+    this.activeBattleNotice = null;
+    this.battleNoticeQueue = [];
     this.triggerHitStop(0.18, 0.08, true);
     this.triggerSlashAfterglow(1.0, 0.35);
     this.triggerEdgeFlash(1.0, 0.35);
     this.screenShake = Math.max(this.screenShake, 0.18);
-    this.addText(DESIGN_WIDTH / 2, DESIGN_HEIGHT * 0.38, "破阵成功！", "#ffd35a", 30, 0.9);
   }
 
   /** P2.8：更新破阵过渡 */
@@ -4266,6 +4303,125 @@ export class Game {
     return this.texts.some((t) => t.text === text && t.life > (t.maxLife - withinSec));
   }
 
+  /** P4.2: 统一中央播报 */
+  private showBattleNotice(input: { text: string; subtext?: string; priority: BattleNoticePriority; category: BattleNoticeCategory; style: BattleNoticeStyle; duration?: number; dedupeKey: string; cooldown?: number; interrupt?: boolean }) {
+    const now = this.elapsed;
+    const cooldownUntil = this.battleNoticeCooldowns.get(input.dedupeKey) ?? 0;
+    if (now < cooldownUntil) return;
+    if (this.activeBattleNotice?.dedupeKey === input.dedupeKey) return;
+    if (this.battleNoticeQueue.some(n => n.dedupeKey === input.dedupeKey)) return;
+    const cfg = Game.BATTLE_NOTICE_CONFIG;
+    const notice: BattleNotice = {
+      ...input,
+      id: this.nextId("notice"), elapsed: 0, createdAt: now,
+      duration: input.duration ?? cfg.defaultDuration[input.priority],
+      cooldown: input.cooldown ?? cfg.defaultCooldown[input.priority],
+      interrupt: input.interrupt ?? false,
+    };
+    if (!this.activeBattleNotice) { this.activateBattleNotice(notice); return; }
+    const np = cfg.priorityValue[notice.priority];
+    const ap = cfg.priorityValue[this.activeBattleNotice.priority];
+    if (notice.interrupt && np > ap) { this.activateBattleNotice(notice); return; }
+    this.battleNoticeQueue.push(notice);
+    this.battleNoticeQueue.sort((a, b) => (cfg.priorityValue[b.priority] - cfg.priorityValue[a.priority]) || (a.createdAt - b.createdAt));
+    this.battleNoticeQueue = this.battleNoticeQueue.slice(0, cfg.maxQueue);
+  }
+
+  private activateBattleNotice(notice: BattleNotice) {
+    this.activeBattleNotice = notice;
+    this.battleNoticeCooldowns.set(notice.dedupeKey, this.elapsed + notice.cooldown);
+  }
+
+  private updateBattleNotice(dt: number) {
+    const modalBlocking = this.chestPendingConfirm || this.phase === "buffChoice" || this.phase === "revive" || this.phase === "paused_for_chest";
+    if (modalBlocking) return;
+    const active = this.activeBattleNotice;
+    if (active) {
+      active.elapsed += dt;
+      if (active.elapsed >= active.duration) this.activeBattleNotice = null;
+    }
+    if (!this.activeBattleNotice && this.battleNoticeQueue.length > 0) {
+      const next = this.battleNoticeQueue.shift();
+      if (next) this.activateBattleNotice(next);
+    }
+    for (const [key, until] of this.battleNoticeCooldowns) {
+      if (until <= this.elapsed) this.battleNoticeCooldowns.delete(key);
+    }
+  }
+
+  private getBattleNoticeColor(style: BattleNoticeStyle): string {
+    switch (style) {
+      case "gold": return "#ffd35a";
+      case "danger": return "#ff6a33";
+      case "purple": return "#b58cff";
+      case "blue": return "#5bc0ff";
+      default: return "#f6e7bd";
+    }
+  }
+
+  private drawBattleNotice(ctx: CanvasRenderingContext2D) {
+    const notice = this.activeBattleNotice;
+    if (!notice) return;
+    const cfg = Game.BATTLE_NOTICE_CONFIG;
+    const fadeIn = clamp(notice.elapsed / cfg.fadeIn, 0, 1);
+    const remain = notice.duration - notice.elapsed;
+    const fadeOut = clamp(remain / cfg.fadeOut, 0, 1);
+    const alpha = Math.min(fadeIn, fadeOut);
+    const y = cfg.centerY;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = notice.priority === "S" ? '900 30px "Microsoft YaHei", sans-serif' : '900 23px "Microsoft YaHei", sans-serif';
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = "rgba(10,7,5,0.90)";
+    ctx.fillStyle = this.getBattleNoticeColor(notice.style);
+    ctx.shadowColor = ctx.fillStyle;
+    ctx.shadowBlur = notice.priority === "S" ? 18 : 10;
+    ctx.strokeText(notice.text, DESIGN_WIDTH / 2, y);
+    ctx.fillText(notice.text, DESIGN_WIDTH / 2, y);
+    if (notice.subtext) {
+      ctx.shadowBlur = 0;
+      ctx.font = '600 13px "Microsoft YaHei", sans-serif';
+      ctx.fillStyle = "rgba(246,231,189,0.82)";
+      ctx.fillText(notice.subtext, DESIGN_WIDTH / 2, y + 30);
+    }
+    ctx.restore();
+  }
+
+  /** P4.2: 局部浮字入口（支持分类/优先级/合并/轨道） */
+  private addCombatFloat(input: { x: number; y: number; text: string; color: string; size: number; duration: number; category: CombatFloatCategory; priority: CombatFloatPriority; mergeKey?: string; targetId?: string }) {
+    // 同类同目标0.25秒内合并
+    if (input.mergeKey && input.targetId) {
+      const existing = this.texts.find(t => t.mergeKey === input.mergeKey && t.targetId === input.targetId && t.life > t.maxLife - 0.25);
+      if (existing) {
+        existing.life = input.duration;
+        existing.text = input.text;
+        existing.x = input.x;
+        existing.y = input.y;
+        return;
+      }
+    }
+    // 同屏上限：优先淘汰C、其次最旧B
+    const worldFloats = this.texts.filter(t => t.priority && t.priority !== "A");
+    if (worldFloats.length >= 6) {
+      const cFloats = worldFloats.filter(t => t.priority === "C");
+      if (cFloats.length > 0) { this.texts = this.texts.filter(t => t.id !== cFloats[0].id); }
+      else { this.texts = this.texts.filter(t => t.id !== worldFloats[0].id); }
+    }
+    // 轨道选择
+    const lane = input.targetId ? (input.targetId.charCodeAt(0) % 3) : Math.floor(Math.random() * 3);
+    const laneOffsets = [-18, 0, 18];
+    this.texts.push({
+      id: this.nextId("float"),
+      x: input.x, y: input.y - laneOffsets[lane],
+      text: input.text, color: input.color, size: input.size,
+      life: input.duration, maxLife: input.duration,
+      category: input.category, priority: input.priority,
+      mergeKey: input.mergeKey, targetId: input.targetId, lane,
+    });
+  }
+
   private clampPointer(pos: Vec2): Vec2 {
     return {
       x: clamp(pos.x, 0, DESIGN_WIDTH),
@@ -6022,8 +6178,8 @@ export class Game {
     this.enemies.push(enemy);
     this.discoveredEnemies.add("elite");
     // 出场播报（0.85秒）
-    this.eliteIntroTimer = 0.85;
-    this.eliteIntroText = conf.introText;
+    // P4.2: 使用统一播报系统
+    this.showBattleNotice({ text: conf.introText, priority: "A", category: "elite", style: "purple", duration: 0.9, dedupeKey: `elite:${ek}`, cooldown: 3, interrupt: false });
     // P3.2：标记已播报出场
     this.eliteSpawnAnnounced = true;
     // 出场特效强化
@@ -6689,43 +6845,6 @@ export class Game {
     grad2.addColorStop(1, `rgba(${color}, 0.7)`);
     ctx.fillStyle = grad2;
     ctx.fillRect(0, DESIGN_HEIGHT - 60, DESIGN_WIDTH, 60);
-    ctx.restore();
-  }
-
-  /** 绘制精英/Boss出场播报 */
-  private drawIntroOverlay(ctx: CanvasRenderingContext2D) {
-    const timer = Math.max(this.eliteIntroTimer, this.bossIntroTimer);
-    if (timer <= 0) return;
-
-    const text = this.eliteIntroTimer > 0 ? this.eliteIntroText : this.bossIntroText;
-    const isBoss = this.bossIntroTimer > 0;
-    const alpha = Math.min(1, timer * 2);
-
-    ctx.save();
-    ctx.globalAlpha = alpha;
-
-    // 半透明暗色遮罩
-    ctx.fillStyle = "rgba(10, 7, 5, 0.35)";
-    ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
-
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-
-    // 弹出版本文字（从下往上）
-    const slideY = 300 - (isBoss ? 20 : 10) * (1 - Math.min(1, timer * 3));
-
-    // 名称大字
-    ctx.shadowColor = isBoss ? "#c0392b" : "#d48c2a";
-    ctx.shadowBlur = isBoss ? 24 : 16;
-    ctx.fillStyle = isBoss ? "#f5b7b1" : "#f5d78a";
-    ctx.font = isBoss ? '800 32px "Microsoft YaHei", sans-serif' : '800 26px "Microsoft YaHei", sans-serif';
-    ctx.fillText(text, DESIGN_WIDTH / 2, slideY);
-
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = "rgba(246, 231, 189, 0.72)";
-    ctx.font = '14px "Microsoft YaHei", sans-serif';
-    ctx.fillText(isBoss ? "Boss 参上！" : "精英 现身", DESIGN_WIDTH / 2, slideY + 36);
-
     ctx.restore();
   }
 
