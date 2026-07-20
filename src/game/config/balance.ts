@@ -206,6 +206,24 @@ export const FLOATING_TEXT_LIMITS = {
   lowPriorityMax: 3
 } as const;
 
+/** P4.3A: 战场三层流动压力配置 */
+export const BATTLEFIELD_FLOW = {
+  enabled: true,
+  layerRatios: {
+    main_waves: { rear: 0.28, mid: 0.42, front: 0.30 },
+    elite: { rear: 0.25, mid: 0.50, front: 0.25 },
+    edict_burst: { rear: 0.20, mid: 0.35, front: 0.45 },
+  },
+  roleSpeed: { vanguard: 1.14, main: 1.00, reserve: 0.86 },
+  minSpeedMultiplier: 0.72,
+  maxSpeedMultiplier: 1.22,
+  speedLerp: 3.0,
+  layerBlendHeight: 42,
+  nearEmptyGrace: 1.20,
+  spacing: { xRadius: 52, minYGap: 28, closeMultiplier: 0.78, recoverSpeed: 4.0 },
+  drawDepth: { rearScale: 0.92, rearAlpha: 0.86, midScale: 1.00, frontScale: 1.06 }
+} as const;
+
 export type SwordStage = {
   id: BladeTier;
   name: string;

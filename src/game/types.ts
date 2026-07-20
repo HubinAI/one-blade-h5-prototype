@@ -11,6 +11,20 @@ export type PickupKind = "drum" | "soul" | "oil";
 export type GamePhase = "playing" | "buffChoice" | "revive" | "won" | "lost" | "chestOpen" | "paused_for_chest";
 export type RatingGrade = "C" | "B" | "A" | "S" | "SS" | "神之一刀";
 
+// ---- P4.3A: 战场三层流动压力 ----
+export type BattlefieldPressureLayer = "rear" | "mid" | "front";
+export type EnemyFlowRole = "vanguard" | "main" | "reserve";
+export type EnemyFlowState = {
+  role: EnemyFlowRole;
+  currentLayer: BattlefieldPressureLayer;
+  targetSpeedMultiplier: number;
+  currentSpeedMultiplier: number;
+  spacingMultiplier: number;
+  spawnGroupId: string;
+  spawnOrder: number;
+  depthSeed: number;
+};
+
 // ---- P4.2: 统一播报调度 ----
 export type BattleNoticePriority = "S" | "A" | "B";
 export type BattleNoticeCategory = "victory" | "defeat" | "boss" | "elite" | "mechanic" | "milestone" | "system";
@@ -215,6 +229,8 @@ export type Enemy = {
   tractorTimer?: number;
   tractorPullCount?: number;
   tractorTargetRefs?: Enemy[];
+  /** P4.3A: 战场流动状态 */
+  flow?: EnemyFlowState;
 };
 
 export type Pickup = {

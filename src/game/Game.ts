@@ -5,7 +5,7 @@ import { ELITE_VISUAL_DEFS } from "../data/elites";
 import { BOSS_VISUAL_DEFS } from "../data/bosses";
 import { FORMATIONS } from "../data/formations";
 import { DESIGN_HEIGHT, DESIGN_WIDTH, HUD_HEIGHT, WALL_TOP_Y, MAX_ENEMIES_ON_SCREEN, MAX_PARTICLES_ON_SCREEN, MAX_CHAIN_DEPTH, MAX_FLOATING_TEXT } from "./config/constants";
-import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID, BATTLEFIELD_ZONES, ENTRY_PHASE_CONFIG, PERFORMANCE_LIMITS, ENEMY_SOFT_SEPARATION, FLOATING_TEXT_LIMITS, ENTRY_PROFILE_COMMON, ENTRY_PROFILE_EDICT_BURST, ENTRY_PROFILE_ELITE, ENTRY_END_JITTER, BATTLE_SAFE_X, SPLITTER_CONFIG, TRACTOR_CONFIG } from "./config/balance";
+import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID, BATTLEFIELD_ZONES, ENTRY_PHASE_CONFIG, PERFORMANCE_LIMITS, ENEMY_SOFT_SEPARATION, FLOATING_TEXT_LIMITS, ENTRY_PROFILE_COMMON, ENTRY_PROFILE_EDICT_BURST, ENTRY_PROFILE_ELITE, ENTRY_END_JITTER, BATTLE_SAFE_X, SPLITTER_CONFIG, TRACTOR_CONFIG, BATTLEFIELD_FLOW } from "./config/balance";
 import { AD_CONFIG } from "./config/ads";
 import { RUN_BUFFS, RUN_BUFF_BY_ID, ROUTE_COLORS, ROUTE_NAMES, ROUTE_BUFFS, getNextBuffInRoute, getBuffRoute } from "./config/buffs";
 import { BOSS_CONFIG, getBossPhase } from "./config/bosses";
@@ -47,6 +47,8 @@ import type {
   BattleNoticeStyle,
   CombatFloatCategory,
   CombatFloatPriority,
+  EnemyFlowRole,
+  BattlefieldPressureLayer,
 } from "./types";
 import { choose, clamp, distance, distanceToSegment, randomRange } from "../utils/math";
 
@@ -163,7 +165,7 @@ export class Game {
     attackEndPos: Vec2;
   }[] = [];
   // 多波多次刷新队列：每个子刷新有时间戳，到时间就spawn
-  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase }[] = [];
+  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number }[] = [];
 
   private pointerDown = false;
   private pointerPos?: Vec2;
@@ -224,6 +226,8 @@ export class Game {
   private _midfieldEvent: { type: string; timer: number; duration: number } | null = null;
   /** P4.1A.11: 可见战场空场计时器 */
   private visibleEmptyTimer = 0;
+  /** P4.3A: 近场连续空场计时 */
+  private nearEmptyTimer = 0;
   /** 当前波次对应的中场事件（仅作用于本波敌人生效） */
   private _currentWaveEvent: 'gather' | 'charge_pause' | null = null;
 
@@ -649,6 +653,10 @@ export class Game {
       this._activeEventTimer = Math.max(0, this._activeEventTimer - scaledDt);
       if (this._activeEventTimer <= 0) this._currentEventType = null;
     }
+    // P4.3A: 战场流动控制
+    if (BATTLEFIELD_FLOW.enabled) {
+      this.updateBattlefieldFlow(scaledDt);
+    }
 
     // 三幕制阶段爆发
     this.checkActMilestones();
@@ -662,7 +670,6 @@ export class Game {
     this.updateSubSpawnQueue();
     this.updateEliteSpawn();
     this.updateSubBlades(scaledDt);
-    this.updateMidfieldHints(scaledDt);
     this.updateBossSpawn();
     this.updateEliteSkills(scaledDt);
     this.updateBossSkills(scaledDt);
@@ -2012,9 +2019,9 @@ export class Game {
       // 正常下落（未蓄力时或冲刺后）
       const isCharging = enemy.chargeTimer !== undefined && enemy.chargeTimer >= 0;
       if (!isCharging) {
-        // 二次打磨：主战区（y>=560）轻微减速，让怪物在可砍区域停留更久
-        const harvestSlow = enemy.y >= BATTLEFIELD_ZONES.harvestStartY && enemy.chargeTimer === undefined ? 0.85 : 1;
-        enemy.y += enemy.speed * entryMultiplier * rushMultiplier * statusSlow * fortressSlow * harvestSlow * dt;
+        // P4.3A: 动态flow倍率替代固定harvestSlow
+        const flowMul = enemy.flow?.currentSpeedMultiplier ?? 1;
+        enemy.y += enemy.speed * entryMultiplier * rushMultiplier * statusSlow * fortressSlow * flowMul * dt;
       } else {
         // 蓄力时略微闪红光
         if (Math.sin(this.elapsed * 20) > 0) {
@@ -2409,6 +2416,79 @@ export class Game {
   /** 蓄势横扫 —— 横向扫过敌群最密集区域 */
   /** P4.1A.8：左副刀横扫（不再生成假subSlash，由attacking阶段直接结算） */
   /** P2.8：hit stop 普通触发（有冷却，force=true 可无视冷却） */
+  /** P4.3A: 战场三层流动压力控制器 */
+  private getPressureLayer(enemyY: number): BattlefieldPressureLayer {
+    const zones = BATTLEFIELD_ZONES;
+    if (enemyY < zones.midfieldStartY) return "rear";
+    if (enemyY < zones.harvestStartY) return "mid";
+    return "front";
+  }
+
+  private getPressureSnapshot() {
+    const rear: Enemy[] = []; const mid: Enemy[] = []; const front: Enemy[] = [];
+    for (const e of this.enemies) {
+      if (!e.alive || e.kind === "boss") continue;
+      if (e.entryPhase?.active && !e.entryPhase.completed) continue;
+      const layer = this.getPressureLayer(e.y);
+      if (layer === "rear") rear.push(e);
+      else if (layer === "mid") mid.push(e);
+      else front.push(e);
+    }
+    return { rear, mid, front, total: rear.length + mid.length + front.length };
+  }
+
+  private getTargetLayerCounts(total: number, phase: BattlePhase): { rear: number; mid: number; front: number } {
+    const ratios = (BATTLEFIELD_FLOW.layerRatios as any)[phase] ?? BATTLEFIELD_FLOW.layerRatios.main_waves;
+    if (total <= 2) return { rear: 0, mid: 0, front: Math.min(1, total) };
+    if (total <= 5) return { rear: 0, mid: Math.min(1, total - 1), front: Math.min(1, total - 1) };
+    return {
+      front: Math.max(1, Math.round(total * ratios.front)),
+      mid: Math.max(1, Math.round(total * ratios.mid)),
+      rear: Math.max(1, total - Math.round(total * ratios.front) - Math.round(total * ratios.mid)),
+    };
+  }
+
+  private updateBattlefieldFlow(dt: number) {
+    const snap = this.getPressureSnapshot();
+    const targets = this.getTargetLayerCounts(snap.total, this.battlePhase);
+    const flow = BATTLEFIELD_FLOW;
+
+    for (const enemy of this.enemies) {
+      if (!enemy.alive || !enemy.flow || enemy.kind === "boss") continue;
+      const f = enemy.flow;
+      const layer = this.getPressureLayer(enemy.y);
+      f.currentLayer = layer;
+
+      // 基础角色速度
+      let targetSpeed: number = flow.roleSpeed[f.role];
+
+      // 近场动态
+      if (layer === "front") {
+        if (snap.front.length <= 1) targetSpeed = clamp(targetSpeed * 1.08, flow.minSpeedMultiplier, flow.maxSpeedMultiplier);
+        else if (snap.front.length > targets.front + 2) targetSpeed = clamp(targetSpeed * 0.88, flow.minSpeedMultiplier, flow.maxSpeedMultiplier);
+        else targetSpeed = clamp(targetSpeed * 0.98, flow.minSpeedMultiplier, flow.maxSpeedMultiplier);
+      }
+
+      // 远场补位
+      if (layer === "rear" && snap.mid.length < targets.mid * 0.5 && f.role !== "reserve") {
+        targetSpeed = clamp(targetSpeed * 1.12, flow.minSpeedMultiplier, flow.maxSpeedMultiplier);
+      }
+
+      // 近场为空一段时间后加速中场
+      if (layer === "mid" && snap.front.length === 0 && this.nearEmptyTimer > flow.nearEmptyGrace) {
+        targetSpeed = clamp(targetSpeed * 1.15, flow.minSpeedMultiplier, flow.maxSpeedMultiplier);
+      }
+
+      f.targetSpeedMultiplier = targetSpeed;
+      // 平滑速度
+      f.currentSpeedMultiplier = f.currentSpeedMultiplier + (f.targetSpeedMultiplier * f.spacingMultiplier - f.currentSpeedMultiplier) * (1 - Math.exp(-flow.speedLerp * dt));
+    }
+
+    // 近场空场计时
+    if (snap.front.length === 0) this.nearEmptyTimer += dt;
+    else this.nearEmptyTimer = 0;
+  }
+
   private triggerHitStop(duration: number, scale = 0.18, force = false) {
     if (!force && this.elapsed - this.lastHitStopAt < 0.25) return;
     this.lastHitStopAt = this.elapsed;
@@ -3086,6 +3166,20 @@ export class Game {
     this.enemies.push(enemy);
     this.discoveredEnemies.add(item.kind as any);
     this.particles.push(glowParticle({ x: item.x, y: spawnY }, "#5c4a3a", 10, 16));
+    // P4.3A: 初始化流动状态（Boss除外）
+    if (item.kind !== "boss" && BATTLEFIELD_FLOW.enabled) {
+      const flowRole = item.flowRole ?? "main";
+      enemy.flow = {
+        role: flowRole,
+        currentLayer: "rear",
+        targetSpeedMultiplier: BATTLEFIELD_FLOW.roleSpeed[flowRole],
+        currentSpeedMultiplier: BATTLEFIELD_FLOW.roleSpeed[flowRole],
+        spacingMultiplier: 1,
+        spawnGroupId: item.spawnGroupId ?? `${this.wavesSpawned}`,
+        spawnOrder: item.spawnOrder ?? 0,
+        depthSeed: Math.random(),
+      };
+    }
   }
 
   /** 判定是否应立刻胜利结算（二次打磨：检查 battlePhase） */
@@ -4184,14 +4278,7 @@ export class Game {
     size: number,
     life: number = BALANCE.feedback.floatingTextLife
   ) {
-    // P4.2A.3: addText仅允许13px以下的小型文字，且不能出现在上半区
-    // P4.2A.3: 禁用旧世界文字清单
-    const BANNED_WORLD_TEXTS = new Set(["军令宝箱","宝箱倒计时","军令已生效","冰霜横扫","冰霜锁定","烈火横扫","烈火追击","雷暴横扫","雷暴锁定","破甲横扫","破甲点杀","+破绽"]);
-    const BANNED_PREFIXES = ["蓄势 ","蓄势连斩 ","破点斩 "];
-    if (BANNED_WORLD_TEXTS.has(text) || BANNED_PREFIXES.some(p => text.startsWith(p))) {
-      console.warn("[P4.2 banned world text]", text);
-      return;
-    }
+    // P4.2A.3: addText仅允许13px以下的小型文字
     const allowedLegacy = size <= 13 && y >= 330;
     if (!allowedLegacy) {
       console.warn("[P4.2 legacy addText blocked]", { text, x, y, size });
@@ -4616,6 +4703,14 @@ export class Game {
       const wobbleX = Math.sin(enemy.wobble * 5) * 1.2;
       ctx.save();
       ctx.translate(enemy.x + wobbleX, enemy.y);
+      // P4.3A: 三层纵深缩放（Boss/精英不受影响）
+      if (BATTLEFIELD_FLOW.enabled && enemy.flow && enemy.kind !== "boss" && enemy.kind !== "elite") {
+        const dd = BATTLEFIELD_FLOW.drawDepth;
+        const layer = this.getPressureLayer(enemy.y);
+        const scale = layer === "rear" ? dd.rearScale : layer === "front" ? dd.frontScale : dd.midScale;
+        ctx.scale(scale, scale);
+        ctx.globalAlpha = layer === "rear" ? dd.rearAlpha : 1;
+      }
       ctx.rotate(Math.sin(enemy.wobble * 2) * 0.04);
       ctx.shadowColor = "rgba(0,0,0,0.45)";
       ctx.shadowBlur = 6;
