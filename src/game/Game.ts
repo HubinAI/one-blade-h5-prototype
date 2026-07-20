@@ -2069,6 +2069,11 @@ export class Game {
         this.activateMidfieldTrait(enemy);
       }
 
+      // P4.4A.1: Boss开场期间不扣防线伤害
+      if (this.bossController?.isIntroActive) {
+        enemy.alive = false;
+        continue;
+      }
       if (enemy.y >= BALANCE.battlefield.bottomDefenseY) {
         // ---- 堅城(fortress)buff：敌军触线后减速1秒，而非立即消失 ----
         if (this.hasBuff("fortress") && enemy.slowedTimer <= 0) {
@@ -6748,23 +6753,30 @@ export class Game {
     }
     const bid = this.level.bossId;
 
-    // P4.4A: thunderGeneral 使用新的BossController系统
+    // P4.4A.1-R2: thunderGeneral 使用新 BossController 系统
     if (bid === "thunderGeneral") {
-      // 清空场上非Boss敌人（突破战只有护卫兵）
-      for (const e of this.enemies) {
-        if (e.kind !== "boss") e.alive = false;
-      }
-      this.enemies = this.enemies.filter(e => e.alive);
-      // 重置指针状态（防止误触残留）
+      // 清空场上所有非Boss敌人
+      for (const e of this.enemies) { e.alive = false; }
+      this.enemies = [];
+      // 重置指针/副刀状态
       this.pointerDown = false;
       this.pendingSlash = null;
+      this.currentSlash = undefined;
+      for (let i = 0; i < 2; i++) {
+        if (this.subBladeAnim[i]) this.subBladeAnim[i].phase = "idle";
+      }
+      // 清空波次/子队列/事件
+      this.wavesSpawned = 0;
+      this.subSpawnQueue = [];
 
+      // 创建 Boss Enemy（仅用于战斗结束检测）
       const enemy = this.createBoss(bid);
-      enemy.y = -80; // 开场从上方进入
+      enemy.y = -200; // 隐藏（BossController 自行绘制）
       this.enemies.push(enemy);
-      const controller = new BossController(bid);
-      controller.attachBoss(enemy);
-      this.bossController = controller;
+
+      // 创建并启动 BossController
+      this.bossController = new BossController(bid);
+      this.bossController.enterLoading();
       this.discoveredEnemies.add("boss");
       this.screenShake = Math.max(this.screenShake, 0.6);
       this.flash = Math.max(this.flash, 0.5);

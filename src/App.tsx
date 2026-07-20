@@ -52,7 +52,7 @@ import type { UpgradeId } from "./game/config/rewards";
 import { REWARD_CONFIG } from "./game/config/rewards";
 import { createFloorLevelConfig, MAIN_STAGE_GATES, getCurrentGate, RANK_ORDER } from "./game/config/synthesis";
 
-type Screen = "menu" | "battle" | "result" | "upgrades" | "forge" | "challenge" | "team" | "ranking" | "idle" | "bag" | "debug" | "breakthroughResult";
+type Screen = "menu" | "battle" | "result" | "upgrades" | "forge" | "challenge" | "team" | "ranking" | "idle" | "bag" | "debug" | "breakthroughResult" | "bossFailScreen";
 
 const SAVE_KEY = "one_blade_v02_progress";
 
@@ -72,7 +72,7 @@ export default function App() {
   const [home, setHome] = useState(getHomeSnapshot);
   const [currentLevel, setCurrentLevel] = useState<LevelConfig>(LEVELS[0]);
   const [lastResult, setLastResult] = useState<BattleResult | null>(null);
-  const [appVersion] = useState("V0720017");
+  const [appVersion] = useState("V0720018");
   const [runIndex, setRunIndex] = useState(0);
   const [currentMode, setCurrentMode] = useState<RunMode>("normal");
   const [reviveOffer, setReviveOffer] = useState<ReviveOffer | null>(null);
@@ -179,6 +179,11 @@ export default function App() {
       }
       refreshHome();
       window.setTimeout(() => {
+        // P4.4A.1: Boss战失败显示临时失败页
+        if (!result.win && currentMode === "challenge") {
+          setScreen("bossFailScreen");
+          return;
+        }
         // 检测是否为突破战胜利
         // P3.3：突破检测使用内存态 currentMode，不再依赖 storage（已被 applyBattleRewards 重置）
         if (result.win && currentMode === "challenge") {
@@ -517,6 +522,21 @@ export default function App() {
             破境
           </button>
           <p className="breakthrough-tip">点击任意处或破境按钮继续</p>
+        </section>
+      )}
+
+      {/* P4.4A.1: Boss失败临时页面 */}
+      {screen === "bossFailScreen" && (
+        <section className="screen" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0d0015', color: '#d7bde2' }}>
+          <h1 style={{ fontSize: 28, color: '#f0e130', marginBottom: 12 }}>挑战失败</h1>
+          <p style={{ fontSize: 14, marginBottom: 6, opacity: 0.7 }}>当前阶段：破甲</p>
+          <p style={{ fontSize: 14, marginBottom: 24, opacity: 0.7 }}>护甲进度：0/3</p>
+          <button className="battle-btn" style={{ width: 180, marginBottom: 8, background: '#6c3483', border: '1px solid #8e44ad' }} onClick={() => { setScreen("battle"); setCurrentMode("challenge"); }}>
+            再次挑战
+          </button>
+          <button className="battle-btn" style={{ width: 180, background: '#2c1038', border: '1px solid #4a2060' }} onClick={() => { setCurrentMode("normal"); setScreen("menu"); }}>
+            返回
+          </button>
         </section>
       )}
 
