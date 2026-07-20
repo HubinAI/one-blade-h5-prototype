@@ -395,10 +395,14 @@ export class Game {
     killedBoss: null
   };
 
-  constructor(level: LevelConfig, onFinish: FinishCallback, onReviveOffer?: ReviveOfferCallback) {
+  constructor(level: LevelConfig, onFinish: FinishCallback, onReviveOffer?: ReviveOfferCallback, runMode?: "normal" | "challenge") {
     this.level = level;
     this.onFinish = onFinish;
     this.onReviveOffer = onReviveOffer;
+    // P4.4A.2: 第一帧确定游戏模式
+    if (runMode === "challenge" && level.bossId === "thunderGeneral") {
+      this.gameMode = "boss";
+    }
     this.maxHp = Math.min(level.hp + this.progressionModifiers.openingShield, BALANCE.player.maxHp + this.progressionModifiers.openingShield);
     this.hp = this.maxHp;
     this.energy = clamp(this.runContext.mode === "freeBurst" ? BALANCE.swordEnergy.max : level.initialEnergy + this.progressionModifiers.initialEnergyBonus, 0, BALANCE.swordEnergy.max);
@@ -888,7 +892,7 @@ export class Game {
     // P4.1A.7：使用已锁定的一刀斩倍率
     const oneBladeBoost = pending ? pending.oneBladeBoost : (this.oneBladeModeTimer > 0 ? 2.0 : 1.0);
     this._slashOneBladeBoost = oneBladeBoost;
-    if (this._slashOneBladeBoost > 1) {
+    if (this._slashOneBladeBoost > 1 && this.gameMode !== "boss") {
       this.oneBladeModeTimer = 0;
       this.addText(DESIGN_WIDTH / 2, 240, "⚡ 一刀斩！", "#ff6a33", 26, 1.5);
     } else {
@@ -1004,8 +1008,11 @@ export class Game {
 
     trail.active = false;
 
-    // P4.4A.2-R1: Boss模式跳过所有普通挥刀反馈（防止"破阵斩"等旧文字出现）
-    if (this.gameMode === "boss") return;
+    // P4.4A.2: Boss模式收刀 → 仅清理，不执行普通反馈
+    if (this.gameMode === "boss") {
+      this.finalizeBossSlashCommon(trail);
+      return;
+    }
     this.resolvePendingSlash(trail);
     const last = trail.points[trail.points.length - 1];
 
@@ -1431,10 +1438,14 @@ export class Game {
   }
 
   private checkSegmentHits(a: Vec2, b: Vec2, trail: SlashTrail) {
-    // P4.4A.2-R2: 高层诊断日志
-    if (this.gameMode === "boss" && trail.tier !== "weak") {
-      const bossEnemy = this.enemies.find(e => e.kind === "boss");
-      console.log(`[CSH] game=boss a=(${a.x.toFixed(0)},${a.y.toFixed(0)})→b=(${b.x.toFixed(0)},${b.y.toFixed(0)}) enemiesTotal=${this.enemies.length} bossFound=${!!bossEnemy} bossPos=(${bossEnemy?.x.toFixed(0)},${bossEnemy?.y.toFixed(0)}) slashId=${trail.id}`);
+    // P4.4A.2: Boss模式先路由到护甲检测（不再走Enemy圆碰撞）
+    if (this.gameMode === "boss" && this.bossController) {
+      const result = this.bossController.resolveArmorSegment(a, b, trail.id);
+      if (result) {
+        // 命中或弹刀
+        this.applyArmorResolveResult(result, a, b);
+      }
+      return;
     }
     const stage = SWORD_STAGE_BY_ID[trail.tier];
     const ratio = Math.max(0.06, this.getSlashRatio(trail));
@@ -1493,47 +1504,6 @@ export class Game {
       if (segmentHitCircle(a, b, enemy, enemy.radius + bladeReach)) {
         trail.hitEnemyIds.add(enemy.id);
         this.handleEnemyHit(enemy, trail);
-        // P4.4A.2: Boss 护甲命中检测
-        if (enemy.kind === "boss" && enemy.bossId === "thunderGeneral" && this.bossController) {
-          console.log(`[BossHit] ✅ 刀路命中 Boss Enemy slash=${trail.id} a=(${a.x.toFixed(0)},${a.y.toFixed(0)}) b=(${b.x.toFixed(0)},${b.y.toFixed(0)}) bossR=${enemy.radius}+reach=${bladeReach.toFixed(0)}`);
-          const armorResult = this.bossController.checkSlashSegmentHit(a, b, trail.id);
-          if (armorResult.hit) {
-            console.log(`[BossArmor] ✅ HIT slash=${trail.id} target=${armorResult.targetId} dist=${armorResult.minDistance.toFixed(1)} r=${armorResult.hitRadius}`);
-            // 正确命中护甲
-            const progress = this.bossController.recordArmorHit(armorResult.targetId);
-            this.flash = Math.max(this.flash, 0.35);
-            this.screenShake = Math.max(this.screenShake, 0.25);
-            // 碎甲粒子
-            const shards = this.bossController.getArmorShardParticles(6, "#f0e130");
-            this.particles.push(...sparkBurst({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, 8, "#f0e130"));
-            // 世界坐标"破甲"文字 — 改用addCombatFloat绕过addText守卫
-            const worldPos = this.bossController.getActiveArmorWorldPos();
-            if (worldPos) {
-              this.addCombatFloat({
-                x: worldPos.x,
-                y: worldPos.y - 20,
-                text: "破甲",
-                color: "#f0e130",
-                size: 18,
-                duration: 0.6,
-                category: "mechanic",
-                priority: "A",
-                mergeKey: `armor-hit-${trail.id}`
-              });
-            }
-            // HUD 进度已在 BossController 中更新
-            if (progress.completed) {
-              // 破甲完成——BossController会自行触发armor_break演出
-              this.screenShake = Math.max(this.screenShake, 0.6);
-              this.flash = Math.max(this.flash, 0.5);
-            }
-          } else if (enemy.y > -50) {
-            // 未命中护甲（但砍中了Boss身体）→ 弹刀
-            this.bossController.recordMissHit();
-            this.particles.push(...sparkBurst({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, 6, "#6c3483"));
-            this.screenShake = Math.max(this.screenShake, 0.15);
-          }
-        }
         // 破绽检测：主刀命中带破绽标记的敌人
         const remaining = this.weakpointMarks.get(enemy.id) ?? 0;
         if (remaining > 0) {
@@ -1572,6 +1542,10 @@ export class Game {
   }
 
   private handleEnemyHit(enemy: Enemy, trail: SlashTrail) {
+    // P4.4A.2: 防御性断言——thunderGeneral 不得进入普通伤害链路
+    if (enemy.bossId === "thunderGeneral") {
+      throw new Error("ThunderGeneral must not enter normal damage pipeline");
+    }
     // P3.10：教学高亮仍显示"蓄裂中"但不再阻断伤害
     if (enemy.kind === "splitter") {
       if ((enemy.mechanicProtectedTimer ?? 0) > 0) {
@@ -2275,8 +2249,8 @@ export class Game {
 
   /** 副刀自动攻击 - 蓄势横扫(槽0) + 破点追击(槽1) */
   private updateSubBlades(dt: number) {
-    // P4.4A: Boss开场期间副刀保持待机
-    if (this.bossController?.isIntroActive) return;
+    // P4.4A.2: Boss模式全程副刀待机
+    if (this.gameMode === "boss") return;
     // P4.1A.12: subSlash子系统已删除
     // 破绽标记衰减
     for (const [enemyId, timeLeft] of this.weakpointMarks) {
@@ -2995,6 +2969,7 @@ export class Game {
     // P3.11：副刀只攻击中下段区域（中场起始~防线上方）
     for (const enemy of this.enemies) {
       if (!enemy.alive) continue;
+      if (enemy.kind === "boss") continue; // P4.4A.2: 副刀不攻击Boss
       if (enemy.y < BATTLEFIELD_ZONES.midfieldStartY) continue;
       const dist = distanceToSegment(enemy, { x: s.x1, y: s.y1 }, { x: s.x2, y: s.y2 });
       if (dist < enemy.radius + 32) hits.push(enemy);
@@ -3624,6 +3599,43 @@ export class Game {
         depthSeed: Math.random(),
       };
     }
+  }
+
+  /** P4.4A.2: Boss模式收刀公共清理 */
+  private finalizeBossSlashCommon(trail: SlashTrail): void {
+    this.warriorSheathTimer = 0.38;
+    this.warriorDrawTimer = 0;
+    this.regenDelayTimer = BALANCE.swordEnergy.regenDelayAfterSlash;
+    AudioService.slashEnd();
+    this.currentSlash = undefined;
+  }
+
+  /** P4.4A.2: Boss模式护甲判定结果应用 */
+  private applyArmorResolveResult(result: import("./systems/BossController").ArmorResolveResult, segA: Vec2, segB: Vec2): void {
+    if (result.kind === "armor_hit") {
+      this.flash = Math.max(this.flash, 0.35);
+      this.screenShake = Math.max(this.screenShake, 0.25);
+      this.particles.push(...sparkBurst({ x: (segA.x + segB.x) / 2, y: (segA.y + segB.y) / 2 }, 8, "#f0e130"));
+      this.addCombatFloat({
+        x: result.hitPos.x,
+        y: result.hitPos.y - 20,
+        text: "破甲",
+        color: "#f0e130",
+        size: 18,
+        duration: 0.6,
+        category: "mechanic",
+        priority: "A",
+        mergeKey: `armor-hit-${result.slashId}`
+      });
+      if (result.completed) {
+        this.screenShake = Math.max(this.screenShake, 0.6);
+        this.flash = Math.max(this.flash, 0.5);
+      }
+    } else if (result.kind === "wrong_hit") {
+      this.particles.push(...sparkBurst({ x: (segA.x + segB.x) / 2, y: (segA.y + segB.y) / 2 }, 6, "#6c3483"));
+      this.screenShake = Math.max(this.screenShake, 0.15);
+    }
+    // miss: 不��打印任何反馈
   }
 
   /** 判定是否应立刻胜利结算（二次打磨：检查 battlePhase） */
@@ -6865,11 +6877,10 @@ export class Game {
     }
     const bid = this.level.bossId;
 
-    // P4.4A.1-R2: thunderGeneral 使用新 BossController 系统
+    // P4.4A.2: thunderGeneral 使用新 BossController 系统（无 Enemy 代理）
     if (bid === "thunderGeneral") {
-      // P4.4A.1-R3: 切换游戏模式
       this.gameMode = "boss";
-      // 清空场上所有非Boss敌人
+      // 清空场上所有敌人
       for (const e of this.enemies) { e.alive = false; }
       this.enemies = [];
       // 重置指针/副刀状态
@@ -6883,12 +6894,7 @@ export class Game {
       this.wavesSpawned = 0;
       this.subSpawnQueue = [];
 
-      // 创建 Boss Enemy（可见位置，供刀路碰撞检测用）
-      const enemy = this.createBoss(bid);
-      enemy.y = 195; // 可见位置（BossController 同名坐标）
-      this.enemies.push(enemy);
-
-      // 创建并启动 BossController
+      // 创建并启动 BossController（不创建 Enemy 代理）
       this.bossController = new BossController(bid);
       this.bossController.enterLoading();
       this.discoveredEnemies.add("boss");

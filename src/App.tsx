@@ -72,7 +72,7 @@ export default function App() {
   const [home, setHome] = useState(getHomeSnapshot);
   const [currentLevel, setCurrentLevel] = useState<LevelConfig>(LEVELS[0]);
   const [lastResult, setLastResult] = useState<BattleResult | null>(null);
-  const [appVersion] = useState("V0720028");
+  const [appVersion] = useState("V0720029");
   const [runIndex, setRunIndex] = useState(0);
   const [currentMode, setCurrentMode] = useState<RunMode>("normal");
   const [reviveOffer, setReviveOffer] = useState<ReviveOffer | null>(null);
@@ -460,6 +460,7 @@ export default function App() {
             reviveSignal={reviveSignal}
             declineReviveSignal={declineReviveSignal}
             paused={paused || Boolean(reviveOffer)}
+            runMode={currentMode === "challenge" ? "challenge" : "normal"}
           />
           {!reviveOffer && !paused && (
             <button

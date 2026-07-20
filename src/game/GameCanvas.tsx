@@ -10,9 +10,12 @@ type GameCanvasProps = {
   reviveSignal?: number;
   declineReviveSignal?: number;
   paused?: boolean;
+  runMode?: "normal" | "challenge";
 };
 
-export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, declineReviveSignal = 0, paused = false }: GameCanvasProps) {
+export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, declineReviveSignal = 0, paused = false, runMode }: GameCanvasProps) {
+  // 从currentLevel获取当前模式
+  const effectiveMode = runMode === "challenge" ? "challenge" : "normal";
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const gameRef = useRef<Game | null>(null);
   const pausedRef = useRef(paused);

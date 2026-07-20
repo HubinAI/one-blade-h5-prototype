@@ -15,6 +15,12 @@ const INTRO_DURATION = 2.85;
 const ARMOR_L = 0, ARMOR_R = 1, ARMOR_C = 2;
 const CONSECUTIVE_ERROR_LIMIT = 2;
 
+/** P4.4A.2: 护甲判定结果（原子化） */
+export type ArmorResolveResult =
+  | { kind: "armor_hit"; targetId: number; hitPos: { x: number; y: number }; progress: number; maxProgress: number; completed: boolean; slashId: string }
+  | { kind: "wrong_hit"; hitPos: { x: number; y: number }; rePrompt: boolean; slashId: string }
+  | { kind: "miss"; slashId: string };
+
 type ArmorTarget = {
   id: number; name: string;
   relX: number; relY: number; hitRadius: number;
@@ -35,15 +41,20 @@ export class BossController {
 
   get debugSnapshot(): Record<string, string | number | boolean> {
     const arm = this.armorTargets[this.activeArmorIndex];
+    const activeCenter = arm ? `(${DESIGN_WIDTH / 2 + arm.relX},${BOSS_CY + arm.relY})` : "无";
     return {
       "Game Mode": "boss", "Boss State": this._phase,
+      "Visual Boss Pos": `(${DESIGN_WIDTH / 2}, ${this.renderY})`,
       "Boss HP": `${this._bossHP}/${this._bossMaxHP}`,
       "Active Armor": arm?.name ?? "无",
+      "Active Armor Center": activeCenter,
       "Armor Progress": `${this.armorProgress}/${this.maxArmor}`,
       "Input Locked": this.isIntroActive,
+      "Player Invuln": this.playerInvulnerable,
       "Consecutive Errors": this.consecutiveErrors,
       "Normal HUD Visible": false,
       "Boss HUD Visible": true,
+      "Sub Blade Locked": true,
     };
   }
 
@@ -166,92 +177,49 @@ export class BossController {
   // ==============================================================
   // 护甲命中判定（Game.ts 调用）
   // ==============================================================
-  /**
-   * 检查挥刀线段是否命中激活护甲
-   * @returns { hit: boolean, targetId: number, bossCenterX: number, bossCenterY: number, targetCenterX: number, targetCenterY: number, minDistance: number }
-   */
-  checkSlashSegmentHit(segA: Vec2, segB: Vec2, slashId: string):
-    { hit: boolean; targetId: number; bossCenterX: number; bossCenterY: number; targetCenterX: number; targetCenterY: number; minDistance: number; hitRadius: number } {
-    
-    if (this._phase !== "armor") {
-      if (this._phase === "intro" || this._phase === "loading") {
-        console.log(`[BossArmor] SKIP: phase=${this._phase} (not ARMOR)`);
-      }
-      return { hit: false, targetId: -1, bossCenterX: 0, bossCenterY: 0, targetCenterX: 0, targetCenterY: 0, minDistance: 999, hitRadius: 0 };
-    }
-
+  /** P4.4A.2: 原子化护甲判定 */
+  resolveArmorSegment(segA: Vec2, segB: Vec2, slashId: string): ArmorResolveResult | null {
+    if (this._phase !== "armor") return null;
+    if (this._phase !== "armor") return null;
     const active = this.armorTargets[this.activeArmorIndex];
-    if (!active || active.broken) {
-      console.log(`[BossArmor] SKIP: active=${!!active} broken=${active?.broken}`);
-      return { hit: false, targetId: -1, bossCenterX: 0, bossCenterY: 0, targetCenterX: 0, targetCenterY: 0, minDistance: 999, hitRadius: 0 };
-    }
-
-    if (active.lastHitSlashId === slashId) {
-      return { hit: false, targetId: -1, bossCenterX: 0, bossCenterY: 0, targetCenterX: 0, targetCenterY: 0, minDistance: 999, hitRadius: 0 };
-    }
+    if (!active || active.broken) return null;
+    if (active.lastHitSlashId === slashId) return null;
 
     const cx = DESIGN_WIDTH / 2;
     const cy = this.renderY;
     const tcX = cx + active.relX;
     const tcY = cy + active.relY;
     const center: Vec2 = { x: tcX, y: tcY };
-
     const minDist = distanceToSegment(center, segA, segB);
-    const hit = minDist <= active.hitRadius;
 
-    console.log(`[BossArmor] seg=(${segA.x.toFixed(0)},${segA.y.toFixed(0)})→(${segB.x.toFixed(0)},${segB.y.toFixed(0)}) target=(${tcX.toFixed(0)},${tcY.toFixed(0)}) r=${active.hitRadius} minDist=${minDist.toFixed(1)} ${hit ? '✅ HIT' : '❌ MISS'}`);
-
-    if (hit) {
+    if (minDist <= active.hitRadius) {
       active.lastHitSlashId = slashId;
-    }
-    return { hit, targetId: active.id, bossCenterX: cx, bossCenterY: cy, targetCenterX: tcX, targetCenterY: tcY, minDistance: minDist, hitRadius: active.hitRadius };
-  }
-
-  /** 记录一次护甲命中（Game.ts 调用） */
-  recordArmorHit(targetId: number): { progress: number; maxProgress: number; completed: boolean } {
-    if (this._phase !== "armor") return { progress: this.armorProgress, maxProgress: this.maxArmor, completed: false };
-    
-    const target = this.armorTargets[targetId];
-    if (!target || target.broken) return { progress: this.armorProgress, maxProgress: this.maxArmor, completed: false };
-
-    target.broken = true;
-    target.active = false;
-    target.animTimer = 0.6; // 破碎动画
-    this.armorProgress++;
-    this.consecutiveErrors = 0;
-
-    if (this.armorProgress >= this.maxArmor) {
-      this._phase = "armor_break";
-      this.armorBreakTimer = 0;
-      this.objectiveAlpha = 0;
-      return { progress: this.armorProgress, maxProgress: this.maxArmor, completed: true };
+      active.broken = true;
+      active.active = false;
+      this.armorProgress++;
+      this.consecutiveErrors = 0;
+      const completed = this.armorProgress >= this.maxArmor;
+      if (completed) {
+        this._phase = "armor_break";
+        this.armorBreakTimer = 0;
+      } else {
+        const nextId = (this.activeArmorIndex + 1) % this.maxArmor;
+        this.activeArmorIndex = nextId;
+        this.armorTargets[nextId].active = true;
+      }
+      return { kind: "armor_hit", targetId: active.id, hitPos: { x: tcX, y: tcY }, progress: this.armorProgress, maxProgress: this.maxArmor, completed, slashId };
     }
 
-    // 激活下一块护甲
-    const nextId = (targetId + 1) % this.maxArmor;
-    this.activeArmorIndex = nextId;
-    this.armorTargets[nextId].active = true;
-    
-    return { progress: this.armorProgress, maxProgress: this.maxArmor, completed: false };
-  }
-
-  /** 记录一次错误命中（Game.ts 调用） */
-  recordMissHit(): { rePrompt: boolean } {
     this.consecutiveErrors++;
-    const rePrompt = this.consecutiveErrors >= CONSECUTIVE_ERROR_LIMIT && 
-                     (Date.now() - this.lastErrorRePromptAt > 3000);
-    if (rePrompt) {
-      this.lastErrorRePromptAt = Date.now();
-      this.objectiveAlpha = 1;
-      // 增强当前护甲描边（由 render 处理）
-    }
-    return { rePrompt };
+    const rePrompt = this.consecutiveErrors >= CONSECUTIVE_ERROR_LIMIT && (Date.now() - this.lastErrorRePromptAt > 3000);
+    if (rePrompt) { this.lastErrorRePromptAt = Date.now(); this.objectiveAlpha = 1; }
+    return { kind: "wrong_hit", hitPos: { x: tcX, y: tcY }, rePrompt, slashId };
   }
 
   // ==============================================================
   // render
   // ==============================================================
-  render(ctx: CanvasRenderingContext2D): void {
+  render(ctx: any): void {
     if (this._phase === "exit") return;
     this.drawVignette(ctx);
     this.drawTopMist(ctx);
@@ -684,7 +652,7 @@ export class BossController {
   }
 
   /** P4.4A.2-R2: 是否显示 Hit Area 边界 */
-  private _debugShowHitArea = true;
+  private _debugShowHitArea = false;
 
   // ================================================================
   // 外部方法
