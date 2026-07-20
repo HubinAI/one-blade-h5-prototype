@@ -203,6 +203,8 @@ export class Game {
   private _currentEventType: string | null = null;
   /** 中场激活事件 */
   private _midfieldEvent: { type: string; timer: number; duration: number } | null = null;
+  /** P4.1A.11: 可见战场空场计时器 */
+  private visibleEmptyTimer = 0;
   /** 当前波次对应的中场事件（仅作用于本波敌人生效） */
   private _currentWaveEvent: 'gather' | 'charge_pause' | null = null;
 
@@ -221,8 +223,7 @@ export class Game {
   private subBlades: Blade[] = [];
   private subBladeTimers: number[] = [];
   private subBladeCooldowns: number[] = [];
-  // 当前副刀挥击轨迹
-  private subSlash: { x1: number; y1: number; x2: number; y2: number; color: string; life: number; maxLife: number; bladeIdx: number; damaged: boolean; slotType: 'momentum_sweep' | 'weakpoint_chase'; lockOnEnemyId?: string; }[] = [];
+  // P4.1A.12: subSlash已删除
   // 破绽标记系统：enemyId → 剩余时间
   private weakpointMarks: Map<string, number> = new Map();
   // ---- 主刀品质 ----
@@ -380,11 +381,15 @@ export class Game {
     const equipped = getEquippedBlades();
     this.mainBladeQuality = equipped.main?.quality ?? null;
     this.subBlades = equipped.subs.filter(b => b && b.quality);
-    this.subBladeTimers = this.subBlades.map((_, i) => {
-      const cd = this.subBladeCooldowns[i];
-      const delay = i === 0 ? 4 : 6;
-      return Math.max(0, cd - delay);
+    // P4.1A.11: 先初始化cooldowns，再初始化timers（避免NaN）
+    this.subBladeCooldowns = this.subBlades.map((b) => {
+      const stats = BLADE_BASE_STATS[b.quality];
+      return stats ? stats.subSlashInterval : 5;
     });
+    const firstReadyDelay = [4, 6];
+    this.subBladeTimers = this.subBlades.map((_, i) =>
+      this.subBladeCooldowns[i] - firstReadyDelay[i]
+    );
     this.subBladeAnim = this.subBlades.map((_, i) => ({
       slot: i,
       phase: "idle" as const,
@@ -398,10 +403,6 @@ export class Game {
       visualScale: 1,
       hitApplied: false
     }));
-    this.subBladeCooldowns = this.subBlades.map((b) => {
-      const stats = BLADE_BASE_STATS[b.quality];
-      return stats ? stats.subSlashInterval : 5;
-    });
     this.weakpointMarks = new Map();
     this._breakReadyNotified = false;
     this._act1Triggered = false;
@@ -667,7 +668,6 @@ export class Game {
     // 远景山间雾气遮罩（敌人从雾后现身）
     this.drawTopMist(ctx);
     this.drawSlash(ctx);
-    this.drawSubSlashes(ctx);
     this.drawParticles(ctx);
     this.drawDefenseAndWarrior(ctx);
     this.drawSubBladeVisual(ctx);
@@ -2117,16 +2117,7 @@ export class Game {
 
   /** 副刀自动攻击 - 蓄势横扫(槽0) + 破点追击(槽1) */
   private updateSubBlades(dt: number) {
-    // 处理挥击弧线生命衰减
-    for (const s of this.subSlash) {
-      s.life -= dt;
-      if (!s.damaged && s.life <= s.maxLife * 0.5) {
-        s.damaged = true;
-        // P4.1A.8: subSlash仍用于轨迹，但伤害已由attacking阶段直接结算，此处不再调用
-      }
-    }
-    this.subSlash = this.subSlash.filter(s => s.life > 0);
-
+    // P4.1A.12: subSlash子系统已删除
     // 破绽标记衰减
     for (const [enemyId, timeLeft] of this.weakpointMarks) {
       const newTime = timeLeft - dt;
@@ -2180,8 +2171,15 @@ export class Game {
             if (bestGroup.length < 3) { anim.phaseTimer += frameDt; break; }
             const avgX = bestGroup.reduce((s, e) => s + e.x, 0) / bestGroup.length;
             const avgY = bestGroup.reduce((s, e) => s + e.y, 0) / bestGroup.length;
+            const centerX = clamp(avgX, 100, DESIGN_WIDTH - 100);
+            const centerY = clampSubBladeAttackY(avgY - 50);
+            // P4.1A.11: 计算横扫入口/出口，让outbound飞向入口，attacking穿越到出口
+            const entryPos = { x: clamp(centerX - 90, 32, DESIGN_WIDTH - 32), y: clampSubBladeAttackY(centerY + 6) };
+            const exitPos = { x: clamp(centerX + 90, 32, DESIGN_WIDTH - 32), y: clampSubBladeAttackY(centerY - 6) };
             anim.startPos = { ...home };
-            anim.endPos = { x: clamp(avgX, 100, DESIGN_WIDTH - 100), y: clampSubBladeAttackY(avgY - 50) };
+            anim.endPos = { ...entryPos };
+            // 将出口存在targetId关联字段（复用）
+            (anim as any)._sweepExit = exitPos;
             anim.phase = "arming";
             anim.phaseTimer = 0;
             anim.phaseDuration = M.arming;
@@ -2238,18 +2236,32 @@ export class Game {
             this.subBladeTimers[i] = 0;
             const stats = BLADE_BASE_STATS[blade.quality];
             if (stats) {
-              if (i === 0) this.triggerMomentumSweep(blade, anim.endPos.x, anim.endPos.y, stats);
-              else this.triggerWeakpointChase(blade, anim.endPos.x, anim.endPos.y, stats);
+              // P4.1A.12: 伤害由attacking阶段直接结算，不再调用空trigger函数
             }
             anim.phase = "attacking";
             anim.phaseTimer = 0;
             anim.phaseDuration = M.attacking;
-            anim.startPos = { ...anim.endPos };
+            // P4.1A.11: 左刀startPos为横扫入口，attacking结束从出口返回
+            if (i === 0) {
+              const sweepExit = (anim as any)._sweepExit ?? { x: anim.endPos.x + 180, y: anim.endPos.y };
+              anim.startPos = { ...sweepExit };
+            } else {
+              anim.startPos = { ...anim.endPos };
+            }
           }
           break;
         }
         case "attacking": {
           anim.phaseTimer += frameDt;
+          // P4.1A.11: attacking阶段飞刀实体沿真实路径运动
+          const aT = clamp(anim.phaseTimer / anim.phaseDuration, 0, 1);
+          if (i === 0) {
+            // 左刀：从outbound终点（entry）到出口（exit）
+            const sweepEntry = anim.endPos;
+            const sweepExit = (anim as any)._sweepExit ?? { x: anim.endPos.x + 180, y: anim.endPos.y };
+            const easeT = aT < 0.5 ? 2 * aT * aT : 1 - Math.pow(-2 * aT + 2, 2) / 2; // easeInOutQuad
+            anim.startPos = { x: sweepEntry.x + (sweepExit.x - sweepEntry.x) * easeT, y: sweepEntry.y + (sweepExit.y - sweepEntry.y) * easeT };
+          }
           // P4.1A.8: attacking阶段在命中时刻直接结算伤害（不再依赖subSlash）
           const hitMoment = M.specialHitHold;
           if (anim.phaseTimer >= hitMoment && !anim.hitApplied) {
@@ -2260,26 +2272,31 @@ export class Game {
                 // 左刀：对endPos附近的敌人结算一次横扫伤害
                 this.applyMomentumSweepDamage({ x1: anim.endPos.x - 90, y1: anim.endPos.y + 6, x2: anim.endPos.x + 90, y2: anim.endPos.y - 6, color: "#5bc0ff", bladeIdx: 0 }, blade, stats);
               } else {
-                // P4.1A.10: 右刀验证目标，死亡时用endPos重锁，不依赖已过滤的enemy对象
-                let finalTarget: Enemy | null = anim.targetId ? (this.enemies.find(e => e.id === anim.targetId && e.alive) ?? null) : null;
-                if (!finalTarget) {
-                  // 死亡：从endPos附近90px搜索
-                  const pos = { x: anim.endPos.x, y: anim.endPos.y + 30 };
-                  const searchArea = this.enemies.filter(e => e.alive && e.y >= BATTLEFIELD_ZONES.midfieldStartY && e.y <= BALANCE.battlefield.bottomDefenseY - 30);
-                  const highValueOrder = ["splitter", "elite", "core", "powder", "shield"];
-                  let newTarget: Enemy | null = null;
-                  for (const kind of highValueOrder) {
-                    newTarget = searchArea.find(e => e.kind === (kind === "splitter" ? "splitter" : kind) && Math.abs(e.x - pos.x) <= 90 && Math.abs(e.y - pos.y) <= 90) ?? null;
-                    if (newTarget) break;
-                  }
-                  if (!newTarget) newTarget = searchArea.sort((a, b) => b.y - a.y).find(e => Math.abs(e.x - pos.x) <= 90 && Math.abs(e.y - pos.y) <= 90) ?? null;
-                  if (newTarget) {
-                    anim.targetId = newTarget.id;
-                    finalTarget = newTarget;
+                // P4.1A.11: 右刀严格单目标伤害
+                let rightTarget: Enemy | null = anim.targetId ? (this.enemies.find(e => e.id === anim.targetId && e.alive) ?? null) : null;
+                if (!rightTarget) {
+                  // 重锁：使用endPos附近90px搜索
+                  const searchPos = { x: anim.endPos.x, y: anim.endPos.y + 30 };
+                  const candidates = this.enemies.filter(e => e.alive && e.y >= BATTLEFIELD_ZONES.midfieldStartY && e.y <= BALANCE.battlefield.bottomDefenseY - 30);
+                  const orders = ["splitter", "elite", "core", "powder", "shield"];
+                  for (const kind of orders) { rightTarget = candidates.find(e => e.kind === kind && Math.abs(e.x - searchPos.x) <= 90 && Math.abs(e.y - searchPos.y) <= 90) ?? null; if (rightTarget) break; }
+                  if (!rightTarget) rightTarget = candidates.sort((a, b) => b.y - a.y).find(e => Math.abs(e.x - searchPos.x) <= 90 && Math.abs(e.y - searchPos.y) <= 90) ?? null;
+                  if (rightTarget) {
+                    anim.targetId = rightTarget.id;
+                    anim.endPos = { x: rightTarget.x, y: rightTarget.y - 30 };
+                  } else {
+                    // 无目标：回收+返还75%CD
+                    this.subBladeTimers[i] = this.subBladeCooldowns[i] * 0.75;
+                    anim.phase = "returning";
+                    anim.phaseTimer = 0;
+                    anim.phaseDuration = M.returning;
+                    anim.startPos = { ...anim.endPos };
+                    anim.endPos = { ...home };
+                    break; // 跳过伤害
                   }
                 }
-                if (finalTarget) {
-                  this.applyWeakpointChaseDamage({ x1: finalTarget.x - 3, y1: finalTarget.y - 20, x2: finalTarget.x + 3, y2: finalTarget.y + 10, color: "#b58cff", bladeIdx: 1 }, blade, stats);
+                if (rightTarget) {
+                  this.applyWeakpointChaseDamage({ x1: rightTarget.x - 3, y1: rightTarget.y - 20, x2: rightTarget.x + 3, y2: rightTarget.y + 10, color: "#b58cff", bladeIdx: 1 }, blade, stats);
                 }
               }
             }
@@ -2324,16 +2341,6 @@ export class Game {
 
   /** 蓄势横扫 —— 横向扫过敌群最密集区域 */
   /** P4.1A.8：左副刀横扫（不再生成假subSlash，由attacking阶段直接结算） */
-  private triggerMomentumSweep(blade: Blade, cx: number, cy: number, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]) {
-    // P4.1A.8: 不再创建任何subSlash/subRune，伤害由attacking阶段调用applyMomentumSweepDamage
-  }
-
-  /** 破点追击 —— 锁定高价值目标 */
-  /** P4.1A.8：右副刀追击（不再生成假subSlash和_pendingWeakpointChaseTarget） */
-  private triggerWeakpointChase(blade: Blade, cx: number, cy: number, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]) {
-    // P4.1A.8: 不再创建subSlash/subRune/_pendingWeakpointChaseTarget，伤害由attacking阶段直接结算
-  }
-
   /** P2.8：hit stop 普通触发（有冷却，force=true 可无视冷却） */
   private triggerHitStop(duration: number, scale = 0.18, force = false) {
     if (!force && this.elapsed - this.lastHitStopAt < 0.25) return;
@@ -2781,14 +2788,23 @@ export class Game {
     if (this.wavesSpawned >= this.level.waves.length) return;
     const wave = this.level.waves[this.wavesSpawned];
 
-    // 双重判断：到达 spawnAt 时间 或 场上活跃敌人少、立即刷下一波
-    const reachedSpawnAt = wave.spawnAt !== undefined && this.elapsed >= wave.spawnAt;
-    const aliveInZone = this.enemies.filter(e => e.alive && e.y >= 60 && e.y < BALANCE.battlefield.bottomDefenseY).length;
-    const enoughGap = this.elapsed - (this._lastWaveElapsed ?? 0) >= 1.6;
-    const fewEnemiesLeft = aliveInZone <= 3 && enoughGap;
+    // P4.1A.11: 第4关空窗守卫（前5关低阈值+完全空场强制补波）
+    const logicalFloor = this.getLogicalFloor();
+    const lowPressureThreshold = logicalFloor <= 5 ? 4 : 3;
+    const refillGap = logicalFloor <= 5 ? 0.8 : 1.2;
+    const visibleCount = this.enemies.filter(e => e.alive && e.y >= 100 && e.y < BALANCE.battlefield.bottomDefenseY).length;
+    const incomingSoon = this.subSpawnQueue.some(item => item.time <= this.elapsed + 0.65);
+    if (visibleCount === 0) this.visibleEmptyTimer += dt;
+    else this.visibleEmptyTimer = 0;
+    const emptyGuard = visibleCount === 0 && !incomingSoon && this.visibleEmptyTimer >= 0.55 && this.phase === "playing" && !this.isEdictModalBlocking() && !this.victoryTransitionActive;
 
-    if (reachedSpawnAt || fewEnemiesLeft) {
+    const reachedSpawnAt = wave.spawnAt !== undefined && this.elapsed >= wave.spawnAt;
+    const enoughGap = this.elapsed - (this._lastWaveElapsed ?? 0) >= refillGap;
+    const lowPressure = visibleCount <= lowPressureThreshold && enoughGap;
+
+    if (reachedSpawnAt || lowPressure || emptyGuard) {
       this.spawnCurrentWave(wave);
+      this.visibleEmptyTimer = 0;
     }
   }
 
@@ -4425,9 +4441,10 @@ export class Game {
   }
 
   private drawEnemies(ctx: CanvasRenderingContext2D) {
-    // 二次打磨：按 y 排序绘制（靠下的在上层）
+    // P4.1A.12: 第一遍 — 只画怪物主体（不含血条/名牌）
     const sorted = [...this.enemies].sort((a, b) => a.y - b.y);
     for (const enemy of sorted) {
+      if (!enemy.alive) continue;
       const def = ENEMY_DEFS[enemy.kind];
       const wobbleX = Math.sin(enemy.wobble * 5) * 1.2;
       ctx.save();
@@ -4794,10 +4811,7 @@ export class Game {
         }
       }
 
-      // P3.9：精英名牌（必须 eliteKind 有效，禁止空血条残影）
-      if (enemy.kind === "elite" && enemy.eliteKind) {
-        this.drawEliteNameplate(ctx, enemy);
-      }
+      // P4.1A.12: 血条移出局部坐标，由drawEnemyHealthOverlays统一绘制
 
       // P3.13：分裂兵只保留丝带/裂纹预警绘制
       if (enemy.kind === "splitter") {
@@ -4847,14 +4861,8 @@ export class Game {
 
         // 血条（简短Boss血条）
         const hpRatio = enemy.hp / enemy.maxHp;
-        ctx.fillStyle = "rgba(10, 7, 5, 0.7)";
-        ctx.fillRect(-enemy.radius - 4, -enemy.radius - 8, (enemy.radius + 4) * 2, 5);
-        ctx.fillStyle = hpRatio > 0.5 ? "#2ecc71" : hpRatio > 0.25 ? "#f39c12" : "#e74c3c";
-        ctx.fillRect(-enemy.radius - 4, -enemy.radius - 8, (enemy.radius + 4) * 2 * hpRatio, 5);
-
-        ctx.strokeStyle = "#fff3c0";
-        ctx.lineWidth = 1;
-        ctx.strokeRect(-enemy.radius - 4, -enemy.radius - 8, (enemy.radius + 4) * 2, 5);
+        // P4.1A.12: Boss血条移出局部坐标，由drawEnemyHealthOverlays统一绘制
+        void hpRatio;
 
         // 阶段标识
         ctx.fillStyle = phaseColor;
@@ -4875,6 +4883,44 @@ export class Game {
 
       ctx.restore();
     }
+    // P4.1A.12: 第二遍 — 屏幕空间血条/名牌（不继承怪物旋转/缩放）
+    this.drawEnemyHealthOverlays(ctx, sorted.filter(e => e.alive));
+  }
+
+  /** P4.1A.12: 屏幕空间血条/名牌层（不继承怪物局部坐标） */
+  private drawEnemyHealthOverlays(ctx: CanvasRenderingContext2D, enemies: any[]) {
+    if (enemies.length === 0) return;
+    ctx.save();
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    for (const enemy of enemies) {
+      if (!enemy.alive) continue;
+      // 精英分段血条 + 名牌
+      if (enemy.kind === "elite" && enemy.eliteKind) {
+        this.drawEliteNameplate(ctx, enemy);
+      }
+      // Boss简短血条（屏幕空间）
+      if (enemy.kind === "boss" && enemy.bossId) {
+        const hpRatio = enemy.hp / enemy.maxHp;
+        const barW = 96;
+        const barH = 7;
+        const cx = clamp(enemy.x, barW / 2 + 8, DESIGN_WIDTH - barW / 2 - 8);
+        const topY = clamp(enemy.y - enemy.radius - 32, 90, BALANCE.battlefield.bottomDefenseY - barH - 12);
+        ctx.save();
+        ctx.fillStyle = "rgba(10, 7, 5, 0.7)";
+        ctx.fillRect(cx - barW / 2, topY, barW, barH);
+        ctx.fillStyle = hpRatio > 0.5 ? "#2ecc71" : hpRatio > 0.25 ? "#f39c12" : "#e74c3c";
+        ctx.fillRect(cx - barW / 2, topY, barW * hpRatio, barH);
+        ctx.strokeStyle = "#fff3c0";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(cx - barW / 2, topY, barW, barH);
+        ctx.restore();
+      }
+    }
+    ctx.restore();
   }
 
   private drawPickups(ctx: CanvasRenderingContext2D) {
@@ -4965,84 +5011,8 @@ export class Game {
     ctx.restore();
   }
 
-  /** 副刀弧形挥击 - 从尾到头延展的弧线（0.40s，更粗更亮） */
-  private drawSubSlashes(ctx: CanvasRenderingContext2D) {
-    if (this.subSlash.length === 0) return;
-    ctx.save();
-    for (const s of this.subSlash) {
-      const t = 1 - s.life / s.maxLife; // 0→1 随时间推进
-      // 弧形控制点（中间略偏移，形成弧线）
-      const midX = (s.x1 + s.x2) / 2 + (s.bladeIdx === 0 ? -22 : 22);
-      const midY = (s.y1 + s.y2) / 2 - 30;
-      // 已划到的部分：t 比例的尾→头
-      const curX = s.x1 + (s.x2 - s.x1) * t;
-      const curY = s.y1 + (s.y2 - s.y1) * t;
-      // 外发光层（最宽、最低不透明）
-      ctx.strokeStyle = s.color + "88";
-      ctx.shadowColor = s.color;
-      ctx.shadowBlur = 26;
-      ctx.lineWidth = 18;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(s.x1, s.y1);
-      ctx.quadraticCurveTo(midX, midY, curX, curY);
-      ctx.stroke();
-      // 主刀光（亮）
-      ctx.strokeStyle = s.color + "ee";
-      ctx.shadowBlur = 12;
-      ctx.lineWidth = 9;
-      ctx.beginPath();
-      ctx.moveTo(s.x1, s.y1);
-      ctx.quadraticCurveTo(midX, midY, curX, curY);
-      ctx.stroke();
-      // 内白线（最亮核心）
-      ctx.strokeStyle = "#ffffffee";
-      ctx.shadowBlur = 0;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(s.x1, s.y1);
-      ctx.quadraticCurveTo(midX, midY, curX, curY);
-      ctx.stroke();
-      // 刀头圆点
-      if (t > 0.05) {
-        ctx.fillStyle = "#ffffff";
-        ctx.shadowColor = s.color;
-        ctx.shadowBlur = 16;
-        ctx.beginPath();
-        ctx.arc(curX, curY, 5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      // 破点追击：被锁定敌人头顶准星
-      if (s.slotType === 'weakpoint_chase' && s.lockOnEnemyId) {
-        const target = this.enemies.find(e => e.id === s.lockOnEnemyId);
-        if (target && target.alive) {
-          const pulse = 0.5 + Math.sin(this.elapsed * 16) * 0.5;
-          ctx.save();
-          ctx.shadowColor = s.color;
-          ctx.shadowBlur = 12 + pulse * 8;
-          ctx.strokeStyle = `rgba(255, 106, 51, ${0.7 + pulse * 0.3})`;
-          ctx.lineWidth = 2.5;
-          const r = target.radius + 10;
-          // 4个角的L型
-          const L = 8;
-          const corners = [[target.x - r, target.y - r], [target.x + r, target.y - r], [target.x - r, target.y + r], [target.x + r, target.y + r]];
-          for (const [cx, cy] of corners) {
-            const dx = Math.sign(cx - target.x);
-            const dy = Math.sign(cy - target.y);
-            ctx.beginPath();
-            ctx.moveTo(cx - dx * L, cy);
-            ctx.lineTo(cx, cy);
-            ctx.lineTo(cx, cy - dy * L);
-            ctx.stroke();
-          }
-          ctx.restore();
-        }
-      }
-    }
-    ctx.restore();
-  }
-
-  /** P4.1：副刀驻留视觉（浮空飞刀 + 连接线 + Ready光效） */
+  /** @deprecated P4.1A.12: subSlash系统已删除 */
+  private drawSubSlashes(ctx: CanvasRenderingContext2D) { }
   private drawSubBladeVisual(ctx: CanvasRenderingContext2D) {
     const warriorY = BALANCE.battlefield.warriorY;
     const heroX = DESIGN_WIDTH / 2;
