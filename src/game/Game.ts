@@ -2430,6 +2430,7 @@ export class Game {
     const rear: Enemy[] = []; const mid: Enemy[] = []; const front: Enemy[] = [];
     for (const e of this.enemies) {
       if (!e.alive || e.kind === "boss") continue;
+      // P4.3A.2: entryPhase敌人计入入场压力而非完全排除
       if (e.entryPhase?.active && !e.entryPhase.completed) continue;
       const layer = this.getPressureLayer(e.y);
       if (layer === "rear") rear.push(e);
@@ -2437,6 +2438,65 @@ export class Game {
       else front.push(e);
     }
     return { rear, mid, front, total: rear.length + mid.length + front.length };
+  }
+
+  /** P4.3A.2: 投影压力（actual + entry权重 + incoming权重） */
+  private getProjectedPressure(lookAhead = 1.5) {
+    // actual (完成入场)
+    const actual = { rear: 0, mid: 0, front: 0 };
+    for (const e of this.enemies) {
+      if (!e.alive || e.kind === "boss") continue;
+      if (e.entryPhase && e.entryPhase.completed) {
+        const l = this.getPressureLayer(e.y);
+        if (l === "rear") actual.rear++; else if (l === "mid") actual.mid++; else actual.front++;
+      }
+    }
+    // entry (正在入场，按剩余时间给权重)
+    const entry = { rear: 0, mid: 0, front: 0 };
+    for (const e of this.enemies) {
+      if (!e.alive || !e.entryPhase || e.entryPhase.completed) continue;
+      const remain = Math.max(0, e.entryPhase.maxDuration - e.entryPhase.elapsed);
+      const weight = remain <= 0.6 ? 1.0 : remain <= 1.2 ? 0.7 : 0.4;
+      // 正在入场的敌人预计将补到mid（远场）
+      entry.mid += weight * 0.7;
+      entry.rear += weight * 0.3;
+    }
+    // incoming (未来队列)
+    const incoming = { vanguard: 0, main: 0, reserve: 0 };
+    for (const q of this.subSpawnQueue) {
+      if (q.time - this.elapsed > lookAhead) continue;
+      const role = q.flowRole ?? "main";
+      if (role === "vanguard") incoming.vanguard++;
+      else if (role === "main") incoming.main++;
+      else incoming.reserve++;
+    }
+    // 映射
+    const incomingRear = incoming.vanguard * 0 + incoming.main * 0.4 + incoming.reserve * 1;
+    const incomingMid = incoming.vanguard * 0.6 + incoming.main * 0.6 + incoming.reserve * 0;
+    const incomingFront = incoming.vanguard * 0.4 + incoming.main * 0 + incoming.reserve * 0;
+    // 投影 = actual + entry + incoming
+    const projected = {
+      rear: actual.rear + entry.rear + incomingRear,
+      mid: actual.mid + entry.mid + incomingMid,
+      front: actual.front + entry.front + incomingFront,
+    };
+    return { actual, entry: { rear: entry.rear, mid: entry.mid, front: entry.front }, incoming, projected, totalActual: actual.rear + actual.mid + actual.front, totalProjected: projected.rear + projected.mid + projected.front };
+  }
+
+  /** P4.3A.2: 是否允许提前推进下一波 */
+  private shouldAdvanceNextWave(pressure: ReturnType<typeof this.getProjectedPressure>): boolean {
+    const activeThreat = pressure.projected.mid + pressure.projected.front;
+    const tooLow = activeThreat <= 3;
+    const noNearThreat = pressure.projected.front < 0.8;
+    const lockExpired = this.elapsed >= this.waveAdvanceLockedUntil;
+    const enoughGap = this.elapsed - this._lastWaveElapsed >= 0.60;
+    if (!tooLow || !noNearThreat || !lockExpired || !enoughGap) return false;
+    if (this.chestPendingConfirm || this.phase !== "playing") return false;
+    if (this.wavesSpawned >= this.level.waves.length) return false;
+    // 检查性能
+    const aliveCount = this.enemies.filter(e => e.alive).length;
+    if (aliveCount + this.subSpawnQueue.length > 40) return false;
+    return true;
   }
 
   private getTargetLayerCounts(total: number, phase: BattlePhase): { rear: number; mid: number; front: number } {
@@ -2467,6 +2527,31 @@ export class Game {
       spawnOrder: order,
       depthSeed: Math.random(),
     };
+  }
+
+  /** P4.3A.2: 怪物类型→Flow角色偏好 */
+  private getPreferredFlowRoles(kind: EnemyKind): EnemyFlowRole[] {
+    switch (kind) {
+      case "infantry": return ["vanguard", "main", "reserve"];
+      case "powder": return ["vanguard", "main"];
+      case "shield": return ["main", "reserve"];
+      case "splitter": return ["main", "reserve"];
+      case "core": return ["reserve", "main"];
+      case "tractor": return ["reserve"];
+      default: return ["main"];
+    }
+  }
+
+  /** P4.3A.2: 统一敌人加入（自动挂接flow） */
+  private pushEnemy(enemy: Enemy, role?: EnemyFlowRole, groupId?: string, order?: number) {
+    if (enemy.kind !== "boss" && !enemy.flow) {
+      const prefRoles = this.getPreferredFlowRoles(enemy.kind);
+      const preferredRole = role ?? (prefRoles.length > 0 ? prefRoles[0] : "main");
+      // 急冲兵强制vanguard
+      const finalRole = enemy.rushTimer !== undefined ? "vanguard" : preferredRole;
+      this.attachEnemyFlow(enemy, finalRole, groupId ?? "direct", order ?? 0);
+    }
+    this.enemies.push(enemy);
   }
 
   private updateBattlefieldFlow(dt: number) {
@@ -2547,7 +2632,8 @@ export class Game {
       const rear = alive[i];
       if (!rear.flow) continue;
       // 特殊状态排除
-      if (rear.rushTimer !== undefined || rear.tractorState === "pulling" || (rear.kind === "splitter" && rear.splitState === "warning")) {
+      const isActivelyRushing = rear.rushTimer !== undefined && rear.rushTimer > 0;
+      if (isActivelyRushing || rear.tractorState === "pulling" || (rear.kind === "splitter" && rear.splitState === "warning")) {
         rear.flow.spacingMultiplier = 1;
         continue;
       }
@@ -3138,22 +3224,53 @@ export class Game {
         flatEnemies.push({ kind: spawn.kind as string, x: baseX + (Math.random() - 0.5) * 40, yOffset: spawn.yOffset ?? 0 });
       }
     }
-    // 按角色比例分配
+    // P4.3A.2: 按怪物职责偏好分配角色（禁止随机分配）
     const isEdictBurst = this.battlePhase === "edict_burst";
-    const rolePct = isEdictBurst ? { vanguard: 0.45, main: 0.35, reserve: 0.20 } : { vanguard: 0.25, main: 0.50, reserve: 0.25 };
     const total = flatEnemies.length;
-    const vCount = Math.max(1, Math.round(total * rolePct.vanguard));
-    const mCount = Math.max(1, Math.round(total * rolePct.main));
-    const rCount = total - vCount - mCount;
-    const roles: EnemyFlowRole[] = [];
-    for (let i = 0; i < total; i++) {
-      if (i < vCount) roles.push("vanguard");
-      else if (i < vCount + mCount) roles.push("main");
-      else roles.push("reserve");
+    // 配额计算
+    let qV = 0, qM = 0, qR = 0;
+    if (total === 1) { qV = 0; qM = 1; qR = 0; }
+    else if (total === 2) { qV = 1; qM = 1; qR = 0; }
+    else if (total === 3) { qV = 1; qM = 1; qR = 1; }
+    else if (total === 4) { qV = 1; qM = 2; qR = 1; }
+    else if (total === 5) { qV = 1; qM = 3; qR = 1; }
+    else {
+      const pctV = isEdictBurst ? 0.45 : 0.25;
+      const pctM = isEdictBurst ? 0.35 : 0.50;
+      qV = Math.round(total * pctV);
+      qM = Math.round(total * pctM);
+      qR = total - qV - qM;
+      if (qR < 0) { qM += qR; qR = 0; }
     }
-    // 在角色内随机打乱（避免同类型怪全部集中）
-    for (let i = roles.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1)); [roles[i], roles[j]] = [roles[j], roles[i]];
+    let quota = { vanguard: qV, main: qM, reserve: qR };
+    const roles: (EnemyFlowRole | null)[] = new Array(total).fill(null);
+    // 按偏好分配（限制最强者优先）
+    const sortedByPreference = flatEnemies.map((e, i) => {
+      const kind = e.kind as EnemyKind;
+      return { index: i, kind, prefs: this.getPreferredFlowRoles(kind) };
+    }).sort((a, b) => a.prefs.length - b.prefs.length);
+    for (const item of sortedByPreference) {
+      if (quota.vanguard + quota.main + quota.reserve === 0) break;
+      const assigned = item.prefs.find(r => (quota as any)[r] > 0) ?? ((["vanguard","main","reserve"] as EnemyFlowRole[]).find(r => (quota as any)[r] > 0) ?? "main");
+      roles[item.index] = assigned;
+      (quota as any)[assigned] -= 1;
+    }
+    // 填充剩余
+    for (let i = 0; i < total; i++) {
+      if (roles[i] !== null) continue;
+      const fallback = ["vanguard","main","reserve"].find(r => (quota as any)[r] > 0);
+      roles[i] = (fallback ?? "main") as EnemyFlowRole;
+      if (fallback) { (quota as any)[fallback] -= 1; }
+    }
+    // 分布保护：第一只不为reserve，splitter不得为第一vanguard
+    const firstRole = roles[0];
+    if (firstRole === "reserve") { roles[0] = "main"; }
+    for (let i = 0; i < total; i++) {
+      if (flatEnemies[i].kind === "splitter" && roles[i] === "vanguard") {
+        const swapIdx = roles.findIndex((r, j) => r !== "vanguard" && flatEnemies[j].kind !== "splitter");
+        if (swapIdx >= 0) { [roles[i], roles[swapIdx]] = [roles[swapIdx], roles[i]]; }
+        break;
+      }
     }
     // 分别计算各梯队的时间
     const vangTime = isEdictBurst ? 0.0 : 0.0;
