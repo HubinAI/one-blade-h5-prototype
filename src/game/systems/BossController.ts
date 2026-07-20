@@ -8,6 +8,7 @@ import { BOSS_CONFIG } from "../config/bosses";
 import { BOSS_VISUAL_DEFS } from "../../data/bosses";
 import { DESIGN_WIDTH, DESIGN_HEIGHT } from "../config/constants";
 import { segmentHitCircle } from "./collisionSystem";
+import { distanceToSegment } from "../../utils/math";
 
 const BOSS_CY = 195;
 const INTRO_DURATION = 2.85;
@@ -167,28 +168,43 @@ export class BossController {
   // ==============================================================
   /**
    * 检查挥刀线段是否命中激活护甲
-   * @returns { hit: boolean, targetId: number, bossCenterX: number, bossCenterY: number }
+   * @returns { hit: boolean, targetId: number, bossCenterX: number, bossCenterY: number, targetCenterX: number, targetCenterY: number, minDistance: number }
    */
   checkSlashSegmentHit(segA: Vec2, segB: Vec2, slashId: string):
-    { hit: boolean; targetId: number; bossCenterX: number; bossCenterY: number } {
+    { hit: boolean; targetId: number; bossCenterX: number; bossCenterY: number; targetCenterX: number; targetCenterY: number; minDistance: number; hitRadius: number } {
     
-    if (this._phase !== "armor") return { hit: false, targetId: -1, bossCenterX: 0, bossCenterY: 0 };
+    if (this._phase !== "armor") {
+      if (this._phase === "intro" || this._phase === "loading") {
+        console.log(`[BossArmor] SKIP: phase=${this._phase} (not ARMOR)`);
+      }
+      return { hit: false, targetId: -1, bossCenterX: 0, bossCenterY: 0, targetCenterX: 0, targetCenterY: 0, minDistance: 999, hitRadius: 0 };
+    }
 
     const active = this.armorTargets[this.activeArmorIndex];
-    if (!active || active.broken) return { hit: false, targetId: -1, bossCenterX: 0, bossCenterY: 0 };
+    if (!active || active.broken) {
+      console.log(`[BossArmor] SKIP: active=${!!active} broken=${active?.broken}`);
+      return { hit: false, targetId: -1, bossCenterX: 0, bossCenterY: 0, targetCenterX: 0, targetCenterY: 0, minDistance: 999, hitRadius: 0 };
+    }
 
-    // 同一挥刀不能重复命中同一块护甲
-    if (active.lastHitSlashId === slashId) return { hit: false, targetId: -1, bossCenterX: 0, bossCenterY: 0 };
+    if (active.lastHitSlashId === slashId) {
+      return { hit: false, targetId: -1, bossCenterX: 0, bossCenterY: 0, targetCenterX: 0, targetCenterY: 0, minDistance: 999, hitRadius: 0 };
+    }
 
     const cx = DESIGN_WIDTH / 2;
     const cy = this.renderY;
-    const center: Vec2 = { x: cx + active.relX, y: cy + active.relY };
+    const tcX = cx + active.relX;
+    const tcY = cy + active.relY;
+    const center: Vec2 = { x: tcX, y: tcY };
 
-    const hit = segmentHitCircle(segA, segB, center, active.hitRadius);
+    const minDist = distanceToSegment(center, segA, segB);
+    const hit = minDist <= active.hitRadius;
+
+    console.log(`[BossArmor] seg=(${segA.x.toFixed(0)},${segA.y.toFixed(0)})→(${segB.x.toFixed(0)},${segB.y.toFixed(0)}) target=(${tcX.toFixed(0)},${tcY.toFixed(0)}) r=${active.hitRadius} minDist=${minDist.toFixed(1)} ${hit ? '✅ HIT' : '❌ MISS'}`);
+
     if (hit) {
       active.lastHitSlashId = slashId;
     }
-    return { hit, targetId: active.id, bossCenterX: cx, bossCenterY: cy };
+    return { hit, targetId: active.id, bossCenterX: cx, bossCenterY: cy, targetCenterX: tcX, targetCenterY: tcY, minDistance: minDist, hitRadius: active.hitRadius };
   }
 
   /** 记录一次护甲命中（Game.ts 调用） */

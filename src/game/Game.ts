@@ -1475,6 +1475,7 @@ export class Game {
         if (enemy.kind === "boss" && enemy.bossId === "thunderGeneral" && this.bossController) {
           const armorResult = this.bossController.checkSlashSegmentHit(a, b, trail.id);
           if (armorResult.hit) {
+            console.log(`[BossArmor] ✅ HIT slash=${trail.id} target=${armorResult.targetId} dist=${armorResult.minDistance.toFixed(1)} r=${armorResult.hitRadius}`);
             // 正确命中护甲
             const progress = this.bossController.recordArmorHit(armorResult.targetId);
             this.flash = Math.max(this.flash, 0.35);
