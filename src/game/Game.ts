@@ -827,14 +827,19 @@ export class Game {
       const shake = this.screenShake * 5;
       ctx.translate(randomRange(-shake, shake), randomRange(-shake, shake));
     }
+    // 1. 背景 + Boss世界层（在刀光下方）
     this.drawBackground(ctx);
     this.drawTopMist(ctx);
+    this.bossController?.renderWorld(ctx);
+    // 2. 战斗表现层（Boss身体上方）
     this.drawSlash(ctx);
     this.drawParticles(ctx);
     this.drawDefenseAndWarrior(ctx);
     this.drawFloatingTexts(ctx);
     this.drawEdgeFlash(ctx);
-    if (this.bossController) this.bossController.render(ctx);
+    // 3. Boss覆盖层（HUD/文字在最上方）
+    this.bossController?.renderOverlay(ctx);
+    // 4. Debug/Flash
     if (this.debugEnabled) this.drawDebugPanel(ctx);
     if (this.flash > 0) {
       ctx.fillStyle = `rgba(255, 232, 146, ${this.flash * 0.18})`;
@@ -1007,13 +1012,15 @@ export class Game {
     this.lastSlashAngle = this.angleFromWarrior(pos);
     logEvent("slash_start", { levelId: this.level.id, energy: lockedEnergy, stage: stage.name });
     AudioService.slashDraw(tier);
-    // P4.2: 段位提示每局每段位最多一次（强斩/破阵斩），弱斩/普通不显示
-    if ((tier === "strong" || tier === "burst") && !this.shownBladeTierPrompts.has(tier)) {
-      this.shownBladeTierPrompts.add(tier);
-      this.addCombatFloat({ x: pos.x, y: pos.y - 18, text: stage.prompt, color: stage.color, size: 14, duration: 0.5, category: "blade-tier", priority: "B", mergeKey: `blade-tier:${tier}` });
-    }
-    if (lockedEnergy < 25) {
-      this.showHint("low-energy-slash", "刀势越满，刀芒越强", DESIGN_WIDTH / 2, 118, 2);
+    // P4.4A.2: Boss模式不显示强斩/破阵斩/低刀势提示
+    if (this.gameMode !== "boss") {
+      if ((tier === "strong" || tier === "burst") && !this.shownBladeTierPrompts.has(tier)) {
+        this.shownBladeTierPrompts.add(tier);
+        this.addCombatFloat({ x: pos.x, y: pos.y - 18, text: stage.prompt, color: stage.color, size: 14, duration: 0.5, category: "blade-tier", priority: "B", mergeKey: `blade-tier:${tier}` });
+      }
+      if (lockedEnergy < 25) {
+        this.showHint("low-energy-slash", "刀势越满，刀芒越强", DESIGN_WIDTH / 2, 118, 2);
+      }
     }
     this.particles.push(...sparkBurst(pos, tier === "burst" ? 15 : 8, stage.color));
   }

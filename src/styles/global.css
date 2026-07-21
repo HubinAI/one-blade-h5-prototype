@@ -6488,6 +6488,149 @@ h1 {
   box-shadow: 0 0 10px rgba(74, 124, 78, 0.4);
 }
 
+/* ================================================================
+   P4.4A.2: 玄甲雷将首页预览
+   ================================================================ */
+.thunder-general-preview {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(142, 68, 173, .22), transparent 30%),
+    linear-gradient(180deg, rgba(16, 7, 24, .72), rgba(31, 13, 28, .88));
+}
+
+.tg-preview-boss {
+  position: absolute;
+  left: 50%;
+  top: 48%;
+  width: 150px;
+  height: 150px;
+  transform: translate(-50%, -50%);
+  filter: drop-shadow(0 0 18px rgba(142, 68, 173, .45));
+  animation: tgPreviewBreath 2.4s ease-in-out infinite;
+}
+
+@keyframes tgPreviewBreath {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-50%, -50%) scale(1.03); }
+}
+
+.tg-preview-plume {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-bottom: 24px solid rgba(108, 52, 131, .7);
+}
+
+.tg-preview-helmet {
+  position: absolute;
+  left: 50%;
+  top: 16px;
+  width: 32px;
+  height: 16px;
+  transform: translateX(-50%);
+  background: rgba(13, 5, 21, .9);
+  border-radius: 4px 4px 0 0;
+  border-bottom: 2px solid rgba(108, 52, 131, .5);
+}
+
+.tg-preview-shoulder {
+  position: absolute;
+  top: 38px;
+  width: 40px;
+  height: 18px;
+  border-radius: 8px;
+  background: rgba(61, 26, 80, .8);
+  border: 1.5px solid rgba(108, 52, 131, .4);
+}
+.tg-preview-shoulder.left { left: 4px; }
+.tg-preview-shoulder.right { right: 4px; }
+
+.tg-preview-body {
+  position: absolute;
+  left: 50%;
+  top: 36px;
+  width: 48px;
+  height: 48px;
+  transform: translateX(-50%);
+  background: rgba(13, 5, 21, .7);
+  border-radius: 6px;
+}
+
+.tg-preview-core {
+  position: absolute;
+  left: 50%;
+  top: 50px;
+  width: 14px;
+  height: 14px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  background: #6c3483;
+  border: 2px solid #f0e130;
+  box-shadow: 0 0 12px rgba(240, 225, 48, .7);
+  animation: tgCorePulse 1.2s ease-in-out infinite;
+}
+
+@keyframes tgCorePulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(240, 225, 48, .5); }
+  50% { box-shadow: 0 0 18px rgba(240, 225, 48, .9); }
+}
+
+.tg-preview-skirt {
+  position: absolute;
+  left: 50%;
+  top: 74px;
+  width: 54px;
+  height: 24px;
+  transform: translateX(-50%);
+  background: rgba(13, 5, 21, .6);
+  clip-path: polygon(10% 0%, 90% 0%, 78% 100%, 22% 100%);
+}
+
+.tg-preview-label {
+  position: absolute;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%);
+  color: rgba(215, 189, 226, .7);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 4px;
+}
+
+.tg-preview-name {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  color: #f0e130;
+  font-size: 16px;
+  font-weight: 900;
+  text-shadow: 0 0 12px rgba(240, 225, 48, .5);
+}
+
+.tg-preview-lightning {
+  position: absolute;
+  top: 8px;
+  width: 2px;
+  height: 32px;
+  background: rgba(108, 52, 131, .3);
+  animation: tgLightning 0.4s ease-in-out infinite alternate;
+}
+.tg-preview-lightning-left { left: 20%; transform: rotate(-15deg); }
+.tg-preview-lightning-right { right: 20%; transform: rotate(15deg); }
+
+@keyframes tgLightning {
+  0% { opacity: .3; height: 28px; }
+  100% { opacity: .7; height: 38px; }
+}
+
 .idle-tree-trunk {
   position: absolute;
   bottom: 0;

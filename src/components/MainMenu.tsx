@@ -3,6 +3,7 @@ import type { HomeSnapshot } from "../game/services/ProgressionService";
 import { getEquippedBlades, restoreStaminaByAd, restoreStaminaByShare, readProgress, writeProgress, claimAutoIdle } from "../game/services/ProgressionService";
 import { getStageNameByFloor, MAIN_STAGE_GATES, getCurrentGate } from "../game/config/synthesis";
 import { IdleTreeAnimation, useRandomTip } from "./IdleTreeAnimation";
+import { ThunderGeneralPreview } from "./ThunderGeneralPreview";
 
 type MainMenuProps = {
   unlockedLevel: number;
@@ -130,25 +131,33 @@ export function MainMenu({
         </div>
       )}
 
-      {/* 4. 砍树动画 + 挂机收益按钮（自动累积，点按钮打开挂机界面） */}
-      <div className="v3-idle-tree-area">
-        <IdleTreeAnimation />
-        <button
-          className="v3-idle-reward-btn"
-          onClick={() => {
-            if (unlockedLevel < 2) {
-              showToast("通关第2关后解锁挂机收益");
-              return;
-            }
-            onIdle();
-          }}
-        >
-          <span className="v3-idle-reward-icon">🛍</span>
-          <span className="v3-idle-reward-label">挂机</span>
-          {home.offlineCoins > 0 && (
-            <span className="v3-idle-reward-badge">{home.offlineCoins}</span>
-          )}
-        </button>
+      {/* 4. 中央展示区：突破→Boss预览/普通→砍树+挂机 */}
+      <div
+        className={`v3-idle-tree-area ${pendingGate ? "is-breakthrough" : ""}`}
+        data-testid="home-main-preview"
+      >
+        {pendingGate ? (
+          <ThunderGeneralPreview />
+        ) : (
+          <IdleTreeAnimation />
+        )}
+
+        {!pendingGate && (
+          <button className="v3-idle-reward-btn"
+            onClick={() => {
+              if (unlockedLevel < 2) {
+                showToast("通关第2关后解锁挂机收益");
+                return;
+              }
+              onIdle();
+            }}>
+            <span className="v3-idle-reward-icon">🛍</span>
+            <span className="v3-idle-reward-label">挂机</span>
+            {home.offlineCoins > 0 && (
+              <span className="v3-idle-reward-badge">{home.offlineCoins}</span>
+            )}
+          </button>
+        )}
       </div>
 
       {/* 5. 开始游戏按钮 (圆角胶囊 + 居中对齐) */}

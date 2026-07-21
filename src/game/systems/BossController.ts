@@ -279,14 +279,25 @@ export class BossController {
   }
 
   // ==============================================================
-  // render
+  // render（兼容旧调用）
   // ==============================================================
   render(ctx: any): void {
+    this.renderWorld(ctx);
+    this.renderOverlay(ctx);
+  }
+
+  /** P4.4A.2: 世界层（在刀光下方） */
+  renderWorld(ctx: any): void {
     if (this._phase === "exit") return;
     this.drawVignette(ctx);
     this.drawTopMist(ctx);
     this.drawBoss(ctx);
     this.drawParticles(ctx);
+  }
+
+  /** P4.4A.2: 覆盖层（在刀光/命中文字上方） */
+  renderOverlay(ctx: any): void {
+    if (this._phase === "exit") return;
     this.drawTexts(ctx);
     if (this._phase === "armor" && this.objectiveAlpha > 0.01) this.drawObjective(ctx);
     if (this._phase === "armor_break_show") this.drawArmorBreakShow(ctx);

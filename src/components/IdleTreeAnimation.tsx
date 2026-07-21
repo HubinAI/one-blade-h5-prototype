@@ -61,7 +61,7 @@ export function IdleTreeAnimation() {
   const axeAngle = treeState === "swing" ? -60 : (treeState === "falling" ? 30 : -120);
 
   return (
-    <div className="idle-tree-stage">
+    <div className="idle-tree-stage" data-testid="idle-tree-animation">
       <div className="idle-tree-bg" />
       <div className="idle-tree-glow" />
       {/* 树 */}
