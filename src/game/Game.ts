@@ -436,6 +436,9 @@ export class Game {
           coreTarget: self.bossController?.getCoreWorldPos(),
           armorTargets: [0, 1, 2].map(i => self.bossController?.getArmorTargetWorldPos(i)).filter(Boolean),
         }),
+        // 程序化命中（仅 e2e 用）：直接调用游戏真实 resolve 逻辑，避免坐标离散采样 flaky
+        slashArmor: () => self.bossController?.debugForceArmorHit() ?? false,
+        slashCore: () => self.bossController?.debugForcePursuitHit() ?? false,
       };
     }
 

@@ -418,6 +418,29 @@ export class BossController {
     return { cx: DESIGN_WIDTH / 2 + CORE_GEOMETRY.relX, cy: this.renderY + CORE_GEOMETRY.relY, rx: CORE_GEOMETRY.hitRadiusX, ry: CORE_GEOMETRY.hitRadiusY };
   }
 
+  /** E2E 桥专用：程序化强制命中当前激活护甲。仅 e2e=1 暴露的桥调用，生产无路径触达。
+   *  直接复用 resolveArmorSegment 真实命中逻辑，规避鼠标坐标离散采样在 CI 下的 flaky。 */
+  debugForceArmorHit(): boolean {
+    if (this._phase !== "armor") return false;
+    const t = this.armorTargets[this.activeArmorIndex];
+    if (!t || t.broken) return false;
+    const segA = { x: DESIGN_WIDTH / 2 + t.relX - 1, y: this.renderY + t.relY - 1 };
+    const segB = { x: DESIGN_WIDTH / 2 + t.relX + 1, y: this.renderY + t.relY + 1 };
+    const sid = `e2e_a_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    return !!this.resolveArmorSegment(segA, segB, sid);
+  }
+
+  /** E2E 桥专用：程序化强制命中雷核。仅 e2e=1 暴露的桥调用，生产无路径触达。
+   *  直接复用 resolvePursuitSegment 真实命中逻辑，规避坐标采样 flaky。 */
+  debugForcePursuitHit(): boolean {
+    if (this._phase !== "pursuit") return false;
+    const core = this.getCoreWorldPos();
+    const segA = { x: core.cx - 1, y: core.cy - 1 };
+    const segB = { x: core.cx + 1, y: core.cy + 1 };
+    const sid = `e2e_c_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    return !!this.resolvePursuitSegment(segA, segB, sid);
+  }
+
   /** P4.4A.3: 追击判定（返回独立PursuitResolveResult） */
   resolvePursuitSegment(segA: Vec2, segB: Vec2, slashId: string): import("../types").PursuitResolveResult | null {
     if (this._phase !== "pursuit") return null;
