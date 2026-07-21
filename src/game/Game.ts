@@ -834,8 +834,6 @@ export class Game {
     this.warriorSheathTimer = Math.max(0, this.warriorSheathTimer - scaledDt);
     this.screenShake = Math.max(0, this.screenShake - scaledDt * 2.7);
     this.flash = Math.max(0, this.flash - scaledDt * 2.2);
-    this.updateEdictIconFly(frameDt);
-    this.updateEdictStatusIcon(frameDt);
   }
 
   handlePointerDown(pos: Vec2) {

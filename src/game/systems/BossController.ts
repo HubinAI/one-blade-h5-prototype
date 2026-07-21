@@ -45,8 +45,12 @@ export class BossController {
   get playerInvulnerable(): boolean { return this.isIntroActive; }
   get bossDamageable(): boolean { return false; }
   get bossModeActive(): boolean { return this._phase !== "exit"; }
+  /** 护甲切换延迟期间锁定输入 */
+  get armorSwitching(): boolean {
+    return this._phase === "armor" && this._switchTimer > 0;
+  }
   get inputLocked(): boolean {
-    return this._phase === "loading" || this._phase === "intro" || this._phase === "armor_break_show" || this._phase === "armor_complete_hold";
+    return this._phase === "loading" || this._phase === "intro" || this._phase === "armor_break_show" || this._phase === "armor_complete_hold" || this.armorSwitching;
   }
   /** 完成Hold时冻结战斗资源 */
   get freezeCombatResources(): boolean {
@@ -71,6 +75,7 @@ export class BossController {
       "Slash Session": this._session.slashId || "无",
       "Final Result": this._session.finalResult || "-",
       "Freeze": this.freezeCombatResources,
+      "Armor Switching": this.armorSwitching,
       ...(this.lastResolveDebug ? {
         "Last Slash ID": this.lastResolveDebug.slashId,
         "Last Seg": `(${this.lastResolveDebug.segA.x.toFixed(0)},${this.lastResolveDebug.segA.y.toFixed(0)})→(${this.lastResolveDebug.segB.x.toFixed(0)},${this.lastResolveDebug.segB.y.toFixed(0)})`,
@@ -103,8 +108,8 @@ export class BossController {
   private lastErrorRePromptAt = 0;
   /** 整刀解析锁 */
   private _resolvedSlashId = "";
-  /** 整刀Body Contact候选（wrong_hit收刀结算） */
-  private _bodyContactSlashId = "";
+  /** 整刀Body Contact候选（wrong_hit收刀结算）— 已由_session替代 */
+  private _bodyContactSlashId = ""; // 保留旧字段防编译错误，后续版本清理
   /** 整刀Session追踪 */
   private _session: { slashId: string; bodyContact: boolean; firstBodyHitPos?: Vec2; lastBodyHitPos?: Vec2; finalResult?: string } = { slashId: "", bodyContact: false };
   /** 冲击触发标记（防shakeTimer重复） */
@@ -149,10 +154,8 @@ export class BossController {
     return distanceToSegment(origin, a, b) <= 1;
   }
 
-  /** 椭圆-点距离（归一化后） */
-  private pointToEllipseDist(px: number, py: number, cx: number, cy: number, rx: number, ry: number): number {
-    return Math.sqrt(Math.pow((px - cx) / Math.max(1, rx), 2) + Math.pow((py - cy) / Math.max(1, ry), 2));
-  }
+  /** 椭圆-点距离（归一化后） — 当前未使用，保留以备调试 */
+  // private pointToEllipseDist(px, py, cx, cy, rx, ry) { ... }
 
   // ==============================================================
   // 生命周期
@@ -188,7 +191,9 @@ export class BossController {
   // ==============================================================
   update(dt: number): void {
     this.particles = this.particles.filter(p => { p.life -= dt; return p.life > 0; });
-    // P4.4A.2: 统一衰减shakeTimer
+    // P4.4A.2: 全局衰减护甲动画计时器（保证所有阶段都能更新）
+    for (const t of this.armorTargets) { t.animTimer = Math.max(0, t.animTimer - dt); }
+    // 统一衰减shakeTimer
     this.shakeTimer = Math.max(0, this.shakeTimer - dt * 3);
 
     if (this._phase === "loading") { this._phase = "intro"; return; }
@@ -306,7 +311,6 @@ export class BossController {
   // 内部
   // ==============================================================
   private updateArmorPhase(dt: number): void {
-    for (const t of this.armorTargets) { if (t.animTimer > 0) t.animTimer = Math.max(0, t.animTimer - dt); }
     // 护甲切换延迟：倒计时结束后激活下一块
     if (this._switchTimer > 0) {
       this._switchTimer = Math.max(0, this._switchTimer - dt);
