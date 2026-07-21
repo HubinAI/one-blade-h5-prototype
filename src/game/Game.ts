@@ -856,6 +856,12 @@ export class Game {
     this.updateTexts(scaledDt);
     this.updateBossSpawn();
     this.updateBossController(scaledDt);
+    // P4.4A.3: 进入pursuit时补刀势
+    if (this.bossController?.phase === "pursuit" && !this.bossController.pursuitEnergyBoosted) {
+      this.bossController.pursuitEnergyBoosted = true;
+      this.energy = Math.max(this.energy, 60);
+      this.addText(DESIGN_WIDTH / 2, 810, "⚡ 刀势回涌", "#5bc0ff", 14, 1.0);
+    }
     this.regenDelayTimer = Math.max(0, this.regenDelayTimer - scaledDt);
     if (!this.currentSlash?.active && !this.pendingSlash && this.regenDelayTimer <= 0) {
       if (!(this.bossController?.freezeCombatResources)) {
@@ -1515,7 +1521,7 @@ export class Game {
       if (this.bossController.phase === "pursuit") {
         const result = this.bossController.resolvePursuitSegment(a, b, trail.id);
         if (result) {
-          this.applyArmorResolveResult(result, a, b);
+          this.applyPursuitResolveResult(result, a, b);
           // 同步BossController的屏震/闪屏到Game
           this.screenShake = Math.max(this.screenShake, this.bossController.screenShake);
           this.flash = Math.max(this.flash, this.bossController.flash);
@@ -3727,6 +3733,35 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       AudioService.armorWrong();
       this.particles.push(...sparkBurst({ x: (segA.x + segB.x) / 2, y: (segA.y + segB.y) / 2 }, 6, "#6c3483"));
       this.screenShake = Math.max(this.screenShake, 0.15);
+    }
+    // miss: 不打印任何反馈
+  }
+
+  /** P4.4A.3: 追击结果反馈（独立于破甲） */
+  private applyPursuitResolveResult(result: import("./types").PursuitResolveResult, segA: Vec2, segB: Vec2): void {
+    if (result.kind === "pursuit_hit") {
+      this.flash = Math.max(this.flash, 0.25);
+      this.screenShake = Math.max(this.screenShake, 0.2);
+      this.particles.push(...sparkBurst({ x: result.hitPos.x, y: result.hitPos.y }, 8, "#a855f7"));
+      if (result.completed) {
+        AudioService.armorComplete();
+        this.screenShake = Math.max(this.screenShake, 0.5);
+        this.flash = Math.max(this.flash, 0.5);
+        this.addCombatFloat({
+          x: result.hitPos.x, y: result.hitPos.y - 20,
+          text: "雷核击破", color: "#f0e130", size: 20, duration: 0.8,
+          category: "mechanic", priority: "A", mergeKey: `pursuit-cplt-${result.slashId}`
+        });
+      } else {
+        AudioService.armorHit();
+        this.addCombatFloat({
+          x: result.hitPos.x, y: result.hitPos.y - 20,
+          text: "追击", color: "#a855f7", size: 16, duration: 0.5,
+          category: "mechanic", priority: "A", mergeKey: `pursuit-hit-${result.slashId}`
+        });
+      }
+    } else if (result.kind === "pursuit_body_hit") {
+      this.particles.push(...sparkBurst({ x: result.hitPos.x, y: result.hitPos.y }, 4, "#6c3483"));
     }
     // miss: 不打印任何反馈
   }

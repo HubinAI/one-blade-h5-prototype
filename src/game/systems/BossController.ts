@@ -16,10 +16,17 @@ const CONSECUTIVE_ERROR_LIMIT = 2;
 
 // 身体Hit Area（多个几何区域并集）
 const BODY_PARTS = [
-  { cx: 0, cy: -20, rx: 70, ry: 35 },  // 上半躯干+肩
-  { cx: 0, cy: 15, rx: 50, ry: 40 },    // 下躯干+甲裙
-  { cx: 0, cy: -65, rx: 30, ry: 18 },    // 头盔
+  { cx: 0, cy: -20, rx: 70, ry: 35 },
+  { cx: 0, cy: 15, rx: 50, ry: 40 },
+  { cx: 0, cy: -65, rx: 30, ry: 18 },
 ];
+
+/** P4.4A.3: 雷核（弱点）共享几何 */
+const CORE_GEOMETRY = {
+  relX: 0, relY: 2,
+  visualRadius: 12,
+  hitRadiusX: 17, hitRadiusY: 18,
+};
 
 export type ArmorResolveResult =
   | { kind: "armor_hit"; targetId: number; hitPos: Vec2; armorCenter: Vec2; shardOrigin: Vec2; progress: number; maxProgress: number; completed: boolean; slashId: string }
@@ -53,11 +60,11 @@ export class BossController {
   /** 避开TS类型缩窄 */
   private p(): BossPhaseState { return this._phase; }
   get inputLocked(): boolean {
-    return this._phase === "loading" || this._phase === "intro" || this._phase === "armor_break_show" || this._phase === "armor_complete_hold" || this.armorSwitching || this.p() === "pursuit_intro";
+    return this._phase === "loading" || this._phase === "intro" || this._phase === "armor_break_show" || this._phase === "armor_complete_hold" || this.armorSwitching || this.p() === "pursuit_intro" || this._phase === "core_break";
   }
   /** 完成Hold时冻结战斗资源 */
   get freezeCombatResources(): boolean {
-    return this._phase === "armor_break_show" || this._phase === "armor_complete_hold" || this.p() === "pursuit_intro";
+    return this._phase === "armor_break_show" || this._phase === "armor_complete_hold" || this.p() === "pursuit_intro" || this._phase === "core_break";
   }
   /** 雷核是否暴露 */
   get coreExposed(): boolean {
@@ -145,6 +152,8 @@ export class BossController {
   screenShake: number = 0;
   /** 闪屏（供Game读取） */
   flash: number = 0;
+  /** 追击能量增幅标记 */
+  pursuitEnergyBoosted = false;
 
   // 完成状态
   private breakShowTimer = 0;
@@ -269,7 +278,11 @@ export class BossController {
     }
     if (this._phase === "core_break") {
       this.coreBreakTimer += dt;
-      // 占位，P4.4A.3后续完善
+      // 输入锁定 + 刀势冻结由inputLocked/freezeCombatResources负责
+      // 收刀清理在Game handlePointerUp通过inputLocked已处理
+      if (this.coreBreakTimer > 8) {
+        // 超时保护，防永久锁定
+      }
       return;
     }
   }
@@ -382,13 +395,13 @@ export class BossController {
 
   /** P4.4A.3: 雷核（弱点）世界坐标 */
   getCoreWorldPos(): { cx: number; cy: number; rx: number; ry: number } {
-    return { cx: DESIGN_WIDTH / 2, cy: this.renderY + 2, rx: 28, ry: 30 };
+    return { cx: DESIGN_WIDTH / 2 + CORE_GEOMETRY.relX, cy: this.renderY + CORE_GEOMETRY.relY, rx: CORE_GEOMETRY.hitRadiusX, ry: CORE_GEOMETRY.hitRadiusY };
   }
 
-  /** P4.4A.3: 追击判定 */
-  resolvePursuitSegment(segA: Vec2, segB: Vec2, slashId: string): ArmorResolveResult | null {
+  /** P4.4A.3: 追击判定（返回独立PursuitResolveResult） */
+  resolvePursuitSegment(segA: Vec2, segB: Vec2, slashId: string): import("../types").PursuitResolveResult | null {
     if (this._phase !== "pursuit") return null;
-    if (this._resolvedSlashId === slashId) return null; // 整刀只结算一次
+    if (this._resolvedSlashId === slashId) return null;
     const core = this.getCoreWorldPos();
     if (this.segmentHitEllipse(segA, segB, core.cx, core.cy, core.rx, core.ry)) {
       this._resolvedSlashId = slashId;
@@ -397,21 +410,16 @@ export class BossController {
       this.flash = Math.max(this.flash, 0.2);
       this.lastResolveDebug = { slashId, segA, segB, activeArmorName: "core", minDist: 0, bodyHit: true, result: "pursuit_hit" };
       const completed = this._pursuitProgress >= this.MAX_PURSUIT;
-      if (completed) {
-        this._phase = "core_break";
-        this.coreBreakTimer = 0;
-      }
-      return { kind: "armor_hit", targetId: -1, hitPos: segB, armorCenter: { x: core.cx, y: core.cy }, shardOrigin: { x: core.cx, y: core.cy }, progress: this._pursuitProgress, maxProgress: this.MAX_PURSUIT, completed, slashId };
+      if (completed) { this._phase = "core_break"; this.coreBreakTimer = 0; }
+      return { kind: "pursuit_hit", hitPos: segB, coreCenter: { x: core.cx, y: core.cy }, progress: this._pursuitProgress, maxProgress: this.MAX_PURSUIT, completed, slashId };
     }
-    // 身体接触（非弱点）
     const bodyHit = BODY_PARTS.some(p => this.segmentHitEllipse(segA, segB, DESIGN_WIDTH / 2 + p.cx, this.renderY + p.cy, p.rx, p.ry));
     if (bodyHit) {
       this.lastResolveDebug = { slashId, segA, segB, activeArmorName: "body", minDist: 0, bodyHit: true, result: "body_contact" };
-      return { kind: "miss", slashId };
+      return { kind: "pursuit_body_hit", hitPos: segB, slashId };
     }
-    // 挥空
     this.lastResolveDebug = { slashId, segA, segB, activeArmorName: "-", minDist: 999, bodyHit: false, result: "miss" };
-    return { kind: "miss", slashId };
+    return { kind: "pursuit_miss", slashId };
   }
 
   // ==============================================================
@@ -619,31 +627,33 @@ export class BossController {
     let coreAlpha: number;
     let coreColor0: string;
     let coreColor1: string;
-    if (this._phase === "armor_break_show") {
+    let drawR = CORE_GEOMETRY.visualRadius;
+    if (this._phase === "armor") {
+      coreAlpha = 0.35; coreColor0 = "#6c3483"; coreColor1 = "#3d1a50";
+    } else if (this._phase === "armor_break_show") {
       const p = Math.min(this.breakShowTimer / 0.4, 1);
-      coreAlpha = 0.3 + 0.7 * p;
-      coreColor0 = "#8e44ad"; coreColor1 = "#f0e130";
+      coreAlpha = 0.3 + 0.7 * p; coreColor0 = "#8e44ad"; coreColor1 = "#f0e130";
     } else if (this._phase === "armor_complete_hold") {
-      coreAlpha = 0.75 + Math.sin(this._elapsed * 3) * 0.15;
-      coreColor0 = "#a855f7"; coreColor1 = "#f0e130";
+      coreAlpha = 0.75 + Math.sin(this._elapsed * 3) * 0.15; coreColor0 = "#a855f7"; coreColor1 = "#f0e130";
     } else if (this._phase === "pursuit_intro" || this._phase === "pursuit") {
-      coreAlpha = 0.8 + Math.sin(this._elapsed * 4) * 0.15;
-      coreColor0 = "#a855f7"; coreColor1 = "#f0e130";
+      coreAlpha = 0.8 + Math.sin(this._elapsed * 4) * 0.15; coreColor0 = "#a855f7"; coreColor1 = "#f0e130";
+      drawR = CORE_GEOMETRY.visualRadius * 1.5;
+    } else if (this._phase === "core_break") {
+      coreAlpha = 0.6 + Math.sin(this.coreBreakTimer * 10) * 0.3; coreColor0 = "#f0e130"; coreColor1 = "#ffffff";
+      drawR = CORE_GEOMETRY.visualRadius * 1.8;
     } else {
-      coreAlpha = 0.35;
-      coreColor0 = "#6c3483"; coreColor1 = "#3d1a50";
+      coreAlpha = 0.35; coreColor0 = "#6c3483"; coreColor1 = "#3d1a50";
     }
     ctx.save();
     ctx.globalAlpha = coreAlpha;
-    const coreR = 8;
-    const pulse = this.coreExposed ? 1 + Math.sin(this._elapsed * 6) * 0.15 : 0.9 + Math.sin(this._elapsed * 4) * 0.1;
-    const drawR = this._phase === "pursuit_intro" || this._phase === "pursuit" ? coreR * 1.5 : coreR;
-    const grd = ctx.createRadialGradient(0, 2, 0, 0, 2, drawR * pulse);
+    const pulse = exposed ? 1 + Math.sin(this._elapsed * 6) * 0.15 : 0.9 + Math.sin(this._elapsed * 4) * 0.1;
+    const finalR = drawR * pulse;
+    const grd = ctx.createRadialGradient(0, 2, 0, 0, 2, finalR);
     grd.addColorStop(0, coreColor0); grd.addColorStop(1, coreColor1);
     ctx.fillStyle = grd;
     ctx.shadowColor = exposed ? "#a855f7" : "#6c3483";
     ctx.shadowBlur = exposed ? 16 : 6;
-    ctx.beginPath(); ctx.arc(0, 2, coreR * pulse, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 2, finalR, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
 
@@ -727,17 +737,22 @@ export class BossController {
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     let phaseLabel = "阶段 1 · 破甲";
     if (this._phase === "armor_break_show" || this._phase === "armor_complete_hold") phaseLabel = "破甲完成";
-    if (this.p() === "pursuit_intro") phaseLabel = "阶段 2 · 追击";
-    if (this._phase === "pursuit") phaseLabel = "阶段 2 · 追击";
+    if (this.p() === "pursuit_intro" || this._phase === "pursuit") phaseLabel = "阶段 2 · 追击";
+    if (this._phase === "core_break") phaseLabel = "雷核击破";
     ctx.fillText(phaseLabel, barLeft, labelY);
     ctx.fillStyle = "#a569bd"; ctx.font = '12px "Microsoft YaHei", sans-serif';
     ctx.textAlign = "right";
-    // P4.4A.3: 追击阶段显示追击进度，护甲阶段显示护甲进度
-    if (this.coreExposed && this._phase !== "armor_break_show" && this._phase !== "armor_complete_hold") {
-      ctx.fillText(`追击 ${this._pursuitProgress}/${this.MAX_PURSUIT}`, DESIGN_WIDTH - 14, labelY);
+    let progText: string;
+    if (this._phase === "core_break") {
+      progText = "终结机会";
+    } else if (this._phase === "armor_break_show" || this._phase === "armor_complete_hold") {
+      progText = "弱点暴露";
+    } else if (this._phase === "pursuit_intro" || this._phase === "pursuit") {
+      progText = `追击 ${this._pursuitProgress}/${this.MAX_PURSUIT}`;
     } else {
-      ctx.fillText(`护甲 ${this.armorProgress}/${this.maxArmor}`, DESIGN_WIDTH - 14, labelY);
+      progText = `护甲 ${this.armorProgress}/${this.maxArmor}`;
     }
+    ctx.fillText(progText, DESIGN_WIDTH - 14, labelY);
     ctx.restore();
   }
 

@@ -13,6 +13,27 @@ export type PickupKind = "drum" | "soul" | "oil";
 export type GamePhase = "playing" | "buffChoice" | "revive" | "won" | "lost" | "chestOpen" | "paused_for_chest";
 export type RatingGrade = "C" | "B" | "A" | "S" | "SS" | "神之一刀";
 
+// ---- P4.4A.3: 追击结果类型 ----
+export type PursuitResolveResult =
+  | {
+      kind: "pursuit_hit";
+      hitPos: Vec2;
+      coreCenter: Vec2;
+      progress: number;
+      maxProgress: number;
+      completed: boolean;
+      slashId: string;
+    }
+  | {
+      kind: "pursuit_body_hit";
+      hitPos: Vec2;
+      slashId: string;
+    }
+  | {
+      kind: "pursuit_miss";
+      slashId: string;
+    };
+
 // ---- P4.3A: 战场三层流动压力 ----
 export type BattlefieldPressureLayer = "rear" | "mid" | "front";
 export type EnemyFlowRole = "vanguard" | "main" | "reserve";
