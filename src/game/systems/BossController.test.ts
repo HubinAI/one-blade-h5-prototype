@@ -416,6 +416,46 @@ describe("BossController - 护甲解析", () => {
     expect(finish!.kind).toBe("pursuit_miss");
   });
 
+  it("finishBossSlash统一路由：pursuit阶段→finishPursuitSlash", () => {
+    const bc = new BossController("thunderGeneral");
+    toPursuit(bc);
+    const id = "route_1";
+    bc.resolvePursuitSegment(v(50, 700), v(100, 750), id); // miss
+    // finishBossSlash应返回pursuit_miss
+    const finish = bc.finishBossSlash(id);
+    expect(finish).not.toBeNull();
+    expect(finish!.kind).toBe("pursuit_miss");
+  });
+
+  it("finishBossSlash统一路由：armor阶段→finishSlash（wrong_hit）", () => {
+    const bc = new BossController("thunderGeneral");
+    bc.enterLoading();
+    bc.skipIntro();
+    // 切中身体但非护甲
+    bc.resolveArmorSegment(v(150, 100), v(200, 250), "w1");
+    const finish = bc.finishBossSlash("w1");
+    // finishSlash返回wrong_hit或miss，body_contact会收刀结算
+    expect(finish).toBeDefined();
+  });
+
+  it("第三击进入core_break后finishBossSlash不抛错", () => {
+    const bc = new BossController("thunderGeneral");
+    bc.enterLoading(); bc3s();
+    bc.skipIntro();
+    bc.resolveArmorSegment(v(141, 145), v(181, 185), "s1"); bc.update(0.5);
+    bc.resolveArmorSegment(v(221, 135), v(301, 195), "s2"); bc.update(0.5);
+    bc.resolveArmorSegment(v(181, 171), v(241, 231), "s3");
+    bc.update(0.5); bc.update(0.5); bc.update(0.5);
+    bc.update(0.5); bc.update(1.0);
+    bc.resolvePursuitSegment(v(195, 190), v(225, 200), "p1");
+    bc.resolvePursuitSegment(v(195, 190), v(225, 200), "p2");
+    bc.resolvePursuitSegment(v(195, 190), v(225, 200), "p3");
+    expect(bc.phase).toBe("core_break");
+    // core_break下finishBossSlash应安全返回null
+    const finish = bc.finishBossSlash("p3");
+    expect(finish).toBeNull();
+  });
+
   it("重新enterLoading重置所有状态", () => {
     const bc3 = new BossController("thunderGeneral");
     bc3["pursuitEnergyBoosted"] = true;

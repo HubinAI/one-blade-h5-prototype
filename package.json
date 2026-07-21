@@ -1,7 +1,7 @@
 {
   "name": "one-blade-h5-prototype",
   "private": true,
-  "version": "0721.013",
+  "version": "0721.014",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:ui": "vitest run src/components/MainMenu.test.tsx",
     "test:boss": "vitest run src/game/systems/BossController.test.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "check:version": "node -e \"const fs=require('fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf-8'));const lock=JSON.parse(fs.readFileSync('package-lock.json','utf-8'));if(pkg.version!==lock.version||lock.packages[''].version!==pkg.version){console.error('Version mismatch:',pkg.version,lock.version,lock.packages[''].version);process.exit(1);}else{console.log('Version OK:',pkg.version);}\""
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
