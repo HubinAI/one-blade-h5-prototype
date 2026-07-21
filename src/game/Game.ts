@@ -416,7 +416,7 @@ export class Game {
       this.initializeThunderGeneralBoss();
     }
 
-    // P4.4A.3: E2E测试桥（仅在debug/e2e参数下暴露）
+    // P4.4A.3: E2E测试桥（仅在e2e=1参数下暴露）
     if (typeof window !== "undefined" && window.location.search.includes("e2e=1")) {
       const self = this;
       const instanceId = `game_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
