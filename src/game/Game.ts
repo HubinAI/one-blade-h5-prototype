@@ -416,6 +416,26 @@ export class Game {
       this.initializeThunderGeneralBoss();
     }
 
+    // P4.4A.3: E2E测试桥（仅在debug/e2e参数下暴露）
+    if (typeof window !== "undefined" && (window.location.search.includes("debug=1") || window.location.search.includes("e2e=1"))) {
+      const self = this;
+      (window as any).__ONE_BLADE_E2E__ = {
+        getState: () => ({
+          phase: self.bossController?.phase,
+          armorProgress: self.bossController?.debugSnapshot?.["Armor Progress"],
+          pursuitProgress: self.bossController?.debugSnapshot?.["Pursuit"],
+          energy: self.energy,
+          pointerDown: self.pointerDown,
+          currentSlashActive: self.currentSlash?.active ?? false,
+          gameMode: self.gameMode,
+        }),
+        getTargets: () => ({
+          coreTarget: self.bossController?.getCoreWorldPos(),
+          armorTargets: [0, 1, 2].map(i => self.bossController?.getArmorTargetWorldPos(i)).filter(Boolean),
+        }),
+      };
+    }
+
     // P3.2：重置精英播报状态，防止上一关残留
     this.elitePreviewShown = false;
     this.eliteSpawnAnnounced = false;
@@ -3692,23 +3712,14 @@ export class Game {
 
 /** P4.4A.2: Boss模式收刀公共清理 */
 private finalizeBossSlashCommon(trail: SlashTrail): void {
-  // P4.4A.3: 追击阶段走独立收刀结算
-  if (this.bossController?.phase === "pursuit") {
-    const pursuitResult = this.bossController.finishPursuitSlash(trail.id);
-    if (pursuitResult) {
-      this.applyPursuitResolveResult(pursuitResult, trail.points[0], trail.points[trail.points.length - 1]);
+  // P4.4A.3: 统一使用finishBossSlash路由
+  const finishResult = this.bossController?.finishBossSlash(trail.id);
+  if (finishResult) {
+    if (finishResult.kind === "pursuit_hit" || finishResult.kind === "pursuit_body_hit" || finishResult.kind === "pursuit_miss") {
+      this.applyPursuitResolveResult(finishResult, trail.points[0], trail.points[trail.points.length - 1]);
+    } else if (finishResult.kind !== "miss") {
+      this.applyArmorResolveResult(finishResult, "hitPos" in finishResult ? finishResult.hitPos! : trail.points[trail.points.length - 1], trail.points[trail.points.length - 1]);
     }
-    this.warriorSheathTimer = 0.38;
-    this.warriorDrawTimer = 0;
-    this.regenDelayTimer = BALANCE.swordEnergy.regenDelayAfterSlash;
-    AudioService.slashEnd();
-    this.currentSlash = undefined;
-    return;
-  }
-  // 收刀结算body_contact→wrong_hit，获取最终结果
-  const finishResult = this.bossController?.finishSlash(trail.id);
-  if (finishResult && finishResult.kind !== "miss") {
-    this.applyArmorResolveResult(finishResult, finishResult.hitPos ?? trail.points[trail.points.length - 1], trail.points[trail.points.length - 1]);
   }
   this.warriorSheathTimer = 0.38;
   this.warriorDrawTimer = 0;
