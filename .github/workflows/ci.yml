@@ -46,3 +46,24 @@ jobs:
           name: playwright-report-dpr3
           path: playwright-report/
           retention-days: 5
+
+  # 真实触摸输入（非阻挡）：hasTouch:true，CDP 派发真实 touch 指针。
+  # 失败不阻塞主链路（continue-on-error），用于捕获触摸/pointercancel 回归（审计五）。
+  test-e2e-touch:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test -c playwright.touch.config.ts
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-touch
+          path: playwright-report/
+          retention-days: 5

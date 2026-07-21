@@ -416,12 +416,32 @@ export class Game {
       this.initializeThunderGeneralBoss();
     }
 
-    // P4.4A.3: E2E测试桥（仅 e2e 构建期开启，公开 Pages 生产构建不含此桥）
-    // 构建期开关：vite build --mode e2e + .env.e2e 设置 VITE_ENABLE_E2E_BRIDGE=true
-    // 生产构建（MODE=production）该分支被静态消除，公开站点无法再通过 URL 参数开启作弊桥。
-    if (import.meta.env.MODE === "e2e" && import.meta.env.VITE_ENABLE_E2E_BRIDGE === "true") {
+    // P4.4A.3: E2E 测试桥（仅 e2e 构建期开启，生产构建零残留）。
+    // __E2E_BRIDGE__ 由 vite define 注入：e2e 模式=true，其余=false。
+    // 生产构建下整段被静态消除（纯内联代码、无动态导入副作用），
+    // 故生产包不含任何 E2E 代码（桥全局变量 / 强制命中闭包均不存在，审计六）。
+    if (__E2E_BRIDGE__) {
       const self = this;
       const instanceId = `game_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+      // 程序化命中闭包：随本 if 块被 DCE 消除，不进入生产包。
+      // 复用 BossController 真实 resolve 逻辑，规避坐标采样 flaky。
+      const forceArmorHit = (bc: any) => {
+        if (!bc || bc.phase !== "armor") return;
+        const idx = bc.activeArmorIndex as number;
+        const t = bc.getArmorTargetWorldPos(idx);
+        if (!t) return;
+        const slashId = `e2e_armor_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        bc.resolveArmorSegment({ x: t.cx - 120, y: t.cy }, { x: t.cx + 120, y: t.cy }, slashId);
+      };
+      const forcePursuitHit = (bc: any) => {
+        if (!bc || bc.phase !== "pursuit") return;
+        const core = bc.getCoreWorldPos();
+        if (!core) return;
+        const slashId = `e2e_pursuit_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        bc.resolvePursuitSegment({ x: core.cx - 120, y: core.cy }, { x: core.cx + 120, y: core.cy }, slashId);
+      };
+
       (window as any).__ONE_BLADE_E2E__ = {
         instanceId,
         levelId: level.id,
@@ -439,11 +459,11 @@ export class Game {
           coreTarget: self.bossController?.getCoreWorldPos(),
           armorTargets: [0, 1, 2].map(i => self.bossController?.getArmorTargetWorldPos(i)).filter(Boolean),
         }),
-        // 程序化命中（仅 e2e 用）：直接调用游戏真实 resolve 逻辑，避免坐标离散采样 flaky
-        slashArmor: () => self.bossController?.debugForceArmorHit() ?? false,
-        slashCore: () => self.bossController?.debugForcePursuitHit() ?? false,
-        // 跳过Boss开场动画（e2e 仅用于加速到达 armor 阶段，不验证 intro 计时）
-        skipIntro: () => self.bossController?.skipIntro(),
+        // 程序化命中：复用 BossController 真实 resolve 逻辑，规避坐标采样 flaky
+        slashArmor: () => forceArmorHit(self.bossController as any),
+        slashCore: () => forcePursuitHit(self.bossController as any),
+        // 跳过 Boss 开场动画（仅加速到达 armor 阶段）
+        skipIntro: () => (self.bossController as any)?.skipIntro(),
       };
     }
 

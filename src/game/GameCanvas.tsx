@@ -55,9 +55,11 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
     return () => {
       cancelAnimationFrame(frame);
       gameRef.current = null;
-      // P4.4A.3: 清理E2E桥，避免旧Game引用
-      if (typeof window !== "undefined" && (window as any).__ONE_BLADE_E2E__) {
-        delete (window as any).__ONE_BLADE_E2E__;
+      // P4.4A.3: 清理E2E桥，避免旧Game引用（仅 e2e 构建期；生产构建整段被 DCE 消除）
+      if (__E2E_BRIDGE__) {
+        if (typeof window !== "undefined" && (window as any).__ONE_BLADE_E2E__) {
+          delete (window as any).__ONE_BLADE_E2E__;
+        }
       }
     };
   }, [level, onFinish, onReviveOffer, effectiveMode]);

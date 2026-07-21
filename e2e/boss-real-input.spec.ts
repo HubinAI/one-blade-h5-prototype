@@ -68,7 +68,6 @@ test.describe("Boss真实Pointer输入E2E", () => {
       await page.mouse.move(p.x + offset / 2, p.y, { steps: 16 });
       await page.mouse.move(p.x + offset, p.y, { steps: 16 });
       await page.mouse.up();
-      await page.waitForTimeout(250);
     };
 
     // 1) 真实拖动左肩护甲一次 → 0/3→1/3
@@ -78,8 +77,10 @@ test.describe("Boss真实Pointer输入E2E", () => {
     const armor0 = await page.evaluate(() => window.__ONE_BLADE_E2E__.getTargets().armorTargets[0]);
     expect(armor0).toBeTruthy();
     await realDragThrough(armor0.cx, armor0.cy);
-    state = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
-    expect(state.armorProgress).toBe("1/3");
+    // 拖拽后轮询读取，避免慢速CI提前读旧值（审计四）
+    await expect.poll(async () =>
+      page.evaluate(() => window.__ONE_BLADE_E2E__.getState().armorProgress)
+    , { timeout: 5000 }).toBe("1/3");
 
     // 程序化桥推进至 3/3（每次先等待可命中状态，避免护甲切换延迟 _switchTimer 拦截）
     for (const target of ["2/3", "3/3"]) {
@@ -104,8 +105,10 @@ test.describe("Boss真实Pointer输入E2E", () => {
     const core = await page.evaluate(() => window.__ONE_BLADE_E2E__.getTargets().coreTarget);
     expect(core).toBeTruthy();
     await realDragThrough(core.cx, core.cy);
-    state = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
-    expect(state.pursuitProgress).toBe("1/3");
+    // 拖拽后轮询读取（审计四）
+    await expect.poll(async () =>
+      page.evaluate(() => window.__ONE_BLADE_E2E__.getState().pursuitProgress)
+    , { timeout: 5000 }).toBe("1/3");
 
     // 程序化推进至 execution_intro（每次先等待可命中状态）
     for (const target of ["2/3"]) {
