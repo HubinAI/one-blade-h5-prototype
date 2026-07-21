@@ -426,20 +426,25 @@ export class Game {
 
       // 程序化命中闭包：随本 if 块被 DCE 消除，不进入生产包。
       // 复用 BossController 真实 resolve 逻辑，规避坐标采样 flaky。
-      const forceArmorHit = (bc: any) => {
-        if (!bc || bc.phase !== "armor") return;
+      // 返回布尔与历史 debugForce*Hit 契约一致（smoke 测试 expect(ok).toBe(true)）。
+      const forceArmorHit = (bc: any): boolean => {
+        if (!bc || bc.phase !== "armor") return false;
         const idx = bc.activeArmorIndex as number;
         const t = bc.getArmorTargetWorldPos(idx);
-        if (!t) return;
-        const slashId = `e2e_armor_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        bc.resolveArmorSegment({ x: t.cx - 120, y: t.cy }, { x: t.cx + 120, y: t.cy }, slashId);
+        if (!t) return false;
+        const slashId = `e2e_a_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const segA = { x: t.cx - 1, y: t.cy - 1 };
+        const segB = { x: t.cx + 1, y: t.cy + 1 };
+        return !!bc.resolveArmorSegment(segA, segB, slashId);
       };
-      const forcePursuitHit = (bc: any) => {
-        if (!bc || bc.phase !== "pursuit") return;
+      const forcePursuitHit = (bc: any): boolean => {
+        if (!bc || bc.phase !== "pursuit") return false;
         const core = bc.getCoreWorldPos();
-        if (!core) return;
-        const slashId = `e2e_pursuit_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        bc.resolvePursuitSegment({ x: core.cx - 120, y: core.cy }, { x: core.cx + 120, y: core.cy }, slashId);
+        if (!core) return false;
+        const slashId = `e2e_c_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const segA = { x: core.cx - 1, y: core.cy - 1 };
+        const segB = { x: core.cx + 1, y: core.cy + 1 };
+        return !!bc.resolvePursuitSegment(segA, segB, slashId);
       };
 
       (window as any).__ONE_BLADE_E2E__ = {
