@@ -165,9 +165,8 @@ describe("BossController - 护甲解析", () => {
     const bc2 = new BossController("thunderGeneral");
     bc2.enterLoading();
     expect(bc2.phase).toBe("loading");
-    bc2.update(0.01); // loading立即转为intro
+    bc2.update(0.01);
     expect(bc2.phase).toBe("intro");
-    // 推过intro全部时间 (2.85s)
     bc2.update(1.5);
     bc2.update(1.5);
     expect(bc2.phase).toBe("armor");
@@ -178,12 +177,81 @@ describe("BossController - 护甲解析", () => {
     const bc2 = new BossController("thunderGeneral");
     bc2.enterLoading();
     bc2.update(0.01);
-    // 推过1.25s冲击点
     bc2.update(1.25);
-    expect(bc2["_impactTriggered"]).toBe(true); // 冲击已触发
-    // 再次推过冲击点——确认不会再次触发
-    bc2.update(0.1);
-    // _impactTriggered保持true（不重复）
     expect(bc2["_impactTriggered"]).toBe(true);
+    bc2.update(0.1);
+    expect(bc2["_impactTriggered"]).toBe(true);
+  });
+
+  // ===== P4.4A.3: 追击状态测试 =====
+
+  it("armor_complete_hold 0.34秒仍为hold，0.35秒进入pursuit_intro", () => {
+    bc3s();
+    const bc3 = new BossController("thunderGeneral");
+    bc3.enterLoading();
+    bc3.skipIntro();
+    // 快速完成破甲
+    bc3.resolveArmorSegment(v(141, 145), v(181, 185), "s1");
+    bc3.update(0.5);
+    bc3.resolveArmorSegment(v(221, 135), v(301, 195), "s2");
+    bc3.update(0.5);
+    bc3.resolveArmorSegment(v(181, 171), v(241, 231), "s3");
+    bc3.update(0.5); bc3.update(0.5); bc3.update(0.5); // → armor_complete_hold
+    expect(bc3.phase).toBe("armor_complete_hold");
+    bc3.update(0.34); // 0.34s仍为hold
+    expect(bc3.phase).toBe("armor_complete_hold");
+    bc3.update(0.02); // 跨过0.35门槛
+    expect(bc3.phase).toBe("pursuit_intro");
+    expect(bc3["objectiveText"]).toBe("趁弱点显现时追击");
+    expect(bc3["objectiveAlpha"]).toBeGreaterThan(0);
+  });
+
+  function bc3s() {} // 辅助让测试范围正确
+
+  it("pursuit_intro期间inputLocked=true", () => {
+    const bc3 = new BossController("thunderGeneral");
+    bc3.enterLoading(); bc3.skipIntro();
+    bc3.resolveArmorSegment(v(141, 145), v(181, 185), "s1");
+    bc3.update(0.5);
+    bc3.resolveArmorSegment(v(221, 135), v(301, 195), "s2");
+    bc3.update(0.5);
+    bc3.resolveArmorSegment(v(181, 171), v(241, 231), "s3");
+    bc3.update(0.5); bc3.update(0.5); bc3.update(0.5);
+    bc3.update(0.5);
+    expect(bc3.phase).toBe("pursuit_intro");
+    expect(bc3.inputLocked).toBe(true);
+    expect(bc3.freezeCombatResources).toBe(true);
+  });
+
+  it("pursuit_intro 0.89秒仍为intro，0.90秒进入pursuit", () => {
+    const bc3 = new BossController("thunderGeneral");
+    bc3.enterLoading(); bc3.skipIntro();
+    bc3.resolveArmorSegment(v(141, 145), v(181, 185), "s1");
+    bc3.update(0.5);
+    bc3.resolveArmorSegment(v(221, 135), v(301, 195), "s2");
+    bc3.update(0.5);
+    bc3.resolveArmorSegment(v(181, 171), v(241, 231), "s3");
+    bc3.update(0.5); bc3.update(0.5); bc3.update(0.5);
+    bc3.update(0.5); // → pursuit_intro
+    expect(bc3.phase).toBe("pursuit_intro");
+    bc3.update(0.89); // 仍为intro
+    expect(bc3.phase).toBe("pursuit_intro");
+    bc3.update(0.02); // 跨过0.9门槛
+    expect(bc3.phase).toBe("pursuit");
+  });
+
+  it("pursuit阶段inputLocked=false，coreExposed=true", () => {
+    const bc3 = new BossController("thunderGeneral");
+    bc3.enterLoading(); bc3.skipIntro();
+    bc3.resolveArmorSegment(v(141, 145), v(181, 185), "s1");
+    bc3.update(0.5);
+    bc3.resolveArmorSegment(v(221, 135), v(301, 195), "s2");
+    bc3.update(0.5);
+    bc3.resolveArmorSegment(v(181, 171), v(241, 231), "s3");
+    bc3.update(0.5); bc3.update(0.5); bc3.update(0.5);
+    bc3.update(0.5); bc3.update(1.0);
+    expect(bc3.phase).toBe("pursuit");
+    expect(bc3.inputLocked).toBe(false);
+    expect(bc3.coreExposed).toBe(true);
   });
 });

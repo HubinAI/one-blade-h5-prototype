@@ -6,13 +6,26 @@ export default defineConfig({
   retries: 1,
   use: {
     baseURL: "http://localhost:5173",
-    viewport: { width: 422, height: 912 },
     actionTimeout: 5000,
   },
   projects: [
     {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      name: "mobile-dpr1",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 430, height: 914 },
+        deviceScaleFactor: 1,
+      },
+    },
+    {
+      name: "mobile-dpr3",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 430, height: 914 },
+        deviceScaleFactor: 3,
+        hasTouch: true,
+        isMobile: true,
+      },
     },
   ],
   webServer: {

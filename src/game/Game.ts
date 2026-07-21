@@ -1511,10 +1511,22 @@ export class Game {
   private checkSegmentHits(a: Vec2, b: Vec2, trail: SlashTrail) {
     // P4.4A.2: Boss模式先路由到护甲检测（不再走Enemy圆碰撞）
     if (this.gameMode === "boss" && this.bossController) {
-      const result = this.bossController.resolveArmorSegment(a, b, trail.id);
-      if (result) {
-        // 命中或弹刀
-        this.applyArmorResolveResult(result, a, b);
+      // P4.4A.3: 追击阶段路由到追击判定
+      if (this.bossController.phase === "pursuit") {
+        const result = this.bossController.resolvePursuitSegment(a, b, trail.id);
+        if (result) {
+          this.applyArmorResolveResult(result, a, b);
+          // 同步BossController的屏震/闪屏到Game
+          this.screenShake = Math.max(this.screenShake, this.bossController.screenShake);
+          this.flash = Math.max(this.flash, this.bossController.flash);
+          this.bossController.screenShake = 0;
+          this.bossController.flash = 0;
+        }
+      } else {
+        const result = this.bossController.resolveArmorSegment(a, b, trail.id);
+        if (result) {
+          this.applyArmorResolveResult(result, a, b);
+        }
       }
       return;
     }
