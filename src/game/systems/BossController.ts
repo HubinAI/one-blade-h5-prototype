@@ -156,6 +156,8 @@ export class BossController {
   flash: number = 0;
   /** 追击能量增幅标记 */
   pursuitEnergyBoosted = false;
+  /** 追击整刀Session */
+  private _pursuitSession: { slashId: string; bodyContact: boolean; firstBodyHitPos?: Vec2; lastBodyHitPos?: Vec2 } = { slashId: "", bodyContact: false };
 
   // 完成状态
   private breakShowTimer = 0;
@@ -209,6 +211,7 @@ export class BossController {
     this._bossHP = this._bossMaxHP; this.particles = [];
     this._resolvedSlashId = ""; this.lastResolveDebug = null;
     this._session = { slashId: "", bodyContact: false, firstBodyHitPos: undefined, lastBodyHitPos: undefined, finalResult: undefined };
+    this._pursuitSession = { slashId: "", bodyContact: false };
     this._impactTriggered = false; this._objectiveTimer = 0; this._switchTimer = 0; this._elapsed = 0;
     this.holdTimer = 0; this.pursuitIntroTimer = 0;
     this.coreBreakTimer = 0; this.executionIntroTimer = 0;
@@ -392,6 +395,7 @@ export class BossController {
     if (this._phase === "armor_break_show") this.drawArmorBreakShow(ctx);
     if (this.p() === "pursuit_intro" && this.objectiveAlpha > 0.01) this.drawObjective(ctx);
     if (this._phase === "pursuit" && this.objectiveAlpha > 0.01) this.drawObjective(ctx);
+    if (this._phase === "execution_intro" && this.objectiveAlpha > 0.01) this.drawObjective(ctx);
     if (this._phase !== "loading" && this._phase !== "intro") this.drawBossHud(ctx);
   }
 
@@ -417,7 +421,10 @@ export class BossController {
   /** P4.4A.3: 追击判定（返回独立PursuitResolveResult） */
   resolvePursuitSegment(segA: Vec2, segB: Vec2, slashId: string): import("../types").PursuitResolveResult | null {
     if (this._phase !== "pursuit") return null;
-    if (this._resolvedSlashId === slashId) return null;
+    if (this._resolvedSlashId === slashId) return null; // 已命中核心，整刀已结算
+    if (this._pursuitSession.slashId !== slashId) {
+      this._pursuitSession = { slashId, bodyContact: false };
+    }
     const core = this.getCoreWorldPos();
     if (this.segmentHitEllipse(segA, segB, core.cx, core.cy, core.rx, core.ry)) {
       this._resolvedSlashId = slashId;
@@ -431,12 +438,30 @@ export class BossController {
     }
     const bodyHit = BODY_PARTS.some(p => this.segmentHitEllipse(segA, segB, DESIGN_WIDTH / 2 + p.cx, this.renderY + p.cy, p.rx, p.ry));
     if (bodyHit) {
-      this._resolvedSlashId = slashId; // body整刀去重
-      this.lastResolveDebug = { slashId, segA, segB, activeArmorName: "body", minDist: 0, bodyHit: true, result: "body_contact" };
-      return { kind: "pursuit_body_hit", hitPos: segB, slashId };
+      this._pursuitSession.bodyContact = true;
+      this._pursuitSession.firstBodyHitPos ??= segB;
+      this._pursuitSession.lastBodyHitPos = segB;
     }
-    this._resolvedSlashId = slashId; // miss也锁定，整刀无反馈
+    // 不锁定slashId，允许多segment穿透→最终命中核心
+    return null;
+  }
+
+  /** P4.4A.3: 收刀时结算追击最终结果 */
+  finishPursuitSlash(slashId: string): import("../types").PursuitResolveResult | null {
+    if (this._resolvedSlashId === slashId) return null;
+    if (this._pursuitSession.slashId !== slashId) return null;
+    this._resolvedSlashId = slashId;
+    const session = this._pursuitSession;
+    if (session.bodyContact) {
+      return { kind: "pursuit_body_hit", hitPos: session.lastBodyHitPos!, slashId };
+    }
     return { kind: "pursuit_miss", slashId };
+  }
+
+  /** P4.4A.3: 统一Boss收刀路由 */
+  finishBossSlash(slashId: string): ArmorResolveResult | import("../types").PursuitResolveResult | null {
+    if (this._phase === "pursuit") return this.finishPursuitSlash(slashId);
+    return this.finishSlash(slashId);
   }
 
   // ==============================================================

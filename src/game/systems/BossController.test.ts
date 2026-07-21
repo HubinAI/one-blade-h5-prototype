@@ -296,20 +296,26 @@ describe("BossController - 护甲解析", () => {
     expect(bc3.debugSnapshot["Pursuit"]).toBe("1/3");
   });
 
-  it("pursuit_body_hit不推进进度", () => {
+  it("pursuit_body_hit不推进进度（收刀时结算）", () => {
     const bc3 = new BossController("thunderGeneral");
     toPursuit(bc3);
-    // 切中身体左侧
-    const r = bc3.resolvePursuitSegment(v(160, 180), v(190, 230), "pb1");
-    expect(r!.kind).toBe("pursuit_body_hit");
+    // 切中身体——segment返回null，收刀时结算一次
+    const r1 = bc3.resolvePursuitSegment(v(160, 180), v(190, 230), "pb1");
+    expect(r1).toBeNull();
     expect(bc3.debugSnapshot["Pursuit"]).toBe("0/3");
+    const finish = bc3.finishPursuitSlash("pb1");
+    expect(finish!.kind).toBe("pursuit_body_hit");
+    expect(bc3.debugSnapshot["Pursuit"]).toBe("0/3"); // body不推进
   });
 
-  it("pursuit_miss不推进进度", () => {
+  it("pursuit_miss不推进进度（收刀时结算）", () => {
     const bc3 = new BossController("thunderGeneral");
     toPursuit(bc3);
-    const r = bc3.resolvePursuitSegment(v(50, 700), v(100, 750), "pm1");
-    expect(r!.kind).toBe("pursuit_miss");
+    const r1 = bc3.resolvePursuitSegment(v(50, 700), v(100, 750), "pm1");
+    expect(r1).toBeNull();
+    expect(bc3.debugSnapshot["Pursuit"]).toBe("0/3");
+    const finish = bc3.finishPursuitSlash("pm1");
+    expect(finish!.kind).toBe("pursuit_miss");
     expect(bc3.debugSnapshot["Pursuit"]).toBe("0/3");
   });
 
@@ -351,6 +357,63 @@ describe("BossController - 护甲解析", () => {
     expect(bc3.phase).toBe("execution_intro");
     expect(bc3.inputLocked).toBe(true);
     expect(bc3.freezeCombatResources).toBe(true);
+  });
+
+  it("前段挥空后段命中核心 → pursuit_hit（多segments）", () => {
+    const bc = new BossController("thunderGeneral");
+    toPursuit(bc);
+    const id = "multi_seg_1";
+    // seg1: 挥空
+    const r1 = bc.resolvePursuitSegment(v(100, 500), v(150, 350), id);
+    expect(r1).toBeNull();
+    // seg2: 接近身体但未中核心
+    const r2 = bc.resolvePursuitSegment(v(150, 350), v(190, 240), id);
+    expect(r2).toBeNull();
+    // seg3: 穿过核心（从左侧切入核心区域）
+    const r3 = bc.resolvePursuitSegment(v(195, 190), v(225, 200), id);
+    expect(r3).not.toBeNull();
+    expect(r3!.kind).toBe("pursuit_hit");
+    expect(bc.debugSnapshot["Pursuit"]).toBe("1/3");
+  });
+
+  it("先接触身体后命中核心 → pursuit_hit", () => {
+    const bc = new BossController("thunderGeneral");
+    toPursuit(bc);
+    const id = "body_then_core";
+    // seg1: 命中身体外沿（左侧躯干，绕开核心）
+    const r1 = bc.resolvePursuitSegment(v(155, 155), v(175, 220), id);
+    expect(r1).toBeNull();
+    // seg2: 穿过核心
+    const r2 = bc.resolvePursuitSegment(v(195, 190), v(225, 200), id);
+    expect(r2).not.toBeNull();
+    expect(r2!.kind).toBe("pursuit_hit");
+    expect(bc.debugSnapshot["Pursuit"]).toBe("1/3");
+  });
+
+  it("多个body segment只在收刀时反馈一次", () => {
+    const bc = new BossController("thunderGeneral");
+    toPursuit(bc);
+    const id = "multi_body_1";
+    // 多个身体segment都不返回体反馈（绕开核心区域）
+    expect(bc.resolvePursuitSegment(v(155, 160), v(165, 200), id)).toBeNull();
+    expect(bc.resolvePursuitSegment(v(165, 200), v(170, 230), id)).toBeNull();
+    expect(bc.resolvePursuitSegment(v(170, 230), v(175, 260), id)).toBeNull();
+    expect(bc.debugSnapshot["Pursuit"]).toBe("0/3");
+    // 收刀时只返回一次body_hit
+    const finish = bc.finishPursuitSlash(id);
+    expect(finish!.kind).toBe("pursuit_body_hit");
+  });
+
+  it("多个miss segment收刀时返回pursuit_miss", () => {
+    const bc = new BossController("thunderGeneral");
+    toPursuit(bc);
+    const id = "multi_miss_1";
+    expect(bc.resolvePursuitSegment(v(50, 700), v(80, 650), id)).toBeNull();
+    expect(bc.resolvePursuitSegment(v(80, 650), v(120, 600), id)).toBeNull();
+    expect(bc.resolvePursuitSegment(v(120, 600), v(150, 550), id)).toBeNull();
+    expect(bc.debugSnapshot["Pursuit"]).toBe("0/3");
+    const finish = bc.finishPursuitSlash(id);
+    expect(finish!.kind).toBe("pursuit_miss");
   });
 
   it("重新enterLoading重置所有状态", () => {

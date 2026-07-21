@@ -3692,6 +3692,19 @@ export class Game {
 
 /** P4.4A.2: Boss模式收刀公共清理 */
 private finalizeBossSlashCommon(trail: SlashTrail): void {
+  // P4.4A.3: 追击阶段走独立收刀结算
+  if (this.bossController?.phase === "pursuit") {
+    const pursuitResult = this.bossController.finishPursuitSlash(trail.id);
+    if (pursuitResult) {
+      this.applyPursuitResolveResult(pursuitResult, trail.points[0], trail.points[trail.points.length - 1]);
+    }
+    this.warriorSheathTimer = 0.38;
+    this.warriorDrawTimer = 0;
+    this.regenDelayTimer = BALANCE.swordEnergy.regenDelayAfterSlash;
+    AudioService.slashEnd();
+    this.currentSlash = undefined;
+    return;
+  }
   // 收刀结算body_contact→wrong_hit，获取最终结果
   const finishResult = this.bossController?.finishSlash(trail.id);
   if (finishResult && finishResult.kind !== "miss") {
