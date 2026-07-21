@@ -3692,14 +3692,18 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       this.flash = Math.max(this.flash, 0.35);
       this.screenShake = Math.max(this.screenShake, 0.25);
       this.particles.push(...sparkBurst({ x: result.shardOrigin.x, y: result.shardOrigin.y }, 8, "#f0e130"));
-      AudioService.armorHit(); // Boss音效
+      // 第三击用armorComplete替代armorHit，避免叠加
+      if (result.completed) {
+        AudioService.armorComplete();
+      } else {
+        AudioService.armorHit();
+      }
       this.addCombatFloat({
         x: result.hitPos.x, y: result.hitPos.y - 20,
         text: "破甲", color: "#f0e130", size: 18, duration: 0.6,
         category: "mechanic", priority: "A", mergeKey: `armor-hit-${result.slashId}`
       });
       if (result.completed) {
-        AudioService.armorComplete();
         this.screenShake = Math.max(this.screenShake, 0.6);
         this.flash = Math.max(this.flash, 0.5);
         // 碎甲：三块护甲位置各生成一圈粒子

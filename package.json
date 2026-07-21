@@ -1,7 +1,7 @@
 {
   "name": "one-blade-h5-prototype",
   "private": true,
-  "version": "0721.008",
+  "version": "0721.009",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
@@ -9,7 +9,8 @@
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
     "test:ui": "vitest run src/components/MainMenu.test.tsx",
-    "test:boss": "vitest run src/game/systems/BossController.test.ts"
+    "test:boss": "vitest run src/game/systems/BossController.test.ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",

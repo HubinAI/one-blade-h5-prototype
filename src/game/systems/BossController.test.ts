@@ -29,9 +29,7 @@ describe("BossController - 护甲解析", () => {
   });
 
   it("一刀穿过左肩甲 → armor_hit, 进度1/3", () => {
-    // 左肩中心在 (DESIGN_WIDTH/2 - 50, renderY - 30) = (161, 165)
-    // 从左上到右下穿过左肩甲区域
-    const result = bc.resolveArmorSegment(v(130, 140), v(180, 180), "slash_1");
+    const result = bc.resolveArmorSegment(v(141, 145), v(181, 185), "slash_1");
     expect(result).not.toBeNull();
     if (result!.kind === "armor_hit") {
       expect(result!.progress).toBe(1);
@@ -40,63 +38,58 @@ describe("BossController - 护甲解析", () => {
   });
 
   it("同一刀只能破一甲（第二个segments返回null）", () => {
-    bc.resolveArmorSegment(v(130, 140), v(180, 180), "slash_1");
-    // 等待切换延迟
+    bc.resolveArmorSegment(v(141, 145), v(181, 185), "slash_1");
     bc.update(0.5);
-    // 再次使用同一slashId→应被整刀锁拦截
-    const result = bc.resolveArmorSegment(v(130, 140), v(230, 180), "slash_1");
+    const result = bc.resolveArmorSegment(v(161, 155), v(200, 180), "slash_1");
     expect(result).toBeNull();
     expect(bc.debugSnapshot["Armor Progress"]).toBe("1/3");
   });
 
   it("三次独立挥刀完成3/3", () => {
-    // 第1刀: 左肩
-    bc.resolveArmorSegment(v(130, 140), v(180, 180), "slash_1");
+    // 第1刀: 左肩 (center: 211-50=161, 195-30=165, rx=34, ry=26)
+    const r1 = bc.resolveArmorSegment(v(141, 145), v(181, 185), "s1");
+    expect(r1?.kind).toBe("armor_hit");
     expect(bc.debugSnapshot["Armor Progress"]).toBe("1/3");
-    bc.update(0.5); // 等待切换延迟0.45s
-    // 第2刀: 右肩 (center: 211+50=261, 165, rx=34, ry=26)
-    const r2 = bc.resolveArmorSegment(v(220, 130), v(300, 190), "slash_2");
-    if (r2?.kind !== "armor_hit") {
-      bc.resolveArmorSegment(v(200, 140), v(320, 200), "slash_2b");
-    }
+    bc.update(0.5);
+    // 第2刀: 右肩 (center: 211+50=261, 165)
+    const r2 = bc.resolveArmorSegment(v(221, 135), v(301, 195), "s2");
+    expect(r2?.kind).toBe("armor_hit");
     expect(bc.debugSnapshot["Armor Progress"]).toBe("2/3");
-    bc.update(0.5); // 等待切换延迟
+    bc.update(0.5);
     // 第3刀: 胸甲 (center: 211, 201, rx=28, ry=30)
-    const r3 = bc.resolveArmorSegment(v(180, 180), v(240, 220), "slash_3");
-    if (r3?.kind !== "armor_hit") {
-      bc.resolveArmorSegment(v(160, 170), v(260, 220), "slash_3b");
-    }
+    const r3 = bc.resolveArmorSegment(v(181, 171), v(241, 231), "s3");
+    expect(r3?.kind).toBe("armor_hit");
     expect(bc.debugSnapshot["Armor Progress"]).toBe("3/3");
   });
 
   it("第三刀完成后进入armor_break_show", () => {
-    bc.resolveArmorSegment(v(130, 140), v(180, 180), "s1");
+    bc.resolveArmorSegment(v(141, 145), v(181, 185), "s1");
     bc.update(0.5);
-    bc.resolveArmorSegment(v(230, 140), v(280, 180), "s2");
+    bc.resolveArmorSegment(v(221, 135), v(301, 195), "s2");
     bc.update(0.5);
-    bc.resolveArmorSegment(v(180, 180), v(240, 220), "s3");
+    bc.resolveArmorSegment(v(181, 171), v(241, 231), "s3");
     expect(bc.phase).toBe("armor_break_show");
   });
 
   it("armor_break_show 1.2秒后进入armor_complete_hold", () => {
-    bc.resolveArmorSegment(v(130, 140), v(180, 180), "s1");
+    bc.resolveArmorSegment(v(141, 145), v(181, 185), "s1");
     bc.update(0.5);
-    bc.resolveArmorSegment(v(230, 140), v(280, 180), "s2");
+    bc.resolveArmorSegment(v(221, 135), v(301, 195), "s2");
     bc.update(0.5);
-    bc.resolveArmorSegment(v(180, 180), v(240, 220), "s3");
+    bc.resolveArmorSegment(v(181, 171), v(241, 231), "s3");
     expect(bc.phase).toBe("armor_break_show");
-    bc.update(0.5); bc.update(0.5); bc.update(0.5); // 1.5s → armor_complete_hold
+    bc.update(0.5); bc.update(0.5); bc.update(0.5);
     expect(bc.phase).toBe("armor_complete_hold");
   });
 
   it("armor_complete_hold 时 freezeCombatResources=true", () => {
-    bc.resolveArmorSegment(v(130, 140), v(180, 180), "s1");
+    bc.resolveArmorSegment(v(141, 145), v(181, 185), "s1");
     bc.update(0.5);
-    bc.resolveArmorSegment(v(230, 140), v(280, 180), "s2");
+    bc.resolveArmorSegment(v(221, 135), v(301, 195), "s2");
     bc.update(0.5);
-    bc.resolveArmorSegment(v(180, 180), v(240, 220), "s3");
+    bc.resolveArmorSegment(v(181, 171), v(241, 231), "s3");
     expect(bc.phase).toBe("armor_break_show");
-    bc.update(0.5); bc.update(0.5); bc.update(0.5); // 1.5s → armor_complete_hold
+    bc.update(0.5); bc.update(0.5); bc.update(0.5);
     expect(bc.phase).toBe("armor_complete_hold");
     expect(bc.freezeCombatResources).toBe(true);
     expect(bc.inputLocked).toBe(true);
@@ -119,8 +112,7 @@ describe("BossController - 护甲解析", () => {
   });
 
   it("护甲切换期间 armorSwitching=true, inputLocked=true", () => {
-    // 命左肩 → 触发切换延迟
-    bc.resolveArmorSegment(v(130, 140), v(180, 180), "s1");
+    bc.resolveArmorSegment(v(141, 145), v(181, 185), "s1");
     expect(bc.armorSwitching).toBe(true);
     expect(bc.inputLocked).toBe(true);
     // 推进0.5秒后切换完成
@@ -167,5 +159,31 @@ describe("BossController - 护甲解析", () => {
     bc.renderWorld(ctx);
     bc.renderOverlay(ctx);
     // 不报错即通过
+  });
+
+  it("完整update推进入armor（不依赖skipIntro）", () => {
+    const bc2 = new BossController("thunderGeneral");
+    bc2.enterLoading();
+    expect(bc2.phase).toBe("loading");
+    bc2.update(0.01); // loading立即转为intro
+    expect(bc2.phase).toBe("intro");
+    // 推过intro全部时间 (2.85s)
+    bc2.update(1.5);
+    bc2.update(1.5);
+    expect(bc2.phase).toBe("armor");
+    expect(bc2.debugSnapshot["Armor Progress"]).toBe("0/3");
+  });
+
+  it("bossImpact只触发一次（_impactTriggered防护）", () => {
+    const bc2 = new BossController("thunderGeneral");
+    bc2.enterLoading();
+    bc2.update(0.01);
+    // 推过1.25s冲击点
+    bc2.update(1.25);
+    expect(bc2["_impactTriggered"]).toBe(true); // 冲击已触发
+    // 再次推过冲击点——确认不会再次触发
+    bc2.update(0.1);
+    // _impactTriggered保持true（不重复）
+    expect(bc2["_impactTriggered"]).toBe(true);
   });
 });

@@ -50,8 +50,10 @@ export class BossController {
   get armorSwitching(): boolean {
     return this._phase === "armor" && this._switchTimer > 0;
   }
+  /** 避开TS类型缩窄 */
+  private p(): BossPhaseState { return this._phase; }
   get inputLocked(): boolean {
-    return this._phase === "loading" || this._phase === "intro" || this._phase === "armor_break_show" || this._phase === "armor_complete_hold" || this.armorSwitching;
+    return this._phase === "loading" || this._phase === "intro" || this._phase === "armor_break_show" || this._phase === "armor_complete_hold" || this.armorSwitching || this.p() === "pursuit_intro";
   }
   /** 完成Hold时冻结战斗资源 */
   get freezeCombatResources(): boolean {
@@ -98,6 +100,7 @@ export class BossController {
   private guardianAlpha = 0;
   private bossNameAlpha = 0;
   private objectiveAlpha = 0;
+  private objectiveText = "切发亮护甲";
   private vignetteIntensity = 0;
   private particles: { x: number; y: number; life: number; size: number; color: string }[] = [];
 
@@ -123,6 +126,10 @@ export class BossController {
   /** 护甲切换延迟 */
   private _switchTimer = 0;
   private readonly SWITCH_DELAY = 0.45;
+  /** Hold计时（P4.4A.3转pursuit_intro） */
+  private holdTimer = 0;
+  /** 追击介绍计时 */
+  private pursuitIntroTimer = 0;
 
   // 完成状态
   private breakShowTimer = 0;
@@ -177,6 +184,7 @@ export class BossController {
     this._resolvedSlashId = ""; this._bodyContactSlashId = ""; this.lastResolveDebug = null;
     this._session = { slashId: "", bodyContact: false, firstBodyHitPos: undefined, lastBodyHitPos: undefined, finalResult: undefined };
     this._impactTriggered = false; this._objectiveTimer = 0; this._switchTimer = 0; this._elapsed = 0;
+    this.holdTimer = 0; this.pursuitIntroTimer = 0;
     this.lastErrorRePromptElapsed = -99;
     this.initArmorTargets();
     this.armorTargets[ARMOR_L].active = true;
@@ -215,7 +223,22 @@ export class BossController {
       return;
     }
     if (this._phase === "armor_complete_hold") {
-      // 保持，不进入胜利
+      this.holdTimer += dt;
+      // P4.4A.3: 0.3秒后进入追击介绍
+      if (this.holdTimer >= 0.35) {
+        (this._phase as BossPhaseState) = "pursuit_intro";
+        this.pursuitIntroTimer = 0;
+        this._bossHP = this._bossMaxHP;
+      }
+      return;
+    }
+    if (this.p() === "pursuit_intro") {
+      this.pursuitIntroTimer += dt;
+      if (this.pursuitIntroTimer >= 0.9) {
+        this._phase = "pursuit";
+        this.objectiveAlpha = 1;
+        this.objectiveText = "趁弱点显现时追击";
+      }
       return;
     }
   }
@@ -307,6 +330,7 @@ export class BossController {
     this.drawTexts(ctx);
     if (this._phase === "armor" && this.objectiveAlpha > 0.01) this.drawObjective(ctx);
     if (this._phase === "armor_break_show") this.drawArmorBreakShow(ctx);
+    if (this.p() === "pursuit_intro" && this.objectiveAlpha > 0.01) this.drawObjective(ctx);
     if (this._phase !== "loading" && this._phase !== "intro") this.drawBossHud(ctx);
   }
 
@@ -581,7 +605,7 @@ export class BossController {
     ctx.font = 'bold 16px "Microsoft YaHei", sans-serif';
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 8;
-    ctx.fillText("切发亮护甲", DESIGN_WIDTH / 2, 108); ctx.restore();
+    ctx.fillText(this.objectiveText, DESIGN_WIDTH / 2, 108); ctx.restore();
   }
 
   private drawArmorBreakShow(ctx: any): void {
@@ -633,6 +657,8 @@ export class BossController {
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     let phaseLabel = "阶段 1 · 破甲";
     if (this._phase === "armor_break_show" || this._phase === "armor_complete_hold") phaseLabel = "破甲完成";
+    if (this.p() === "pursuit_intro") phaseLabel = "阶段 2 · 追击";
+    if (this._phase === "pursuit") phaseLabel = "阶段 2 · 追击";
     ctx.fillText(phaseLabel, barLeft, labelY);
     ctx.fillStyle = "#a569bd"; ctx.font = '12px "Microsoft YaHei", sans-serif';
     ctx.textAlign = "right";

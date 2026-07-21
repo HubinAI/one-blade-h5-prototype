@@ -8,7 +8,7 @@ export type EnemyKind = "infantry" | "shield" | "powder" | "core" | "elite" | "b
 export type EliteKind = "fireRing" | "heal" | "aura";
 export type BossId = "yaoWang" | "moXiu" | "huaYao" | "thunderGeneral";
 /** P4.4A: Boss状态机阶段 */
-export type BossPhaseState = "loading" | "intro" | "armor" | "armor_break_show" | "armor_complete_hold" | "pursuit" | "core_break" | "execution" | "victory_show" | "result" | "fail" | "exit";
+export type BossPhaseState = "loading" | "intro" | "armor" | "armor_break_show" | "armor_complete_hold" | "pursuit_intro" | "pursuit" | "core_break" | "execution" | "victory_show" | "result" | "fail" | "exit";
 export type PickupKind = "drum" | "soul" | "oil";
 export type GamePhase = "playing" | "buffChoice" | "revive" | "won" | "lost" | "chestOpen" | "paused_for_chest";
 export type RatingGrade = "C" | "B" | "A" | "S" | "SS" | "神之一刀";
