@@ -416,8 +416,10 @@ export class Game {
       this.initializeThunderGeneralBoss();
     }
 
-    // P4.4A.3: E2E测试桥（仅在e2e=1参数下暴露）
-    if (typeof window !== "undefined" && window.location.search.includes("e2e=1")) {
+    // P4.4A.3: E2E测试桥（仅 e2e 构建期开启，公开 Pages 生产构建不含此桥）
+    // 构建期开关：vite build --mode e2e + .env.e2e 设置 VITE_ENABLE_E2E_BRIDGE=true
+    // 生产构建（MODE=production）该分支被静态消除，公开站点无法再通过 URL 参数开启作弊桥。
+    if (import.meta.env.MODE === "e2e" && import.meta.env.VITE_ENABLE_E2E_BRIDGE === "true") {
       const self = this;
       const instanceId = `game_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       (window as any).__ONE_BLADE_E2E__ = {
@@ -430,6 +432,7 @@ export class Game {
           energy: self.energy,
           pointerDown: self.pointerDown,
           currentSlashActive: self.currentSlash?.active ?? false,
+          inputLocked: self.bossController?.inputLocked ?? false,
           gameMode: self.gameMode,
         }),
         getTargets: () => ({
@@ -439,6 +442,8 @@ export class Game {
         // 程序化命中（仅 e2e 用）：直接调用游戏真实 resolve 逻辑，避免坐标离散采样 flaky
         slashArmor: () => self.bossController?.debugForceArmorHit() ?? false,
         slashCore: () => self.bossController?.debugForcePursuitHit() ?? false,
+        // 跳过Boss开场动画（e2e 仅用于加速到达 armor 阶段，不验证 intro 计时）
+        skipIntro: () => self.bossController?.skipIntro(),
       };
     }
 

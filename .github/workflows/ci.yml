@@ -25,3 +25,24 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 5
+
+  # 高DPR 坐标覆盖（非阻挡）：deviceScaleFactor=3，仅跑 boss-smoke。
+  # 失败不阻塞主链路（continue-on-error），用于捕获高DPR下渲染/坐标回归。
+  test-e2e-dpr3:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test -c playwright.dpr3.config.ts
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-dpr3
+          path: playwright-report/
+          retention-days: 5

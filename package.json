@@ -1,11 +1,12 @@
 {
   "name": "one-blade-h5-prototype",
   "private": true,
-  "version": "0721.018",
+  "version": "0721.019",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc && vite build",
+    "build:e2e": "tsc && vite build --mode e2e",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
     "test:ui": "vitest run src/components/MainMenu.test.tsx",

@@ -3,6 +3,8 @@ dist/
 .vite/
 .env
 .env.*
+# 例外：E2E 测试构建开关（仅启用测试桥，无密钥，不进生产构建）
+!.env.e2e
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -16,6 +18,8 @@ Thumbs.db
 # 自动化测试
 *.mjs
 e2e-screenshots/
+test-results/
+playwright-report/
 dist_old/
 dist_out/
 dist_old/
