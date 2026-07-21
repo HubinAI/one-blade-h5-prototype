@@ -420,8 +420,8 @@ export class Game {
     this.elitePreviewShown = false;
     this.eliteSpawnAnnounced = false;
 
-    // 首局教学检测
-    this.isFirstRun = (level.id === 1 || level.id === 10001) && !window.localStorage.getItem("one_blade_first_run_done");
+    // 首局教学检测（Boss模式不触发）
+    this.isFirstRun = this.gameMode !== "boss" && (level.id === 1 || level.id === 10001) && !window.localStorage.getItem("one_blade_first_run_done");
     if (this.isFirstRun) {
       this.overrideWithScriptedTutorial();
       this.showHint("drag-guide", "按住拖动，松手挥出一刀", DESIGN_WIDTH / 2, 118, 2.5);
@@ -655,6 +655,12 @@ export class Game {
       return;
     }
 
+    // P4.4A.2: Boss模式专用主循环（隔离所有普通系统）
+    if (this.gameMode === "boss") {
+      this.updateBossMode(scaledDt, frameDt);
+      return;
+    }
+
     this.elapsed += scaledDt;
     this.regenDelayTimer = Math.max(0, this.regenDelayTimer - scaledDt);
     this.chestMomentumTimer = Math.max(0, this.chestMomentumTimer - scaledDt);
@@ -806,6 +812,30 @@ export class Game {
     }
 
     ctx.restore();
+  }
+
+  /** P4.4A.2: Boss模式专用主循环 */
+  private updateBossMode(scaledDt: number, frameDt: number): void {
+    this.elapsed += scaledDt;
+    this.updateActiveSlash(scaledDt);
+    this.updateParticles(scaledDt);
+    this.updateTexts(scaledDt);
+    this.updateBossSpawn();
+    this.updateBossController(scaledDt);
+    this.regenDelayTimer = Math.max(0, this.regenDelayTimer - scaledDt);
+    if (!this.currentSlash?.active && !this.pendingSlash && this.regenDelayTimer <= 0) {
+      if (!(this.bossController?.freezeCombatResources)) {
+        this.energy = recoverEnergy(this.energy, scaledDt * this.getPassiveRegenMultiplier(), this.drumTimer);
+      }
+    }
+    this.drumTimer = Math.max(0, this.drumTimer - scaledDt);
+    this.warDrumNoDecayTimer = Math.max(0, this.warDrumNoDecayTimer - scaledDt);
+    this.warriorDrawTimer = Math.max(0, this.warriorDrawTimer - scaledDt);
+    this.warriorSheathTimer = Math.max(0, this.warriorSheathTimer - scaledDt);
+    this.screenShake = Math.max(0, this.screenShake - scaledDt * 2.7);
+    this.flash = Math.max(0, this.flash - scaledDt * 2.2);
+    this.updateEdictIconFly(frameDt);
+    this.updateEdictStatusIcon(frameDt);
   }
 
   handlePointerDown(pos: Vec2) {
@@ -6864,6 +6894,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
   /** P4.4A.2: Boss构造期初始化玄甲雷将（不等待0.5秒） */
   private initializeThunderGeneralBoss(): void {
+    if (this.bossSpawned || this.bossController) return; // 防重复初始化
+    this.bossSpawned = true;
     this.gameMode = "boss";
     // 清空场上所有敌人
     for (const e of this.enemies) { e.alive = false; }

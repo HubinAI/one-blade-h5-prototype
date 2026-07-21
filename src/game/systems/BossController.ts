@@ -48,6 +48,10 @@ export class BossController {
   get inputLocked(): boolean {
     return this._phase === "loading" || this._phase === "intro" || this._phase === "armor_break_show" || this._phase === "armor_complete_hold";
   }
+  /** 完成Hold时冻结战斗资源 */
+  get freezeCombatResources(): boolean {
+    return this._phase === "armor_break_show" || this._phase === "armor_complete_hold";
+  }
 
   // ---- 调试 ----
   private lastResolveDebug: ResolveDebug | null = null;
@@ -66,6 +70,7 @@ export class BossController {
       "Resolved Slash": this._resolvedSlashId || "无",
       "Slash Session": this._session.slashId || "无",
       "Final Result": this._session.finalResult || "-",
+      "Freeze": this.freezeCombatResources,
       ...(this.lastResolveDebug ? {
         "Last Slash ID": this.lastResolveDebug.slashId,
         "Last Seg": `(${this.lastResolveDebug.segA.x.toFixed(0)},${this.lastResolveDebug.segA.y.toFixed(0)})→(${this.lastResolveDebug.segB.x.toFixed(0)},${this.lastResolveDebug.segB.y.toFixed(0)})`,
@@ -106,6 +111,9 @@ export class BossController {
   private _impactTriggered = false;
   /** 目标提示计时器 */
   private _objectiveTimer = 0;
+  /** 护甲切换延迟 */
+  private _switchTimer = 0;
+  private readonly SWITCH_DELAY = 0.45;
 
   // 完成状态
   private breakShowTimer = 0;
@@ -161,7 +169,7 @@ export class BossController {
     this._bossHP = this._bossMaxHP; this.particles = [];
     this._resolvedSlashId = ""; this._bodyContactSlashId = ""; this.lastResolveDebug = null;
     this._session = { slashId: "", bodyContact: false, firstBodyHitPos: undefined, lastBodyHitPos: undefined, finalResult: undefined };
-    this._impactTriggered = false; this._objectiveTimer = 0;
+    this._impactTriggered = false; this._objectiveTimer = 0; this._switchTimer = 0;
     this.initArmorTargets();
     this.armorTargets[ARMOR_L].active = true;
   }
@@ -207,6 +215,7 @@ export class BossController {
   resolveArmorSegment(segA: Vec2, segB: Vec2, slashId: string): ArmorResolveResult | null {
     if (this._phase !== "armor") return null;
     if (this._resolvedSlashId === slashId) return null;
+    if (this._switchTimer > 0) return null; // 护甲切换延迟
     // 初始化Session
     if (this._session.slashId !== slashId) {
       this._session = { slashId, bodyContact: false, firstBodyHitPos: undefined, lastBodyHitPos: undefined, finalResult: undefined };
@@ -228,7 +237,7 @@ export class BossController {
       this._session.finalResult = "armor_hit";
       const completed = this.armorProgress >= this.maxArmor;
       if (completed) { this._phase = "armor_break_show"; this.breakShowTimer = 0; }
-      else { this.activeArmorIndex = (this.activeArmorIndex + 1) % this.maxArmor; this.armorTargets[this.activeArmorIndex].active = true; }
+      else { this._switchTimer = this.SWITCH_DELAY; this.activeArmorIndex = (this.activeArmorIndex + 1) % this.maxArmor; }
       this.lastResolveDebug = { slashId, segA, segB, activeArmorName: active.name, minDist: 0, bodyHit: true, result: "armor_hit" };
       return { kind: "armor_hit", targetId: active.id, hitPos: segB, armorCenter: { x: tcX, y: tcY }, shardOrigin: { x: tcX, y: tcY }, progress: this.armorProgress, maxProgress: this.maxArmor, completed, slashId };
     }
@@ -298,7 +307,14 @@ export class BossController {
   // ==============================================================
   private updateArmorPhase(dt: number): void {
     for (const t of this.armorTargets) { if (t.animTimer > 0) t.animTimer = Math.max(0, t.animTimer - dt); }
-    // P4.4A.2: objectiveAlpha 1.5s首次显示→0.3s淡出
+    // 护甲切换延迟：倒计时结束后激活下一块
+    if (this._switchTimer > 0) {
+      this._switchTimer = Math.max(0, this._switchTimer - dt);
+      if (this._switchTimer <= 0) {
+        this.armorTargets[this.activeArmorIndex].active = true;
+      }
+    }
+    // objectiveAlpha计时器
     if (this._objectiveTimer < 1.5) {
       this._objectiveTimer += dt;
       this.objectiveAlpha = Math.min(1, this._objectiveTimer / 0.2);
@@ -431,15 +447,27 @@ export class BossController {
     const isActive = this._phase === "armor" && target.active && !target.broken;
     const isBroken = target.broken;
     const flash = isActive && this.consecutiveErrors >= CONSECUTIVE_ERROR_LIMIT;
+    // 破碎态：根据animTimer缩小+淡出
+    let scale = 1, alpha = 1;
+    if (isBroken && target.animTimer > 0) {
+      const t = target.animTimer / 0.6;
+      scale = 0.3 + 0.7 * t;
+      alpha = 0.1 + 0.9 * t;
+    } else if (isBroken) {
+      scale = 0.15; alpha = 0.08; // 破碎后几乎消失
+    }
     ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
     ctx.fillStyle = isBroken ? "#0d0515" : (isActive ? "#3d1a50" : "#150a20");
     ctx.strokeStyle = isActive ? (flash ? "#ff6a33" : "#f0e130") : "#3d1a4a";
     ctx.lineWidth = isActive ? 3 : 1.5;
     if (isActive) { ctx.shadowColor = flash ? "#ff6a33" : "#f0e130"; ctx.shadowBlur = flash ? 20 : 12; }
-    ctx.beginPath(); ctx.ellipse(x, y, w, h, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(0, 0, w, h, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     if (isBroken && target.animTimer > 0) {
-      ctx.strokeStyle = "rgba(240, 225, 48, 0.5)"; ctx.lineWidth = 2; ctx.shadowBlur = 0;
-      ctx.beginPath(); ctx.moveTo(x - 8, y - 4); ctx.lineTo(x, y); ctx.lineTo(x + 6, y + 6); ctx.stroke();
+      ctx.strokeStyle = `rgba(240, 225, 48, ${target.animTimer / 0.6 * 0.6})`; ctx.lineWidth = 2; ctx.shadowBlur = 0;
+      ctx.beginPath(); ctx.moveTo(-8, -4); ctx.lineTo(0, 0); ctx.lineTo(6, 6); ctx.stroke();
     }
     ctx.restore();
   }
@@ -447,7 +475,18 @@ export class BossController {
   private drawChestPiece(ctx: any, target: ArmorTarget): void {
     const isActive = this._phase === "armor" && target.active && !target.broken;
     const isBroken = target.broken;
+    let scale = 1, alpha = 1;
+    if (isBroken && target.animTimer > 0) {
+      const t = target.animTimer / 0.6;
+      scale = 0.3 + 0.7 * t;
+      alpha = 0.1 + 0.9 * t;
+    } else if (isBroken) {
+      scale = 0.15; alpha = 0.08;
+    }
     ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.translate(0, 0);
+    ctx.scale(scale, scale);
     ctx.fillStyle = isBroken ? "#0d0515" : (isActive ? "#3d1a50" : "#150a20");
     ctx.strokeStyle = isActive ? "#f0e130" : "#3d1a4a";
     ctx.lineWidth = isActive ? 3 : 1.5;
@@ -455,7 +494,7 @@ export class BossController {
     ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(20, 2); ctx.lineTo(0, 22); ctx.lineTo(-20, 2);
     ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0;
     if (isBroken && target.animTimer > 0) {
-      ctx.strokeStyle = "rgba(240, 225, 48, 0.5)"; ctx.lineWidth = 2;
+      ctx.strokeStyle = `rgba(240, 225, 48, ${target.animTimer / 0.6 * 0.5})`; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(-8, 0); ctx.lineTo(0, 6); ctx.lineTo(10, -4); ctx.stroke();
     }
     ctx.restore();
