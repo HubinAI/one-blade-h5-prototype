@@ -13,9 +13,12 @@ const INTRO_DURATION = 2.85;
 const ARMOR_L = 0, ARMOR_R = 1, ARMOR_C = 2;
 const CONSECUTIVE_ERROR_LIMIT = 2;
 
-// 身体Hit Area（椭圆）
-const BODY_CX = 0, BODY_CY = -5;
-const BODY_RX = 50, BODY_RY = 55;
+// 身体Hit Area（多个几何区域并集）
+const BODY_PARTS = [
+  { cx: 0, cy: -20, rx: 70, ry: 35 },  // 上半躯干+肩
+  { cx: 0, cy: 15, rx: 50, ry: 40 },    // 下躯干+甲裙
+  { cx: 0, cy: -65, rx: 30, ry: 18 },    // 头盔
+];
 
 export type ArmorResolveResult =
   | { kind: "armor_hit"; targetId: number; hitPos: Vec2; armorCenter: Vec2; shardOrigin: Vec2; progress: number; maxProgress: number; completed: boolean; slashId: string }
@@ -61,6 +64,8 @@ export class BossController {
       "Player Invuln": this.playerInvulnerable,
       "Sub Blade Locked": true,
       "Resolved Slash": this._resolvedSlashId || "无",
+      "Slash Session": this._session.slashId || "无",
+      "Final Result": this._session.finalResult || "-",
       ...(this.lastResolveDebug ? {
         "Last Slash ID": this.lastResolveDebug.slashId,
         "Last Seg": `(${this.lastResolveDebug.segA.x.toFixed(0)},${this.lastResolveDebug.segA.y.toFixed(0)})→(${this.lastResolveDebug.segB.x.toFixed(0)},${this.lastResolveDebug.segB.y.toFixed(0)})`,
@@ -95,6 +100,8 @@ export class BossController {
   private _resolvedSlashId = "";
   /** 整刀Body Contact候选（wrong_hit收刀结算） */
   private _bodyContactSlashId = "";
+  /** 整刀Session追踪 */
+  private _session: { slashId: string; bodyContact: boolean; firstBodyHitPos?: Vec2; lastBodyHitPos?: Vec2; finalResult?: string } = { slashId: "", bodyContact: false };
   /** 冲击触发标记（防shakeTimer重复） */
   private _impactTriggered = false;
   /** 目标提示计时器 */
@@ -153,6 +160,7 @@ export class BossController {
     this.activeArmorIndex = ARMOR_L;
     this._bossHP = this._bossMaxHP; this.particles = [];
     this._resolvedSlashId = ""; this._bodyContactSlashId = ""; this.lastResolveDebug = null;
+    this._session = { slashId: "", bodyContact: false, firstBodyHitPos: undefined, lastBodyHitPos: undefined, finalResult: undefined };
     this._impactTriggered = false; this._objectiveTimer = 0;
     this.initArmorTargets();
     this.armorTargets[ARMOR_L].active = true;
@@ -198,7 +206,11 @@ export class BossController {
   // ==============================================================
   resolveArmorSegment(segA: Vec2, segB: Vec2, slashId: string): ArmorResolveResult | null {
     if (this._phase !== "armor") return null;
-    if (this._resolvedSlashId === slashId) return null; // 整刀已锁定
+    if (this._resolvedSlashId === slashId) return null;
+    // 初始化Session
+    if (this._session.slashId !== slashId) {
+      this._session = { slashId, bodyContact: false, firstBodyHitPos: undefined, lastBodyHitPos: undefined, finalResult: undefined };
+    }
     const active = this.armorTargets[this.activeArmorIndex];
     if (!active || active.broken) return null;
     const cx = DESIGN_WIDTH / 2;
@@ -213,7 +225,7 @@ export class BossController {
       active.animTimer = 0.6;
       this.armorProgress++; this.consecutiveErrors = 0;
       this._resolvedSlashId = slashId;
-      this._bodyContactSlashId = ""; // 清除body候选
+      this._session.finalResult = "armor_hit";
       const completed = this.armorProgress >= this.maxArmor;
       if (completed) { this._phase = "armor_break_show"; this.breakShowTimer = 0; }
       else { this.activeArmorIndex = (this.activeArmorIndex + 1) % this.maxArmor; this.armorTargets[this.activeArmorIndex].active = true; }
@@ -221,11 +233,14 @@ export class BossController {
       return { kind: "armor_hit", targetId: active.id, hitPos: segB, armorCenter: { x: tcX, y: tcY }, shardOrigin: { x: tcX, y: tcY }, progress: this.armorProgress, maxProgress: this.maxArmor, completed, slashId };
     }
 
-    // 第2级(候选): 是否接触Boss身体（使用整条线段判定，不立即结算）
-    if (this._bodyContactSlashId !== slashId && this.segmentHitEllipse(segA, segB, cx, cy + BODY_CY, BODY_RX, BODY_RY)) {
-      this._bodyContactSlashId = slashId;
+    // 第2级(候选): 是否接触Boss身体（多椭圆并集+线段判定，不立即结算）
+    const bodyHit = BODY_PARTS.some(p => this.segmentHitEllipse(segA, segB, cx + p.cx, cy + p.cy, p.rx, p.ry));
+    if (bodyHit && !this._session.bodyContact) {
+      this._session.bodyContact = true;
+      this._session.firstBodyHitPos = this._session.firstBodyHitPos ?? segB;
+      this._session.lastBodyHitPos = segB;
       this.lastResolveDebug = { slashId, segA, segB, activeArmorName: active.name, minDist: 0, bodyHit: true, result: "body_contact" };
-      return { kind: "miss", slashId }; // 返回miss而不是wrong_hit
+      return { kind: "miss", slashId }; // 候选，不锁定
     }
 
     // 第3级: 完全挥空
@@ -234,16 +249,19 @@ export class BossController {
   }
 
   /** 收刀结算——处理body_contact→wrong_hit */
-  finishSlash(slashId: string): void {
-    if (this._resolvedSlashId === slashId) return; // 已armor_hit
-    if (this._bodyContactSlashId === slashId) {
-      // body_contact → wrong_hit（只计一次）
+  finishSlash(slashId: string): ArmorResolveResult | null {
+    if (this._resolvedSlashId === slashId) return null; // 已armor_hit
+    if (this._session.bodyContact && this._session.slashId === slashId) {
       this._resolvedSlashId = slashId;
       this.consecutiveErrors++;
       const rePrompt = this.consecutiveErrors >= CONSECUTIVE_ERROR_LIMIT && (Date.now() - this.lastErrorRePromptAt > 3000);
       if (rePrompt) { this.lastErrorRePromptAt = Date.now(); this.objectiveAlpha = 1; this._objectiveTimer = 0; }
+      this._session.finalResult = "wrong_hit";
+      this.lastResolveDebug = { slashId, segA: this._session.firstBodyHitPos ?? { x: 0, y: 0 }, segB: this._session.lastBodyHitPos ?? { x: 0, y: 0 }, activeArmorName: this.armorTargets[this.activeArmorIndex]?.name ?? "-", minDist: 0, bodyHit: true, result: "wrong_hit" };
+      return { kind: "wrong_hit", hitPos: this._session.lastBodyHitPos ?? { x: 0, y: 0 }, rePrompt, slashId };
     }
-    // 无body_contact → miss（不锁，允许后续尝试）
+    this._session.finalResult = "miss";
+    return null;
   }
 
   // ==============================================================
@@ -262,8 +280,10 @@ export class BossController {
   }
 
   /** 获取Boss身体世界坐标（用于wrong_hit参考） */
-  getBodyWorldPos(): { cx: number; cy: number; rx: number; ry: number } {
-    return { cx: DESIGN_WIDTH / 2, cy: this.renderY + BODY_CY, rx: BODY_RX * this.bossRenderScale, ry: BODY_RY * this.bossRenderScale };
+  getBodyWorldPos(): { parts: { cx: number; cy: number; rx: number; ry: number }[] } {
+    const cx = DESIGN_WIDTH / 2;
+    const cy = this.renderY;
+    return { parts: BODY_PARTS.map(p => ({ cx: cx + p.cx, cy: cy + p.cy, rx: p.rx * this.bossRenderScale, ry: p.ry * this.bossRenderScale })) };
   }
 
   /** 获取护甲目标世界坐标 */

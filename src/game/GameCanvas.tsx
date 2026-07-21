@@ -56,7 +56,7 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
       cancelAnimationFrame(frame);
       gameRef.current = null;
     };
-  }, [level, onFinish, onReviveOffer]);
+  }, [level, onFinish, onReviveOffer, effectiveMode]);
 
   useEffect(() => {
     if (reviveSignal > 0) gameRef.current?.reviveFromRewardedAd();

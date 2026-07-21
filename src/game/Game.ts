@@ -408,7 +408,13 @@ export class Game {
     this.energy = clamp(this.runContext.mode === "freeBurst" ? BALANCE.swordEnergy.max : level.initialEnergy + this.progressionModifiers.initialEnergyBonus, 0, BALANCE.swordEnergy.max);
     this.hintSeen = this.readSeenHints();
     this.discoveredEnemies.add("infantry");
-    this.currentRunMode = this.runContext.mode;
+    // P4.4A.2: 统一运行模式来源
+    this.currentRunMode = runMode ?? this.runContext.mode;
+
+    // P4.4A.2: Boss构造期直接初始化（不等待0.5秒）
+    if (this.gameMode === "boss") {
+      this.initializeThunderGeneralBoss();
+    }
 
     // P3.2：重置精英播报状态，防止上一关残留
     this.elitePreviewShown = false;
@@ -3601,8 +3607,11 @@ export class Game {
 
 /** P4.4A.2: Boss模式收刀公共清理 */
 private finalizeBossSlashCommon(trail: SlashTrail): void {
-  // 收刀结算body_contact→wrong_hit
-  this.bossController?.finishSlash(trail.id);
+  // 收刀结算body_contact→wrong_hit，获取最终结果
+  const finishResult = this.bossController?.finishSlash(trail.id);
+  if (finishResult && finishResult.kind !== "miss") {
+    this.applyArmorResolveResult(finishResult, finishResult.hitPos ?? trail.points[trail.points.length - 1], trail.points[trail.points.length - 1]);
+  }
   this.warriorSheathTimer = 0.38;
   this.warriorDrawTimer = 0;
   this.regenDelayTimer = BALANCE.swordEnergy.regenDelayAfterSlash;
@@ -6853,12 +6862,36 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     logEvent("elite_spawn", { levelId: this.level.id, eliteKind: ek, time: this.elapsed });
   }
 
+  /** P4.4A.2: Boss构造期初始化玄甲雷将（不等待0.5秒） */
+  private initializeThunderGeneralBoss(): void {
+    this.gameMode = "boss";
+    // 清空场上所有敌人
+    for (const e of this.enemies) { e.alive = false; }
+    this.enemies = [];
+    // 重置指针/副刀状态
+    this.pointerDown = false;
+    this.pendingSlash = null;
+    this.currentSlash = undefined;
+    for (let i = 0; i < 2; i++) {
+      if (this.subBladeAnim[i]) this.subBladeAnim[i].phase = "idle";
+    }
+    this.wavesSpawned = 0;
+    this.subSpawnQueue = [];
+    // 创建并启动 BossController
+    this.bossController = new BossController("thunderGeneral");
+    this.bossController.enterLoading();
+    this.discoveredEnemies.add("boss");
+    logEvent("boss_spawn", { levelId: this.level.id, bossId: "thunderGeneral", time: 0 });
+  }
+
   /** Boss生成 */
   private updateBossSpawn() {
-    // 原 debugBossOverride 参数已移除（突破配置改为直接使用 thunderGeneral）
+    // 玄甲雷将已由构造期初始化，此处不再处理
+    if (this.bossController?.bossId === "thunderGeneral") return;
     if (this.bossSpawned || !this.level.bossId) return;
     const isChallengeBreakthrough = this.currentRunMode === "challenge";
     if (isChallengeBreakthrough) {
+      // 非thunderGeneral的突破关卡继续等待0.5秒
       if (this.elapsed < 0.5) return;
       this.bossSpawned = true;
     } else {
@@ -6867,33 +6900,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       this.bossSpawned = true;
     }
     const bid = this.level.bossId;
-
-    // P4.4A.2: thunderGeneral 使用新 BossController 系统（无 Enemy 代理）
-    if (bid === "thunderGeneral") {
-      this.gameMode = "boss";
-      // 清空场上所有敌人
-      for (const e of this.enemies) { e.alive = false; }
-      this.enemies = [];
-      // 重置指针/副刀状态
-      this.pointerDown = false;
-      this.pendingSlash = null;
-      this.currentSlash = undefined;
-      for (let i = 0; i < 2; i++) {
-        if (this.subBladeAnim[i]) this.subBladeAnim[i].phase = "idle";
-      }
-      // 清空波次/子队列/事件
-      this.wavesSpawned = 0;
-      this.subSpawnQueue = [];
-
-      // 创建并启动 BossController（不创建 Enemy 代理）
-      this.bossController = new BossController(bid);
-      this.bossController.enterLoading();
-      this.discoveredEnemies.add("boss");
-      this.screenShake = Math.max(this.screenShake, 0.6);
-      this.flash = Math.max(this.flash, 0.5);
-      logEvent("boss_spawn", { levelId: this.level.id, bossId: bid, time: this.elapsed });
-      return;
-    }
 
     // 原有Boss系统（yaoWang/moXiu/huaYao）
     const bossId = bid as import("../game/types").BossId;
