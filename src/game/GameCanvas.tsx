@@ -36,7 +36,7 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
     canvas.height = DESIGN_HEIGHT * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const game = new Game(level, onFinish, onReviveOffer);
+    const game = new Game(level, onFinish, onReviveOffer, effectiveMode);
     gameRef.current = game;
     let frame = 0;
     let last = performance.now();

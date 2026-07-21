@@ -861,16 +861,14 @@ export class Game {
   }
 
   handlePointerUp() {
-    // P4.4A.2: Boss输入锁定（intro + 完成演出）
-    if (this.bossController?.inputLocked) return;
-    if (this.phase !== "playing") return;
+    // P4.4A.2: pointerUp永远先做清理，再检查输入锁定
     this.pointerDown = false;
+    this.pendingSlash = null;
     if (this.currentSlash?.active) {
       this.endSlash("收刀");
-    } else {
-      // P4.1A.7：只有Pending未提交，零消耗取消
-      this.pendingSlash = null;
     }
+    if (this.bossController?.inputLocked) return;
+    if (this.phase !== "playing") return;
   }
 
   /** P4.1A.7：正式提交挥刀（滑动超过activationDistance后触发） */
@@ -3601,14 +3599,16 @@ export class Game {
     }
   }
 
-  /** P4.4A.2: Boss模式收刀公共清理 */
-  private finalizeBossSlashCommon(trail: SlashTrail): void {
-    this.warriorSheathTimer = 0.38;
-    this.warriorDrawTimer = 0;
-    this.regenDelayTimer = BALANCE.swordEnergy.regenDelayAfterSlash;
-    AudioService.slashEnd();
-    this.currentSlash = undefined;
-  }
+/** P4.4A.2: Boss模式收刀公共清理 */
+private finalizeBossSlashCommon(trail: SlashTrail): void {
+  // 收刀结算body_contact→wrong_hit
+  this.bossController?.finishSlash(trail.id);
+  this.warriorSheathTimer = 0.38;
+  this.warriorDrawTimer = 0;
+  this.regenDelayTimer = BALANCE.swordEnergy.regenDelayAfterSlash;
+  AudioService.slashEnd();
+  this.currentSlash = undefined;
+}
 
   /** P4.4A.2: Boss模式护甲判定结果应用 */
   private applyArmorResolveResult(result: import("./systems/BossController").ArmorResolveResult, segA: Vec2, segB: Vec2): void {
@@ -6715,14 +6715,7 @@ export class Game {
       `allPostSpawned: ${this.allPostChestWavesSpawned}`,
       ...(this.bossController ? [
         `--- Boss Debug ---`,
-        `Game Mode: ${this.gameMode}`,
-        `Boss State: ${this.bossController.debugSnapshot["Boss State"]}`,
-        `Input Locked: ${this.bossController.debugSnapshot["Input Locked"]}`,
-        `Player Invuln: ${this.bossController.debugSnapshot["Player Invuln"]}`,
-        `Alive Normal: ${this.enemies.filter(e => e.alive && e.kind !== "boss").length}`,
-        `Boss HP: ${this.bossController.debugSnapshot["Boss HP"]}`,
-        `Active Armor: ${this.bossController.debugSnapshot["Active Armor"]}`,
-        `Armor Progress: ${this.bossController.debugSnapshot["Armor Progress"]}`,
+        ...Object.entries(this.bossController.debugSnapshot).map(([k, v]) => `${k}: ${v}`),
       ] : []),
       `Sub0: ${this.subBladeAnim[0]?.phase ?? "-"} (t:${(this.subBladeAnim[0]?.phaseTimer ?? 0).toFixed(2)}/${(this.subBladeAnim[0]?.phaseDuration ?? 0).toFixed(2)})`,
       `Sub1: ${this.subBladeAnim[1]?.phase ?? "-"} (t:${(this.subBladeAnim[1]?.phaseTimer ?? 0).toFixed(2)}/${(this.subBladeAnim[1]?.phaseDuration ?? 0).toFixed(2)})`,

@@ -91,8 +91,14 @@ export class BossController {
   private armorTargets: ArmorTarget[] = [];
   private consecutiveErrors = 0;
   private lastErrorRePromptAt = 0;
-  /** 整刀级别解析锁：每次pointerDown唯一slashId只能解析一次结果 */
+  /** 整刀解析锁 */
   private _resolvedSlashId = "";
+  /** 整刀Body Contact候选（wrong_hit收刀结算） */
+  private _bodyContactSlashId = "";
+  /** 冲击触发标记（防shakeTimer重复） */
+  private _impactTriggered = false;
+  /** 目标提示计时器 */
+  private _objectiveTimer = 0;
 
   // 完成状态
   private breakShowTimer = 0;
@@ -146,7 +152,8 @@ export class BossController {
     this.armorProgress = 0; this.consecutiveErrors = 0;
     this.activeArmorIndex = ARMOR_L;
     this._bossHP = this._bossMaxHP; this.particles = [];
-    this._resolvedSlashId = ""; this.lastResolveDebug = null;
+    this._resolvedSlashId = ""; this._bodyContactSlashId = ""; this.lastResolveDebug = null;
+    this._impactTriggered = false; this._objectiveTimer = 0;
     this.initArmorTargets();
     this.armorTargets[ARMOR_L].active = true;
   }
@@ -165,6 +172,8 @@ export class BossController {
   // ==============================================================
   update(dt: number): void {
     this.particles = this.particles.filter(p => { p.life -= dt; return p.life > 0; });
+    // P4.4A.2: 统一衰减shakeTimer
+    this.shakeTimer = Math.max(0, this.shakeTimer - dt * 3);
 
     if (this._phase === "loading") { this._phase = "intro"; return; }
     if (this._phase === "intro") {
@@ -189,55 +198,52 @@ export class BossController {
   // ==============================================================
   resolveArmorSegment(segA: Vec2, segB: Vec2, slashId: string): ArmorResolveResult | null {
     if (this._phase !== "armor") return null;
-
-    // 整刀解析锁：已解析的slashId直接忽略
-    if (this._resolvedSlashId === slashId) return null;
-
+    if (this._resolvedSlashId === slashId) return null; // 整刀已锁定
     const active = this.armorTargets[this.activeArmorIndex];
     if (!active || active.broken) return null;
-
     const cx = DESIGN_WIDTH / 2;
     const cy = this.renderY;
     const tcX = cx + active.relX;
     const tcY = cy + active.relY;
 
-    // 第1级: 是否命中激活护甲
+    // 第1级: 命中护甲 → 立即锁定
     if (this.segmentHitEllipse(segA, segB, tcX, tcY, active.radiusX, active.radiusY)) {
       active.hitSlashId = slashId;
       active.broken = true; active.active = false;
       active.animTimer = 0.6;
-      this.armorProgress++;
-      this.consecutiveErrors = 0;
+      this.armorProgress++; this.consecutiveErrors = 0;
       this._resolvedSlashId = slashId;
-
+      this._bodyContactSlashId = ""; // 清除body候选
       const completed = this.armorProgress >= this.maxArmor;
-      if (completed) {
-        this._phase = "armor_break_show";
-        this.breakShowTimer = 0;
-      } else {
-        const nextId = (this.activeArmorIndex + 1) % this.maxArmor;
-        this.activeArmorIndex = nextId;
-        this.armorTargets[nextId].active = true;
-      }
-
+      if (completed) { this._phase = "armor_break_show"; this.breakShowTimer = 0; }
+      else { this.activeArmorIndex = (this.activeArmorIndex + 1) % this.maxArmor; this.armorTargets[this.activeArmorIndex].active = true; }
       this.lastResolveDebug = { slashId, segA, segB, activeArmorName: active.name, minDist: 0, bodyHit: true, result: "armor_hit" };
       return { kind: "armor_hit", targetId: active.id, hitPos: segB, armorCenter: { x: tcX, y: tcY }, shardOrigin: { x: tcX, y: tcY }, progress: this.armorProgress, maxProgress: this.maxArmor, completed, slashId };
     }
 
-    // 第2级: 是否命中Boss身体
-    const bodyHit = this.pointToEllipseDist(segB.x, segB.y, cx, cy + BODY_CY, BODY_RX, BODY_RY) <= 1.2;
-    if (bodyHit) {
-      this._resolvedSlashId = slashId;
-      this.consecutiveErrors++;
-      const rePrompt = this.consecutiveErrors >= CONSECUTIVE_ERROR_LIMIT && (Date.now() - this.lastErrorRePromptAt > 3000);
-      if (rePrompt) { this.lastErrorRePromptAt = Date.now(); this.objectiveAlpha = 1; }
-      this.lastResolveDebug = { slashId, segA, segB, activeArmorName: active.name, minDist: this.pointToEllipseDist(segB.x, segB.y, tcX, tcY, active.radiusX, active.radiusY), bodyHit: true, result: "wrong_hit" };
-      return { kind: "wrong_hit", hitPos: segB, rePrompt, slashId };
+    // 第2级(候选): 是否接触Boss身体（使用整条线段判定，不立即结算）
+    if (this._bodyContactSlashId !== slashId && this.segmentHitEllipse(segA, segB, cx, cy + BODY_CY, BODY_RX, BODY_RY)) {
+      this._bodyContactSlashId = slashId;
+      this.lastResolveDebug = { slashId, segA, segB, activeArmorName: active.name, minDist: 0, bodyHit: true, result: "body_contact" };
+      return { kind: "miss", slashId }; // 返回miss而不是wrong_hit
     }
 
     // 第3级: 完全挥空
     this.lastResolveDebug = { slashId, segA, segB, activeArmorName: active.name, minDist: 999, bodyHit: false, result: "miss" };
     return { kind: "miss", slashId };
+  }
+
+  /** 收刀结算——处理body_contact→wrong_hit */
+  finishSlash(slashId: string): void {
+    if (this._resolvedSlashId === slashId) return; // 已armor_hit
+    if (this._bodyContactSlashId === slashId) {
+      // body_contact → wrong_hit（只计一次）
+      this._resolvedSlashId = slashId;
+      this.consecutiveErrors++;
+      const rePrompt = this.consecutiveErrors >= CONSECUTIVE_ERROR_LIMIT && (Date.now() - this.lastErrorRePromptAt > 3000);
+      if (rePrompt) { this.lastErrorRePromptAt = Date.now(); this.objectiveAlpha = 1; this._objectiveTimer = 0; }
+    }
+    // 无body_contact → miss（不锁，允许后续尝试）
   }
 
   // ==============================================================
@@ -272,7 +278,14 @@ export class BossController {
   // ==============================================================
   private updateArmorPhase(dt: number): void {
     for (const t of this.armorTargets) { if (t.animTimer > 0) t.animTimer = Math.max(0, t.animTimer - dt); }
-    this.objectiveAlpha = Math.max(0, this.objectiveAlpha - dt * 0.2);
+    // P4.4A.2: objectiveAlpha 1.5s首次显示→0.3s淡出
+    if (this._objectiveTimer < 1.5) {
+      this._objectiveTimer += dt;
+      this.objectiveAlpha = Math.min(1, this._objectiveTimer / 0.2);
+    } else if (this._objectiveTimer < 1.8) {
+      this._objectiveTimer += dt;
+      this.objectiveAlpha = Math.max(0, 1 - (this._objectiveTimer - 1.5) / 0.3);
+    }
     this.hudSlideY = Math.min(0, this.hudSlideY + dt * 60);
   }
 
@@ -282,10 +295,14 @@ export class BossController {
       this.renderY = -100 + (BOSS_CY + 100) * (1 - Math.pow(1 - t, 3));
       this.bossRenderScale = 0.75 + 0.25 * (1 - Math.pow(1 - t, 3));
     } else if (this.introElapsed > 1.25) { this.renderY = BOSS_CY; this.bossRenderScale = 1; }
+    // P4.4A.2: 一次性冲击触发，不每帧重置
     this.shakeTimer = Math.max(0, this.shakeTimer - 0.033);
+    if (!this._impactTriggered && this.introElapsed >= 1.25) {
+      this._impactTriggered = true;
+      this.shakeTimer = 0.25;
+    }
     if (this.introElapsed >= 0.10) this.vignetteIntensity = 0.15;
     if (this.introElapsed >= 0.30) this.vignetteIntensity = 0.35;
-    if (this.introElapsed >= 1.25) this.shakeTimer = 0.25;
     if (this.introElapsed >= 1.45) this.guardianAlpha = Math.min(1, (this.introElapsed - 1.45) / 0.15);
     if (this.introElapsed >= 1.75) this.bossNameAlpha = Math.min(1, (this.introElapsed - 1.75) / 0.15);
     if (this.introElapsed >= 2.10) this.hudSlideY = Math.min(0, this.renderY * 5);
@@ -296,7 +313,7 @@ export class BossController {
   private transitionToArmor(): void {
     this._phase = "armor"; this.renderY = BOSS_CY;
     this.bossRenderScale = 1; this.vignetteIntensity = 0.15;
-    this.hudSlideY = -60; this.objectiveAlpha = 1;
+    this.hudSlideY = -60; this.objectiveAlpha = 1; this._objectiveTimer = 0;
     this.armorTargets[ARMOR_L].active = true; this.activeArmorIndex = ARMOR_L;
   }
 
@@ -346,8 +363,8 @@ export class BossController {
   private drawBoss(ctx: any): void {
     const shakeX = this.shakeTimer > 0 ? (Math.random() - 0.5) * 4 : 0;
     const shakeY = this.shakeTimer > 0 ? (Math.random() - 0.5) * 3 : 0;
+    // P4.4A.2: 不使用setTransform(1)，保留DPR和上层transform
     ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.translate(DESIGN_WIDTH / 2 + shakeX, this.renderY + shakeY);
     ctx.scale(this.bossRenderScale, this.bossRenderScale);
     ctx.save();
