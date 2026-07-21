@@ -803,8 +803,8 @@ export class Game {
   }
 
   handlePointerDown(pos: Vec2) {
-    // P4.4A: Boss开场期间阻断输入
-    if (this.bossController?.isIntroActive) return;
+    // P4.4A.2: Boss输入锁定（intro + 完成演出）
+    if (this.bossController?.inputLocked) return;
     if (this.phase === "buffChoice") {
       this.selectBuffAt(pos);
       return;
@@ -843,8 +843,8 @@ export class Game {
   }
 
   handlePointerMove(pos: Vec2) {
-    // P4.4A: Boss开场期间阻断输入
-    if (this.bossController?.isIntroActive) return;
+    // P4.4A.2: Boss输入锁定（intro + 完成演出）
+    if (this.bossController?.inputLocked) return;
     if (this.phase !== "playing" || !this.pointerDown) return;
     const next = this.clampPointer(pos);
     this.pointerPos = next;
@@ -861,8 +861,8 @@ export class Game {
   }
 
   handlePointerUp() {
-    // P4.4A: Boss开场期间阻断输入
-    if (this.bossController?.isIntroActive) return;
+    // P4.4A.2: Boss输入锁定（intro + 完成演出）
+    if (this.bossController?.inputLocked) return;
     if (this.phase !== "playing") return;
     this.pointerDown = false;
     if (this.currentSlash?.active) {
@@ -3615,27 +3615,25 @@ export class Game {
     if (result.kind === "armor_hit") {
       this.flash = Math.max(this.flash, 0.35);
       this.screenShake = Math.max(this.screenShake, 0.25);
-      this.particles.push(...sparkBurst({ x: (segA.x + segB.x) / 2, y: (segA.y + segB.y) / 2 }, 8, "#f0e130"));
+      this.particles.push(...sparkBurst({ x: result.shardOrigin.x, y: result.shardOrigin.y }, 8, "#f0e130"));
       this.addCombatFloat({
-        x: result.hitPos.x,
-        y: result.hitPos.y - 20,
-        text: "破甲",
-        color: "#f0e130",
-        size: 18,
-        duration: 0.6,
-        category: "mechanic",
-        priority: "A",
-        mergeKey: `armor-hit-${result.slashId}`
+        x: result.hitPos.x, y: result.hitPos.y - 20,
+        text: "破甲", color: "#f0e130", size: 18, duration: 0.6,
+        category: "mechanic", priority: "A", mergeKey: `armor-hit-${result.slashId}`
       });
       if (result.completed) {
         this.screenShake = Math.max(this.screenShake, 0.6);
         this.flash = Math.max(this.flash, 0.5);
+        // 碎甲：三块护甲位置各生成一圈粒子
+        for (const t of ["armor_hit_fx"]) {
+          this.particles.push(...sparkBurst({ x: result.shardOrigin.x, y: result.shardOrigin.y }, 12, "#f0e130"));
+        }
       }
     } else if (result.kind === "wrong_hit") {
       this.particles.push(...sparkBurst({ x: (segA.x + segB.x) / 2, y: (segA.y + segB.y) / 2 }, 6, "#6c3483"));
       this.screenShake = Math.max(this.screenShake, 0.15);
     }
-    // miss: 不��打印任何反馈
+    // miss: 不打印任何反馈
   }
 
   /** 判定是否应立刻胜利结算（二次打磨：检查 battlePhase） */
@@ -5148,8 +5146,8 @@ export class Game {
   }
 
   private drawHud(ctx: CanvasRenderingContext2D) {
-    // P4.4A: Boss战期间隐藏标准HUD（由BossController绘制专属HUD）
-    if (this.bossController) return;
+    // P4.4A.2: Boss模式隐藏标准HUD
+    if (this.gameMode === "boss" || this.bossController) return;
 
     ctx.fillStyle = "rgba(18, 12, 8, 0.78)";
     ctx.fillRect(0, 0, DESIGN_WIDTH, HUD_HEIGHT);
