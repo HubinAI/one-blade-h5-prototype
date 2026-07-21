@@ -7,6 +7,7 @@
 import type { BossId, BossPhaseState, Vec2 } from "../types";
 import { DESIGN_WIDTH, DESIGN_HEIGHT } from "../config/constants";
 import { distanceToSegment } from "../../utils/math";
+import { AudioService } from "../services/AudioService";
 
 const BOSS_CY = 195;
 const INTRO_DURATION = 2.85;
@@ -105,7 +106,8 @@ export class BossController {
   private activeArmorIndex = ARMOR_L;
   private armorTargets: ArmorTarget[] = [];
   private consecutiveErrors = 0;
-  private lastErrorRePromptAt = 0;
+  /** 错误提示冷却（内部累计时间替代Date.now） */
+  private lastErrorRePromptElapsed = -99;
   /** 整刀解析锁 */
   private _resolvedSlashId = "";
   /** 整刀Body Contact候选（wrong_hit收刀结算）— 已由_session替代 */
@@ -116,6 +118,8 @@ export class BossController {
   private _impactTriggered = false;
   /** 目标提示计时器 */
   private _objectiveTimer = 0;
+  /** 内部累计时间（替代Date.now） */
+  private _elapsed = 0;
   /** 护甲切换延迟 */
   private _switchTimer = 0;
   private readonly SWITCH_DELAY = 0.45;
@@ -172,7 +176,8 @@ export class BossController {
     this._bossHP = this._bossMaxHP; this.particles = [];
     this._resolvedSlashId = ""; this._bodyContactSlashId = ""; this.lastResolveDebug = null;
     this._session = { slashId: "", bodyContact: false, firstBodyHitPos: undefined, lastBodyHitPos: undefined, finalResult: undefined };
-    this._impactTriggered = false; this._objectiveTimer = 0; this._switchTimer = 0;
+    this._impactTriggered = false; this._objectiveTimer = 0; this._switchTimer = 0; this._elapsed = 0;
+    this.lastErrorRePromptElapsed = -99;
     this.initArmorTargets();
     this.armorTargets[ARMOR_L].active = true;
   }
@@ -190,6 +195,7 @@ export class BossController {
   // update
   // ==============================================================
   update(dt: number): void {
+    this._elapsed += dt;
     this.particles = this.particles.filter(p => { p.life -= dt; return p.life > 0; });
     // P4.4A.2: 全局衰减护甲动画计时器（保证所有阶段都能更新）
     for (const t of this.armorTargets) { t.animTimer = Math.max(0, t.animTimer - dt); }
@@ -268,8 +274,8 @@ export class BossController {
     if (this._session.bodyContact && this._session.slashId === slashId) {
       this._resolvedSlashId = slashId;
       this.consecutiveErrors++;
-      const rePrompt = this.consecutiveErrors >= CONSECUTIVE_ERROR_LIMIT && (Date.now() - this.lastErrorRePromptAt > 3000);
-      if (rePrompt) { this.lastErrorRePromptAt = Date.now(); this.objectiveAlpha = 1; this._objectiveTimer = 0; }
+      const rePrompt = this.consecutiveErrors >= CONSECUTIVE_ERROR_LIMIT && (this._elapsed - this.lastErrorRePromptElapsed > 3);
+      if (rePrompt) { this.lastErrorRePromptElapsed = this._elapsed; this.objectiveAlpha = 1; this._objectiveTimer = 0; }
       this._session.finalResult = "wrong_hit";
       this.lastResolveDebug = { slashId, segA: this._session.firstBodyHitPos ?? { x: 0, y: 0 }, segB: this._session.lastBodyHitPos ?? { x: 0, y: 0 }, activeArmorName: this.armorTargets[this.activeArmorIndex]?.name ?? "-", minDist: 0, bodyHit: true, result: "wrong_hit" };
       return { kind: "wrong_hit", hitPos: this._session.lastBodyHitPos ?? { x: 0, y: 0 }, rePrompt, slashId };
@@ -327,6 +333,7 @@ export class BossController {
       this._switchTimer = Math.max(0, this._switchTimer - dt);
       if (this._switchTimer <= 0) {
         this.armorTargets[this.activeArmorIndex].active = true;
+        AudioService.armorSwitch();
       }
     }
     // objectiveAlpha计时器
@@ -348,10 +355,11 @@ export class BossController {
     } else if (this.introElapsed > 1.25) { this.renderY = BOSS_CY; this.bossRenderScale = 1; }
     // P4.4A.2: 一次性冲击触发，不每帧重置
     this.shakeTimer = Math.max(0, this.shakeTimer - 0.033);
-    if (!this._impactTriggered && this.introElapsed >= 1.25) {
-      this._impactTriggered = true;
-      this.shakeTimer = 0.25;
-    }
+      if (!this._impactTriggered && this.introElapsed >= 1.25) {
+        this._impactTriggered = true;
+        this.shakeTimer = 0.25;
+        AudioService.bossImpact();
+      }
     if (this.introElapsed >= 0.10) this.vignetteIntensity = 0.15;
     if (this.introElapsed >= 0.30) this.vignetteIntensity = 0.35;
     if (this.introElapsed >= 1.45) this.guardianAlpha = Math.min(1, (this.introElapsed - 1.45) / 0.15);
@@ -526,7 +534,7 @@ export class BossController {
       coreAlpha = 0.3 + 0.7 * p;
       coreColor0 = "#8e44ad"; coreColor1 = "#f0e130";
     } else if (this._phase === "armor_complete_hold") {
-      coreAlpha = 0.75 + Math.sin(Date.now() / 300) * 0.15;
+      coreAlpha = 0.75 + Math.sin(this._elapsed * 3) * 0.15;
       coreColor0 = "#a855f7"; coreColor1 = "#f0e130";
     } else {
       coreAlpha = 0.35;
@@ -535,7 +543,7 @@ export class BossController {
     ctx.save();
     ctx.globalAlpha = coreAlpha;
     const coreR = 8;
-    const pulse = this._phase === "armor_break_show" ? 1 + Math.sin(this.breakShowTimer * 12) * 0.2 : 0.9 + Math.sin(Date.now() / 250) * 0.1;
+    const pulse = this._phase === "armor_break_show" ? 1 + Math.sin(this.breakShowTimer * 12) * 0.2 : 0.9 + Math.sin(this._elapsed * 4) * 0.1;
     const grd = ctx.createRadialGradient(0, 2, 0, 0, 2, coreR * pulse);
     grd.addColorStop(0, coreColor0); grd.addColorStop(1, coreColor1);
     ctx.fillStyle = grd;

@@ -6,7 +6,8 @@
 
 let ctx: AudioContext | null = null;
 
-function ensureContext(): AudioContext {
+function ensureContext(): AudioContext | null {
+  if (typeof AudioContext === "undefined") return null; // 测试环境
   if (!ctx) ctx = new AudioContext();
   if (ctx.state === "suspended") ctx.resume();
   return ctx;
@@ -93,7 +94,23 @@ const SOUNDS: Record<string, SoundDef | SoundDef[]> = {
     { frequency: 784, type: "sine", duration: 0.35, gain: 0.20, decay: 0.12 }
   ],
   // 失败
-  defeat: { frequency: 200, type: "sawtooth", duration: 0.6, gain: 0.22, decay: 0.3, harmonics: [100] }
+  defeat: { frequency: 200, type: "sawtooth", duration: 0.6, gain: 0.22, decay: 0.3, harmonics: [100] },
+  // P4.4A.2: Boss专属音效
+  boss_impact: [
+    { frequency: 80, type: "sawtooth", duration: 0.5, gain: 0.3, decay: 0.25, harmonics: [40] },
+    { frequency: 200, type: "sine", duration: 0.15, gain: 0.12, decay: 0.06 }
+  ],
+  armor_hit: [
+    { frequency: 600, type: "triangle", duration: 0.12, gain: 0.2, decay: 0.05, harmonics: [1200] },
+    { frequency: 1800, type: "sine", duration: 0.06, gain: 0.1, decay: 0.02 }
+  ],
+  armor_wrong: { frequency: 200, type: "square", duration: 0.08, gain: 0.15, decay: 0.04, detune: -60 },
+  armor_complete: [
+    { frequency: 150, type: "sawtooth", duration: 0.6, gain: 0.3, decay: 0.3, harmonics: [75] },
+    { frequency: 600, type: "sine", duration: 0.4, gain: 0.18, decay: 0.15 },
+    { frequency: 1200, type: "sine", duration: 0.2, gain: 0.12, decay: 0.08 }
+  ],
+  armor_switch: { frequency: 440, type: "sine", duration: 0.08, gain: 0.08, decay: 0.03 }
 };
 
 function playSingle(audioCtx: AudioContext, def: SoundDef, startTime: number) {
@@ -132,6 +149,7 @@ function playSingle(audioCtx: AudioContext, def: SoundDef, startTime: number) {
 
 function playDef(name: string) {
   const audioCtx = ensureContext();
+  if (!audioCtx) return; // 测试环境跳过
   const startTime = audioCtx.currentTime;
   const def = SOUNDS[name];
   if (!def) return;
@@ -211,5 +229,26 @@ export const AudioService = {
   /** 失败 */
   defeat() {
     playDef("defeat");
+  },
+  // ===== P4.4A.2: Boss专属音效 =====
+  /** Boss落位冲击 */
+  bossImpact() {
+    playDef("boss_impact");
+  },
+  /** 正确破甲 */
+  armorHit() {
+    playDef("armor_hit");
+  },
+  /** 错误弹刀 */
+  armorWrong() {
+    playDef("armor_wrong");
+  },
+  /** 3/3护甲完成 */
+  armorComplete() {
+    playDef("armor_complete");
+  },
+  /** 目标切换 */
+  armorSwitch() {
+    playDef("armor_switch");
   }
 };
