@@ -254,4 +254,111 @@ describe("BossController - 护甲解析", () => {
     expect(bc3.inputLocked).toBe(false);
     expect(bc3.coreExposed).toBe(true);
   });
+
+  // ===== P4.4A.3: 追击判定测试 =====
+
+  /** 推进到pursuit阶段的辅助函数 */
+  function toPursuit(bc3: BossController): void {
+    bc3.enterLoading(); bc3.skipIntro();
+    bc3.resolveArmorSegment(v(141, 145), v(181, 185), "s1"); bc3.update(0.5);
+    bc3.resolveArmorSegment(v(221, 135), v(301, 195), "s2"); bc3.update(0.5);
+    bc3.resolveArmorSegment(v(181, 171), v(241, 231), "s3");
+    bc3.update(0.5); bc3.update(0.5); bc3.update(0.5);
+    bc3.update(0.5); bc3.update(1.0);
+    expect(bc3.phase).toBe("pursuit");
+  }
+
+  it("resolvePursuitSegment使用独立结果类型而非armor_hit", () => {
+    const bc3 = new BossController("thunderGeneral");
+    toPursuit(bc3);
+    const r = bc3.resolvePursuitSegment(v(181, 171), v(241, 231), "p1");
+    expect(r).not.toBeNull();
+    expect(r!.kind).toBe("pursuit_hit");
+  });
+
+  it("三个不同slashId推进追击0/3→3/3", () => {
+    const bc3 = new BossController("thunderGeneral");
+    toPursuit(bc3);
+    bc3.resolvePursuitSegment(v(181, 171), v(241, 231), "p1");
+    expect(bc3.debugSnapshot["Pursuit"]).toBe("1/3");
+    bc3.resolvePursuitSegment(v(181, 171), v(241, 231), "p2");
+    expect(bc3.debugSnapshot["Pursuit"]).toBe("2/3");
+    bc3.resolvePursuitSegment(v(181, 171), v(241, 231), "p3");
+    expect(bc3.debugSnapshot["Pursuit"]).toBe("3/3");
+  });
+
+  it("同一slashId只推进一次", () => {
+    const bc3 = new BossController("thunderGeneral");
+    toPursuit(bc3);
+    bc3.resolvePursuitSegment(v(181, 171), v(241, 231), "p1");
+    expect(bc3.debugSnapshot["Pursuit"]).toBe("1/3");
+    bc3.resolvePursuitSegment(v(181, 171), v(241, 231), "p1"); // same slash
+    expect(bc3.debugSnapshot["Pursuit"]).toBe("1/3");
+  });
+
+  it("pursuit_body_hit不推进进度", () => {
+    const bc3 = new BossController("thunderGeneral");
+    toPursuit(bc3);
+    // 切中身体左侧
+    const r = bc3.resolvePursuitSegment(v(160, 180), v(190, 230), "pb1");
+    expect(r!.kind).toBe("pursuit_body_hit");
+    expect(bc3.debugSnapshot["Pursuit"]).toBe("0/3");
+  });
+
+  it("pursuit_miss不推进进度", () => {
+    const bc3 = new BossController("thunderGeneral");
+    toPursuit(bc3);
+    const r = bc3.resolvePursuitSegment(v(50, 700), v(100, 750), "pm1");
+    expect(r!.kind).toBe("pursuit_miss");
+    expect(bc3.debugSnapshot["Pursuit"]).toBe("0/3");
+  });
+
+  it("第三击进入core_break", () => {
+    const bc3 = new BossController("thunderGeneral");
+    bc3.enterLoading(); bc3.skipIntro();
+    // 快速完成破甲
+    bc3.resolveArmorSegment(v(141, 145), v(181, 185), "s1"); bc3.update(0.5);
+    bc3.resolveArmorSegment(v(221, 135), v(301, 195), "s2"); bc3.update(0.5);
+    bc3.resolveArmorSegment(v(181, 171), v(241, 231), "s3");
+    bc3.update(0.5); bc3.update(0.5); bc3.update(0.5);
+    bc3.update(0.5); bc3.update(1.0);
+    expect(bc3.phase).toBe("pursuit");
+    bc3.resolvePursuitSegment(v(181, 171), v(241, 231), "p1");
+    bc3.resolvePursuitSegment(v(181, 171), v(241, 231), "p2");
+    bc3.resolvePursuitSegment(v(181, 171), v(241, 231), "p3");
+    expect(bc3.phase).toBe("core_break");
+  });
+
+  it("core_break锁定输入并冻结资源", () => {
+    const bc3 = new BossController("thunderGeneral");
+    toPursuit(bc3);
+    bc3.resolvePursuitSegment(v(181, 171), v(241, 231), "p1");
+    bc3.resolvePursuitSegment(v(181, 171), v(241, 231), "p2");
+    bc3.resolvePursuitSegment(v(181, 171), v(241, 231), "p3");
+    expect(bc3.phase).toBe("core_break");
+    expect(bc3.inputLocked).toBe(true);
+    expect(bc3.freezeCombatResources).toBe(true);
+  });
+
+  it("core_break 1.2秒后进入execution_intro", () => {
+    const bc3 = new BossController("thunderGeneral");
+    toPursuit(bc3);
+    bc3.resolvePursuitSegment(v(181, 171), v(241, 231), "p1");
+    bc3.resolvePursuitSegment(v(181, 171), v(241, 231), "p2");
+    bc3.resolvePursuitSegment(v(181, 171), v(241, 231), "p3");
+    expect(bc3.phase).toBe("core_break");
+    bc3.update(1.2);
+    expect(bc3.phase).toBe("execution_intro");
+    expect(bc3.inputLocked).toBe(true);
+    expect(bc3.freezeCombatResources).toBe(true);
+  });
+
+  it("重新enterLoading重置所有状态", () => {
+    const bc3 = new BossController("thunderGeneral");
+    bc3["pursuitEnergyBoosted"] = true;
+    // 通过debugSnapshot间接验证
+    bc3.enterLoading();
+    expect(bc3["pursuitEnergyBoosted"]).toBe(false);
+    expect(bc3.debugSnapshot["Pursuit"]).toBe("0/3");
+  });
 });

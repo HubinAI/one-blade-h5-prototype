@@ -60,15 +60,15 @@ export class BossController {
   /** 避开TS类型缩窄 */
   private p(): BossPhaseState { return this._phase; }
   get inputLocked(): boolean {
-    return this._phase === "loading" || this._phase === "intro" || this._phase === "armor_break_show" || this._phase === "armor_complete_hold" || this.armorSwitching || this.p() === "pursuit_intro" || this._phase === "core_break";
+    return this._phase === "loading" || this._phase === "intro" || this._phase === "armor_break_show" || this._phase === "armor_complete_hold" || this.armorSwitching || this.p() === "pursuit_intro" || this._phase === "core_break" || this._phase === "execution_intro";
   }
   /** 完成Hold时冻结战斗资源 */
   get freezeCombatResources(): boolean {
-    return this._phase === "armor_break_show" || this._phase === "armor_complete_hold" || this.p() === "pursuit_intro" || this._phase === "core_break";
+    return this._phase === "armor_break_show" || this._phase === "armor_complete_hold" || this.p() === "pursuit_intro" || this._phase === "core_break" || this._phase === "execution_intro";
   }
   /** 雷核是否暴露 */
   get coreExposed(): boolean {
-    return ["armor_break_show", "armor_complete_hold", "pursuit_intro", "pursuit", "core_break", "execution"].includes(this._phase);
+    return ["armor_break_show", "armor_complete_hold", "pursuit_intro", "pursuit", "core_break", "execution_intro", "execution"].includes(this._phase);
   }
 
   // ---- 调试 ----
@@ -148,6 +148,8 @@ export class BossController {
   private readonly MAX_PURSUIT = 3;
   /** core_break计时 */
   private coreBreakTimer = 0;
+  /** execution_intro计时 */
+  private executionIntroTimer = 0;
   /** 屏幕震动（供Game读取） */
   screenShake: number = 0;
   /** 闪屏（供Game读取） */
@@ -209,6 +211,9 @@ export class BossController {
     this._session = { slashId: "", bodyContact: false, firstBodyHitPos: undefined, lastBodyHitPos: undefined, finalResult: undefined };
     this._impactTriggered = false; this._objectiveTimer = 0; this._switchTimer = 0; this._elapsed = 0;
     this.holdTimer = 0; this.pursuitIntroTimer = 0;
+    this.coreBreakTimer = 0; this.executionIntroTimer = 0;
+    this._pursuitProgress = 0; this.pursuitEnergyBoosted = false;
+    this.screenShake = 0; this.flash = 0;
     this.lastErrorRePromptElapsed = -99;
     this.initArmorTargets();
     this.armorTargets[ARMOR_L].active = true;
@@ -278,11 +283,22 @@ export class BossController {
     }
     if (this._phase === "core_break") {
       this.coreBreakTimer += dt;
-      // 输入锁定 + 刀势冻结由inputLocked/freezeCombatResources负责
-      // 收刀清理在Game handlePointerUp通过inputLocked已处理
-      if (this.coreBreakTimer > 8) {
-        // 超时保护，防永久锁定
+      if (this.coreBreakTimer >= 1.2) {
+        (this._phase as BossPhaseState) = "execution_intro";
+        this.executionIntroTimer = 0;
+        this.objectiveText = "斩碎命核";
+        this.objectiveAlpha = 1;
+        this._objectiveTimer = 0;
       }
+      return;
+    }
+    if (this._phase === "execution_intro") {
+      this.executionIntroTimer += dt;
+      this._objectiveTimer += dt;
+      if (this._objectiveTimer < 1.2) {
+        this.objectiveAlpha = Math.max(0, 1 - (this._objectiveTimer - 0.8) / 0.4);
+      }
+      // 终结尚未接入，保持展示态
       return;
     }
   }
@@ -415,10 +431,11 @@ export class BossController {
     }
     const bodyHit = BODY_PARTS.some(p => this.segmentHitEllipse(segA, segB, DESIGN_WIDTH / 2 + p.cx, this.renderY + p.cy, p.rx, p.ry));
     if (bodyHit) {
+      this._resolvedSlashId = slashId; // body整刀去重
       this.lastResolveDebug = { slashId, segA, segB, activeArmorName: "body", minDist: 0, bodyHit: true, result: "body_contact" };
       return { kind: "pursuit_body_hit", hitPos: segB, slashId };
     }
-    this.lastResolveDebug = { slashId, segA, segB, activeArmorName: "-", minDist: 999, bodyHit: false, result: "miss" };
+    this._resolvedSlashId = slashId; // miss也锁定，整刀无反馈
     return { kind: "pursuit_miss", slashId };
   }
 
@@ -641,6 +658,9 @@ export class BossController {
     } else if (this._phase === "core_break") {
       coreAlpha = 0.6 + Math.sin(this.coreBreakTimer * 10) * 0.3; coreColor0 = "#f0e130"; coreColor1 = "#ffffff";
       drawR = CORE_GEOMETRY.visualRadius * 1.8;
+    } else if (this._phase === "execution_intro") {
+      coreAlpha = 0.4 + Math.sin(this.executionIntroTimer * 3) * 0.2; coreColor0 = "#f0e130"; coreColor1 = "#6c3483";
+      drawR = CORE_GEOMETRY.visualRadius * 1.2;
     } else {
       coreAlpha = 0.35; coreColor0 = "#6c3483"; coreColor1 = "#3d1a50";
     }
@@ -739,12 +759,15 @@ export class BossController {
     if (this._phase === "armor_break_show" || this._phase === "armor_complete_hold") phaseLabel = "破甲完成";
     if (this.p() === "pursuit_intro" || this._phase === "pursuit") phaseLabel = "阶段 2 · 追击";
     if (this._phase === "core_break") phaseLabel = "雷核击破";
+    if (this._phase === "execution_intro") phaseLabel = "阶段 3 · 终结";
     ctx.fillText(phaseLabel, barLeft, labelY);
     ctx.fillStyle = "#a569bd"; ctx.font = '12px "Microsoft YaHei", sans-serif';
     ctx.textAlign = "right";
     let progText: string;
     if (this._phase === "core_break") {
       progText = "终结机会";
+    } else if (this._phase === "execution_intro") {
+      progText = "斩碎命核";
     } else if (this._phase === "armor_break_show" || this._phase === "armor_complete_hold") {
       progText = "弱点暴露";
     } else if (this._phase === "pursuit_intro" || this._phase === "pursuit") {
