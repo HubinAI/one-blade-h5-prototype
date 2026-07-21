@@ -749,6 +749,11 @@ export class Game {
   }
 
   render(ctx: CanvasRenderingContext2D) {
+    // P4.4A.2: Boss模式渲染白名单
+    if (this.gameMode === "boss") {
+      this.renderBossMode(ctx);
+      return;
+    }
     ctx.save();
     ctx.clearRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
 
@@ -811,6 +816,30 @@ export class Game {
       ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
     }
 
+    ctx.restore();
+  }
+
+  /** P4.4A.2: Boss模式渲染白名单 */
+  private renderBossMode(ctx: CanvasRenderingContext2D): void {
+    ctx.save();
+    ctx.clearRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+    if (this.screenShake > 0) {
+      const shake = this.screenShake * 5;
+      ctx.translate(randomRange(-shake, shake), randomRange(-shake, shake));
+    }
+    this.drawBackground(ctx);
+    this.drawTopMist(ctx);
+    this.drawSlash(ctx);
+    this.drawParticles(ctx);
+    this.drawDefenseAndWarrior(ctx);
+    this.drawFloatingTexts(ctx);
+    this.drawEdgeFlash(ctx);
+    if (this.bossController) this.bossController.render(ctx);
+    if (this.debugEnabled) this.drawDebugPanel(ctx);
+    if (this.flash > 0) {
+      ctx.fillStyle = `rgba(255, 232, 146, ${this.flash * 0.18})`;
+      ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+    }
     ctx.restore();
   }
 
@@ -1003,7 +1032,10 @@ export class Game {
     if (prev && isSharpTurn(prev, last, pos)) {
       cost += BALANCE.slash.sharpTurnExtraCost;
       this.sharpTurnCount += 1;
-      this.addText(pos.x, pos.y - 12, "折势", "#d9b45b", 12);
+      // P4.4A.2: Boss模式不显示"折势"
+      if (this.gameMode !== "boss") {
+        this.addText(pos.x, pos.y - 12, "折势", "#d9b45b", 12);
+      }
     }
 
     trail.pathUsed += cost;
