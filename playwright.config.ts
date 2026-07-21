@@ -29,7 +29,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run dev",
+    command: "npm run preview -- --host 0.0.0.0 --port 5173",
     port: 5173,
     reuseExistingServer: true,
   },

@@ -419,7 +419,10 @@ export class Game {
     // P4.4A.3: E2E测试桥（仅在debug/e2e参数下暴露）
     if (typeof window !== "undefined" && (window.location.search.includes("debug=1") || window.location.search.includes("e2e=1"))) {
       const self = this;
+      const instanceId = `game_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       (window as any).__ONE_BLADE_E2E__ = {
+        instanceId,
+        levelId: level.id,
         getState: () => ({
           phase: self.bossController?.phase,
           armorProgress: self.bossController?.debugSnapshot?.["Armor Progress"],
