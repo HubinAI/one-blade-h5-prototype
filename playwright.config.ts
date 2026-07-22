@@ -8,7 +8,7 @@ import { defineConfig, devices } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: ["**/boss-smoke.spec.ts", "**/boss-real-input.spec.ts"],
+  testMatch: ["**/boss-smoke.spec.ts", "**/boss-real-input.spec.ts", "**/boss-execution.spec.ts"],
   timeout: 60000,
   workers: 1,
   retries: 0,

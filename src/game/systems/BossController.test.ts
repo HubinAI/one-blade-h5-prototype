@@ -619,7 +619,7 @@ describe("BossController - Execution 阶段", () => {
     bc.triggerExecutionSuccess();
     expect(bc.phase).toBe("execution_success");
     // 重置
-    bc.resetToExecutionIntro();
+    bc.enterExecutionRetryState();
     expect(bc.phase).toBe("execution_intro");
     expect(bc.inputLocked).toBe(true);
     expect(bc.freezeCombatResources).toBe(true);
@@ -634,7 +634,7 @@ describe("BossController - Execution 阶段", () => {
     // 验证已命中
     expect(bc["_resolvedSlashId"]).toBe("s1");
     // 重置
-    bc.resetToExecutionIntro();
+    bc.enterExecutionRetryState();
     expect(bc["_resolvedSlashId"]).toBe("");
   });
 });

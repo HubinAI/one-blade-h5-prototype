@@ -169,7 +169,8 @@ export class BossController {
   private static readonly EXECUTION_CORE_HIT_RY = 48;
   private static readonly EXECUTION_CORE_VISUAL_HW = 12;
   private static readonly EXECUTION_CORE_VISUAL_HH = 42;
-  /** 屏幕震动（供Game读取） */
+  /** P4.4A.4: execution命核碎裂碎片 */
+  private executionShards: { x: number; y: number; vx: number; vy: number; alpha: number; size: number; color: string }[] = [];
   screenShake: number = 0;
   /** 闪屏（供Game读取） */
   flash: number = 0;
@@ -238,6 +239,7 @@ export class BossController {
     this.coreBreakTimer = 0; this.executionIntroTimer = 0;
     this.executionTimer = 0; this._executionHitDetected = false;
     this.executionResultTimer = 0; this.executionParticles = [];
+    this.executionShards = [];
     this._pursuitProgress = 0; this.pursuitEnergyBoosted = false;
     this.screenShake = 0; this.flash = 0;
     this.lastErrorRePromptElapsed = -99;
@@ -454,7 +456,7 @@ export class BossController {
     if (p === "execution") this.drawExecutionHUD(ctx);
     if (p === "execution_success") this.drawExecutionSuccess(ctx);
     if (p === "execution_fail") this.drawExecutionFail(ctx);
-    if (p !== "loading" && p !== "intro") this.drawBossHud(ctx);
+    if (p !== "loading" && p !== "intro" && !["execution_intro", "execution", "execution_success", "execution_fail"].includes(p)) this.drawBossHud(ctx);
   }
 
   /** 获取Boss身体世界坐标（用于wrong_hit参考） */
@@ -526,25 +528,13 @@ export class BossController {
     };
   }
 
-  /** P4.4A.4: 终结一刀段判定（椭圆命中检测：沿线段采样8点） */
+  /** P4.4A.4: 终结一刀段判定（椭圆命中检测：使用精确segmentHitEllipse） */
   resolveExecutionSegment(segA: Vec2, segB: Vec2, slashId: string): ExecutionResolveResult | null {
     if (this._phase !== "execution") return null;
     if (this._resolvedSlashId === slashId) return null;
     const core = this.getExecutionCoreWorldPos();
-    // 椭圆方程 (dx/rx)² + (dy/ry)² <= 1，沿线段采样8个点
-    const samples = 8;
-    let hit = false;
-    for (let i = 0; i <= samples; i++) {
-      const t = i / samples;
-      const sx = segA.x + (segB.x - segA.x) * t;
-      const sy = segA.y + (segB.y - segA.y) * t;
-      const dx = (sx - core.cx) / core.rx;
-      const dy = (sy - core.cy) / core.ry;
-      if (dx * dx + dy * dy <= 1) {
-        hit = true;
-        break;
-      }
-    }
+    // 使用精确的椭圆-线段相交检测替代低精度8点采样
+    const hit = this.segmentHitEllipse(segA, segB, core.cx, core.cy, core.rx, core.ry);
     if (hit) {
       this._resolvedSlashId = slashId;
       this._executionHitDetected = true;
@@ -580,14 +570,26 @@ export class BossController {
     this.spawnExecutionSuccessParticles();
   }
 
-  /** P4.4A.4: 重置到execution_intro（失败重试） */
-  resetToExecutionIntro(): void {
-    (this._phase as BossPhaseState) = "execution_intro";
+  /** P4.4A.4: 进入execution重试状态（恢复破甲/追击完成状态） */
+  enterExecutionRetryState(): void {
+    this._phase = "execution_intro";
+    // 恢复破甲完成状态
+    this.armorProgress = 3;
+    for (const armor of this.armorTargets) {
+      armor.active = false;
+      armor.broken = true;
+      armor.animTimer = 0;
+    }
+    // 恢复追击完成状态
+    this._pursuitProgress = 3;
+    this.coreBreakTimer = 1.2; // 已过 core_break
+    // 重置 execution 相关
     this.executionIntroTimer = 0;
     this.executionTimer = 0;
     this._executionHitDetected = false;
     this.executionResultTimer = 0;
     this.executionParticles = [];
+    this.executionShards = [];
     this._resolvedSlashId = "";
     this._session = { slashId: "", bodyContact: false, firstBodyHitPos: undefined, lastBodyHitPos: undefined, finalResult: undefined };
     this.objectiveText = "斩碎命核";
@@ -596,7 +598,7 @@ export class BossController {
     this.screenShake = 0;
     this.flash = 0;
     this.renderY = BOSS_CY;
-    this.bossRenderScale = 1;
+    this.bossRenderScale = 1.0;
   }
 
   /** P4.4A.4: 圆形-线段相交检测（用于命核） */
@@ -655,11 +657,14 @@ export class BossController {
     });
   }
 
-  /** P4.4A.3: 统一Boss收刀路由 */
+  /** P4.4A.3: 统一Boss收刀路由（严格switch） */
   finishBossSlash(slashId: string): ArmorResolveResult | import("../types").PursuitResolveResult | ExecutionResolveResult | null {
-    if (this._phase === "execution") return this.finishExecutionSlash(slashId);
-    if (this._phase === "pursuit") return this.finishPursuitSlash(slashId);
-    return this.finishSlash(slashId);
+    switch (this._phase) {
+      case "armor": return this.finishSlash(slashId);
+      case "pursuit": return this.finishPursuitSlash(slashId);
+      case "execution": return this.finishExecutionSlash(slashId);
+      default: return null;
+    }
   }
 
   // ==============================================================
@@ -932,8 +937,36 @@ export class BossController {
       coreAlpha = 0.85 + Math.sin(this._elapsed * 6) * 0.12; coreColor0 = "#ffffff"; coreColor1 = "#f0e130";
       drawR = CORE_GEOMETRY.visualRadius * 1.8;
     } else if (p === "execution_success") {
-      coreAlpha = 0.9; coreColor0 = "#ffffff"; coreColor1 = "#f0e130";
-      drawR = CORE_GEOMETRY.visualRadius * 2.2;
+      const t = this.executionResultTimer;
+      // 0~0.15s: 核心过曝（白色+黄色发光）
+      if (t < 0.15) {
+        const overexpose = t / 0.15;
+        coreAlpha = 0.9 + 0.1 * overexpose;
+        coreColor0 = "#ffffff";
+        coreColor1 = "#f0e130";
+        drawR = CORE_GEOMETRY.visualRadius * 2.2 * (1 + overexpose * 0.5);
+      } else {
+        // 0.15s后不再绘制完整Core（碎片代替）
+        coreAlpha = 0;
+        drawR = 0;
+        coreColor0 = "#ffffff"; coreColor1 = "#f0e130";
+        // 生成碎片（首次）
+        if (this.executionShards.length === 0) {
+          const shardCount = 3 + Math.floor(Math.random() * 3); // 3~5片
+          for (let i = 0; i < shardCount; i++) {
+            const angle = (Math.PI * 2 * i) / shardCount + (Math.random() - 0.5) * 0.5;
+            const speed = 60 + Math.random() * 120;
+            this.executionShards.push({
+              x: 0, y: 2,
+              vx: Math.cos(angle) * speed,
+              vy: Math.sin(angle) * speed - 40,
+              alpha: 1,
+              size: 4 + Math.random() * 8,
+              color: Math.random() > 0.5 ? "#ffffff" : "#f0e130",
+            });
+          }
+        }
+      }
     } else if (p === "execution_fail") {
       coreAlpha = Math.max(0, 0.6 - this.executionResultTimer * 0.3);
       coreColor0 = "#6c3483"; coreColor1 = "#3d1a50";
@@ -952,6 +985,31 @@ export class BossController {
     ctx.shadowBlur = exposed ? 16 : 6;
     ctx.beginPath(); ctx.arc(0, 2, finalR, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
+
+    // P4.4A.4: execution_success 命核碎片绘制
+    if (this.p() === "execution_success" && this.executionShards.length > 0) {
+      const t = this.executionResultTimer;
+      // 更新碎片位置
+      const dt = 0.016;
+      for (const shard of this.executionShards) {
+        shard.x += shard.vx * dt;
+        shard.y += shard.vy * dt;
+        shard.vy += 150 * dt;
+        const shardLife = Math.max(0, (t - 0.15) / 0.65);
+        shard.alpha = Math.max(0, 1 - shardLife);
+      }
+      ctx.save();
+      for (const shard of this.executionShards) {
+        ctx.globalAlpha = shard.alpha;
+        ctx.fillStyle = shard.color;
+        ctx.shadowColor = shard.color;
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(shard.x, shard.y, shard.size * shard.alpha, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
   }
 
   // ================================================================
@@ -1162,13 +1220,13 @@ export class BossController {
     ctx.textBaseline = "middle";
     ctx.shadowColor = "#f0e130";
     ctx.shadowBlur = 24 * pulse;
-    ctx.fillText("一刀决断！", DESIGN_WIDTH / 2, 60);
+    ctx.fillText("一刀决断！", DESIGN_WIDTH / 2, 105);
 
     // 副标题
     ctx.font = '14px "Microsoft YaHei", sans-serif';
     ctx.fillStyle = "#d7bde2";
     ctx.shadowBlur = 0;
-    ctx.fillText("划向命核，一击定胜负", DESIGN_WIDTH / 2, 92);
+    ctx.fillText("划向命核，一击定胜负", DESIGN_WIDTH / 2, 140);
     ctx.restore();
   }
 

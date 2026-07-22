@@ -479,7 +479,20 @@ export class Game {
         // 程序化命中：复用 BossController 真实 resolve 逻辑，规避坐标采样 flaky
         slashArmor: () => forceArmorHit(self.bossController!),
         slashCore: () => forcePursuitHit(self.bossController!),
-        slashExecution: () => forceExecutionHit(self.bossController!),
+        slashExecution: () => {
+          const bc = self.bossController;
+          if (!bc || bc.phase !== "execution") return false;
+          const core = bc.getExecutionCoreWorldPos();
+          if (!core) return false;
+          const slashId = `e2e_e_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          const segA = { x: core.cx - 1, y: core.cy - 1 };
+          const segB = { x: core.cx + 1, y: core.cy + 1 };
+          const result = bc.resolveExecutionSegment(segA, segB, slashId);
+          if (!result || result.kind !== "execution_hit") return false;
+          // 复用 Game 生产反馈链路
+          self.applyExecutionResolveResult(result, segA, segB);
+          return true;
+        },
         // 跳过 Boss 开场动画（仅加速到达 armor 阶段）
         skipIntro: () => self.bossController?.skipIntro(),
       };
@@ -668,7 +681,7 @@ export class Game {
   /** P4.4A.4: 失败后重试——重置Boss到execution_intro */
   retryExecution(): void {
     if (!this.bossController) return;
-    this.bossController.resetToExecutionIntro();
+    this.bossController.enterExecutionRetryState();
     // 重置游戏状态（关键：清除finish标记和lost phase）
     this.finished = false;
     this.phase = "playing";
@@ -927,7 +940,12 @@ export class Game {
     // 2. 战斗表现层（Boss身体上方）
     this.drawSlash(ctx);
     this.drawParticles(ctx);
-    this.drawDefenseAndWarrior(ctx);
+    // P4.4A.4: execution阶段隐藏普通斩/破按钮和技能倒计时
+    const phase = this.bossController?.phase;
+    const inExecution = phase && ["execution_intro", "execution", "execution_success", "execution_fail"].includes(phase);
+    if (!inExecution) {
+      this.drawDefenseAndWarrior(ctx);
+    }
     this.drawFloatingTexts(ctx);
     this.drawEdgeFlash(ctx);
     // 3. Boss覆盖层（HUD/文字在最上方）
