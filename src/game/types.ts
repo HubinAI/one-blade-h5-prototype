@@ -306,6 +306,10 @@ export type SlashTrail = {
   kills: number;
   chain: number;
   active: boolean;
+  /** P4.4B-R3 P1-A: Reactive 模式起刀时的连续刀势视觉快照。
+   *  起刀瞬间用 rc.getBladeEffect(lockedEnergy) 计算，整刀使用此快照，
+   *  不随实时刀势跳变（"一刀一象"）。 */
+  reactiveBladeEffect?: BladeContinuousEffect;
 };
 
 export type ParticleKind = "paper" | "spark" | "ring" | "rune" | "smoke" | "slash";
@@ -515,4 +519,27 @@ export type BladeContinuousEffect = {
   brightness: number;
   color: string;
   glowColor: string;
+};
+
+// ---- P4.4B-R3 P0-A: 玩家战斗层显示策略 ----
+// 将"是否显示"与"是否造成伤害"解耦，让 Reactive/Boss 模式可以
+// 保留玩家主体+主刀气场+副刀视觉，但冻结副刀锁敌与伤害。
+// 来源：审计文档"显示与战斗解耦"共识 A/B/C。
+export type PlayerCombatLayerPolicy = {
+  /** 城墙（普通关卡底部防御线，Boss 模式不画） */
+  showDefenseWall: boolean;
+  /** 玩家主体（小人纸片+心形HP） */
+  showWarrior: boolean;
+  /** 主刀气场（绕玩家的圆弧/装饰弧线，随刀势变化） */
+  showMainBladeAura: boolean;
+  /** 副刀视觉（左右悬浮+Ready发光+连接线） */
+  showSubBlades: boolean;
+  /** 副刀槽位图标（屏幕底部两个槽） */
+  showSubBladeSlots: boolean;
+  /** 副刀待机动画更新（呼吸/横向悬浮）。即使为 false 也仍绘制当前位置 */
+  updateSubBladeIdle: boolean;
+  /** 副刀自动锁敌（找高价值目标/密集群） */
+  enableSubBladeTargeting: boolean;
+  /** 副刀造成伤害（命中敌人/弹幕/护甲） */
+  enableSubBladeDamage: boolean;
 };

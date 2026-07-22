@@ -469,27 +469,83 @@ export class Game {
         return !!bc.resolveExecutionSegment(segA, segB, slashId);
       };
 
+      // P4.4B-R3 P0-D: Reactive 模式程序化命中闭包。
+      // 复用 BossReactiveController 真实 resolveSegment + finishSlash 链路，
+      // 高能量（100）一刀碎护甲，模拟玩家精准命中。
+      const forceReactiveArmorHit = (rc: BossReactiveController): boolean => {
+        if (!rc || rc.phase !== "armor_opportunity") return false;
+        const t = rc.getActiveArmorWorldPos();
+        if (!t) return false;
+        const slashId = `e2e_ra_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        // 用穿过护甲中心的小线段（保证 segmentHitEllipse 命中）
+        const segA = { x: t.cx - Math.max(2, t.rx * 0.5), y: t.cy - Math.max(2, t.ry * 0.5) };
+        const segB = { x: t.cx + Math.max(2, t.rx * 0.5), y: t.cy + Math.max(2, t.ry * 0.5) };
+        // 高能量一刀碎（与玩家真实高刀势命中一致）
+        rc.setProgrammaticSlashEnergy(100);
+        const hits = rc.resolveSegment(segA, segB, slashId, 10);
+        if (hits.length === 0) {
+          // 仍可能命中护甲（resolveSegment 在 opportunity 阶段会触发 transitionToResolve）
+          // 即使无弹幕命中，只要 _resolvedSlashId 被设置就说明护甲命中
+        }
+        const result = rc.finishSlash(slashId);
+        return result.armorHit;
+      };
+
       (window as any).__ONE_BLADE_E2E__ = {
         instanceId,
         levelId: level.id,
-        getState: () => ({
-          phase: self.bossController?.phase,
-          armorProgress: self.bossController?.debugSnapshot?.["Armor Progress"],
-          pursuitProgress: self.bossController?.debugSnapshot?.["Pursuit"],
-          armorBroken: self.bossController?.getArmorBrokenFlags() ?? [],
-          energy: self.energy,
-          pointerDown: self.pointerDown,
-          currentSlashActive: self.currentSlash?.active ?? false,
-          inputLocked: self.bossController?.inputLocked ?? false,
-          gameMode: self.gameMode,
-        }),
+        // P4.4B-R3 P0-D: getState 按 gameMode 路由。
+        // - bossReactive：读 reactiveController.getReactiveSnapshot()（含 phase/armorProgress/inputLocked/playerHp/projectileCount/bridgeTriggered）
+        // - boss/normal：读旧 bossController.debugSnapshot 契约（phase/armorProgress/pursuitProgress/armorBroken/inputLocked）
+        getState: () => {
+          if (self.gameMode === "bossReactive" && self.reactiveController) {
+            const snap = self.reactiveController.getReactiveSnapshot();
+            return {
+              phase: snap.phase,
+              armorProgress: snap.armorProgress,
+              pursuitProgress: snap.pursuitProgress,
+              armorBroken: snap.armorBroken,
+              // 实时 energy 来自 Game（reactive 模式用 this.energy 同步）
+              energy: self.energy,
+              pointerDown: self.pointerDown,
+              currentSlashActive: self.currentSlash?.active ?? false,
+              inputLocked: snap.inputLocked,
+              gameMode: self.gameMode,
+              // reactive 特有字段
+              playerHp: snap.playerHp,
+              projectileCount: snap.projectileCount,
+              activeArmorIndex: snap.activeArmorIndex,
+              armorDurability: snap.armorDurability,
+              bridgeTriggered: snap.bridgeTriggered,
+            };
+          }
+          // 旧 Boss / 普通模式：读 bossController
+          return {
+            phase: self.bossController?.phase,
+            armorProgress: self.bossController?.debugSnapshot?.["Armor Progress"],
+            pursuitProgress: self.bossController?.debugSnapshot?.["Pursuit"],
+            armorBroken: self.bossController?.getArmorBrokenFlags() ?? [],
+            energy: self.energy,
+            pointerDown: self.pointerDown,
+            currentSlashActive: self.currentSlash?.active ?? false,
+            inputLocked: self.bossController?.inputLocked ?? false,
+            gameMode: self.gameMode,
+          };
+        },
         getTargets: () => ({
           coreTarget: self.bossController?.getCoreWorldPos(),
           armorTargets: [0, 1, 2].map(i => self.bossController?.getArmorTargetWorldPos(i)).filter(Boolean),
           executionTarget: self.bossController?.getExecutionCoreWorldPos() ?? null,
         }),
-        // 程序化命中：复用 BossController 真实 resolve 逻辑，规避坐标采样 flaky
-        slashArmor: () => forceArmorHit(self.bossController!),
+        // P4.4B-R3 P0-D: 程序化命中按 gameMode 路由。
+        // - bossReactive：调 forceReactiveArmorHit（resolveSegment + finishSlash 真实链路）
+        // - boss：调 forceArmorHit（旧 BossController.resolveArmorSegment）
+        slashArmor: () => {
+          if (self.gameMode === "bossReactive" && self.reactiveController) {
+            return forceReactiveArmorHit(self.reactiveController);
+          }
+          return forceArmorHit(self.bossController!);
+        },
         slashCore: () => forcePursuitHit(self.bossController!),
         slashExecution: () => {
           const bc = self.bossController;
@@ -505,8 +561,16 @@ export class Game {
           self.applyExecutionResolveResult(result, segA, segB);
           return true;
         },
-        // 跳过 Boss 开场动画（仅加速到达 armor 阶段）
-        skipIntro: () => self.bossController?.skipIntro(),
+        // P4.4B-R3 P0-D: 跳过 Boss 开场动画。
+        // - bossReactive：无 intro 阶段，reactiveController 构造后直接进入 armor_prepare，noop
+        // - boss：调 bossController.skipIntro()
+        skipIntro: () => {
+          if (self.gameMode === "bossReactive") {
+            // reactive 模式无 intro，直接返回。桥接后进入 boss 模式时仍可调 skipIntro。
+            return;
+          }
+          self.bossController?.skipIntro();
+        },
       };
     }
 
@@ -943,6 +1007,80 @@ export class Game {
     ctx.restore();
   }
 
+  /**
+   * P4.4B-R3 P0-A: 获取当前模式的玩家战斗层策略。
+   * 把"是否显示"与"是否造成伤害"解耦：
+   * - 普通关卡：全部开启（玩家+主刀气场+副刀视觉+副刀槽+副刀锁敌+副刀伤害）
+   * - Reactive Boss：玩家/主刀气场/副刀视觉保留，副刀锁敌与伤害冻结（验证期不污染）
+   * - 旧 Boss（pursuit/终结/天雷）：玩家/主刀气场/副刀视觉保留，副刀锁敌与伤害冻结
+   * 来源：审计文档 §4"显示与战斗解耦"共识 A/B/C
+   */
+  private getPlayerCombatLayerPolicy(): import("../game/types").PlayerCombatLayerPolicy {
+    if (this.gameMode === "bossReactive") {
+      return {
+        showDefenseWall: false,
+        showWarrior: true,
+        showMainBladeAura: true,
+        showSubBlades: true,
+        showSubBladeSlots: true,
+        updateSubBladeIdle: true,
+        enableSubBladeTargeting: false,
+        enableSubBladeDamage: false,
+      };
+    }
+    if (this.gameMode === "boss") {
+      // 旧 Boss 模式（pursuit/终结/天雷）：玩家+主刀气场+副刀视觉保留，
+      // 副刀锁敌/伤害冻结，避免在 Boss 战中污染验证或造成数值溢出。
+      // 终结/天雷演出阶段（inExecution）由调用方决定是否调用本层。
+      return {
+        showDefenseWall: false,
+        showWarrior: true,
+        showMainBladeAura: true,
+        showSubBlades: true,
+        showSubBladeSlots: true,
+        updateSubBladeIdle: true,
+        enableSubBladeTargeting: false,
+        enableSubBladeDamage: false,
+      };
+    }
+    // 普通关卡：完整玩家+主刀气场+副刀+锁敌+伤害
+    return {
+      showDefenseWall: true,
+      showWarrior: true,
+      showMainBladeAura: true,
+      showSubBlades: true,
+      showSubBladeSlots: true,
+      updateSubBladeIdle: true,
+      enableSubBladeTargeting: true,
+      enableSubBladeDamage: true,
+    };
+  }
+
+  /**
+   * P4.4B-R3 P0-A: 统一玩家战斗层渲染入口。
+   * 根据 policy 决定调用哪些子方法：
+   * - drawDefenseAndWarrior（policy.showDefenseWall / showWarrior / showMainBladeAura）
+   * - drawSubBladeVisual（policy.showSubBlades）
+   * Boss 模式下 drawDefenseAndWarrior 内部会根据 policy 跳过城墙，
+   * 只画玩家主体 + 主刀气场 + 心形 HP + 副刀槽。
+   */
+  private renderPlayerCombatLayer(ctx: CanvasRenderingContext2D): void {
+    const policy = this.getPlayerCombatLayerPolicy();
+    // drawDefenseAndWarrior 内部读 policy 决定是否画城墙
+    this._playerCombatLayerPolicy = policy;
+    if (policy.showWarrior || policy.showMainBladeAura || policy.showDefenseWall) {
+      this.drawDefenseAndWarrior(ctx);
+    }
+    if (policy.showSubBlades) {
+      this.drawSubBladeVisual(ctx);
+    }
+    // 清理临时 policy 引用，避免误读
+    this._playerCombatLayerPolicy = null;
+  }
+
+  /** 临时保存当前玩家战斗层策略（仅供 drawDefenseAndWarrior/drawSubBladeVisual 内部读取，不可外部依赖） */
+  private _playerCombatLayerPolicy: import("../game/types").PlayerCombatLayerPolicy | null = null;
+
   /** P4.4A.2: Boss模式渲染白名单 */
   private renderBossMode(ctx: CanvasRenderingContext2D): void {
     ctx.save();
@@ -963,14 +1101,18 @@ export class Game {
       // 3. 战斗表现层
       this.drawSlash(ctx);
       this.drawParticles(ctx);
-      // 4. 玩家防线（受击线可视化）
-      this.drawReactiveDefenseLine(ctx);
-      // 5. 浮字 + 边缘闪屏
+      // 4. P4.4B-R3 P0-A: 玩家战斗层（玩家主体+主刀气场+副刀视觉+副刀槽）
+      //    替代旧的"淡蓝虚线+蓝点"调试式可视化。
+      //    副刀只显示不伤害（policy.enableSubBladeTargeting/Damage = false）。
+      this.renderPlayerCombatLayer(ctx);
+      // 5. P4.4B-R3 P0-A: 玩家受击线仅 debug 模式显示（debug 时为碰撞参考，正式画面不显示）
+      if (this.debugEnabled) this.drawReactiveDefenseLine(ctx);
+      // 6. 浮字 + 边缘闪屏
       this.drawFloatingTexts(ctx);
       this.drawEdgeFlash(ctx);
-      // 6. Boss覆盖层
+      // 7. Boss覆盖层
       rc.renderOverlay(ctx);
-      // 7. HUD — 按区域分区：
+      // 8. HUD — 按区域分区：
       //    左上：HP（远离Boss头部）
       const hp = rc.getPlayerHp();
       if (hp) {
@@ -978,13 +1120,13 @@ export class Game {
       }
       //    顶部居中：护甲状态条
       const armors = rc.getArmorBrokenFlags();
-      const activeIndex = rc["activeArmorIndex"] ?? 0;
+      const activeIndex = rc.getActiveArmorIndex();
       drawArmorIndicators(ctx, armors, DESIGN_WIDTH / 2 - 80, 28, activeIndex);
       //    底部：刀势条（靠近玩家操作区）
       drawEnergyBar(ctx, this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.max, DESIGN_WIDTH / 2 - 90, DESIGN_HEIGHT - 60, 180, 18);
-      // 8. Debug
+      // 9. Debug
       if (this.debugEnabled) this.drawDebugPanel(ctx);
-      // 9. Flash
+      // 10. Flash
       if (this.flash > 0) {
         ctx.fillStyle = `rgba(255, 232, 146, ${this.flash * 0.18})`;
         ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
@@ -1004,7 +1146,9 @@ export class Game {
     const phase = this.bossController?.phase;
     const inExecution = phase && ["execution_intro", "execution", "execution_success", "execution_fail", "fail", "victory_show", "tribulation_intro", "tribulation", "breakthrough_show", "result"].includes(phase);
     if (!inExecution) {
-      this.drawDefenseAndWarrior(ctx);
+      // P4.4B-R3 P0-A: 旧 Boss 模式同样使用统一玩家战斗层（玩家+主刀气场+副刀视觉），
+      // 避免桥接（reactive → boss）时 UI 突然切换造成"两套战斗产品"分裂。
+      this.renderPlayerCombatLayer(ctx);
     }
     this.drawFloatingTexts(ctx);
     this.drawEdgeFlash(ctx);
@@ -1044,6 +1188,9 @@ export class Game {
     this.updateActiveSlash(scaledDt);
     this.updateParticles(scaledDt);
     this.updateTexts(scaledDt);
+    // P4.4B-R3 P0-A: 旧 Boss 模式也更新副刀待机动画（cooldown→ready 呼吸），
+    // 不锁敌/不攻击，仅保留视觉。修复审计 §2.5 "进入旧追击后副刀不显示"。
+    this.updateSubBlades(scaledDt);
     this.updateBossSpawn();
     this.updateBossController(scaledDt);
     // P4.4A.5: result terminal state → finish battle
@@ -1081,6 +1228,9 @@ export class Game {
     this.updateActiveSlash(scaledDt);
     this.updateParticles(scaledDt);
     this.updateTexts(scaledDt);
+    // P4.4B-R3 P0-A: Reactive 模式也更新副刀待机动画（cooldown→ready 呼吸），
+    // 不锁敌/不攻击，仅保留视觉。修复审计 §2.3 "Reactive Boss 模式不更新副刀"。
+    this.updateSubBlades(scaledDt);
 
     const rc = this.reactiveController;
     if (!rc) return;
@@ -1088,6 +1238,10 @@ export class Game {
     rc.debugMode = this.debugEnabled;
 
     rc.update(scaledDt);
+
+    // P4.4B-R3 P1-A: 每帧更新连续刀势效果（基于实时 energy）。
+    // 刀光绘制时读 trail.reactiveBladeEffect（起刀快照），本帧更新只供气场/HUD 读 currentBladeEffect。
+    rc.updateBladeEffect(this.energy);
 
     // P0-B: 弹幕漏过玩家受击线
     const REACTIVE_PLAYER_Y = REACTIVE_BOSS_CONFIG.playerHp.playerLineY;
@@ -1278,7 +1432,13 @@ export class Game {
       hasOil: slashHasOil,
       kills: 0,
       chain: 0,
-      active: true
+      active: true,
+      // P4.4B-R3 P1-A: Reactive 模式起刀时锁定连续刀势视觉快照。
+      // 整刀使用此快照（visualLength/width/brightness/color/glowColor），
+      // 不随实时刀势跳变（"一刀一象"）。drawSlash 在 reactive 模式读此字段。
+      reactiveBladeEffect: isReactiveMode && this.reactiveController
+        ? this.reactiveController.getBladeEffect(lockedEnergy)
+        : undefined,
     };
 
     // P4.1A.15: SlashTrail创建后再消耗全局状态
@@ -2692,10 +2852,47 @@ export class Game {
   /** @deprecated P4.2A.1: 强斩时机/破阵良机已删除 */
   private updateMidfieldHints(dt: number) { }
 
+  /**
+   * P4.4B-R3 P0-A: Boss 模式副刀待机更新（仅 cooldown→ready 呼吸）。
+   * 不锁敌、不攻击、不飞出。视觉由 drawSubBladeVisual 根据 phase 绘制（idle/cooldown/ready 横向悬浮）。
+   * 来源：审计文档 §4 共识 B "保留待机、呼吸和 Ready 反馈；冻结自动锁敌和自动伤害"。
+   */
+  private updateSubBladesIdleOnly(dt: number): void {
+    for (let i = 0; i < 2; i++) {
+      const anim = this.subBladeAnim[i];
+      if (!anim) continue;
+      const cd = this.subBladeCooldowns[i];
+      // 待机更新：cooldown 累加 timer，到 cd 切换到 ready；ready 保持发光，不进入 arming。
+      switch (anim.phase) {
+        case "idle":
+        case "cooldown": {
+          if (anim.phase === "idle") anim.phase = "cooldown";
+          this.subBladeTimers[i] += dt;
+          if (this.subBladeTimers[i] >= cd) {
+            anim.phase = "ready";
+            anim.phaseTimer = 0;
+          }
+          break;
+        }
+        case "ready": {
+          // 保持 ready，呼吸 + 发光，不锁敌不攻击
+          break;
+        }
+        // 其他状态（arming/attacking/outbound/returning/settling）不动，
+        // 避免在 Boss 战中误触发攻击动画。
+      }
+    }
+  }
+
   /** 副刀自动攻击 - 蓄势横扫(槽0) + 破点追击(槽1) */
   private updateSubBlades(dt: number) {
-    // P4.4A.2: Boss模式全程副刀待机
-    if (this.gameMode === "boss") return;
+    // P4.4B-R3 P0-A: Boss 模式（reactive + legacy）副刀只更新待机动画
+    // （cooldown→ready 呼吸），不锁敌、不攻击。视觉保留，伤害冻结。
+    // 修复审计文档 §2.3 "Reactive Boss 模式不更新副刀" 与 §2.5 "进入旧追击后也不会恢复副刀"。
+    if (this.gameMode === "boss" || this.gameMode === "bossReactive") {
+      this.updateSubBladesIdleOnly(dt);
+      return;
+    }
     // P4.1A.12: subSlash子系统已删除
     // 破绽标记衰减
     for (const [enemyId, timeLeft] of this.weakpointMarks) {
@@ -4551,7 +4748,15 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (win) AudioService.victory();
     else AudioService.defeat();
     this.stats.score = this.score;
-    this.stats.remainingHp = this.hp;
+    // P4.4B-R3 P1-B: Reactive 模式权威 HP 来自 reactiveController.playerHp，
+    // 旧 Boss/普通模式仍读 this.hp/this.maxHp。修复审计 §10 "Reactive HP 没有完全贯通结果统计"。
+    // 注意：必须在写 stats.remainingHp 之前计算，否则 skillScores 的 maxHp 会读错。
+    const resultHp = this.gameMode === "bossReactive"
+      ? this.reactiveController?.getPlayerHp()
+      : null;
+    const finalRemainingHp = resultHp?.current ?? this.hp;
+    const finalMaxHp = resultHp?.max ?? this.maxHp;
+    this.stats.remainingHp = finalRemainingHp;
     this.stats.defenseLineHits = this.defenseLineHits;
     this.stats.sharpTurnCount = this.sharpTurnCount;
     this.stats.highBladeSlashCount = this.highBladeSlashCount;
@@ -4583,7 +4788,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       explosions: this.stats.explosions,
       defenseLineHits: this.stats.defenseLineHits,
       remainingHp: this.stats.remainingHp,
-      maxHp: this.maxHp,
+      maxHp: finalMaxHp,
       pickups: this.stats.pickups,
       pickupsSpawned: this.pickupsSpawned
     });
@@ -6363,8 +6568,18 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const points = trail.points;
     const isLowBlade = ratio <= BALANCE.slash.lowBladeRemainRatio;
     const lowFade = isLowBlade ? 0.46 + (ratio / BALANCE.slash.lowBladeRemainRatio) * 0.38 : 1;
+
+    // P4.4B-R3 P1-A: Reactive 模式优先使用起刀时的连续刀势视觉快照（reactiveBladeEffect），
+    // 让刀光长度/宽度/亮度/颜色随起刀瞬间锁定，不随实时刀势跳变（"一刀一象"）。
+    // 非 reactive 模式仍用旧离散段位 stage.width/color/brightness/visualLength。
+    const rEff = trail.reactiveBladeEffect;
+    const effWidth = rEff ? rEff.width : stage.width;
+    const effColor = rEff ? rEff.color : stage.color;
+    const effBrightness = rEff ? rEff.brightness : stage.brightness;
+    const effVisualLength = rEff ? rEff.visualLength : stage.visualLength;
+
     // P4.4A.2-R2: 大幅缩短刀光总时长
-    const width = stage.width * trail.widthMultiplier * (0.28 + ratio * 0.95) * 0.7;
+    const width = effWidth * trail.widthMultiplier * (0.28 + ratio * 0.95) * 0.7;
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
@@ -6376,10 +6591,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const b = points[i];
       const age = i / Math.max(1, points.length - 1);
       // P4.4A.2-R2: 加速淡出（命中最亮0.15s，强残影0.15s，淡出0.25s，总计≤0.55s）
-      const alpha = clamp(age * b.energyRatio * stage.brightness * lowFade, 0.05, 0.6);
+      const alpha = clamp(age * b.energyRatio * effBrightness * lowFade, 0.05, 0.6);
       ctx.strokeStyle = `rgba(255, 213, 112, ${alpha * 0.5})`;
-      ctx.shadowColor = stage.color;
-      ctx.shadowBlur = (8 + stage.width * 0.3) * lowFade;  // 减少glow
+      ctx.shadowColor = effColor;
+      ctx.shadowBlur = (8 + effWidth * 0.3) * lowFade;  // 减少glow
       ctx.lineWidth = width * (0.9 + b.energyRatio);
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
@@ -6423,8 +6638,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const last = points[points.length - 1];
     const prev = points[points.length - 2];
     const angle = prev ? Math.atan2(last.y - prev.y, last.x - prev.x) : this.lastSlashAngle;
-    const visualLength = stage.visualLength * (0.34 + ratio * 0.82) * lowFade * 0.6;  // 缩短刀尖长度
-    this.drawBladeTip(ctx, last, angle, visualLength, width, stage.color, ratio);
+    const visualLength = effVisualLength * (0.34 + ratio * 0.82) * lowFade * 0.6;  // 缩短刀尖长度
+    this.drawBladeTip(ctx, last, angle, visualLength, width, effColor, ratio);
     ctx.restore();
   }
   private drawSubBladeVisual(ctx: CanvasRenderingContext2D) {
@@ -6677,44 +6892,52 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private drawDefenseAndWarrior(ctx: CanvasRenderingContext2D) {
     ctx.save();
     const energyRatio = this.energy / BALANCE.swordEnergy.max;
-    const wall = ctx.createLinearGradient(0, WALL_TOP_Y, 0, DESIGN_HEIGHT);
-    wall.addColorStop(0, "#57331f");
-    wall.addColorStop(1, "#1f140f");
-    ctx.fillStyle = wall;
-    ctx.fillRect(0, WALL_TOP_Y, DESIGN_WIDTH, DESIGN_HEIGHT - WALL_TOP_Y);
-    ctx.strokeStyle = "#d8a75d";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(0, WALL_TOP_Y);
-    ctx.lineTo(DESIGN_WIDTH, WALL_TOP_Y);
-    ctx.stroke();
-    if (energyRatio >= 0.9) {
-      const pulse = 0.5 + Math.sin(this.elapsed * 6) * 0.5;
-      ctx.save();
-      ctx.globalCompositeOperation = "lighter";
-      ctx.strokeStyle = `rgba(255, 222, 112, ${0.28 + pulse * 0.34})`;
-      ctx.shadowColor = "#ffd35a";
-      ctx.shadowBlur = 18 + pulse * 10;
-      ctx.lineWidth = 4;
+    // P4.4B-R3 P0-A: Boss 模式（reactive + legacy）不画城墙（policy.showDefenseWall=false），
+    // 只画玩家主体 + 主刀气场 + 心形 HP + 副刀槽。
+    // 普通模式 _playerCombatLayerPolicy 可能为 null（render 主循环直接调用），
+    // 此时走默认 true 画城墙。renderPlayerCombatLayer 会先设置 policy 再调用本方法。
+    const policy = this._playerCombatLayerPolicy;
+    const showWall = policy ? policy.showDefenseWall : true;
+    if (showWall) {
+      const wall = ctx.createLinearGradient(0, WALL_TOP_Y, 0, DESIGN_HEIGHT);
+      wall.addColorStop(0, "#57331f");
+      wall.addColorStop(1, "#1f140f");
+      ctx.fillStyle = wall;
+      ctx.fillRect(0, WALL_TOP_Y, DESIGN_WIDTH, DESIGN_HEIGHT - WALL_TOP_Y);
+      ctx.strokeStyle = "#d8a75d";
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(0, WALL_TOP_Y + 1);
-      ctx.lineTo(DESIGN_WIDTH, WALL_TOP_Y + 1);
+      ctx.moveTo(0, WALL_TOP_Y);
+      ctx.lineTo(DESIGN_WIDTH, WALL_TOP_Y);
       ctx.stroke();
+      if (energyRatio >= 0.9) {
+        const pulse = 0.5 + Math.sin(this.elapsed * 6) * 0.5;
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.strokeStyle = `rgba(255, 222, 112, ${0.28 + pulse * 0.34})`;
+        ctx.shadowColor = "#ffd35a";
+        ctx.shadowBlur = 18 + pulse * 10;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(0, WALL_TOP_Y + 1);
+        ctx.lineTo(DESIGN_WIDTH, WALL_TOP_Y + 1);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      ctx.save();
+      ctx.globalAlpha = 0.1;
+      ctx.fillStyle = "#8a5d2e";
+      // 顶部砖块：更不规则、更像墙
+      for (let x = 4; x < DESIGN_WIDTH; x += 36) {
+        ctx.fillRect(x, WALL_TOP_Y + 4, 28, 3);
+      }
+      // 第二层：错开半个位置
+      for (let x = -12; x < DESIGN_WIDTH; x += 36) {
+        ctx.fillRect(x, WALL_TOP_Y + 14, 28, 3);
+      }
       ctx.restore();
     }
-
-    ctx.save();
-    ctx.globalAlpha = 0.1;
-    ctx.fillStyle = "#8a5d2e";
-    // 顶部砖块：更不规则、更像墙
-    for (let x = 4; x < DESIGN_WIDTH; x += 36) {
-      ctx.fillRect(x, WALL_TOP_Y + 4, 28, 3);
-    }
-    // 第二层：错开半个位置
-    for (let x = -12; x < DESIGN_WIDTH; x += 36) {
-      ctx.fillRect(x, WALL_TOP_Y + 14, 28, 3);
-    }
-    ctx.restore();
 
     const cx = DESIGN_WIDTH / 2;
     const cy = BALANCE.battlefield.warriorY + 28;

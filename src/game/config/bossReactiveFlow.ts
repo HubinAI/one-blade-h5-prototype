@@ -28,13 +28,19 @@ export const REACTIVE_BOSS_CONFIG = {
   },
   playerHp: {
     max: 100,
-    normalBulletDamage: 6,
-    reflectiveBulletDamage: 12,
-    bossHeavyDamage: 20,
-    mistakenCutDamage: 5,
+    // P4.4B-R3 P0-B: 验证期降低伤害，确保测试者能稳定跑完三甲→追击。
+    // 普通 6→3、强化 12→6、误砍 5→3。
+    // 上线前再调回正式难度。
+    normalBulletDamage: 3,
+    reflectiveBulletDamage: 6,
+    bossHeavyDamage: 10,
+    mistakenCutDamage: 3,
     invincibleDuration: 0.3,
-    // P4.4B-R2 P0-B: 玩家受击线 Y（720→690，配合弹速提升让弹幕能真实到达）
+    // P0-B: 玩家受击线 Y（720→690，配合弹速提升让弹幕能真实到达）
     playerLineY: 690,
+    // P0-B: 每次切换到新护甲时恢复 12 HP（首次进入新护甲的回血）。
+    // 让测试者即使前一段漏弹也能继续验证后续阶段。
+    armorTransitionHeal: 12,
   },
   armor: {
     durabilityPerPiece: 100,
@@ -68,6 +74,12 @@ export const REACTIVE_BOSS_CONFIG = {
       glowColor: "rgba(192,57,43,0.8)",
       maxLife: 3.5,
     },
+  },
+  // P4.4B-R3 P0-B: 弹幕生成间隔配置化（验证期 0.6→0.85，减少单段弹幕数）。
+  // threat 阶段时长 2.0~3.0s × 0.85s 间隔 ≈ 2-3 发弹幕/护甲，原 0.6s ≈ 3-5 发。
+  threatSpawn: {
+    intervalBase: 0.85,
+    intervalJitter: 0.2,
   },
   bladeEffect: {
     minLength: 30,

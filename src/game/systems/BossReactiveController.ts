@@ -201,7 +201,9 @@ export class BossReactiveController {
   private updateArmorThreat(dt: number): void {
     // 按间隔生成弹幕
     this.threatSpawnTimer += dt;
-    const spawnInterval = 0.6 + Math.random() * 0.2;
+    // P4.4B-R3 P0-B: 间隔配置化（0.85+random*0.2），验证期减少单段弹幕数量。
+    const { intervalBase, intervalJitter } = REACTIVE_BOSS_CONFIG.threatSpawn;
+    const spawnInterval = intervalBase + Math.random() * intervalJitter;
     if (this.threatSpawnTimer >= spawnInterval) {
       this.threatSpawnTimer = 0;
       this.spawnProjectileForCurrentArmor();
@@ -281,6 +283,17 @@ export class BossReactiveController {
     // 找下一个未破碎的护甲
     const nextIdx = this.armorTargets.findIndex(a => !a.broken);
     if (nextIdx >= 0) {
+      // P4.4B-R3 P0-B: 切换到新护甲时恢复 player HP（不超过 max），
+      // 让测试者即使前一段漏弹也能继续验证后续阶段。
+      const heal = REACTIVE_BOSS_CONFIG.playerHp.armorTransitionHeal ?? 0;
+      if (heal > 0 && this.playerHp.current < this.playerHp.max) {
+        const before = this.playerHp.current;
+        this.playerHp.current = Math.min(this.playerHp.max, before + heal);
+        // 治疗闪烁用 flashTimer 的反相（不闪红），用一个独立标记或直接走 flashTimer 但语义不同。
+        // 简单做法：复用 flashTimer 触发一个轻微高光（HP 条已有 flashTimer 分支），值取负数区分。
+        // 但 flashTimer 在 update 中只衰减不读符号，故用一个小正数让条白色脉冲一下作为视觉反馈。
+        // 这里不强制闪烁，避免和受击红光混淆。仅在 stats 层面回血。
+      }
       this.activeArmorIndex = nextIdx;
       this._phase = "armor_prepare";
       this.phaseTimer = 0;
@@ -339,6 +352,36 @@ export class BossReactiveController {
 
   private getCurrentArmor(): ReactiveArmorTarget {
     return this.armorTargets[this.activeArmorIndex];
+  }
+
+  /** P4.4B-R3 P0-D: 当前激活护甲索引（供 E2E reactiveSnapshot 读） */
+  getActiveArmorIndex(): number { return this.activeArmorIndex; }
+
+  /** P4.4B-R3 P0-D: 当前激活护甲的世界坐标 + 半径（供 E2E 程序化命中使用，避免硬编码） */
+  getActiveArmorWorldPos(): { cx: number; cy: number; rx: number; ry: number } | null {
+    const armor = this.armorTargets[this.activeArmorIndex];
+    if (!armor || armor.broken) return null;
+    return {
+      cx: BOSS_CX + armor.relX,
+      cy: this.renderY + armor.relY,
+      rx: armor.radiusX,
+      ry: armor.radiusY,
+    };
+  }
+
+  /** P4.4B-R3 P0-D: 设置程序化命中的刀势能量（E2E 用，避免依赖外部 Game 注入） */
+  setProgrammaticSlashEnergy(energy: number): void {
+    this.currentSlashEnergy = energy;
+  }
+
+  /** P4.4B-R3 P0-D: 当前护甲耐久数组（供 E2E reactiveSnapshot 读，深拷贝防外部篡改） */
+  getArmorDurability(): number[] {
+    return this.armorTargets.map(a => Math.max(0, Math.round(a.durability)));
+  }
+
+  /** P4.4B-R3 P0-D: 弹幕数量（供 E2E reactiveSnapshot 读） */
+  getProjectileCount(): number {
+    return this.projectiles.filter(p => p.active && !p.resolved).length;
   }
 
   // ================================================================
@@ -557,6 +600,49 @@ export class BossReactiveController {
   }
   getArmorBrokenFlags(): boolean[] {
     return this.armorTargets.map(a => a.broken);
+  }
+
+  /** P4.4B-R3 P0-D: Reactive 模式状态快照（供 E2E 桥按 gameMode 路由读取）。
+   *  字段命名沿用旧 BossController.getState 契约（phase/armorProgress/inputLocked 等），
+   *  并补充 reactive 特有字段（playerHp/projectileCount/activeArmorIndex/armorDurability）。
+   *  注意：此快照对外是只读快照，不可被外部修改。 */
+  getReactiveSnapshot(): {
+    phase: BossPhaseState;
+    armorProgress: string;
+    pursuitProgress: string;
+    armorBroken: boolean[];
+    armorDurability: number[];
+    activeArmorIndex: number;
+    inputLocked: boolean;
+    bridgeTriggered: boolean;
+    projectileCount: number;
+    energy: number;
+    playerHp: { current: number; max: number };
+    currentBladeEffect: BladeContinuousEffect;
+  } {
+    const armorDone = this.armorProgress;
+    return {
+      phase: this._phase,
+      // 与旧 BossController.debugSnapshot["Armor Progress"] 一致：用 "n/3" 字符串
+      armorProgress: `${armorDone}/${this.maxArmor}`,
+      // reactive 阶段没有 pursuit，统一返回 "0/3" 占位
+      pursuitProgress: "0/3",
+      armorBroken: this.getArmorBrokenFlags(),
+      armorDurability: this.getArmorDurability(),
+      activeArmorIndex: this.activeArmorIndex,
+      inputLocked: this.inputLocked,
+      bridgeTriggered: this._bridgeTriggered,
+      projectileCount: this.getProjectileCount(),
+      // 注意：energy 由 Game 持有（reactive 模式用 this.energy 同步），
+      // 这里返回 currentSlashEnergy 作为上一刀的能量快照，避免误用实时 energy。
+      // E2E 桥在 getState 中会单独读 game.energy 作为实时值。
+      energy: this.currentSlashEnergy,
+      playerHp: {
+        current: this.playerHp.current,
+        max: this.playerHp.max,
+      },
+      currentBladeEffect: { ...this.bladeEffect },
+    };
   }
 
   // ================================================================
