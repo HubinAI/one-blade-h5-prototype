@@ -11,10 +11,13 @@ import { RUN_BUFFS, RUN_BUFF_BY_ID, ROUTE_COLORS, ROUTE_NAMES, ROUTE_BUFFS, getN
 import { BOSS_CONFIG, getBossPhase } from "./config/bosses";
 import { ELITE_CONFIG, ELITE_KINDS } from "./config/elites";
 import { REWARD_CONFIG } from "./config/rewards";
-import { getBladeTier, getBladeTierName, getTierConfig, canSlash, consumeEnergyByTier, calculateMomentumRefund, getSubBladeCDReduction, recoverEnergy } from "./systems/bladeEnergySystem";
+import { getBladeTier, getBladeTierName, getTierConfig, canSlash, consumeEnergyByTier, calculateMomentumRefund, getSubBladeCDReduction, recoverEnergy, gainEnergyByAction } from "./systems/bladeEnergySystem";
 import { isSharpTurn, segmentHitCircle } from "./systems/collisionSystem";
 import { paperBurst, ringParticle, sparkBurst, glowParticle, explosionBurst, coreCollapseBurst } from "./systems/particleSystem";
 import { BossController } from "./systems/BossController";
+import { BossReactiveController } from "./systems/BossReactiveController";
+import { drawEnergyBar, drawHpBar, drawArmorIndicators } from "./systems/bossReactiveHUD";
+import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
 import { BLADE_BASE_STATS, QUALITY_ORDER } from "./config/synthesis";
 import type { Blade } from "./services/BladeService";
@@ -37,6 +40,7 @@ import type {
   Particle,
   Pickup,
   PickupKind,
+  PlayerHpState,
   SlashPoint,
   SlashTrail,
   SkillScores,
@@ -176,7 +180,7 @@ export class Game {
   private wavesFinishedAt = 0; // 最后一波生成完成时 elapsed
   private currentRunMode: "normal" | "challenge" | "dailyChallenge" | "freeBurst" | "highYield" = "normal";
   /** P4.4A.1-R3: 游戏模式隔离 */
-  private gameMode: "normal" | "boss" = "normal";
+  private gameMode: "normal" | "boss" | "bossReactive" = "normal";
   private nextWaveTimer: number = BALANCE.waves.firstWaveDelay;
   private screenShake = 0;
   private flash = 0;
@@ -251,6 +255,10 @@ export class Game {
   private bossSpawned = false;
   /** P4.4A: Boss控制器（新状态机系统） */
   private bossController: BossController | null = null;
+  /** P0: Reactive Boss控制器 */
+  private reactiveController: BossReactiveController | null = null;
+  /** P0: Reactive模式玩家HP */
+  private playerHp: PlayerHpState = { current: 100, max: 100, invincibleTimer: 0, flashTimer: 0 };
   /** P4.2A.1: 统一中央播报调度器 */
   private activeBattleNotice: BattleNotice | null = null;
   private battleNoticeQueue: BattleNotice[] = [];
@@ -397,24 +405,29 @@ export class Game {
     killedBoss: null
   };
 
-  constructor(level: LevelConfig, onFinish: FinishCallback, onReviveOffer?: ReviveOfferCallback, runMode?: "normal" | "challenge") {
+  constructor(level: LevelConfig, onFinish: FinishCallback, onReviveOffer?: ReviveOfferCallback, runMode?: "normal" | "challenge", bossFlow?: "legacy" | "reactive") {
     this.level = level;
     this.onFinish = onFinish;
     this.onReviveOffer = onReviveOffer;
     // P4.4A.2: 第一帧确定游戏模式
     if (runMode === "challenge" && level.bossId === "thunderGeneral") {
-      this.gameMode = "boss";
+      this.gameMode = bossFlow === "reactive" ? "bossReactive" : "boss";
     }
     this.maxHp = Math.min(level.hp + this.progressionModifiers.openingShield, BALANCE.player.maxHp + this.progressionModifiers.openingShield);
     this.hp = this.maxHp;
-    this.energy = clamp(this.runContext.mode === "freeBurst" ? BALANCE.swordEnergy.max : level.initialEnergy + this.progressionModifiers.initialEnergyBonus, 0, BALANCE.swordEnergy.max);
+    // P0: reactive模式使用独立能量初始值
+    if (this.gameMode === "bossReactive") {
+      this.energy = REACTIVE_BOSS_CONFIG.bladeEnergy.initial;
+    } else {
+      this.energy = clamp(this.runContext.mode === "freeBurst" ? BALANCE.swordEnergy.max : level.initialEnergy + this.progressionModifiers.initialEnergyBonus, 0, BALANCE.swordEnergy.max);
+    }
     this.hintSeen = this.readSeenHints();
     this.discoveredEnemies.add("infantry");
     // P4.4A.2: 统一运行模式来源
     this.currentRunMode = runMode ?? this.runContext.mode;
 
     // P4.4A.2: Boss构造期直接初始化（不等待0.5秒）
-    if (this.gameMode === "boss") {
+    if (this.gameMode === "boss" || this.gameMode === "bossReactive") {
       this.initializeThunderGeneralBoss();
     }
 
@@ -768,6 +781,12 @@ export class Game {
       return;
     }
 
+    // P0: Reactive Boss模式专用主循环
+    if (this.gameMode === "bossReactive") {
+      this.updateReactiveBossMode(scaledDt, frameDt);
+      return;
+    }
+
     this.elapsed += scaledDt;
     this.regenDelayTimer = Math.max(0, this.regenDelayTimer - scaledDt);
     this.chestMomentumTimer = Math.max(0, this.chestMomentumTimer - scaledDt);
@@ -857,7 +876,7 @@ export class Game {
 
   render(ctx: CanvasRenderingContext2D) {
     // P4.4A.2: Boss模式渲染白名单
-    if (this.gameMode === "boss") {
+    if (this.gameMode === "boss" || this.gameMode === "bossReactive") {
       this.renderBossMode(ctx);
       return;
     }
@@ -934,6 +953,35 @@ export class Game {
       const shake = this.screenShake * 5;
       ctx.translate(randomRange(-shake, shake), randomRange(-shake, shake));
     }
+
+    // P0: Reactive Boss模式渲染
+    if (this.gameMode === "bossReactive" && this.reactiveController) {
+      const rc = this.reactiveController;
+      // 渲染弹幕（世界层）
+      rc.renderWorld(ctx);
+      // 渲染刀光
+      this.drawSlash(ctx);
+      this.drawParticles(ctx);
+      this.drawFloatingTexts(ctx);
+      this.drawEdgeFlash(ctx);
+      // 渲染Boss上方的覆盖层+HUD
+      rc.renderOverlay(ctx);
+      // 渲染 reactive HUD
+      drawEnergyBar(ctx, this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.max, 20, 30, 150, 16);
+      drawHpBar(ctx, this.playerHp.current, this.playerHp.max, this.playerHp.flashTimer, 20, 55, 150, 16);
+      const armors = rc.getArmorBrokenFlags();
+      const activeIndex = rc["activeArmorIndex"] ?? 0;
+      drawArmorIndicators(ctx, armors, 20, 78, activeIndex);
+      // Debug/Flash
+      if (this.debugEnabled) this.drawDebugPanel(ctx);
+      if (this.flash > 0) {
+        ctx.fillStyle = `rgba(255, 232, 146, ${this.flash * 0.18})`;
+        ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+      }
+      ctx.restore();
+      return;
+    }
+
     // 1. 背景 + Boss世界层（在刀光下方）
     this.drawBackground(ctx);
     this.drawTopMist(ctx);
@@ -1016,9 +1064,48 @@ export class Game {
     this.flash = Math.max(0, this.flash - scaledDt * 2.2);
   }
 
+  /** P0: Reactive Boss模式专用主循环 */
+  private updateReactiveBossMode(scaledDt: number, frameDt: number): void {
+    this.elapsed += scaledDt;
+    this.updateActiveSlash(scaledDt);
+    this.updateParticles(scaledDt);
+    this.updateTexts(scaledDt);
+
+    const rc = this.reactiveController;
+    if (!rc) return;
+
+    rc.update(scaledDt);
+
+    // 检测玩家死亡
+    if (rc.isPlayerDead) {
+      this.finish(false);
+      return;
+    }
+
+    // 桥接检测：reactiveController完成后进入pursuit
+    if (rc.bridgeTriggered && this.bossController) {
+      this.bossController.enterPursuitDirectly();
+      this.reactiveController = null;
+      this.gameMode = "boss";
+      this.addText(DESIGN_WIDTH / 2, 810, "⚡ 刀势回涌", "#5bc0ff", 14, 1.0);
+      return;
+    }
+
+    // 能量恢复（被动1.5/s兜底）
+    this.regenDelayTimer = Math.max(0, this.regenDelayTimer - scaledDt);
+    if (!this.currentSlash?.active && !this.pendingSlash && this.regenDelayTimer <= 0) {
+      this.energy = recoverEnergy(this.energy, scaledDt, 0, true);
+    }
+
+    this.screenShake = Math.max(0, this.screenShake - scaledDt * 2.7);
+    this.flash = Math.max(0, this.flash - scaledDt * 2.2);
+  }
+
   handlePointerDown(pos: Vec2) {
     // P4.4A.2: Boss输入锁定（intro + 完成演出）
     if (this.bossController?.inputLocked) return;
+    // P0: Reactive controller 输入锁定
+    if (this.reactiveController?.inputLocked) return;
     if (this.phase === "buffChoice") {
       this.selectBuffAt(pos);
       return;
@@ -1036,14 +1123,15 @@ export class Game {
     if (this.phase !== "playing") return;
     // P4.4A.4: execution阶段允许一刀（绕过刀势不足检查）
     const isExecutionPhase = this.bossController?.phase === "execution";
-    if (!isExecutionPhase) {
+    const isReactive = this.gameMode === "bossReactive";
+    if (!isExecutionPhase && !isReactive) {
       // 蓄势阶段（0-9%）不可挥刀
       if (!canSlash(this.energy)) {
         this.showHint("蓄势中", "刀势不足", DESIGN_WIDTH / 2, 200, 0.6);
         return;
       }
     } else {
-      // execution阶段确保有足够的能量挥刀
+      // execution阶段或reactive模式确保有足够的能量挥刀
       this.energy = Math.max(this.energy, 10);
     }
     this.pointerDown = true;
@@ -1233,7 +1321,7 @@ export class Game {
     trail.active = false;
 
     // P4.4A.2: Boss模式收刀 → 仅清理，不执行普通反馈
-    if (this.gameMode === "boss") {
+    if (this.gameMode === "boss" || this.gameMode === "bossReactive") {
       this.finalizeBossSlashCommon(trail);
       return;
     }
@@ -1688,6 +1776,12 @@ export class Game {
       }
       return;
     }
+
+    // P0: Reactive Boss模式路由到弹幕/护甲检测
+    if (this.gameMode === "bossReactive" && this.reactiveController) {
+      this.checkReactiveProjectileHits(a, b, trail);
+      return;
+    }
     const stage = SWORD_STAGE_BY_ID[trail.tier];
     const ratio = Math.max(0.06, this.getSlashRatio(trail));
     const bladeReach = BALANCE.slash.touchHitPadding + stage.width * trail.widthMultiplier * (0.75 + ratio);
@@ -1778,6 +1872,68 @@ export class Game {
           this.addText(enemy.x, enemy.y - 20, "阵眼自崩", "#9b6dff", 14);
           this.particles.push(ringParticle(enemy, "#9b6dff", 34));
         }
+      }
+    }
+  }
+
+  /** P0: Reactive Boss弹幕/护甲检测 */
+  private checkReactiveProjectileHits(a: Vec2, b: Vec2, trail: SlashTrail): void {
+    const rc = this.reactiveController;
+    if (!rc) return;
+
+    // 设置当前刀势能量
+    rc.currentSlashEnergy = this.energy;
+
+    // 计算刀芒检测范围
+    const stage = SWORD_STAGE_BY_ID[trail.tier];
+    const ratio = Math.max(0.06, trail.remainingPathLength / Math.max(1, trail.maxPathLength));
+    const bladeReach = BALANCE.slash.touchHitPadding + stage.width * trail.widthMultiplier * (0.75 + ratio);
+
+    // 调用reactiveController的resolveSegment
+    const hits = rc.resolveSegment(a, b, trail.id, bladeReach);
+
+    // 处理弹幕命中效果
+    for (const hit of hits) {
+      const p = rc["projectiles"]?.[hit.projectileIndex] as any;
+      if (!p || !p.active) continue;
+
+      // 根据弹幕类型处理
+      if (p.kind === "normal") {
+        // 普通弹幕：斩碎，+8刀势
+        p.active = false;
+        this.energy = gainEnergyByAction(this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.normalBulletReward, REACTIVE_BOSS_CONFIG.bladeEnergy.max);
+        this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 6, "#9b59b6"));
+        this.addText(p.x, p.y - 12, "+8", "#5bc0ff", 12);
+      } else if (p.kind === "reflective") {
+        // 强化弹幕：根据刀势不同效果
+        if (this.energy < 30) {
+          // 削弱：仅弹开
+          p.active = false;
+          this.addText(p.x, p.y - 12, "弹开", "#d4a0ff", 12);
+        } else if (this.energy < 70) {
+          // 斩碎
+          p.active = false;
+          this.energy = gainEnergyByAction(this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.normalBulletReward, REACTIVE_BOSS_CONFIG.bladeEnergy.max);
+          this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 8, "#d4a0ff"));
+          this.addText(p.x, p.y - 12, "+8", "#5bc0ff", 12);
+        } else {
+          // 反射：弹幕反弹
+          p.reflected = true;
+          p.vx = -p.vx;
+          p.vy = -p.vy;
+          this.energy = gainEnergyByAction(this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.reflectReward, REACTIVE_BOSS_CONFIG.bladeEnergy.max);
+          this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 10, "#ffd700"));
+          this.addText(p.x, p.y - 12, "+16 反射", "#ffd700", 14);
+        }
+      } else if (p.kind === "dangerous") {
+        // 危险雷球：误砍扣刀势+扣血
+        p.active = false;
+        this.energy = Math.max(0, this.energy - REACTIVE_BOSS_CONFIG.bladeEnergy.wrongHitPenalty);
+        this.playerHp.current = Math.max(0, this.playerHp.current - REACTIVE_BOSS_CONFIG.playerHp.mistakenCutDamage);
+        this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 12, "#c0392b"));
+        this.addText(p.x, p.y - 16, "误砍 -10", "#ff4444", 14);
+        this.screenShake = Math.max(this.screenShake, 0.3);
+        this.flash = Math.max(this.flash, 0.2);
       }
     }
   }
@@ -3844,6 +4000,48 @@ export class Game {
 
 /** P4.4A.2: Boss模式收刀公共清理 */
 private finalizeBossSlashCommon(trail: SlashTrail): void {
+  // P0: Reactive Boss模式收刀
+  if (this.reactiveController) {
+    const rc = this.reactiveController;
+    rc.currentSlashEnergy = this.energy;
+    const result = rc.finishSlash(trail.id);
+    // 处理弹幕命中结果
+    for (const projResult of result.projectileResults) {
+      if (projResult.kind === "reflective" && projResult.reflected) {
+        this.energy = gainEnergyByAction(this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.reflectReward, REACTIVE_BOSS_CONFIG.bladeEnergy.max);
+        this.addText(DESIGN_WIDTH / 2, 200, "+16 反射", "#ffd700", 14);
+      } else if (projResult.kind === "normal") {
+        this.energy = gainEnergyByAction(this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.normalBulletReward, REACTIVE_BOSS_CONFIG.bladeEnergy.max);
+      }
+    }
+    // 处理护甲命中
+    if (result.armorHit) {
+      this.flash = Math.max(this.flash, 0.35);
+      this.screenShake = Math.max(this.screenShake, 0.25);
+      this.particles.push(...sparkBurst({ x: trail.points[trail.points.length - 1].x, y: trail.points[trail.points.length - 1].y }, 8, "#f0e130"));
+      this.addText(trail.points[trail.points.length - 1].x, trail.points[trail.points.length - 1].y - 20, "破甲", "#f0e130", 18, 0.6);
+      if (result.armorBroken) {
+        this.energy = gainEnergyByAction(this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.armorBreakReward, REACTIVE_BOSS_CONFIG.bladeEnergy.max);
+        this.screenShake = Math.max(this.screenShake, 0.5);
+        this.flash = Math.max(this.flash, 0.5);
+        this.particles.push(...sparkBurst({ x: trail.points[trail.points.length - 1].x, y: trail.points[trail.points.length - 1].y }, 12, "#f0e130"));
+      } else {
+        this.energy = gainEnergyByAction(this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.armorCrackReward, REACTIVE_BOSS_CONFIG.bladeEnergy.max);
+      }
+    }
+    if (result.wrongHit) {
+      this.energy = Math.max(0, this.energy - REACTIVE_BOSS_CONFIG.bladeEnergy.wrongHitPenalty);
+      this.particles.push(...sparkBurst({ x: trail.points[trail.points.length - 1].x, y: trail.points[trail.points.length - 1].y }, 6, "#6c3483"));
+      this.addText(trail.points[trail.points.length - 1].x, trail.points[trail.points.length - 1].y - 20, "打偏 -10", "#ff6a33", 14, 0.6);
+    }
+    this.warriorSheathTimer = 0.38;
+    this.warriorDrawTimer = 0;
+    this.regenDelayTimer = 0;
+    AudioService.slashEnd();
+    this.currentSlash = undefined;
+    return;
+  }
+
   // P4.4A.3: 统一使用finishBossSlash路由
   const finishResult = this.bossController?.finishBossSlash(trail.id);
   if (finishResult) {
@@ -7171,9 +7369,13 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
   /** P4.4A.2: Boss构造期初始化玄甲雷将（不等待0.5秒） */
   private initializeThunderGeneralBoss(): void {
-    if (this.bossSpawned || this.bossController) return; // 防重复初始化
+    if (this.bossSpawned) return; // 防重复初始化
     this.bossSpawned = true;
-    this.gameMode = "boss";
+    if (this.gameMode === "bossReactive") {
+      this.gameMode = "bossReactive";
+    } else {
+      this.gameMode = "boss";
+    }
     // 清空场上所有敌人
     for (const e of this.enemies) { e.alive = false; }
     this.enemies = [];
@@ -7186,9 +7388,16 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
     this.wavesSpawned = 0;
     this.subSpawnQueue = [];
-    // 创建并启动 BossController
-    this.bossController = new BossController("thunderGeneral");
-    this.bossController.enterLoading();
+    if (this.gameMode === "bossReactive") {
+      // P0: 创建 Reactive Controller
+      this.reactiveController = new BossReactiveController();
+      this.bossController = new BossController("thunderGeneral");
+      // 进入等待状态，由reactiveController完成后桥接
+    } else {
+      // 创建并启动 BossController（legacy）
+      this.bossController = new BossController("thunderGeneral");
+      this.bossController.enterLoading();
+    }
     this.discoveredEnemies.add("boss");
     logEvent("boss_spawn", { levelId: this.level.id, bossId: "thunderGeneral", time: 0 });
   }

@@ -18,9 +18,11 @@ type GameCanvasProps = {
   onRetryExecutionConsumed?: () => void;
   /** P4.4A.4: Boss阶段变更回调 */
   onBossPhaseChange?: (phase: BossPhaseState | null) => void;
+  /** P0: Boss流程选择（双入口） */
+  bossFlow?: "legacy" | "reactive";
 };
 
-export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, declineReviveSignal = 0, paused = false, runMode, retryExecutionRequested = false, onRetryExecutionConsumed, onBossPhaseChange }: GameCanvasProps) {
+export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, declineReviveSignal = 0, paused = false, runMode, retryExecutionRequested = false, onRetryExecutionConsumed, onBossPhaseChange, bossFlow = "legacy" }: GameCanvasProps) {
   // 从currentLevel获取当前模式
   const effectiveMode = runMode === "challenge" ? "challenge" : "normal";
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -45,7 +47,7 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
     canvas.height = DESIGN_HEIGHT * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const game = new Game(level, onFinish, onReviveOffer, effectiveMode);
+    const game = new Game(level, onFinish, onReviveOffer, effectiveMode, bossFlow);
     gameRef.current = game;
     let frame = 0;
     let last = performance.now();

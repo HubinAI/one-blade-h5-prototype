@@ -8,7 +8,8 @@ export type EnemyKind = "infantry" | "shield" | "powder" | "core" | "elite" | "b
 export type EliteKind = "fireRing" | "heal" | "aura";
 export type BossId = "yaoWang" | "moXiu" | "huaYao" | "thunderGeneral";
 /** P4.4A: Boss状态机阶段 */
-export type BossPhaseState = "loading" | "intro" | "armor" | "armor_break_show" | "armor_complete_hold" | "pursuit_intro" | "pursuit" | "core_break" | "execution_intro" | "execution" | "execution_success" | "execution_fail" | "victory_show" | "tribulation_intro" | "tribulation" | "breakthrough_show" | "result" | "fail" | "exit";
+export type BossPhaseState = "loading" | "intro" | "armor" | "armor_break_show" | "armor_complete_hold" | "pursuit_intro" | "pursuit" | "core_break" | "execution_intro" | "execution" | "execution_success" | "execution_fail" | "victory_show" | "tribulation_intro" | "tribulation" | "breakthrough_show" | "result" | "fail" | "exit"
+  | "armor_prepare" | "armor_threat" | "armor_opportunity" | "armor_resolve" | "armor_recovery";
 export type PickupKind = "drum" | "soul" | "oil";
 export type GamePhase = "playing" | "buffChoice" | "revive" | "won" | "lost" | "chestOpen" | "paused_for_chest";
 export type RatingGrade = "C" | "B" | "A" | "S" | "SS" | "神之一刀";
@@ -458,3 +459,57 @@ export function isExecutionFlowPhase(phase: BossPhaseState): boolean {
     "result",
   ].includes(phase);
 }
+
+// ---- P0 Reactive Boss 新增类型 ----
+
+export type ProjectileKind = "normal" | "reflective" | "dangerous";
+
+export type Projectile = {
+  id: string;
+  kind: ProjectileKind;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  active: boolean;
+  spawnTime: number;
+  maxLife: number;
+  rotation: number;
+  rotationSpeed: number;
+  color: string;
+  glowColor: string;
+  reflected: boolean;
+};
+
+export type ReactiveArmorTarget = {
+  id: number;
+  name: string;
+  relX: number;
+  relY: number;
+  radiusX: number;
+  radiusY: number;
+  active: boolean;
+  broken: boolean;
+  durability: number;
+  maxDurability: number;
+  crackProgress: number;
+  animTimer: number;
+  projectileKind: ProjectileKind;
+  bossAction: "sweep" | "reflect" | "mixed";
+};
+
+export type PlayerHpState = {
+  current: number;
+  max: number;
+  invincibleTimer: number;
+  flashTimer: number;
+};
+
+export type BladeContinuousEffect = {
+  visualLength: number;
+  width: number;
+  brightness: number;
+  color: string;
+  glowColor: string;
+};

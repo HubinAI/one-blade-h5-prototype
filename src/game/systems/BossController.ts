@@ -690,6 +690,23 @@ export class BossController {
     return this.armorTargets.map(a => a.broken);
   }
 
+  /** P0: 直接从外部桥接进入pursuit阶段（由BossReactiveController调用） */
+  enterPursuitDirectly(): void {
+    this._phase = "pursuit_intro";
+    this.pursuitIntroTimer = 0;
+    this._pursuitProgress = 0;
+    this.armorProgress = 3;
+    for (const armor of this.armorTargets) {
+      armor.active = false;
+      armor.broken = true;
+    }
+    this.renderY = BOSS_CY;
+    this.bossRenderScale = 1;
+    this.objectiveText = "趁弱点显现时追击";
+    this.objectiveAlpha = 1;
+    this._objectiveTimer = 0;
+  }
+
   /** P4.4A.4: 终结一刀段判定（椭圆命中检测：使用精确segmentHitEllipse） */
   resolveExecutionSegment(segA: Vec2, segB: Vec2, slashId: string): ExecutionResolveResult | null {
     if (this._phase !== "execution") return null;

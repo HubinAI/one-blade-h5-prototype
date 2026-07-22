@@ -5,6 +5,30 @@ export const BALANCE = {
     maxHp: 3
   },
 
+  /** P0: Reactive Boss 玩家生命配置 */
+  playerHp: {
+    max: 100,
+    normalBulletDamage: 6,
+    reflectiveBulletDamage: 12,
+    bossHeavyDamage: 20,
+    mistakenCutDamage: 5,
+    invincibleDuration: 0.3,
+  },
+
+  /** P0: Reactive Boss 刀势能量配置 */
+  reactiveBladeEnergy: {
+    max: 100,
+    initial: 35,
+    passiveRegenPerSecond: 1.5,
+    slashRejectedByEnergyCount: 0,
+    normalBulletReward: 8,
+    reflectReward: 16,
+    armorCrackReward: 5,
+    armorBreakReward: 22,
+    wrongHitPenalty: 10,
+    mistakenCutPenalty: 10,
+  },
+
   swordEnergy: {
     max: 100,
     passiveRegenPerSecond: 12,

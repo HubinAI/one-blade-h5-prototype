@@ -1,103 +1,55 @@
 sequenceDiagram
-    participant Game as Game.updateBossMode()
-    participant BC as BossController
-    participant Render as Game.renderBossMode()
-    participant Overlay as TribulationOverlay
+    participant Player as 玩家
+    participant Game as Game
+    participant BRC as BossReactiveController
+    participant PS as ProjectileSystem
+    participant BC as BossController(现有)
 
-    Note over Game,Overlay: === 现有流程 ===
-    Game->>BC: update(dt)
-    BC->>BC: executionResultTimer >= 2.0
-    BC->>BC: _phase = "victory_show"
-    Game->>BC: check phase
-    Note over Game: 旧: phase === "victory_show" → finish(true)
-
-    Note over Game,Overlay: === P4.4A.5 新流程 ===
-    Game->>BC: update(dt)
-    BC->>BC: executionResultTimer >= 2.0
-    BC->>BC: _phase = "victory_show"
-    BC->>BC: victory_show 粒子持续淡出 (P1-2)
-    BC->>BC: victoryShowTimer >= 0.5 (可配置)
-    BC->>BC: _phase = "tribulation_intro"
-    BC->>BC: tribulationIntroTimer = 0
-
-    rect rgb(20, 10, 40)
-        Note over BC: tribulation_intro 阶段
-        loop 每帧
-            Game->>BC: update(dt)
-            BC->>BC: tribulationIntroTimer += dt
-            BC->>BC: 环境压暗 0→0.5 (0-0.5s)
-            Overlay->>Overlay: 雷云CSS渐入 (0-1.5s)
-            BC->>BC: 裂缝颜色白→紫→白过渡
-            alt tribulationIntroTimer >= 1.5
-                BC->>BC: _phase = "tribulation"
-                BC->>BC: tribulationTimer = 0
-                BC->>BC: tribulationStage = 0
-            end
-        end
+    Note over BRC: === 第1块护甲循环 ===
+    BRC->>BRC: armor_prepare (0.3s)
+    Note right of BRC: Boss 抬手预告
+    
+    BRC->>BRC: armor_threat (2~3s)
+    BRC->>PS: spawnProjectile("normal")
+    PS-->>BRC: 弹幕列表
+    BRC->>PS: spawnProjectile("reflective")
+    PS-->>BRC: 弹幕列表
+    
+    loop 每帧更新弹幕
+        BRC->>PS: updateProjectiles(dt)
+        PS-->>BRC: 更新后弹幕列表
     end
-
-    rect rgb(40, 10, 30)
-        Note over BC: tribulation 阶段
-        loop 每帧
-            Game->>BC: update(dt)
-            BC->>BC: tribulationTimer += dt
-            BC->>BC: tribulationStage = floor(tribulationTimer / 0.6)
-            BC->>BC: stageT = tribulationTimer % 0.6
-
-            alt stageT < 0.15
-                Note over BC: 蓄能：白光闪烁
-                BC->>BC: lightningFlash = stageT / 0.15
-            else
-                Note over BC: 劈落：雷柱 + 闪白 + Boss效果
-                BC->>BC: 绘制竖直雷柱 (白→紫渐变)
-                BC->>BC: screenShake 震动
-                BC->>BC: flash = 0.1 (屏幕闪白)
-            end
-
-            alt tribulationStage == 0
-                Note over BC: Boss 震动裂痕
-            else tribulationStage == 1
-                Note over BC: Boss 缩小至 60%
-                BC->>BC: bossRenderScale = 0.6
-            else tribulationStage == 2
-                Note over BC: Boss 完全消失
-                BC->>BC: bossRenderScale → 0, alpha → 0
-            end
-
-            alt tribulationTimer >= 1.8
-                BC->>BC: _phase = "breakthrough_show"
-                BC->>BC: breakthroughShowTimer = 0
-            end
-        end
+    
+    BRC->>BRC: armor_opportunity (1.5s)
+    Note right of BRC: 护甲发光，可攻击
+    
+    Player->>Game: handlePointerDown → handlePointerMove
+    Game->>Game: startSlash → extendSlash
+    Game->>BRC: resolveSegment(segA, segB, slashId)
+    alt 命中护甲
+        BRC-->>Game: armor_hit {damage, completed}
+        Game->>Game: applyReactiveArmorResult()
+    else 命中Boss身体
+        BRC-->>Game: wrong_hit
+    else 挥空
+        BRC-->>Game: miss
     end
-
-    rect rgb(10, 30, 20)
-        Note over BC: breakthrough_show 阶段
-        loop 每帧
-            Game->>BC: update(dt)
-            BC->>BC: breakthroughShowTimer += dt
-
-            alt breakthroughShowTimer < 0.5
-                Note over BC: 光柱展开
-                BC->>BC: drawBreakthroughColumn(progress)
-            else
-                Note over BC: 光柱稳定
-                BC->>BC: 持续绘制光柱
-                BC->>BC: 绘制上升粒子流 (20-30个)
-                BC->>BC: 绘制边缘飘带
-            end
-
-            alt breakthroughShowTimer >= 1.5
-                Overlay->>Overlay: 破境大字显示
-            end
-            alt breakthroughShowTimer >= 2.0
-                Note over BC: 阶段结束
-                BC->>BC: _phase = "result"
-            end
-        end
+    
+    Player->>Game: handlePointerUp
+    Game->>BRC: finishSlash(slashId)
+    BRC-->>Game: 最终结算结果
+    
+    BRC->>BRC: armor_recovery (0.2s)
+    
+    Note over BRC: === 第2块护甲循环 ===
+    BRC->>BRC: armor_prepare → threat → opportunity → resolve → recovery
+    
+    Note over BRC: === 第3块护甲循环 ===
+    BRC->>BRC: armor_prepare → threat → opportunity → resolve → recovery
+    
+    alt 三块护甲全部击破
+        BRC->>BC: bridgeToPursuit()
+        BC->>BC: enterPursuitDirectly()
+        Note over BC: 进入现有 pursuit 流程
+        Note over BC: 追击→终结→天雷劫(保持不变)
     end
-
-    Game->>BC: check phase === "result"
-    Game->>Game: finish(true)
-    Game->>Game: onFinish(result)
-    Note over Game: App.tsx 收到 result → 进入破境结果页

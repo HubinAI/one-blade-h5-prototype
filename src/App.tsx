@@ -73,6 +73,9 @@ export default function App() {
   const [currentLevel, setCurrentLevel] = useState<LevelConfig>(LEVELS[0]);
   const [lastResult, setLastResult] = useState<BattleResult | null>(null);
   const [appVersion] = useState("V0722008");
+  /** P0: bossFlow 参数（双入口） */
+  const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
+  const bossFlow: "legacy" | "reactive" = urlParams.get("bossFlow") === "reactive" ? "reactive" : "legacy";
   const [runIndex, setRunIndex] = useState(0);
   const [currentMode, setCurrentMode] = useState<RunMode>("normal");
   const [reviveOffer, setReviveOffer] = useState<ReviveOffer | null>(null);
@@ -468,6 +471,7 @@ export default function App() {
             retryExecutionRequested={retryExecutionRequested}
             onRetryExecutionConsumed={handleRetryExecutionConsumed}
             onBossPhaseChange={handleBossPhaseChange}
+            bossFlow={bossFlow}
           />
           {(() => {
             const isExecutionPhase = bossPhase && ["execution_intro", "execution", "execution_success", "execution_fail"].includes(bossPhase);

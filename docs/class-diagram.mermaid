@@ -1,63 +1,91 @@
 classDiagram
-    class BossPhaseState {
-        <<type>>
-        "loading" | "intro" | "armor" | "armor_break_show"
-        | "armor_complete_hold" | "pursuit_intro" | "pursuit"
-        | "core_break" | "execution_intro" | "execution"
-        | "execution_success" | "execution_fail" | "victory_show"
-        | "tribulation_intro" | "tribulation" | "breakthrough_show"
-        | "result" | "fail" | "exit"
+    class BossReactiveController {
+        -_phase: BossPhaseState
+        -_armorCycle: number
+        -_activeArmorIndex: number
+        -_armorTargets: ReactiveArmorTarget[]
+        -_projectiles: Projectile[]
+        -_threatTimer: number
+        -_opportunityTimer: number
+        -_recoveryTimer: number
+        -_prepareTimer: number
+        -_elapsed: number
+        -_session: SlashSession
+        -_resolvedSlashId: string
+        -_playerHp: PlayerHpState
+        -_bladeEffect: BladeContinuousEffect
+        +bossId: BossId
+        +renderY: number
+        +bossRenderScale: number
+        +screenShake: number
+        +flash: number
+        
+        +constructor(bossId: BossId)
+        +enterLoading(): void
+        +update(dt: number): void
+        +resolveSegment(segA: Vec2, segB: Vec2, slashId: string): ReactiveArmorResolveResult | null
+        +finishSlash(slashId: string): ReactiveArmorResolveResult | null
+        +getPlayerHp(): PlayerHpState
+        +takeDamage(amount: number, source: string): void
+        +getBladeEffect(energy: number): BladeContinuousEffect
+        +renderWorld(ctx: any): void
+        +renderOverlay(ctx: any): void
+        +bridgeToPursuit(): void
+        +getArmorBrokenFlags(): boolean[]
+        
+        -updateArmorPrepare(dt): void
+        -updateThreatPhase(dt): void
+        -updateOpportunityPhase(dt): void
+        -updateResolvePhase(dt): void
+        -updateRecoveryPhase(dt): void
+        -spawnProjectile(kind: ProjectileKind): void
+        -updateProjectiles(dt): void
+        -drawBoss(ctx): void
+        -drawProjectiles(ctx): void
+        -drawArmorHUD(ctx): void
+        -drawPlayerHUD(ctx): void
+        -drawEnergyBar(ctx): void
+    }
+
+    class ProjectileSystem {
+        +createProjectile(kind: ProjectileKind, x: number, y: number, targetX: number, targetY: number): Projectile
+        +updateProjectiles(projectiles: Projectile[], dt: number): Projectile[]
+        +checkSlashHit(projectile: Projectile, segA: Vec2, segB: Vec2, bladeReach: number): boolean
+        +checkPlayerHit(projectile: Projectile, playerX: number, playerY: number, playerRadius: number): boolean
+        +getProjectileConfig(kind: ProjectileKind): ProjectileConfig
+    }
+
+    class BossReactiveHUD {
+        +drawEnergyBar(ctx, x, y, energy, maxEnergy): void
+        +drawHpBar(ctx, x, y, hp, maxHp, flash): void
+        +drawArmorIndicators(ctx, armors: ReactiveArmorTarget[], activeIndex: number): void
+        +drawFloatText(ctx, texts: FloatingText[]): void
+        +drawProjectileWarning(ctx, projectiles: Projectile[]): void
     }
 
     class BossController {
-        - _phase: BossPhaseState
-        - tribulationIntroTimer: number
-        - tribulationTimer: number
-        - tribulationStage: number
-        - breakthroughShowTimer: number
-        - tribulationDarkAlpha: number
-        - lightningFlash: number
-        - breakthroughLightColumn: number
-        + get inputLocked(): boolean
-        + get freezeCombatResources(): boolean
-        + update(dt: number): void
-        + renderWorld(ctx): void
-        + renderOverlay(ctx): void
-        - updateTribulationIntro(dt): void
-        - updateTribulation(dt): void
-        - updateBreakthroughShow(dt): void
-        - drawTribulationDarkOverlay(ctx): void
-        - drawLightningBolt(ctx, stage, stageT): void
-        - drawBreakthroughColumn(ctx): void
-        - drawBreakthroughParticles(ctx): void
-        - drawBreakthroughRibbon(ctx): void
-    }
-
-    class TribulationOverlay {
-        + props: { bossPhase: BossPhaseState; tribulationIntroTimer: number; breakthroughShowTimer: number }
-        - cloudAlpha: number
-        - bigTextAlpha: number
-        + render(): ReactNode
-        - renderClouds(): ReactNode
-        - renderBreakthroughText(): ReactNode
+        <<existing>>
+        +bridgeToPursuit(): void
+        +enterPursuitDirectly(): void
     }
 
     class Game {
-        - bossController: BossController
-        - updateBossMode(scaledDt, frameDt): void
-        - renderBossMode(ctx): void
-        + get bossPhase(): BossPhaseState | null
+        <<modified>>
+        -bossFlow: "legacy" | "reactive"
+        -reactiveController: BossReactiveController | null
+        -playerHp: PlayerHpState
+        +handlePointerDown(pos): void
+        +handlePointerUp(): void
+        -updateBossMode(dt): void
+        -updateReactiveBossMode(dt): void
+        -renderBossMode(ctx): void
+        -renderReactiveBossMode(ctx): void
+        -checkReactiveProjectileHits(a, b, trail): void
+        -applyReactiveArmorResult(result): void
     }
 
-    class GameCanvas {
-        - tribulationOverlayRef
-        + props: { onBossPhaseChange }
-        - renderTribulationOverlay(): ReactNode
-    }
-
-    BossController --> BossPhaseState : uses
-    Game --> BossController : owns
-    GameCanvas --> TribulationOverlay : renders
-    GameCanvas --> Game : owns
-    GameCanvas --> BossPhaseState : reads via onBossPhaseChange
-    TribulationOverlay --> BossPhaseState : reads props
+    BossReactiveController --> ProjectileSystem : uses
+    BossReactiveController --> BossReactiveHUD : uses
+    BossReactiveController --> BossController : bridges to pursuit
+    Game --> BossReactiveController : owns (reactive flow)
+    Game --> BossController : owns (legacy flow)

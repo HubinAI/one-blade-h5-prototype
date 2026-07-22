@@ -1,680 +1,801 @@
-# 《我只要一刀》P4.4A.5 天雷劫与破境演出 — 系统设计 + 任务分解
+# 《我只要一刀》增量系统架构设计 — 破甲阶段重构（reactive flow）
 
-> 版本: V0722006 | 基干: P4.4A.4 | 当前: 51/51 测试全绿
-> 架构师: Bob | 日期: 2025-07
+> 架构师：高见远 | 版本：V0722008 → V0722009 | 日期：2025-07-22
 
 ---
 
-## Part A: 系统设计
+## 1. 实现方案 + 框架选型
 
-### 1. 实施方式
+### 1.1 整体技术方案（增量改造策略）
 
-#### 1.1 核心难点分析
+**原则：只重构破甲阶段，不碰追击/终结/天雷劫。**
 
-| 难点 | 风险 | 对策 |
+现有 BossController 管理完整的 armor → pursuit → execution → tribulation 全流程。本次在旁新增 `BossReactiveController`，专门处理新破甲阶段。当 3 块护甲全部击破后，**桥接回现有 BossController 的 pursuit 阶段**，复用后续全流程。
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  BossController (现有)                                              │
+│  armor → armor_break_show → armor_complete_hold → pursuit → ...    │
+│              ↑                          ↓                          │
+│              │                    [保持不变]                        │
+│              │                                                      │
+│  BossReactiveController (新增)                                       │
+│  armor_prepare → threat → opportunity → resolve → recovery × 3    │
+│        ↓                                                           │
+│  (桥接回 BossController.pursuit)                                    │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 1.2 核心技术挑战
+
+| 挑战 | 解决方案 |
+|------|----------|
+| 弹幕系统与刀光碰撞检测 | 复用现有 `segmentHitCircle` / `segmentHitEllipse`，新增弹幕类型定义 |
+| 新旧版本并存 | `?bossFlow=legacy/reactive` URL 参数 + Game 内部路由 |
+| 刀势经济重做 | 修改 `bladeEnergySystem.ts`：`canSlash` 永远返回 true，正向行为回能 |
+| 玩家生命系统 | Game 类新增 `playerHp` / `playerMaxHp`，与现有 `hp` 系统隔离 |
+| 刀势连续视觉效果 | 刀芒长度/宽度基于 `energy/100` 连续缩放，不再依赖刀势段位阶梯 |
+
+### 1.3 框架与库
+
+| 用途 | 选择 | 理由 |
 |------|------|------|
-| 三段天雷的时间管理（精确到 0.15s 粒度的蓄能/劈落/闪白循环） | 🟡 中 | 在 BossController 中使用独立 tribulationTimer + tribulationStage 索引，所有渲染基于 stage 内相对时间计算 |
-| 裂缝 → 雷光视觉过渡（drawExecutionCrack 产物的跨阶段传递） | 🟡 中 | tribulation_intro 阶段继续绘制 executionCrack，通过 lerp 颜色从白→紫→白渐变，tribulation 阶段停止绘制裂缝 |
-| 环境压暗 + 雷云 + 天雷 + 光柱的叠加渲染 | 🟢 低 | 分层策略：CSS 做雷云/破境大字，Canvas 做环境压暗/天雷/光柱/粒子 |
-| 三段递进中 Boss 残躯的震动/缩放/淡出协调 | 🟢 低 | 复用现有 execution_success 分裂态渲染，叠加 tribulationStage 参数控制缩放和透明度 |
+| UI 框架 | React 19 + TypeScript | 现有技术栈，不变 |
+| 构建工具 | Vite 6 | 现有技术栈，不变 |
+| 测试 | Vitest + Playwright | 现有技术栈，不变 |
+| Canvas 渲染 | 原生 Canvas 2D | 现有技术栈，不变 |
+| 新增依赖 | 无 | 全部使用现有能力实现 |
 
-#### 1.2 框架选型与架构模式
+### 1.4 新旧版本并存策略（`?bossFlow=legacy/reactive`）
 
-**无新增依赖**。所有效果使用现有技术栈：
+```
+?bossFlow=legacy     → 使用现有 BossController 完整流程（不变）
+?bossFlow=reactive   → 使用 BossReactiveController 处理破甲阶段
+无参数               → 默认 legacy（向后兼容）
+```
 
-| 效果 | 实现方式 | 原因 |
-|------|----------|------|
-| 环境压暗 | Canvas fillRect（BossController 内） | 与现有 vignette 实现一致 |
-| 雷云 | CSS 叠加层（TribulationOverlay 组件） | 降低 Canvas 重绘开销，CSS 动画更流畅 |
-| 裂缝转化 | Canvas drawExecutionCrack 扩展 | 复用现有代码，颜色过渡可控 |
-| 天雷雷柱 | Canvas 绘制竖直渐变闪电 | 精细控制闪电形状，与闪白配合 |
-| 屏幕闪白 | Canvas fillRect（Game.ts renderBossMode） | 复用现有 flash 机制 |
-| 光柱 | Canvas 绘制渐变梯形 | 底部宽顶部窄，金色渐变 |
-| 粒子流 | Canvas 粒子系统（BossController 内） | 复用现有粒子渲染循环 |
-| 破境大字 | DOM 元素（TribulationOverlay 组件） | 大字样式更丰富，CSS animation 控制 |
-| 灵气飘带 | Canvas 或 CSS 粒子 | 20-30 个粒子，轻量 |
-
-**架构模式**：MVC 变异（Game 为 Controller，BossController 为 Model+部分 View，TribulationOverlay 为独立 View 层）
-
-#### 1.3 关键架构决策
-
-| 决策项 | 选择 | 理由 |
-|--------|------|------|
-| 天雷/光柱/雷云分工 | 雷云→CSS, 天雷/光柱→Canvas | CSS 雷云避免 Canvas 大量重绘，天雷需要精细 Canvas 控制 |
-| 三段时间管理 | 独立 tribulationTimer + tribulationStage 索引 | 与现有 executionResultTimer 模式一致，无需引入新机制 |
-| 裂缝转化 | drawExecutionCrack 在 tribulation_intro 继续绘制 | 复用现有代码，通过 color lerp 过渡 |
-| Boss 残躯渲染 | 继续使用 execution_success 分裂态 + 震动/缩放/淡出 | 复用现有两半分裂渲染，叠加 tribulation 参数 |
-| 共享函数导出位置 | `src/game/types.ts` | 已有类型定义，导出纯函数无循环依赖风险 |
-| 破境大字 | DOM 元素（CSS） | 避免 Canvas 渲染大量文字，CSS animation 更简洁 |
+**实现方式：**
+- `App.tsx` 从 URL 读取 `bossFlow` 参数，通过 `GameCanvas` 的 props 传入
+- `GameCanvas` 将参数传给 `Game` 构造函数
+- `Game` 在 `initializeThunderGeneralBoss` 时根据参数选择控制器
+- 两个控制器共享同一个 `BossPhaseState` 类型，但 reactive 阶段使用新状态名
 
 ---
 
-### 2. 文件列表
+## 2. 文件列表
 
-#### 修改文件
+### 2.1 新建文件
 
-| 文件路径 | 修改类型 | 说明 |
-|----------|----------|------|
-| `src/game/types.ts` | 修改 | 扩展 BossPhaseState，新增共享判断函数导出 |
-| `src/game/systems/BossController.ts` | 修改 | 新增三态处理、时间管理、渲染方法 |
-| `src/game/Game.ts` | 修改 | 修改 updateBossMode 调用链，渲染新阶段效果 |
-| `src/game/GameCanvas.tsx` | 修改 | 集成 TribulationOverlay，更新 inExecution 判断 |
-| `src/game/systems/BossController.test.ts` | 修改 | 新增 6 项终端状态测试 |
-
-#### 新增文件
-
-| 文件路径 | 说明 |
+| 文件路径 | 用途 |
 |----------|------|
-| `src/styles/tribulation.css` | 雷云 + 环境压暗 + 破境大字 CSS 样式 |
-| `src/components/TribulationOverlay.tsx` | 雷云/破境大字 React 叠加层组件 |
+| `src/game/config/bossReactiveFlow.ts` | **配置中心**：新破甲阶段全部数值常量、弹幕配置、刀势经济参数 |
+| `src/game/systems/BossReactiveController.ts` | **核心控制器**：新 5 状态机 + 弹幕生成 + 护甲判定 + 渲染 |
+| `src/game/systems/projectileSystem.ts` | **弹幕系统**：弹幕运动更新、碰撞检测、生命周期管理 |
+| `src/game/systems/bossReactiveHUD.ts` | **HUD 渲染**：刀势条、生命条、护甲状态指示器 |
+| `src/game/systems/BossReactiveController.test.ts` | **单元测试**：新控制器的全部测试用例 |
+
+### 2.2 修改文件
+
+| 文件路径 | 修改内容 |
+|----------|----------|
+| `src/game/types.ts` | 新增 `BossPhaseState` 枚举值（reactive 子状态）、`Projectile` 类型、`ProjectileKind`、`PlayerHpState` |
+| `src/game/Game.ts` | 双入口路由、HP 系统、能量经济重构、渲染适配、BossReactiveController 集成 |
+| `src/game/systems/bladeEnergySystem.ts` | `canSlash` 永远返回 true、新增正向回能函数、被动回能降为 1.5/s |
+| `src/game/config/balance.ts` | 新增 `playerHp`、`reactiveBladeEnergy` 等配置段 |
+| `src/game/systems/BossController.ts` | 新增 `bridgeToPursuit()` 方法供 reactive 控制器桥接调用 |
+| `src/game/GameCanvas.tsx` | 传递 `bossFlow` prop 到 Game |
+| `src/App.tsx` | 从 URL 解析 `bossFlow` 参数并传入 GameCanvas |
+| `src/game/systems/BossController.test.ts` | 新增桥接测试（保持现有测试不变） |
 
 ---
 
-### 3. 数据结构和接口
+## 3. 数据结构与接口
+
+### 3.1 关键 TypeScript 类型定义
+
+```typescript
+// ---- 新增弹幕类型 ----
+export type ProjectileKind = "normal" | "reflective" | "dangerous";
+
+export type Projectile = {
+  id: string;
+  kind: ProjectileKind;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  active: boolean;
+  /** 生成时间（用于生命周期判断） */
+  spawnTime: number;
+  /** 最大存活时间 */
+  maxLife: number;
+  /** 旋转角度（用于 reflective 视觉效果） */
+  rotation: number;
+  /** 旋转速度 */
+  rotationSpeed: number;
+  /** 颜色主色 */
+  color: string;
+  /** 发光颜色 */
+  glowColor: string;
+  /** 已反射标记 */
+  reflected: boolean;
+};
+
+// ---- 新破甲阶段状态机 ----
+// 扩展 BossPhaseState 新增值:
+// "armor_prepare" | "armor_threat" | "armor_opportunity" | "armor_resolve" | "armor_recovery"
+
+// ---- 新护甲目标 ----
+export type ReactiveArmorTarget = {
+  id: number;
+  name: string;
+  relX: number;
+  relY: number;
+  radiusX: number;
+  radiusY: number;
+  /** 当前是否激活（可被攻击） */
+  active: boolean;
+  /** 是否已破碎 */
+  broken: boolean;
+  /** 当前耐久 */
+  durability: number;
+  /** 最大耐久 */
+  maxDurability: number;
+  /** 累积裂痕值（低刀势累积） */
+  crackProgress: number;
+  /** 动画计时器 */
+  animTimer: number;
+  /** 绑定的弹幕类型 */
+  projectileKind: ProjectileKind;
+  /** Boss 动作（绑定到该护甲） */
+  bossAction: "sweep" | "reflect" | "mixed";
+};
+
+// ---- 玩家生命状态 ----
+export type PlayerHpState = {
+  current: number;
+  max: number;
+  /** 受伤无敌计时 */
+  invincibleTimer: number;
+  /** 受伤闪白计时 */
+  flashTimer: number;
+};
+
+// ---- 刀势连续效果参数 ----
+export type BladeContinuousEffect = {
+  /** 刀芒长度 (30~130) */
+  visualLength: number;
+  /** 刀芒宽度 (3~20) */
+  width: number;
+  /** 亮度 (0.3~1.2) */
+  brightness: number;
+  /** 颜色（渐变插值） */
+  color: string;
+  /** 发光颜色 */
+  glowColor: string;
+};
+```
+
+### 3.2 Mermaid 类图
 
 ```mermaid
 classDiagram
-    class BossPhaseState {
-        <<type>>
-        "loading" | "intro" | "armor" | "armor_break_show"
-        | "armor_complete_hold" | "pursuit_intro" | "pursuit"
-        | "core_break" | "execution_intro" | "execution"
-        | "execution_success" | "execution_fail" | "victory_show"
-        | "tribulation_intro" | "tribulation" | "breakthrough_show"
-        | "result" | "fail" | "exit"
+    class BossReactiveController {
+        -_phase: BossPhaseState
+        -_armorCycle: number
+        -_activeArmorIndex: number
+        -_armorTargets: ReactiveArmorTarget[]
+        -_projectiles: Projectile[]
+        -_threatTimer: number
+        -_opportunityTimer: number
+        -_recoveryTimer: number
+        -_prepareTimer: number
+        -_elapsed: number
+        -_session: SlashSession
+        -_resolvedSlashId: string
+        -_playerHp: PlayerHpState
+        -_bladeEffect: BladeContinuousEffect
+        +bossId: BossId
+        +renderY: number
+        +bossRenderScale: number
+        +screenShake: number
+        +flash: number
+        
+        +constructor(bossId: BossId)
+        +enterLoading(): void
+        +update(dt: number): void
+        +resolveSegment(segA: Vec2, segB: Vec2, slashId: string): ReactiveArmorResolveResult | null
+        +finishSlash(slashId: string): ReactiveArmorResolveResult | null
+        +getPlayerHp(): PlayerHpState
+        +takeDamage(amount: number, source: string): void
+        +getBladeEffect(energy: number): BladeContinuousEffect
+        +renderWorld(ctx: any): void
+        +renderOverlay(ctx: any): void
+        +bridgeToPursuit(): void
+        +getArmorBrokenFlags(): boolean[]
+        
+        -updateArmorPrepare(dt): void
+        -updateThreatPhase(dt): void
+        -updateOpportunityPhase(dt): void
+        -updateResolvePhase(dt): void
+        -updateRecoveryPhase(dt): void
+        -spawnProjectile(kind: ProjectileKind): void
+        -updateProjectiles(dt): void
+        -drawBoss(ctx): void
+        -drawProjectiles(ctx): void
+        -drawArmorHUD(ctx): void
+        -drawPlayerHUD(ctx): void
+        -drawEnergyBar(ctx): void
+    }
+
+    class ProjectileSystem {
+        +createProjectile(kind: ProjectileKind, x: number, y: number, targetX: number, targetY: number): Projectile
+        +updateProjectiles(projectiles: Projectile[], dt: number): Projectile[]
+        +checkSlashHit(projectile: Projectile, segA: Vec2, segB: Vec2, bladeReach: number): boolean
+        +checkPlayerHit(projectile: Projectile, playerX: number, playerY: number, playerRadius: number): boolean
+        +getProjectileConfig(kind: ProjectileKind): ProjectileConfig
+    }
+
+    class BossReactiveHUD {
+        +drawEnergyBar(ctx, x, y, energy, maxEnergy): void
+        +drawHpBar(ctx, x, y, hp, maxHp, flash): void
+        +drawArmorIndicators(ctx, armors: ReactiveArmorTarget[], activeIndex: number): void
+        +drawFloatText(ctx, texts: FloatingText[]): void
+        +drawProjectileWarning(ctx, projectiles: Projectile[]): void
     }
 
     class BossController {
-        - _phase: BossPhaseState
-        - tribulationIntroTimer: number
-        - tribulationTimer: number
-        - tribulationStage: number  % 0, 1, 2
-        - breakthroughShowTimer: number
-        - tribulationDarkAlpha: number  % 环境压暗 0→0.5
-        - lightningFlash: number  % 闪白 0→1
-        - breakthroughLightColumn: number  % 光柱展开进度
-        + get inputLocked(): boolean
-        + get freezeCombatResources(): boolean
-        + update(dt: number): void
-        + renderWorld(ctx): void
-        + renderOverlay(ctx): void
-        - updateTribulationIntro(dt): void
-        - updateTribulation(dt): void
-        - updateBreakthroughShow(dt): void
-        - drawTribulationDarkOverlay(ctx): void
-        - drawLightningBolt(ctx, stage: number, stageT: number): void
-        - drawBreakthroughColumn(ctx): void
-        - drawBreakthroughParticles(ctx): void
-        - drawBreakthroughRibbon(ctx): void
-    }
-
-    class TribulationOverlay {
-        + props: { bossPhase: BossPhaseState; tribulationTimer: number; breakthroughShowTimer: number }
-        - cloudAlpha: number  % 雷云透明度
-        - bigTextAlpha: number  % 破境大字透明度
-        + render(): ReactNode
-        - renderClouds(): ReactNode
-        - renderBreakthroughText(): ReactNode
+        <<existing>>
+        +bridgeToPursuit(): void
+        +enterPursuitDirectly(): void
     }
 
     class Game {
-        - bossController: BossController
-        - updateBossMode(scaledDt, frameDt): void
-        - renderBossMode(ctx): void
-        + get bossPhase(): BossPhaseState | null
+        <<modified>>
+        -bossFlow: "legacy" | "reactive"
+        -reactiveController: BossReactiveController | null
+        -playerHp: PlayerHpState
+        +handlePointerDown(pos): void
+        +handlePointerUp(): void
+        -updateBossMode(dt): void
+        -renderBossMode(ctx): void
     }
 
-    class GameCanvas {
-        - tribulationOverlayRef
-        + props: { onBossPhaseChange }
-        - renderTribulationOverlay(): ReactNode
-    }
-
-    BossController --> BossPhaseState : uses
-    Game --> BossController : owns
-    GameCanvas --> TribulationOverlay : renders
-    GameCanvas --> Game : owns
-    GameCanvas --> BossPhaseState : reads via onBossPhaseChange
-    TribulationOverlay --> BossPhaseState : reads props
-```
-
-#### 共享判断函数（导出到 types.ts）
-
-```typescript
-// ---- P4.4A.5: 共享阶段判断函数 ----
-
-/** 所有演出阶段（含新增天雷劫/破境） */
-export function isBossCinematicPhase(phase: BossPhaseState): boolean {
-  return ["victory_show", "tribulation_intro", "tribulation", "breakthrough_show"].includes(phase);
-}
-
-/** 所有输入锁定阶段 */
-export function isBossInputLockedPhase(phase: BossPhaseState): boolean {
-  return [
-    "loading", "intro",
-    "armor_break_show", "armor_complete_hold",
-    "pursuit_intro", "core_break",
-    "execution_intro", "execution_success", "execution_fail",
-    "fail", "victory_show",
-    "tribulation_intro", "tribulation", "breakthrough_show",
-  ].includes(phase);
-}
-
-/** 终结流程阶段（含新增演出阶段，用于 freezeCombatResources） */
-export function isExecutionFlowPhase(phase: BossPhaseState): boolean {
-  return [
-    "execution_intro", "execution", "execution_success", "execution_fail",
-    "fail", "victory_show",
-    "tribulation_intro", "tribulation", "breakthrough_show",
-  ].includes(phase);
-}
-```
-
-#### tribulation 阶段内部状态
-
-```typescript
-// tribulation 阶段内部时间参数（由 BossController 管理）
-const TRIBULATION_STAGE_DURATION = 0.6;    // 每段 0.6s
-const TRIBULATION_CHARGE_DURATION = 0.15;  // 蓄能 0.15s
-const TRIBULATION_STRIKE_DURATION = 0.45;  // 劈落 0.45s
-const TRIBULATION_TOTAL_STAGES = 3;
-
-// breakthrough_show 阶段时间参数
-const BREAKTHROUGH_COLUMN_RISE = 0.5;      // 光柱展开 0.5s
-const BREAKTHROUGH_TEXT_SHOW = 1.5;        // 大字显示 1.5s
-const BREAKTHROUGH_TEXT_FADE = 0.5;        // 大字淡出 0.5s
-const BREAKTHROUGH_TOTAL = 2.0;            // 总时长 2.0s
+    BossReactiveController --> ProjectileSystem : uses
+    BossReactiveController --> BossReactiveHUD : uses
+    BossReactiveController --> BossController : bridges to pursuit
+    Game --> BossReactiveController : owns
+    Game --> BossController : owns (legacy)
 ```
 
 ---
 
-### 4. 程序调用流程
+## 4. 程序调用流程
+
+### 4.1 新破甲状态机时序
 
 ```mermaid
 sequenceDiagram
-    participant Game as Game.updateBossMode()
-    participant BC as BossController
-    participant Render as Game.renderBossMode()
-    participant Overlay as TribulationOverlay
+    participant Player as 玩家
+    participant Game as Game
+    participant BRC as BossReactiveController
+    participant PS as ProjectileSystem
+    participant BC as BossController(现有)
 
-    Note over Game,Overlay: === 现有流程 ===
-    Game->>BC: update(dt)
-    BC->>BC: executionResultTimer >= 2.0
-    BC->>BC: _phase = "victory_show"
-    Game->>BC: check phase
-    Note over Game: 旧: phase === "victory_show" → finish(true)
+    Note over BRC: === 第1块护甲循环 ===
+    BRC->>BRC: armor_prepare (0.3s)
+    Note right of BRC: Boss 抬手预告
+    
+    BRC->>BRC: armor_threat (2~3s)
+    BRC->>PS: spawnProjectile("normal")
+    PS-->>BRC: 弹幕列表
+    BRC->>PS: spawnProjectile("reflective")
+    PS-->>BRC: 弹幕列表
+    
+    loop 每帧更新弹幕
+        BRC->>PS: updateProjectiles(dt)
+        PS-->>BRC: 更新后弹幕列表
+    end
+    
+    BRC->>BRC: armor_opportunity (1.5s)
+    Note right of BRC: 护甲发光，可攻击
+    
+    Player->>Game: handlePointerDown → handlePointerMove
+    Game->>Game: startSlash → extendSlash
+    Game->>BRC: resolveSegment(segA, segB, slashId)
+    alt 命中护甲
+        BRC-->>Game: armor_hit {damage, completed}
+        Game->>Game: applyReactiveArmorResult()
+    else 命中Boss身体
+        BRC-->>Game: wrong_hit
+    else 挥空
+        BRC-->>Game: miss
+    end
+    
+    Player->>Game: handlePointerUp
+    Game->>BRC: finishSlash(slashId)
+    BRC-->>Game: 最终结算结果
+    
+    BRC->>BRC: armor_recovery (0.2s)
+    
+    Note over BRC: === 第2块护甲循环 ===
+    BRC->>BRC: armor_prepare → threat → opportunity → resolve → recovery
+    
+    Note over BRC: === 第3块护甲循环 ===
+    BRC->>BRC: armor_prepare → threat → opportunity → resolve → recovery
+    
+    alt 三块护甲全部击破
+        BRC->>BC: bridgeToPursuit()
+        BC->>BC: enterPursuitDirectly()
+        Note over BC: 进入现有 pursuit 流程
+        Note over BC: 追击→终结→天雷劫(保持不变)
+    end
+```
 
-    Note over Game,Overlay: === P4.4A.5 新流程 ===
-    Game->>BC: update(dt)
-    BC->>BC: executionResultTimer >= 2.0
-    BC->>BC: _phase = "victory_show"
-    BC->>BC: victory_show 粒子持续淡出 (P1-2)
-    BC->>BC: victoryShowTimer >= 0.5 (可配置)
-    BC->>BC: _phase = "tribulation_intro"
-    BC->>BC: tribulationIntroTimer = 0
+### 4.2 弹幕碰撞处理流程
 
-    rect rgb(20, 10, 40)
-        Note over BC: tribulation_intro 阶段
-        loop 每帧
-            Game->>BC: update(dt)
-            BC->>BC: tribulationIntroTimer += dt
-            BC->>BC: 环境压暗 0→0.5 (0-0.5s)
-            Overlay->>Overlay: 雷云CSS渐入 (0-1.5s)
-            BC->>BC: 裂缝颜色白→紫→白过渡
-            alt tribulationIntroTimer >= 1.5
-                BC->>BC: _phase = "tribulation"
-                BC->>BC: tribulationTimer = 0
-                BC->>BC: tribulationStage = 0
+```mermaid
+sequenceDiagram
+    participant Slash as 刀光
+    participant Game as Game
+    participant BRC as BossReactiveController
+    
+    Slash->>Game: checkSegmentHits(a, b, trail)
+    Game->>BRC: 路由到 reactive 弹幕检测
+    BRC->>BRC: 遍历 projectiles
+    
+    loop 每个弹幕
+        alt 普通弹幕(亮紫/浅蓝)
+            BRC->>BRC: 任何刀势可斩
+            Note over BRC: 弹幕销毁 + 玩家+8刀势
+        else 强化弹幕(金紫+旋转环)
+            alt 玩家刀势 < 30
+                BRC->>BRC: 削弱（弹幕方向改变但继续存在）
+            else 30 ≤ 刀势 ≤ 69
+                BRC->>BRC: 斩碎（弹幕销毁）
+            else 刀势 ≥ 70
+                BRC->>BRC: 反射（弹幕反向飞向Boss）
+                Note over BRC: 命中Boss造成护甲伤害
             end
+        else 危险雷球(红黑+尖刺)
+            BRC->>BRC: 误砍惩罚
+            Note over BRC: 玩家-10刀势 + 5伤害
         end
     end
-
-    rect rgb(40, 10, 30)
-        Note over BC: tribulation 阶段
-        loop 每帧
-            Game->>BC: update(dt)
-            BC->>BC: tribulationTimer += dt
-            BC->>BC: tribulationStage = floor(tribulationTimer / 0.6)
-            BC->>BC: stageT = tribulationTimer % 0.6
-
-            alt stageT < 0.15
-                Note over BC: 蓄能：白光闪烁
-                BC->>BC: lightningFlash = stageT / 0.15
-            else
-                Note over BC: 劈落：雷柱 + 闪白 + Boss效果
-                BC->>BC: 绘制竖直雷柱 (白→紫渐变)
-                BC->>BC: screenShake 震动
-                BC->>BC: flash = 0.1 (屏幕闪白)
-            end
-
-            alt tribulationStage == 0
-                Note over BC: Boss 震动裂痕
-            else tribulationStage == 1
-                Note over BC: Boss 缩小至 60%
-                BC->>BC: bossRenderScale = 0.6
-            else tribulationStage == 2
-                Note over BC: Boss 完全消失
-                BC->>BC: bossRenderScale → 0, alpha → 0
-            end
-
-            alt tribulationTimer >= 1.8
-                BC->>BC: _phase = "breakthrough_show"
-                BC->>BC: breakthroughShowTimer = 0
-            end
-        end
-    end
-
-    rect rgb(10, 30, 20)
-        Note over BC: breakthrough_show 阶段
-        loop 每帧
-            Game->>BC: update(dt)
-            BC->>BC: breakthroughShowTimer += dt
-
-            alt breakthroughShowTimer < 0.5
-                Note over BC: 光柱展开
-                BC->>BC: drawBreakthroughColumn(progress)
-            else
-                Note over BC: 光柱稳定
-                BC->>BC: 持续绘制光柱
-                BC->>BC: 绘制上升粒子流 (20-30个)
-                BC->>BC: 绘制边缘飘带
-            end
-
-            alt breakthroughShowTimer >= 1.5
-                Overlay->>Overlay: 破境大字显示
-            end
-            alt breakthroughShowTimer >= 2.0
-                Note over BC: 阶段结束
-                BC->>BC: _phase = "result"
-            end
-        end
-    end
-
-    Game->>BC: check phase === "result"
-    Game->>Game: finish(true)
-    Game->>Game: onFinish(result)
-    Note over Game: App.tsx 收到 result → 进入破境结果页
 ```
 
 ---
 
-### 5. 待明确事项
+## 5. Anything UNCLEAR — 待明确事项
 
-| 事项 | 假设/决策 |
-|------|-----------|
-| victory_show 到 tribulation_intro 过渡等待时间 | 假设 0.5s（victory_show 粒子淡出 + 文字保持），可调 |
-| 天雷三段内每段的时间分配 | 严格按 PRD 时间线：每段 0.6s（蓄能 0.15s + 劈落 0.45s） |
-| 裂缝转化颜色方案 | 白→紫→白渐变，由 drawExecutionCrack 扩展实现 |
-| 破境大字颜色 | 金色 #f0e130，阴影金色发光，大号 36px |
-| 灵气飘带数量 | 20-30 个粒子，金色/白色交替 |
-| 三段天雷后 shards 清理 | 第三段结束后执行 shards 数组清空 |
-| 演出总时长 | ~5.3s（tribulation_intro 1.5s + tribulation 1.8s + breakthrough_show 2.0s） |
-| 演出期间是否可跳过 | 首版不提供跳过功能 |
+1. **Boss 动作空间变化**（P2）：PRD 提到"Boss 动作空间变化"，但未明确是视觉位移还是判定区域变化。假设为：Threat 阶段 Boss 在 X 轴 ±30px 范围内缓慢平移，增加弹幕落点变化。
+2. **弹幕生成频率与数量**：PRD 未给出具体数值。假设：每块护甲的 threat 阶段持续 2~3 秒，生成 2~4 枚弹幕，其中普通弹幕占 60%、强化 30%、危险 10%。
+3. **刀势飘字具体样式**（P2）：PRD 未指定字体大小/颜色/动画。假设：+8 绿字、-10 红字、+16 金字，浮动 0.6 秒后淡出。
+4. **数据采集埋点维度**（P1）：PRD 未指定具体事件。假设：记录弹幕命中次数、反射次数、误砍次数、单块护甲完成时间、总破甲时间。
+5. **护甲裂痕（crack）累计机制**：低刀势(0~29)每次命中累积 25 裂痕，多次累加可破甲，但需要明确裂痕阈值。假设：每块护甲耐久 100，裂痕满 100 时自动转为 1 次有效攻击。
 
 ---
 
-## Part B: 任务分解
+## 6. 任务列表
 
-### 6. 依赖包列表
+### 6.1 所需包
 
-**无新增依赖。** 使用现有技术栈：
-- vite@5.x (构建工具)
-- react@18.x (UI 框架)
-- vitest@1.x (测试框架)
-- 全部 Canvas 原生渲染，无需第三方图形库
+无新增 npm 包。所有能力使用现有技术栈实现。
 
----
+### 6.2 任务列表（按依赖顺序）
 
-### 7. 任务列表（按依赖顺序排列）
+| 任务 ID | 任务名称 | 源文件 | 依赖 | 优先级 |
+|---------|---------|--------|------|--------|
+| T01 | 项目基础设施：配置中心 + 类型定义 + 双入口路由 | `bossReactiveFlow.ts`, `types.ts`, `balance.ts`, `App.tsx`, `GameCanvas.tsx`, `vite.config.ts` | 无 | P0 |
+| T02 | BossReactiveController：5状态机 + 弹幕系统 + 护甲判定 + 渲染 | `BossReactiveController.ts`, `projectileSystem.ts`, `bossReactiveHUD.ts`, `BossController.ts` | T01 | P0 |
+| T03 | Game 集成：能量经济重构 + 玩家生命系统 + 刀势连续效果 + 流路由 | `Game.ts`, `bladeEnergySystem.ts` | T02 | P0 |
+| T04 | 视觉反馈：HUD 渲染 + 飘字 + 数据采集埋点 + 护甲状态指示 | `bossReactiveHUD.ts`（补充）、`Game.ts`（渲染集成） | T03 | P1 |
+| T05 | 测试：15项单元测试 + 6项E2E测试 + E2E桥接适配 | `BossReactiveController.test.ts`, `BossController.test.ts`, `boss-smoke.spec.ts` | T03 | P1 |
 
-#### T01: 项目基础设施（类型扩展 + CSS 样式 + 共享判断函数 + TribulationOverlay 组件）
-
-| 字段 | 内容 |
-|------|------|
-| **Task ID** | T01 |
-| **Task Name** | 项目基础设施：类型扩展、CSS 样式、共享判断函数导出、TribulationOverlay 组件 |
-| **Priority** | P0 |
-| **Dependencies** | 无 |
-
-**涉及文件：**
-- `src/game/types.ts` — 修改
-  - BossPhaseState 扩展三新状态：`"tribulation_intro"` | `"tribulation"` | `"breakthrough_show"`
-  - 导出三个纯函数：`isBossCinematicPhase()`、`isBossInputLockedPhase()`、`isExecutionFlowPhase()`
-- `src/styles/tribulation.css` — 新增
-  - `.tribulation-clouds`：雷云 CSS 样式（多层暗紫色云，从顶部渐入，opacity 动画）
-  - `.tribulation-dark-overlay`：环境压暗 CSS 备用层（主压暗由 Canvas 负责）
-  - `.breakthrough-text`：破境大字样式（金色 #f0e130，大号，shadow-glow）
-  - `.breakthrough-text--fade`：淡出动画
-  - CSS keyframes 动画定义
-- `src/components/TribulationOverlay.tsx` — 新增
-  - Props: `{ bossPhase: BossPhaseState; tribulationIntroTimer: number; breakthroughShowTimer: number }`
-  - 渲染雷云层（CSS 多层暗紫色云，top→bottom 渐入）
-  - 渲染破境大字（"突破成功"，金色，大号，1.5s 显示 + 0.5s 淡出）
-  - 所有透明度/动画通过 CSS class 切换 + 内联 style 控制
-
-**验收标准：**
-- [ ] BossPhaseState 类型包含三个新状态
-- [ ] `isBossCinematicPhase` 覆盖 victory_show, tribulation_intro, tribulation, breakthrough_show
-- [ ] `isBossInputLockedPhase` 覆盖所有演出阶段
-- [ ] `isExecutionFlowPhase` 包含新增演出阶段
-- [ ] TribulationOverlay 在 tribulation_intro 阶段显示雷云
-- [ ] TribulationOverlay 在 breakthrough_show 阶段显示破境大字
-- [ ] CSS 动画平滑不卡顿
-
----
-
-#### T02: BossController 演出状态机（新增三态 + 时间管理 + 渲染方法）
-
-| 字段 | 内容 |
-|------|------|
-| **Task ID** | T02 |
-| **Task Name** | BossController 演出状态机：新增三态处理、时间管理、渲染方法 |
-| **Priority** | P0 |
-| **Dependencies** | T01 |
-
-**涉及文件：**
-- `src/game/systems/BossController.ts` — 修改
-
-**具体修改内容：**
-
-**a) 新增属性：**
-```typescript
-private tribulationIntroTimer = 0;
-private tribulationTimer = 0;
-private tribulationStage = 0;       // 0, 1, 2
-private breakthroughShowTimer = 0;
-private tribulationDarkAlpha = 0;    // 环境压暗 0→0.5
-private breakthroughParticles: { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; size: number; color: string }[] = [];
-private breakthroughRibbons: { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; alpha: number }[] = [];
-```
-
-**b) 时间常量：**
-```typescript
-private readonly TRIBULATION_INTRO_DURATION = 1.5;
-private readonly TRIBULATION_STAGE_DURATION = 0.6;
-private readonly TRIBULATION_TOTAL_STAGES = 3;
-private readonly BREAKTHROUGH_SHOW_DURATION = 2.0;
-private readonly VICTORY_SHOW_TO_TRIBULATION = 0.5; // victory_show 保持时间
-```
-
-**c) update() 扩展：**
-- `victory_show` → `tribulation_intro` 过渡（victoryShowTimer >= VICTORY_SHOW_TO_TRIBULATION）
-- `tribulation_intro` → `tribulation` 过渡（tribulationIntroTimer >= 1.5）
-- `tribulation` → `breakthrough_show` 过渡（tribulationTimer >= 1.8）
-- `breakthrough_show` → `result` 过渡（breakthroughShowTimer >= 2.0）
-
-**d) 新增 update 方法：**
-- `updateTribulationIntro(dt)`：更新环境压暗 alpha、裂缝颜色过渡
-- `updateTribulation(dt)`：更新 tribulationTimer、stage 计算、Boss 残骸缩放/透明度
-- `updateBreakthroughShow(dt)`：更新 breakthroughShowTimer、粒子流
-
-**e) 新增渲染方法：**
-- `drawTribulationDarkOverlay(ctx)`：Canvas 全屏暗色半透明叠加层
-- `drawLightningBolt(ctx, stage, stageT)`：绘制竖直雷柱（白→紫渐变）
-- `drawBreakthroughColumn(ctx)`：绘制金色光柱（底部宽顶部窄梯形）
-- `drawBreakthroughParticles(ctx)`：绘制上升金色粒子流（20-30 个）
-- `drawBreakthroughRibbons(ctx)`：绘制屏幕边缘飘带
-
-**f) 修改现有方法：**
-- `inputLocked` getter：新增 tribulation_intro/tribulation/breakthrough_show 为锁定
-- `freezeCombatResources` getter：同上
-- `isExecutionLockedPhase()`：包含新三态
-- `isExecutionFlowPhase()`：包含新三态
-- `drawBoss()`：在 tribulation 阶段继续绘制分裂态，叠加震动 + 缩放 + 淡出
-- `drawExecutionCrack()`：在 tribulation_intro 阶段颜色过渡（白→紫→白）
-- `renderWorld()`：包含新阶段的渲染方法
-- `renderOverlay()`：包含新阶段的 overlay 渲染
-- `enterLoading()`：重置所有新属性
-
-**g) victory_show 粒子淡出 (P1-2)：**
-- `drawBoss()` 中 victory_show 阶段：粒子 baseline 保持，executionParticles 自然淡出
-- 进入 tribulation_intro 时 executionParticles 已清空
-
-**h) 输入锁定与资源冻结 (P1-3)：**
-- 将 tribulation_intro/tribulation/breakthrough_show 加入 inputLocked 列表
-- 将三态加入 freezeCombatResources 列表
-
-**验收标准：**
-- [ ] tribulation_intro 阶段环境压暗从 0→0.5 渐入
-- [ ] 三段天雷逐次劈落，间隔 ~0.6s
-- [ ] 每段天雷包含蓄能闪烁 + 雷柱 + 闪白
-- [ ] 第一段 Boss 震动，第二段缩小至 60%，第三段完全消失
-- [ ] breakthrough_show 阶段光柱展开 + 粒子流 + 飘带
-- [ ] 三阶段完成后进入 result 状态
-- [ ] 三阶段期间 inputLocked=true, freezeCombatResources=true
-- [ ] victory_show 粒子淡出自然
-
----
-
-#### T03: Game 集成（Game.ts + GameCanvas.tsx 修改）
-
-| 字段 | 内容 |
-|------|------|
-| **Task ID** | T03 |
-| **Task Name** | Game 集成：修改 Game.ts 调用链 + GameCanvas.tsx 集成 TribulationOverlay |
-| **Priority** | P0 |
-| **Dependencies** | T01, T02 |
-
-**涉及文件：**
-- `src/game/Game.ts` — 修改
-- `src/game/GameCanvas.tsx` — 修改
-
-**Game.ts 具体修改：**
-
-**a) `updateBossMode()` 修改：**
-```typescript
-// 旧代码：
-if (this.bossController?.phase === "victory_show") {
-  this.finish(true);
-  return;
-}
-
-// 新代码：
-if (this.bossController?.phase === "result") {
-  this.finish(true);
-  return;
-}
-```
-
-**b) `renderBossMode()` 修改：**
-- 在 tribulation_intro 阶段：绘制环境压暗叠加层
-- 在 tribulation 阶段：绘制屏幕闪白（复用现有 flash 机制）+ 雷柱
-- 在 breakthrough_show 阶段：绘制光柱 + 粒子 + 飘带
-- 更新 `inExecution` 判断数组，包含新三态（保持隐藏普通斩/破按钮）
-
-**c) 导入更新：**
-- 导入 `isBossCinematicPhase`、`isExecutionFlowPhase` 等共享函数（从 types.ts）
-
-**GameCanvas.tsx 具体修改：**
-
-**a) 集成 TribulationOverlay：**
-- 在 canvas 元素上方渲染 `<TribulationOverlay>` 组件
-- 通过 `onBossPhaseChange` 回调传递 bossPhase 给 overlay
-- 同步传递 tribulationIntroTimer / breakthroughShowTimer
-
-**b) 更新 `inExecution` 判断：**
-```typescript
-// 旧 (in Game.ts renderBossMode):
-const inExecution = phase && ["execution_intro", "execution", "execution_success", "execution_fail", "fail", "victory_show"].includes(phase);
-
-// 新:
-const inExecution = phase && ["execution_intro", "execution", "execution_success", "execution_fail", "fail", "victory_show", "tribulation_intro", "tribulation", "breakthrough_show"].includes(phase);
-```
-
-**验收标准：**
-- [ ] victory_show 不再直接触发 finish(true)
-- [ ] result 状态正确触发 finish(true)
-- [ ] 演出阶段隐藏普通 UI 元素（暂停按钮、刀势等）
-- [ ] TribulationOverlay 在正确阶段渲染
-- [ ] 演出阶段 inputLocked 生效（handlePointerDown/Move/Up 均被阻止）
-
----
-
-#### T04: 单元测试（6 项新增 terminal 状态测试）
-
-| 字段 | 内容 |
-|------|------|
-| **Task ID** | T04 |
-| **Task Name** | 终端状态单元测试：新增 6 项 tribulation/breakthrough 测试 |
-| **Priority** | P0 |
-| **Dependencies** | T02 |
-
-**涉及文件：**
-- `src/game/systems/BossController.test.ts` — 修改
-
-**新增测试用例（6 项）：**
-
-**测试 1: tribulation_intro 期间 inputLocked=true**
-```typescript
-it("tribulation_intro 期间 inputLocked=true", () => {
-  const bc = createBoss();
-  toVictoryShow(bc);
-  bc.update(0.5); // → tribulation_intro
-  expect(bc.phase).toBe("tribulation_intro");
-  expect(bc.inputLocked).toBe(true);
-});
-```
-
-**测试 2: tribulation 期间 freezeCombatResources=true**
-```typescript
-it("tribulation 期间 freezeCombatResources=true", () => {
-  const bc = createBoss();
-  toVictoryShow(bc);
-  bc.update(0.5); // → tribulation_intro
-  bc.update(1.5); // → tribulation
-  expect(bc.phase).toBe("tribulation");
-  expect(bc.freezeCombatResources).toBe(true);
-});
-```
-
-**测试 3: tribulation_intro 阶段 bossVisualState 正确**
-```typescript
-it("tribulation_intro 阶段 bossVisualState 为湮灭中", () => {
-  const bc = createBoss();
-  toVictoryShow(bc);
-  bc.update(0.5); // tribulation_intro
-  // 验证 execution_success 分裂态仍在渲染（残躯未完全消失）
-  expect(bc.phase).toBe("tribulation_intro");
-  // 分裂态应该在渲染中
-});
-```
-
-**测试 4: breakthrough_show 阶段 bossVisualState 正确**
-```typescript
-it("breakthrough_show 阶段 bossVisualState 为已湮灭", () => {
-  const bc = createBoss();
-  toVictoryShow(bc);
-  bc.update(0.5); // tribulation_intro
-  bc.update(1.5); // tribulation
-  bc.update(1.8); // breakthrough_show
-  expect(bc.phase).toBe("breakthrough_show");
-  // Boss 残躯应完全消失
-});
-```
-
-**测试 5: 三段天雷后 shards 清理完毕**
-```typescript
-it("三段天雷后 shards 清理完毕", () => {
-  const bc = createBoss();
-  toVictoryShow(bc);
-  bc.update(0.5); // tribulation_intro
-  bc.update(1.5); // tribulation (三段完整执行)
-  // 第三段结束后 shards 应被清理
-  expect(bc["executionShards"]?.length ?? 0).toBe(0);
-});
-```
-
-**测试 6: victory_show → tribulation_intro 正确过渡**
-```typescript
-it("victory_show 结束后进入 tribulation_intro 而非直接 finish", () => {
-  const bc = createBoss();
-  toVictoryShow(bc);
-  expect(bc.phase).toBe("victory_show");
-  bc.update(0.5);
-  expect(bc.phase).toBe("tribulation_intro");
-  // 不应直接到 result
-  expect(bc.phase).not.toBe("result");
-});
-```
-
-**辅助函数：** `toVictoryShow(bc)` 推进到 victory_show 阶段
-
-**验收标准：**
-- [ ] 6 项新增测试全部通过
-- [ ] 原有 51 项测试保持绿色
-- [ ] 测试覆盖三个新状态的锁/冻结/视觉状态
-
----
-
-### 8. 共享知识（跨文件约定）
-
-#### 8.1 BossPhaseState 类型扩展
-
-```typescript
-// 新增三个状态（按顺序插入 victory_show 与 result 之间）
-export type BossPhaseState = 
-  | "loading" | "intro" | "armor" 
-  | "armor_break_show" | "armor_complete_hold" 
-  | "pursuit_intro" | "pursuit" | "core_break"
-  | "execution_intro" | "execution" 
-  | "execution_success" | "execution_fail" 
-  | "victory_show"
-  | "tribulation_intro"   // 新增：环境压暗/雷云聚集/裂缝转化
-  | "tribulation"          // 新增：三段天雷
-  | "breakthrough_show"    // 新增：破境光柱/粒子流/大字
-  | "result" | "fail" | "exit";
-```
-
-#### 8.2 演出阶段 bossVisualState 定义
-
-| 阶段 | Boss 残躯视觉状态 | 裂缝状态 | 粒子状态 |
-|------|-------------------|----------|----------|
-| victory_show | 分裂态（两半），alpha 淡出中 | 窄裂缝，白线 | executionParticles 淡出 |
-| tribulation_intro | 分裂态，alpha 继续淡出 | 裂缝颜色白→紫→白过渡 | executionParticles 已清空 |
-| tribulation (stage 0) | 分裂态，震动 | 不绘制裂缝 | 雷击粒子 |
-| tribulation (stage 1) | 分裂态，缩小至 60% | 不绘制裂缝 | 雷击粒子 |
-| tribulation (stage 2) | 完全消失 | 不绘制裂缝 | 雷击粒子 |
-| breakthrough_show | 无 | 无 | 金色粒子流 |
-
-#### 8.3 API 响应格式约定
-
-- 所有时间单位为秒（float）
-- 所有 Canvas 坐标使用 DESIGN_WIDTH (390) × DESIGN_HEIGHT (844) 归一化空间
-- BossController 的 `_phase` 属性通过 `as BossPhaseState` 类型断言赋值（复用现有模式）
-- TribulationOverlay 通过 props 接收 bossPhase 和 timer 值，不直接访问 BossController
-- 演出阶段定义在 `types.ts` 中的共享函数集中管理，BossController 和 Game 均引用该函数
-
-#### 8.4 时间线常量约定
-
-```typescript
-// 全局时间常量（BossController 内定义）
-const TRIBULATION_INTRO_DURATION = 1.5;    // 环境压暗 + 雷云 + 裂缝转化
-const TRIBULATION_STAGE_DURATION = 0.6;    // 每段天雷时长
-const TRIBULATION_TOTAL_STAGES = 3;        // 三段天雷
-const TRIBULATION_TOTAL = 1.8;             // 天雷总时长 (3 * 0.6)
-const BREAKTHROUGH_SHOW_DURATION = 2.0;    // 破境光柱 + 大字
-const VICTORY_SHOW_HOLD = 0.5;             // victory_show 保持时间
-```
-
----
-
-### 9. 任务依赖图
+### 6.3 任务依赖图
 
 ```mermaid
 graph TD
-    T01["T01: 项目基础设施<br/>(类型+CSS+共享函数+Overlay组件)"]
-    T02["T02: BossController 演出状态机<br/>(三态+时间管理+渲染方法)"]
-    T03["T03: Game 集成<br/>(Game.ts+GameCanvas.tsx)"]
-    T04["T04: 单元测试<br/>(6项终端状态测试)"]
-
-    T01 --> T02
-    T01 --> T03
-    T02 --> T03
-    T02 --> T04
+    T01["T01: 基础设施+npm"] --> T02["T02: ReactiveController+弹幕"]
+    T02 --> T03["T03: Game集成+能量+HP"]
+    T03 --> T04["T04: HUD+视觉反馈+埋点"]
+    T03 --> T05["T05: 测试+E2E"]
 ```
 
-**依赖说明：**
-- T01 无依赖，最先开始（类型扩展是所有后续代码的基础）
-- T02 依赖 T01（需要新的 BossPhaseState 类型）
-- T03 依赖 T01 + T02（需要 TribulationOverlay 组件 + BossController 新状态）
-- T04 依赖 T02（需要新的状态机逻辑才能编写测试）
+---
+
+## 7. 任务详情
+
+### T01: 项目基础设施 — 配置中心 + 类型定义 + 双入口路由
+
+**说明：** 创建新破甲阶段的集中配置中心，定义所有新类型，建立 `?bossFlow=legacy/reactive` 双入口路由。
+
+**新建文件：**
+- `src/game/config/bossReactiveFlow.ts` — 全部数值常量（弹幕速度/半径/颜色、刀势经济参数、HP 参数、状态机计时器）
+- `src/game/types.ts` — 追加新增类型定义（见第 3 节）
+
+**修改文件：**
+- `src/game/config/balance.ts` — 新增 `playerHp`、`reactiveBladeEnergy` 配置段
+- `src/App.tsx` — 从 `window.location.search` 解析 `bossFlow` 参数，通过 props 传入 `GameCanvas`
+- `src/game/GameCanvas.tsx` — 接收 `bossFlow` prop，传递给 Game 构造函数
+- `src/game/Game.ts` — 构造函数接收 `bossFlow` 参数，存储为 `this.bossFlow`
+- `vite.config.ts` — 新增 `__BOSS_FLOW__` 编译常量（可选，用于 tree-shaking）
+
+**关键产出：** `bossReactiveFlow.ts` 配置内容示例：
+
+```typescript
+export const REACTIVE_BOSS_CONFIG = {
+  // 状态机计时
+  phaseTimers: {
+    armorPrepare: 0.3,
+    threatDuration: [2.0, 3.0],  // 随机范围
+    opportunityDuration: 1.5,
+    recoveryDuration: 0.2,
+  },
+  // 刀势经济
+  bladeEnergy: {
+    max: 100,
+    initial: 35,
+    passiveRegenPerSecond: 1.5,
+    shortSlashCost: 7,
+    longSlashBonus: 3,      // 长刀 +3
+    emptySwingPenalty: 4,   // 空挥惩罚 +4
+    wrongHitPenalty: 10,    // 误砍 -10
+    normalBulletReward: 8,  // 普弹 +8
+    reflectReward: 16,      // 反射 +16
+    armorCrackReward: 5,    // 护甲裂痕 +5
+    armorBreakReward: 22,   // 破甲 +22
+  },
+  // 玩家生命
+  playerHp: {
+    max: 100,
+    normalBulletDamage: 6,
+    reflectiveBulletDamage: 12,
+    bossHeavyDamage: 20,
+    mistakenCutDamage: 5,
+    invincibleDuration: 0.3,
+  },
+  // 护甲
+  armor: {
+    durabilityPerPiece: 100,
+    lowEnergyCrack: 25,      // 0~29 刀势
+    midEnergyDamage: 55,     // 30~69 刀势
+    highEnergyOneShot: 100,  // 70~100 刀势
+    damageFormula: "20 + energy * 0.8",
+  },
+  // 弹幕
+  projectiles: {
+    normal: { speed: 120, radius: 10, color: "#9b59b6", glowColor: "rgba(155,89,182,0.6)", maxLife: 4 },
+    reflective: { speed: 90, radius: 14, color: "#d4a0ff", glowColor: "rgba(212,160,255,0.7)", maxLife: 5, rotationSpeed: 3 },
+    dangerous: { speed: 160, radius: 16, color: "#c0392b", glowColor: "rgba(192,57,43,0.8)", maxLife: 3.5 },
+  },
+  // 刀势连续效果阈值
+  bladeEffect: {
+    minLength: 30,
+    maxLength: 130,
+    minWidth: 3,
+    maxWidth: 20,
+    minBrightness: 0.3,
+    maxBrightness: 1.2,
+    lowEnergyColor: "#666666",
+    midEnergyColor: "#5bc0ff",
+    highEnergyColor: "#fff4a0",
+  },
+};
+```
+
+---
+
+### T02: BossReactiveController — 5状态机 + 弹幕系统 + 护甲判定 + 渲染
+
+**说明：** 实现新破甲阶段的核心控制器，包含完整的 5 状态机、弹幕生成与更新、护甲判定逻辑、渲染方法。
+
+**类结构：**
+
+```
+BossReactiveController
+├── 状态管理
+│   ├── _phase: BossPhaseState (armor_prepare → armor_threat → armor_opportunity → armor_resolve → armor_recovery)
+│   ├── _armorCycle: 0..2 (当前第几块护甲)
+│   ├── _activeArmorIndex: ARMOR_L | ARMOR_R | ARMOR_C
+│   └── _armorTargets: ReactiveArmorTarget[]
+├── 弹幕系统
+│   ├── _projectiles: Projectile[]
+│   ├── spawnProjectile(kind): void
+│   └── updateProjectiles(dt): void
+├── 护甲判定
+│   ├── resolveSegment(segA, segB, slashId): ArmorResolveResult
+│   └── finishSlash(slashId): ArmorResolveResult
+├── 玩家状态
+│   ├── _playerHp: PlayerHpState
+│   ├── takeDamage(amount, source): void
+│   └── getPlayerHp(): PlayerHpState
+├── 刀势效果
+│   └── getBladeEffect(energy): BladeContinuousEffect
+├── 渲染
+│   ├── renderWorld(ctx): void (Boss/弹幕/粒子)
+│   └── renderOverlay(ctx): void (HUD/文字/Boss覆盖层)
+└── 桥接
+    └── bridgeToPursuit(): void → 调用 BossController.enterPursuitDirectly()
+```
+
+**新建文件：**
+- `src/game/systems/BossReactiveController.ts` — 核心控制器
+- `src/game/systems/projectileSystem.ts` — 弹幕系统工具函数
+- `src/game/systems/bossReactiveHUD.ts` — HUD 渲染
+
+**修改文件：**
+- `src/game/systems/BossController.ts` — 新增 `enterPursuitDirectly()` 方法：
+  ```typescript
+  /** 被 reactive 控制器桥接调用：跳过 armor 直接进入 pursuit */
+  enterPursuitDirectly(): void {
+    this._phase = "pursuit_intro";
+    this.pursuitIntroTimer = 0;
+    this.objectiveText = "趁弱点显现时追击";
+    this.objectiveAlpha = 1;
+    this._objectiveTimer = 0;
+    this._pursuitProgress = 0;
+    // 标记所有护甲为已破碎
+    this.armorProgress = 3;
+    for (const armor of this.armorTargets) {
+      armor.active = false;
+      armor.broken = true;
+    }
+  }
+  ```
+
+**护甲三块绑定：**
+
+| 护甲 | 弹幕类型 | Boss 动作 |
+|------|---------|-----------|
+| 左肩 (ARMOR_L) | 普通弹幕 + 横扫 | 普弹从左侧射出，Boss 向右横扫 |
+| 右肩 (ARMOR_R) | 强化弹幕 + 反射 | 强化弹幕从右侧射出，Boss 身上出现反射环 |
+| 胸甲 (ARMOR_C) | 混合 + 雷球 | 普通弹幕 + 危险雷球混合 |
+
+**5 状态机详细逻辑：**
+
+```
+armor_prepare (0.3s)
+  → Boss 抬手动画，护甲发光预告
+  → 不生成弹幕，玩家可观察
+  → 计时结束 → armor_threat
+
+armor_threat (2~3s 随机)
+  → 根据护甲类型生成对应弹幕
+  → 每 0.6~0.8s 生成一枚新弹幕
+  → Boss 做绑定动作（横扫/反射/混合）
+  → 弹幕运动方向：从 Boss 位置向玩家区域
+  → 计时结束 → armor_opportunity
+
+armor_opportunity (1.5s)
+  → 停止生成新弹幕
+  → 护甲高亮发光，提示可攻击
+  → 玩家挥刀可命中护甲
+  → 残留弹幕继续存在
+  → 计时结束 → armor_recovery 或 提前命中护甲即进入 resolve
+
+armor_resolve (瞬时，由玩家挥刀触发)
+  → 判定命中结果
+  → 计算伤害（基于刀势）
+  → 更新护甲耐久
+  → 直接进入 armor_recovery
+
+armor_recovery (0.2s)
+  → Boss 后退复位
+  → 清理残留弹幕
+  → 如果还有下一块护甲 → armor_prepare
+  → 如果三块全部击破 → bridgeToPursuit()
+```
+
+---
+
+### T03: Game 集成 — 能量经济重构 + 玩家生命系统 + 刀势连续效果 + 流路由
+
+**说明：** 将 BossReactiveController 集成到 Game 主循环中，重构能量系统，新增玩家生命系统。
+
+**修改文件：**
+- `src/game/Game.ts` — 主要集成点
+
+**Game.ts 修改要点：**
+
+1. **构造函数新增参数：** `bossFlow: "legacy" | "reactive" = "legacy"`
+
+2. **initializeThunderGeneralBoss 分支：**
+   ```typescript
+   if (this.bossFlow === "reactive") {
+     this.reactiveController = new BossReactiveController("thunderGeneral");
+     this.reactiveController.enterLoading();
+   } else {
+     this.bossController = new BossController("thunderGeneral");
+     this.bossController.enterLoading();
+   }
+   ```
+
+3. **updateBossMode 分支：**
+   ```typescript
+   if (this.bossFlow === "reactive" && this.reactiveController) {
+     this.updateReactiveBossMode(scaledDt, frameDt);
+     return;
+   }
+   ```
+
+4. **updateReactiveBossMode 方法：** 类似 updateBossMode 但使用 reactiveController
+
+5. **checkSegmentHits 新增路由：**
+   ```typescript
+   if (this.gameMode === "boss" && this.bossFlow === "reactive" && this.reactiveController) {
+     // 路由到 reactive 弹幕检测 + 护甲判定
+     this.reactiveController.resolveSegment(a, b, trail.id);
+     // 同时检测弹幕碰撞
+     this.checkReactiveProjectileHits(a, b, trail);
+     return;
+   }
+   ```
+
+6. **endSlash 方法：** reactive 模式下路由到 `reactiveController.finishSlash`
+
+7. **handlePointerDown 修改：** reactive 模式下移除 `canSlash` 检查（永远可挥刀）
+
+8. **能量系统改造：**
+   - `recoverEnergy` 被动回能降为 1.5/s
+   - 新增 `gainEnergyByAction(amount)` 方法
+   - 每次挥刀根据刀路长度消耗/奖励
+
+9. **玩家生命系统：**
+   ```typescript
+   private playerHp: PlayerHpState = { current: 100, max: 100, invincibleTimer: 0, flashTimer: 0 };
+   ```
+   - 弹幕命中玩家时调用 `playerHp.takeDamage`
+   - 误砍时调用 `playerHp.takeDamage(5, "mistaken_cut")`
+   - HP 归零 → 游戏结束
+
+10. **刀势连续效果渲染：**
+    - 在 `startSlash` 时根据 `energy/100` 计算连续效果
+    - 刀芒长度 = lerp(30, 130, energy/100)
+    - 刀芒宽度 = lerp(3, 20, energy/100)
+    - 亮度 = lerp(0.3, 1.2, energy/100)
+    - 颜色渐变：灰→蓝→金
+
+**修改文件：**
+- `src/game/systems/bladeEnergySystem.ts`:
+  - `canSlash()` 在 reactive 模式下永远返回 true
+  - 新增 `gainEnergy(energy, amount)` 辅助函数
+  - `recoverEnergy` 新增 `reactiveMode` 参数，开启时使用 1.5/s
+
+---
+
+### T04: 视觉反馈 — HUD 渲染 + 飘字 + 数据采集埋点 + 护甲状态指示
+
+**说明：** 实现新破甲阶段的完整 HUD 视觉反馈，包括刀势条、生命条、护甲状态指示、飘字反馈、数据采集。
+
+**文件：**
+- `src/game/systems/bossReactiveHUD.ts` — 补充完整 HUD 渲染方法
+
+**HUD 布局（从上到下）：**
+
+```
+┌─────────────────────────────────────┐
+│  ❤ 100/100      ⚡ 35/100          │  ← 生命条 + 刀势条
+│  ████████░░░░░░░  ███████░░░░░░░░  │
+│                                     │
+│  护甲状态: [●] [◉] [○]              │  ← 三块护甲（◉=当前激活）
+│  左肩(普弹)  右肩(强化)  胸甲(混合)  │
+│                                     │
+│  提示: "切发亮护甲"                  │  ← 目标提示
+└─────────────────────────────────────┘
+```
+
+**飘字系统：**
+- 普通弹幕斩碎: `+8 刀势` (绿色, 16px, 0.6s)
+- 强化弹幕反射: `+16 刀势` (金色, 20px, 0.8s)
+- 危险雷球误砍: `-10 刀势 -5HP` (红色, 18px, 0.8s)
+- 护甲命中: `破甲! +22` (金色, 22px, 0.8s)
+- 护甲裂痕: `裂痕 +25` (紫色, 16px, 0.5s)
+
+**数据采集埋点（P1）：**
+```typescript
+logEvent("reactive_armor_hit", { armorId, energy, damage, cycleIndex });
+logEvent("reactive_projectile_cut", { projectileKind, energy });
+logEvent("reactive_projectile_reflect", { energy });
+logEvent("reactive_mistaken_cut", { energy, hpLoss });
+logEvent("reactive_armor_complete", { totalTime, totalSlashCount });
+logEvent("reactive_player_hp_loss", { amount, source, remainingHp });
+```
+
+---
+
+### T05: 测试 — 15项单元测试 + 6项E2E测试 + E2E桥接适配
+
+**说明：** 为 BossReactiveController 编写完整的单元测试套件，补充 E2E 测试，更新 E2E 桥接。
+
+**单元测试（15项）：**
+
+| # | 测试名称 | 描述 |
+|---|---------|------|
+| 1 | 初始状态为 armor_prepare | 验证 skipIntro 后进入 armor_prepare |
+| 2 | 5 状态机完整流转 | 单块护甲经历全部 5 状态 |
+| 3 | 三块护甲循环 | 3 次循环后进入 bridgeToPursuit |
+| 4 | 普通弹幕可被任何刀势斩碎 | 任意能量挥刀命中普通弹幕 → 销毁 |
+| 5 | 强化弹幕三档处理 | <30 削弱 / 30~69 斩碎 / ≥70 反射 |
+| 6 | 危险雷球误砍惩罚 | 命中雷球 → -10 刀势 + 5 伤害 |
+| 7 | 护甲伤害公式验证 | 高刀势(70+) 一刀破甲，中刀势(30~69) 55 伤害 |
+| 8 | 护甲裂痕累积 | 低刀势(0~29)多次命中累积裂痕满 100 破甲 |
+| 9 | 刀势经济正反馈 | 斩碎弹幕 +8，反射 +16，破甲 +22 |
+| 10 | 被动回能 1.5/s | 空闲时每秒恢复 1.5 |
+| 11 | 玩家生命系统 | 受伤扣血，无敌计时，归零检查 |
+| 12 | 刀势连续效果插值 | energy=0→min, energy=100→max |
+| 13 | 弹幕生命周期 | 弹幕超出 maxLife 自动销毁 |
+| 14 | 桥接到 pursuit | 三块护甲破碎后调用 bridgeToPursuit |
+| 15 | 空挥惩罚 | 什么都没命中时 +4 刀势消耗 |
+
+**E2E 测试（6项）：**
+1. 完整 reactive 破甲流程（三块护甲依次击破）
+2. 弹幕斩碎反馈验证
+3. 强化弹幕反射验证
+4. 危险雷球误砍惩罚验证
+5. 桥接到 pursuit 阶段验证
+6. legacy 模式不变验证
+
+**E2E 桥接更新：**
+- `__ONE_BLADE_E2E__` 新增 `reactiveController` 暴露
+- 新增 `forceReactiveArmorHit` 方法
+- 新增 `getReactiveProjectiles` 方法
+
+---
+
+## 8. 共享知识
+
+### 8.1 全局常量/枚举位置
+
+| 常量 | 文件 | 导出名 |
+|------|------|--------|
+| 新破甲阶段全部数值 | `src/game/config/bossReactiveFlow.ts` | `REACTIVE_BOSS_CONFIG` |
+| 弹幕类型枚举 | `src/game/types.ts` | `ProjectileKind` |
+| 弹幕接口 | `src/game/types.ts` | `Projectile` |
+| 新护甲目标接口 | `src/game/types.ts` | `ReactiveArmorTarget` |
+| 玩家生命接口 | `src/game/types.ts` | `PlayerHpState` |
+| 刀势连续效果接口 | `src/game/types.ts` | `BladeContinuousEffect` |
+| 现有通用配置 | `src/game/config/balance.ts` | `BALANCE` |
+| 现有游戏常量 | `src/game/config/constants.ts` | `DESIGN_WIDTH`, `DESIGN_HEIGHT` 等 |
+
+### 8.2 命名约定
+
+- **新文件前缀：** `bossReactive*` 标识属于新破甲阶段
+- **状态机阶段前缀：** `armor_*` 标识属于破甲阶段（与现有 `BossPhaseState` 风格一致）
+- **弹幕类型：** `ProjectileKind` 枚举值使用小写 `"normal" | "reflective" | "dangerous"`
+- **方法命名：** 与现有 BossController 风格一致（camelCase, 动词+名词）
+
+### 8.3 渲染规则
+
+- **渲染层序：** 背景 → 弹幕(世界层) → 刀光 → Boss → 粒子 → HUD(覆盖层)
+- **弹幕渲染：** 在 `renderWorld` 中绘制（刀光下方）
+- **HUD 渲染：** 在 `renderOverlay` 中绘制（最上层）
+- **坐标系统：** 使用 `DESIGN_WIDTH=390, DESIGN_HEIGHT=844` 设计分辨率，GameCanvas 中 DPR 缩放
+
+### 8.4 E2E 桥接约定
+
+- `__E2E_BRIDGE__` 由 vite define 注入，仅 e2e 构建模式开启
+- 生产构建下 `if(__E2E_BRIDGE__)` 整段被静态消除
+- 新增 `window.__ONE_BLADE_E2E__.reactiveController` 暴露
+- 新增 `window.__ONE_BLADE_E2E__.forceReactiveArmorHit()` 和 `getReactiveProjectiles()` 方法
+
+### 8.5 跨文件约定
+
+- 所有 API 响应格式：`{ code, data, message }`（服务端交互，本次不涉及）
+- 所有时间以秒为单位（float）
+- 所有坐标以设计分辨率（390×844）为基准
+- 弹幕 y 方向向下为正（从 Boss 位置向玩家区域）
+- 刀势值范围：0~100，整数
+- HP 范围：0~100，整数
+
+---
+
+## 9. 待明确事项
+
+1. **弹幕碰撞检测精度**：使用现有 `segmentHitCircle` 还是需要更精确的判定？当前假设复用现有函数。
+2. **Boss 动作空间变化的具体实现**：PRD 提到"Boss 动作空间变化"（P2），假设为 Threat 阶段 Boss 在 X 轴 ±30px 范围内缓慢平移。
+3. **强化弹幕"反射"的视觉效果**：反射后弹幕反向飞向 Boss，命中 Boss 时触发什么视觉效果？假设为金紫爆炸粒子。
+4. **危险雷球"尖刺"视觉**：红黑渐变 + 旋转尖刺，使用 Canvas 多边形绘制。
+5. **数据埋点具体维度**：PRD 未指定具体事件名和维度，以上为合理假设，待产品确认。
+6. **护甲裂痕累计的 UI 表现**：护甲表面出现裂纹线条，随裂痕值增加而增多。

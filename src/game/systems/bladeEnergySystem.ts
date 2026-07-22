@@ -24,8 +24,10 @@ export function getBladeTierName(energy: number): string {
 
 /**
  * 是否可以挥刀（刀势 >= 10% 才可挥刀）
+ * 在 reactive mode 下永远返回 true（P0-1 自由挥刀）
  */
-export function canSlash(energy: number): boolean {
+export function canSlash(energy: number, reactiveMode?: boolean): boolean {
+  if (reactiveMode) return true;
   return energy >= BALANCE.swordEnergy.minSlashEnergy;
 }
 
@@ -109,7 +111,18 @@ export function getSubBladeCDReduction(kills: number): { seconds: number; ratio:
 /**
  * 自然恢复（保留原有逻辑但提高基础值）
  */
-export function recoverEnergy(current: number, dt: number, drumTimer: number) {
+export function recoverEnergy(current: number, dt: number, drumTimer: number, reactiveMode?: boolean) {
+  if (reactiveMode) {
+    // P0: reactive模式使用1.5/s被动兜底
+    return clamp(current + 1.5 * dt, 0, 100);
+  }
   const multiplier = drumTimer > 0 ? 1.8 : 1;
   return clamp(current + BALANCE.swordEnergy.passiveRegenPerSecond * multiplier * dt, 0, BALANCE.swordEnergy.max);
+}
+
+/**
+ * P0: 通过正向行为获得刀势能量（reactive模式专用）
+ */
+export function gainEnergyByAction(current: number, amount: number, maxEnergy: number = 100): number {
+  return clamp(current + amount, 0, maxEnergy);
 }
