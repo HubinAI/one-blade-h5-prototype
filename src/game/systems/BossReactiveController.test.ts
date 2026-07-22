@@ -137,7 +137,8 @@ describe("BossReactiveController", () => {
   // Test 5: 强化弹幕三档 — <30 削弱 / 30~69 斩碎 / ≥70 反射
   // ================================================================
   it("强化弹幕三档 — <30 无反应 / ≥30 反射（含能量奖励）", () => {
-    // 根据源码: reflective 弹幕在 energy>=30 时 reflected=true, 否则无结果
+    // 根据新设计: 弹幕命中在 Game.checkReactiveProjectileHits 中标记 resolution，
+    // controller.finishSlash 不再返回 projectileResults
     // 切换到右肩护甲（reflective 弹幕类型）
     controller["activeArmorIndex"] = 1;
     controller["_phase"] = "armor_threat";
@@ -164,6 +165,7 @@ describe("BossReactiveController", () => {
         color: "#d4a0ff",
         glowColor: "rgba(212,160,255,0.7)",
         reflected: false,
+        resolved: false,
       });
     }
 
@@ -175,8 +177,8 @@ describe("BossReactiveController", () => {
     // --- 测试低能量 (<30): 无结果（不满足 reflective 条件） ---
     controller.currentSlashEnergy = 20;
     const resultLow = controller.finishSlash("test_low");
-    const lowResult = resultLow.projectileResults.find(r => r.kind === "reflective");
-    expect(lowResult).toBeUndefined();
+    // projectileResults 现为空（结算移至 Game.ts）
+    expect(resultLow.projectileResults).toEqual([]);
 
     // 重新添加 reflective 弹幕
     (controller["projectiles"] as any[]).push({
@@ -193,16 +195,14 @@ describe("BossReactiveController", () => {
       color: "#d4a0ff",
       glowColor: "rgba(212,160,255,0.7)",
       reflected: false,
+      resolved: false,
     });
 
     // --- 测试中能量 (30~69): 反射（源码 energy>=30 即反射） ---
     controller.currentSlashEnergy = 50;
     const resultMid = controller.finishSlash("test_mid");
-    const midResult = resultMid.projectileResults.find(r => r.kind === "reflective");
-    expect(midResult).toBeDefined();
-    // 源码: energy>=30 时 reflected=true
-    expect(midResult!.reflected).toBe(true);
-    expect(midResult!.energyReward).toBe(REACTIVE_BOSS_CONFIG.bladeEnergy.reflectReward);
+    // projectileResults 现为空（结算移至 Game.ts）
+    expect(resultMid.projectileResults).toEqual([]);
   });
 
   // ================================================================
@@ -234,19 +234,18 @@ describe("BossReactiveController", () => {
         color: "#c0392b",
         glowColor: "rgba(192,57,43,0.8)",
         reflected: false,
+        resolved: false,
       });
     }
     for (const p of projs) {
       p.active = false;
     }
 
-    // 高能量砍 dangerous 弹幕 → 斩碎但玩家受伤（energyReward=0）
+    // 高能量砍 dangerous 弹幕 → 斩碎但玩家受伤
     controller.currentSlashEnergy = 80;
     const result = controller.finishSlash("test_danger");
-    const dangerResult = result.projectileResults.find(r => r.kind === "dangerous");
-    expect(dangerResult).toBeDefined();
-    expect(dangerResult!.reflected).toBe(false);
-    expect(dangerResult!.energyReward).toBe(0);
+    // projectileResults 现为空（结算移至 Game.ts）
+    expect(result.projectileResults).toEqual([]);
   });
 
   // ================================================================
@@ -351,7 +350,7 @@ describe("BossReactiveController", () => {
   // Test 9: 刀势经济正反馈 — 验证各类奖励值
   // ================================================================
   it("刀势经济正反馈 — 验证各类奖励值", () => {
-    // 测试 normal 弹幕奖励
+    // 测试 normal 弹幕奖励 — 结算已移至 Game.ts，controller 不再返回 projectileResults
     const c = new BossReactiveController();
     (c["projectiles"] as any[]).push({
       id: "test_norm",
@@ -367,13 +366,12 @@ describe("BossReactiveController", () => {
       color: "#9b59b6",
       glowColor: "rgba(155,89,182,0.6)",
       reflected: false,
+      resolved: false,
     });
     c.currentSlashEnergy = 50;
     const result = c.finishSlash("test_reward");
-    const normResult = result.projectileResults.find(r => r.kind === "normal");
-    expect(normResult).toBeDefined();
-    // normal 弹幕 reward = normalBulletReward
-    expect(normResult!.energyReward).toBe(REACTIVE_BOSS_CONFIG.bladeEnergy.normalBulletReward);
+    // projectileResults 现为空
+    expect(result.projectileResults).toEqual([]);
 
     // 测试 reflective 弹幕反射奖励
     const c2 = new BossReactiveController();
@@ -391,13 +389,12 @@ describe("BossReactiveController", () => {
       color: "#d4a0ff",
       glowColor: "rgba(212,160,255,0.7)",
       reflected: false,
+      resolved: false,
     });
     c2.currentSlashEnergy = 80;
     const result2 = c2.finishSlash("test_refl");
-    const reflResult = result2.projectileResults.find(r => r.kind === "reflective");
-    expect(reflResult).toBeDefined();
-    expect(reflResult!.reflected).toBe(true);
-    expect(reflResult!.energyReward).toBe(REACTIVE_BOSS_CONFIG.bladeEnergy.reflectReward);
+    // projectileResults 现为空
+    expect(result2.projectileResults).toEqual([]);
   });
 
   // ================================================================

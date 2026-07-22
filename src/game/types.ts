@@ -480,6 +480,9 @@ export type Projectile = {
   color: string;
   glowColor: string;
   reflected: boolean;
+  hitBySlashId?: string;
+  resolved: boolean;
+  resolution?: "cut" | "destroy" | "reflect" | "wrong_cut" | "player_hit" | "expired";
 };
 
 export type ReactiveArmorTarget = {

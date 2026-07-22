@@ -9,7 +9,7 @@ import { REACTIVE_BOSS_CONFIG } from "../config/bossReactiveFlow";
 import { distanceToSegment, clamp, randomRange } from "../../utils/math";
 import { createProjectile, updateProjectiles, checkSlashHit, deactivateAllProjectiles, cleanInactiveProjectiles, resetProjectileIdCounter } from "./projectileSystem";
 
-const BOSS_CY = 195;
+const BOSS_CY = 220;
 const BOSS_CX = DESIGN_WIDTH / 2;
 const ARMOR_L = 0, ARMOR_R = 1, ARMOR_C = 2;
 
@@ -24,7 +24,8 @@ export class BossReactiveController {
   private _phase: BossPhaseState = "armor_prepare";
   get phase(): BossPhaseState { return this._phase; }
   get inputLocked(): boolean {
-    return this._phase === "armor_prepare" || this._phase === "armor_resolve" || this._phase === "armor_recovery";
+    // 只有 resolve 阶段短暂锁定（0.12s命中停顿），其余全部允许挥刀
+    return this._phase === "armor_resolve";
   }
   get freezeCombatResources(): boolean {
     return this._phase === "armor_resolve" || this._phase === "armor_recovery";
@@ -65,7 +66,12 @@ export class BossReactiveController {
 
   // ---- 渲染 ----
   private renderY = BOSS_CY;
-  private bossRenderScale = 1;
+  private bossRenderScale = 1.15;
+
+  // Debug mode — controls phase text visibility
+  private _debugMode = false;
+  get debugMode(): boolean { return this._debugMode; }
+  set debugMode(v: boolean) { this._debugMode = v; }
   private shakeTimer = 0;
   private flash = 0;
   private screenShake = 0;
@@ -169,7 +175,7 @@ export class BossReactiveController {
         this.updateArmorOpportunity(dt);
         break;
       case "armor_resolve":
-        // 瞬时状态，由外部调用 setResolveResult 触发
+        this.updateArmorResolve(dt);
         break;
       case "armor_recovery":
         this.updateArmorRecovery(dt);
@@ -220,6 +226,12 @@ export class BossReactiveController {
     }
   }
 
+  private updateArmorResolve(_dt: number): void {
+    if (this.phaseTimer >= REACTIVE_BOSS_CONFIG.phaseTimers.resolveDuration) {
+      this.transitionToRecovery();
+    }
+  }
+
   // ================================================================
   // 状态转换
   // ================================================================
@@ -245,6 +257,8 @@ export class BossReactiveController {
   private transitionToRecovery(): void {
     this._phase = "armor_recovery";
     this.phaseTimer = 0;
+    this._resolvedSlashId = "";
+    this._session = { slashId: "", bodyContact: false };
     // 清理残留弹幕
     deactivateAllProjectiles(this.projectiles);
     cleanInactiveProjectiles(this.projectiles);
@@ -410,39 +424,7 @@ export class BossReactiveController {
       wrongHit: false,
     };
 
-    // 处理弹幕命中：检查之前已标记失活的弹幕
-    for (let i = this.projectiles.length - 1; i >= 0; i--) {
-      const p = this.projectiles[i];
-      if (!p.active) {
-        // 检查弹幕类型
-        if (p.kind === "reflective" && this.currentSlashEnergy >= 30) {
-          // 反射弹幕
-          result.projectileResults.push({
-            projectileIndex: i,
-            kind: "reflective",
-            reflected: true,
-            energyReward: REACTIVE_BOSS_CONFIG.bladeEnergy.reflectReward,
-          });
-        } else if (p.kind === "dangerous" && this.currentSlashEnergy >= 30) {
-          // 危险雷球—斩碎（但玩家会受伤）
-          result.projectileResults.push({
-            projectileIndex: i,
-            kind: "dangerous",
-            reflected: false,
-            energyReward: 0,
-          });
-        } else if (p.kind === "normal") {
-          result.projectileResults.push({
-            projectileIndex: i,
-            kind: "normal",
-            reflected: false,
-            energyReward: REACTIVE_BOSS_CONFIG.bladeEnergy.normalBulletReward,
-          });
-        }
-        // 从数组中移除已处理的弹幕
-        this.projectiles.splice(i, 1);
-      }
-    }
+    // P0-D: 弹幕命中已在 checkReactiveProjectileHits 中标记，不再在此处结算
     // 清理失活弹幕
     cleanInactiveProjectiles(this.projectiles);
 
@@ -569,7 +551,10 @@ export class BossReactiveController {
     return this._bridgeTriggered;
   }
 
-  /** 获取护甲破碎标志（供外部读取） */
+  /** 获取弹幕列表副本（供外部只读访问） */
+  getProjectiles(): Projectile[] {
+    return this.projectiles;
+  }
   getArmorBrokenFlags(): boolean[] {
     return this.armorTargets.map(a => a.broken);
   }
@@ -620,7 +605,7 @@ export class BossReactiveController {
 
   renderOverlay(ctx: any): void {
     if (this._phase === "exit") return;
-    this.drawPhaseIndicator(ctx);
+    if (this._debugMode) this.drawPhaseIndicator(ctx);
     if (this.flash > 0) {
       ctx.fillStyle = `rgba(255, 232, 146, ${this.flash * 0.18})`;
       ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);

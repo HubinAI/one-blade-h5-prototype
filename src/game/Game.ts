@@ -257,8 +257,6 @@ export class Game {
   private bossController: BossController | null = null;
   /** P0: Reactive Boss控制器 */
   private reactiveController: BossReactiveController | null = null;
-  /** P0: Reactive模式玩家HP */
-  private playerHp: PlayerHpState = { current: 100, max: 100, invincibleTimer: 0, flashTimer: 0 };
   /** P4.2A.1: 统一中央播报调度器 */
   private activeBattleNotice: BattleNotice | null = null;
   private battleNoticeQueue: BattleNotice[] = [];
@@ -957,23 +955,36 @@ export class Game {
     // P0: Reactive Boss模式渲染
     if (this.gameMode === "bossReactive" && this.reactiveController) {
       const rc = this.reactiveController;
-      // 渲染弹幕（世界层）
+      // 1. 背景层（修复黑屏问题）
+      this.drawBackground(ctx);
+      this.drawTopMist(ctx);
+      // 2. 弹幕层 + Boss（世界层）
       rc.renderWorld(ctx);
-      // 渲染刀光
+      // 3. 战斗表现层
       this.drawSlash(ctx);
       this.drawParticles(ctx);
+      // 4. 玩家防线（受击线可视化）
+      this.drawReactiveDefenseLine(ctx);
+      // 5. 浮字 + 边缘闪屏
       this.drawFloatingTexts(ctx);
       this.drawEdgeFlash(ctx);
-      // 渲染Boss上方的覆盖层+HUD
+      // 6. Boss覆盖层
       rc.renderOverlay(ctx);
-      // 渲染 reactive HUD
-      drawEnergyBar(ctx, this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.max, 20, 30, 150, 16);
-      drawHpBar(ctx, this.playerHp.current, this.playerHp.max, this.playerHp.flashTimer, 20, 55, 150, 16);
+      // 7. HUD — 按区域分区：
+      //    左上：HP（远离Boss头部）
+      const hp = rc.getPlayerHp();
+      if (hp) {
+        drawHpBar(ctx, hp.current, hp.max, hp.flashTimer, 12, 30, 130, 12);
+      }
+      //    顶部居中：护甲状态条
       const armors = rc.getArmorBrokenFlags();
       const activeIndex = rc["activeArmorIndex"] ?? 0;
-      drawArmorIndicators(ctx, armors, 20, 78, activeIndex);
-      // Debug/Flash
+      drawArmorIndicators(ctx, armors, DESIGN_WIDTH / 2 - 80, 28, activeIndex);
+      //    底部：刀势条（靠近玩家操作区）
+      drawEnergyBar(ctx, this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.max, DESIGN_WIDTH / 2 - 90, DESIGN_HEIGHT - 60, 180, 18);
+      // 8. Debug
       if (this.debugEnabled) this.drawDebugPanel(ctx);
+      // 9. Flash
       if (this.flash > 0) {
         ctx.fillStyle = `rgba(255, 232, 146, ${this.flash * 0.18})`;
         ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
@@ -1073,8 +1084,25 @@ export class Game {
 
     const rc = this.reactiveController;
     if (!rc) return;
+    // sync debug mode from Game to reactive controller
+    rc.debugMode = this.debugEnabled;
 
     rc.update(scaledDt);
+
+    // P0-B: 弹幕漏过玩家受击线
+    const REACTIVE_PLAYER_Y = 720;
+    const projectiles = rc.getProjectiles?.() || [];
+    for (const p of projectiles) {
+      if (!p.active || p.resolved || p.reflected) continue;
+      if (p.y >= REACTIVE_PLAYER_Y && p.y - p.vy * scaledDt < REACTIVE_PLAYER_Y) {
+        p.resolved = true;
+        p.resolution = "player_hit";
+        const dmg = p.kind === "reflective" || p.kind === "dangerous"
+          ? REACTIVE_BOSS_CONFIG.playerHp.reflectiveBulletDamage
+          : REACTIVE_BOSS_CONFIG.playerHp.normalBulletDamage;
+        rc.takeDamage(dmg);
+      }
+    }
 
     // 检测玩家死亡
     if (rc.isPlayerDead) {
@@ -1132,7 +1160,6 @@ export class Game {
       }
     } else {
       // execution阶段或reactive模式确保有足够的能量挥刀
-      this.energy = Math.max(this.energy, 10);
     }
     this.pointerDown = true;
     const start = this.clampPointer(pos);
@@ -1241,7 +1268,13 @@ export class Game {
     if (slashHasSoul) this.nextSoul = false;
     if (slashHasOil) this.nextOil = false;
 
-    this.energy = consumeEnergyByTier(this.energy, tier);
+    // P0: Reactive模式起刀时锁定刀势快照，不执行旧版消耗
+    if (this.gameMode === "bossReactive") {
+      // 起刀快照已在 lockedEnergy 中，整刀使用
+      // 不执行 consumeEnergyByTier — 由 endSlash/finalizeBossSlashCommon 统一结算
+    } else {
+      this.energy = consumeEnergyByTier(this.energy, tier);
+    }
     this.regenDelayTimer = BALANCE.swordEnergy.regenDelayAfterSlash;
     this.nextSoul = false;
     this.nextOil = false;
@@ -1877,12 +1910,35 @@ export class Game {
   }
 
   /** P0: Reactive Boss弹幕/护甲检测 */
+  /** P1: Reactive 玩家防线可视化 */
+  private drawReactiveDefenseLine(ctx: CanvasRenderingContext2D): void {
+    const y = 720;
+    ctx.save();
+    ctx.strokeStyle = "rgba(91, 192, 255, 0.3)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([8, 12]);
+    ctx.beginPath();
+    ctx.moveTo(40, y);
+    ctx.lineTo(DESIGN_WIDTH - 40, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // 小型玩家位置标记
+    ctx.fillStyle = "rgba(91, 192, 255, 0.5)";
+    ctx.beginPath();
+    ctx.arc(DESIGN_WIDTH / 2, y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   private checkReactiveProjectileHits(a: Vec2, b: Vec2, trail: SlashTrail): void {
     const rc = this.reactiveController;
     if (!rc) return;
 
-    // 设置当前刀势能量
-    rc.currentSlashEnergy = this.energy;
+    // P0-C: 使用起刀快照能量，而非实时 energy
+    const slashEnergy = trail.lockedEnergy ?? this.energy;
+
+    // 设置当前刀势能量（供 finishSlash 使用）
+    rc.currentSlashEnergy = slashEnergy;
 
     // 计算刀芒检测范围
     const stage = SWORD_STAGE_BY_ID[trail.tier];
@@ -1892,48 +1948,23 @@ export class Game {
     // 调用reactiveController的resolveSegment
     const hits = rc.resolveSegment(a, b, trail.id, bladeReach);
 
-    // 处理弹幕命中效果
+    // 处理弹幕命中效果 — P0-D: 仅标记命中，不结算能量/粒子/文字
     for (const hit of hits) {
       const p = rc["projectiles"]?.[hit.projectileIndex] as any;
       if (!p || !p.active) continue;
 
-      // 根据弹幕类型处理
+      // 标记命中（不在此处结算）
+      p.hitBySlashId = trail.id;
+      p.resolved = true;
+
       if (p.kind === "normal") {
-        // 普通弹幕：斩碎，+8刀势
-        p.active = false;
-        this.energy = gainEnergyByAction(this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.normalBulletReward, REACTIVE_BOSS_CONFIG.bladeEnergy.max);
-        this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 6, "#9b59b6"));
-        this.addText(p.x, p.y - 12, "+8", "#5bc0ff", 12);
+        p.resolution = "cut";
       } else if (p.kind === "reflective") {
-        // 强化弹幕：根据刀势不同效果
-        if (this.energy < 30) {
-          // 削弱：仅弹开
-          p.active = false;
-          this.addText(p.x, p.y - 12, "弹开", "#d4a0ff", 12);
-        } else if (this.energy < 70) {
-          // 斩碎
-          p.active = false;
-          this.energy = gainEnergyByAction(this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.normalBulletReward, REACTIVE_BOSS_CONFIG.bladeEnergy.max);
-          this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 8, "#d4a0ff"));
-          this.addText(p.x, p.y - 12, "+8", "#5bc0ff", 12);
-        } else {
-          // 反射：弹幕反弹
-          p.reflected = true;
-          p.vx = -p.vx;
-          p.vy = -p.vy;
-          this.energy = gainEnergyByAction(this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.reflectReward, REACTIVE_BOSS_CONFIG.bladeEnergy.max);
-          this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 10, "#ffd700"));
-          this.addText(p.x, p.y - 12, "+16 反射", "#ffd700", 14);
-        }
+        p.resolution = slashEnergy >= 70 ? "reflect" : "cut";
       } else if (p.kind === "dangerous") {
-        // 危险雷球：误砍扣刀势+扣血
-        p.active = false;
-        this.energy = Math.max(0, this.energy - REACTIVE_BOSS_CONFIG.bladeEnergy.wrongHitPenalty);
-        this.playerHp.current = Math.max(0, this.playerHp.current - REACTIVE_BOSS_CONFIG.playerHp.mistakenCutDamage);
-        this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 12, "#c0392b"));
-        this.addText(p.x, p.y - 16, "误砍 -10", "#ff4444", 14);
-        this.screenShake = Math.max(this.screenShake, 0.3);
-        this.flash = Math.max(this.flash, 0.2);
+        // 危险雷球：标记为 wrong_cut + 直接扣血（HP伤害不延迟到收刀）
+        p.resolution = "wrong_cut";
+        rc.takeDamage(REACTIVE_BOSS_CONFIG.playerHp.mistakenCutDamage);
       }
     }
   }
@@ -4003,17 +4034,39 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   // P0: Reactive Boss模式收刀
   if (this.reactiveController) {
     const rc = this.reactiveController;
-    rc.currentSlashEnergy = this.energy;
+    const slashEnergy = trail.lockedEnergy ?? this.energy;
+    rc.currentSlashEnergy = slashEnergy;
     const result = rc.finishSlash(trail.id);
-    // 处理弹幕命中结果
-    for (const projResult of result.projectileResults) {
-      if (projResult.kind === "reflective" && projResult.reflected) {
-        this.energy = gainEnergyByAction(this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.reflectReward, REACTIVE_BOSS_CONFIG.bladeEnergy.max);
-        this.addText(DESIGN_WIDTH / 2, 200, "+16 反射", "#ffd700", 14);
-      } else if (projResult.kind === "normal") {
-        this.energy = gainEnergyByAction(this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.normalBulletReward, REACTIVE_BOSS_CONFIG.bladeEnergy.max);
+
+    // P0-D: 统一结算弹幕奖励（不依赖 controller 的 projectileResults）
+    const projectiles = rc.getProjectiles?.() || [];
+    const cfg = REACTIVE_BOSS_CONFIG.bladeEnergy;
+    for (const p of projectiles) {
+      if (p.hitBySlashId !== trail.id || !p.resolved) continue;
+      if (p.resolution === "cut") {
+        this.energy = gainEnergyByAction(this.energy, cfg.normalBulletReward, cfg.max);
+        this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 6, "#9b59b6"));
+        this.addText(p.x, p.y - 12, "+6", "#5bc0ff", 12);
+      } else if (p.resolution === "reflect") {
+        this.energy = gainEnergyByAction(this.energy, cfg.reflectReward, cfg.max);
+        this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 10, "#ffd700"));
+        this.addText(p.x, p.y - 12, "+15", "#ffd700", 14);
+        p.reflected = true;
+        p.vx = -p.vx;
+        p.vy = -p.vy;
+      } else if (p.resolution === "wrong_cut") {
+        this.energy = Math.max(0, this.energy - cfg.wrongHitPenalty);
+        this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 12, "#c0392b"));
+        this.addText(p.x, p.y - 16, "-10", "#ff4444", 14);
       }
+      // "player_hit" 和 "expired" 不结算任何奖励
     }
+
+    // P0-C: 收刀结算刀势消耗（reactive模式专用规则）
+    const pathLen = trail.pathUsed ?? 0;
+    const cost = cfg.baseSlashCost + Math.floor(pathLen / 100) * cfg.longSlashExtraCost;
+    this.energy = Math.max(0, this.energy - cost);
+
     // 处理护甲命中
     if (result.armorHit) {
       this.flash = Math.max(this.flash, 0.35);

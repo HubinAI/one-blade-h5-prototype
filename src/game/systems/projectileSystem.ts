@@ -44,6 +44,7 @@ export function createProjectile(
     color: cfg.color,
     glowColor: cfg.glowColor,
     reflected,
+    resolved: false,
   };
 }
 
@@ -57,9 +58,13 @@ export function updateProjectiles(projectiles: Projectile[], dt: number): void {
     p.y += p.vy * dt;
     p.spawnTime += dt;
     p.rotation += p.rotationSpeed * dt;
-    // 超时或超出屏幕 → 失活
+    // 超时或超出屏幕 → 失活 + 标记为过期
     if (p.spawnTime >= p.maxLife || p.y > 900 || p.y < -100 || p.x < -100 || p.x > 490) {
       p.active = false;
+      if (p.spawnTime >= p.maxLife && !p.resolved) {
+        p.resolved = true;
+        p.resolution = "expired";
+      }
     }
   }
 }

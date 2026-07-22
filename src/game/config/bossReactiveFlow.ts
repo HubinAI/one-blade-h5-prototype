@@ -8,6 +8,7 @@ export const REACTIVE_BOSS_CONFIG = {
     armorPrepare: 0.3,
     threatDuration: [2.0, 3.0],
     opportunityDuration: 1.5,
+    resolveDuration: 0.12,
     recoveryDuration: 0.2,
   },
   bladeEnergy: {
@@ -22,6 +23,8 @@ export const REACTIVE_BOSS_CONFIG = {
     reflectReward: 16,
     armorCrackReward: 5,
     armorBreakReward: 22,
+    baseSlashCost: 8,
+    longSlashExtraCost: 3,
   },
   playerHp: {
     max: 100,
