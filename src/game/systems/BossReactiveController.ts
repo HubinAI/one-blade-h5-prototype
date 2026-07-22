@@ -7,7 +7,7 @@ import type { BossPhaseState, Vec2, Projectile, ProjectileKind, ReactiveArmorTar
 import { DESIGN_WIDTH, DESIGN_HEIGHT } from "../config/constants";
 import { REACTIVE_BOSS_CONFIG } from "../config/bossReactiveFlow";
 import { distanceToSegment, clamp, randomRange } from "../../utils/math";
-import { createProjectile, updateProjectiles, checkSlashHit, deactivateAllProjectiles, cleanInactiveProjectiles, resetProjectileIdCounter } from "./projectileSystem";
+import { createProjectile, updateProjectiles, checkSlashHit, cleanInactiveProjectiles, cleanResolvedProjectiles, resetProjectileIdCounter } from "./projectileSystem";
 
 const BOSS_CY = 220;
 const BOSS_CX = DESIGN_WIDTH / 2;
@@ -259,9 +259,9 @@ export class BossReactiveController {
     this.phaseTimer = 0;
     this._resolvedSlashId = "";
     this._session = { slashId: "", bodyContact: false };
-    // 清理残留弹幕
-    deactivateAllProjectiles(this.projectiles);
-    cleanInactiveProjectiles(this.projectiles);
+    // P4.4B-R2 P0-B: 只清理已 resolved 弹幕（被斩断/反射/命中玩家/过期），
+    // 未解决弹幕继续飞行，直到玩家处理或命中防线。修复"recovery 切阶段清屏导致弹幕永远到不了玩家线"。
+    cleanResolvedProjectiles(this.projectiles);
   }
 
   private transitionToResolve(): void {

@@ -149,6 +149,20 @@ export function cleanInactiveProjectiles(projectiles: Projectile[]): void {
 }
 
 /**
+ * P4.4B-R2 P0-B: 只清理已 resolved 的弹幕（被斩断/反射/命中玩家/过期），
+ * 保留未解决弹幕继续飞行，直到玩家处理或命中防线。
+ * 修复"recovery 切阶段时无条件清屏导致弹幕永远到不了玩家线"的阻断。
+ */
+export function cleanResolvedProjectiles(projectiles: Projectile[]): void {
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i];
+    if (p.resolved || !p.active) {
+      projectiles.splice(i, 1);
+    }
+  }
+}
+
+/**
  * 失活所有弹幕
  */
 export function deactivateAllProjectiles(projectiles: Projectile[]): void {

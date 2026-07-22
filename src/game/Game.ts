@@ -1090,7 +1090,7 @@ export class Game {
     rc.update(scaledDt);
 
     // P0-B: 弹幕漏过玩家受击线
-    const REACTIVE_PLAYER_Y = 720;
+    const REACTIVE_PLAYER_Y = REACTIVE_BOSS_CONFIG.playerHp.playerLineY;
     const projectiles = rc.getProjectiles?.() || [];
     for (const p of projectiles) {
       if (!p.active || p.resolved || p.reflected) continue;
@@ -1129,11 +1129,22 @@ export class Game {
     this.flash = Math.max(0, this.flash - scaledDt * 2.2);
   }
 
+  /** P4.4B-R2 P0-A: 按当前模式路由唯一 inputLocked 来源。
+   *  Reactive 期间旧 BossController 停在 loading 永不被 update，inputLocked 恒为 true，
+   *  若仍同时询问两套 Controller 会导致所有挥刀输入被永久 return（V0722009 录屏根因）。 */
+  private isCurrentBossInputLocked(): boolean {
+    if (this.gameMode === "bossReactive") {
+      return this.reactiveController?.inputLocked ?? false;
+    }
+    if (this.gameMode === "boss") {
+      return this.bossController?.inputLocked ?? false;
+    }
+    return false;
+  }
+
   handlePointerDown(pos: Vec2) {
-    // P4.4A.2: Boss输入锁定（intro + 完成演出）
-    if (this.bossController?.inputLocked) return;
-    // P0: Reactive controller 输入锁定
-    if (this.reactiveController?.inputLocked) return;
+    // P4.4B-R2 P0-A: 按模式路由输入锁（reactive 读 reactiveController，旧 bossController 不再阻断 reactive 输入）
+    if (this.isCurrentBossInputLocked()) return;
     if (this.phase === "buffChoice") {
       this.selectBuffAt(pos);
       return;
@@ -1179,8 +1190,8 @@ export class Game {
   }
 
   handlePointerMove(pos: Vec2) {
-    // P4.4A.2: Boss输入锁定（intro + 完成演出）
-    if (this.bossController?.inputLocked) return;
+    // P4.4B-R2 P0-A: 按模式路由输入锁
+    if (this.isCurrentBossInputLocked()) return;
     if (this.phase !== "playing" || !this.pointerDown) return;
     const next = this.clampPointer(pos);
     this.pointerPos = next;
@@ -1189,7 +1200,9 @@ export class Game {
       const pending = this.pendingSlash;
       if (!pending) return;
       const moved = distance(pending.startPos, next);
-      if (moved < BALANCE.slash.activationDistance) return;
+      // P1-A: reactive 模式用独立激活距离
+      const activationDist = this.gameMode === "bossReactive" ? REACTIVE_BOSS_CONFIG.reactiveSlash.activationDistance : BALANCE.slash.activationDistance;
+      if (moved < activationDist) return;
       this.commitPendingSlash(pending, next);
       return;
     }
@@ -1203,7 +1216,8 @@ export class Game {
     if (this.currentSlash?.active) {
       this.endSlash("收刀");
     }
-    if (this.bossController?.inputLocked) return;
+    // P4.4B-R2 P0-A: 清理后按模式路由输入锁（保留 pointerUp 先清理的正确规则）
+    if (this.isCurrentBossInputLocked()) return;
     if (this.phase !== "playing") return;
   }
 
@@ -1220,7 +1234,10 @@ export class Game {
     const stage = SWORD_STAGE_BY_ID[tier];
     const pathMultiplier = (pending && pending.hasSoul ? PICKUP_BALANCE.soul.pathLengthMultiplier ?? 1 : (this.nextSoul ? PICKUP_BALANCE.soul.pathLengthMultiplier ?? 1 : 1)) * this.getPathLengthMultiplier();
     const widthMultiplier = pending && pending.hasSoul ? PICKUP_BALANCE.soul.widthMultiplier ?? 1 : (this.nextSoul ? PICKUP_BALANCE.soul.widthMultiplier ?? 1 : 1);
-    const maxPathLength = stage.maxPathLength * pathMultiplier;
+    // P1-A: reactive 模式用独立刀路配置（0.9s/360px），不读旧段位；刀势不影响能否完成基础刀路
+    const isReactiveMode = this.gameMode === "bossReactive";
+    const reactiveSlashCfg = REACTIVE_BOSS_CONFIG.reactiveSlash;
+    const maxPathLength = isReactiveMode ? reactiveSlashCfg.maxPathLength : stage.maxPathLength * pathMultiplier;
     const point = { x: pos.x, y: pos.y, t: this.elapsed, energyRatio: 1 };
 
     // P4.1A.7：使用已锁定的一刀斩倍率
@@ -1243,8 +1260,8 @@ export class Game {
       lockedEnergy,
       maxPower: maxPathLength,
       remainingPower: maxPathLength,
-      maxDuration: stage.duration,
-      remainingDuration: stage.duration,
+      maxDuration: isReactiveMode ? reactiveSlashCfg.maxDuration : stage.duration,
+      remainingDuration: isReactiveMode ? reactiveSlashCfg.maxDuration : stage.duration,
       maxPathLength,
       remainingPathLength: maxPathLength,
       pathUsed: 0,
@@ -1912,7 +1929,7 @@ export class Game {
   /** P0: Reactive Boss弹幕/护甲检测 */
   /** P1: Reactive 玩家防线可视化 */
   private drawReactiveDefenseLine(ctx: CanvasRenderingContext2D): void {
-    const y = 720;
+    const y = REACTIVE_BOSS_CONFIG.playerHp.playerLineY;
     ctx.save();
     ctx.strokeStyle = "rgba(91, 192, 255, 0.3)";
     ctx.lineWidth = 1;

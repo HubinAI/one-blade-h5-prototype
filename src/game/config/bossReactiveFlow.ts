@@ -33,6 +33,8 @@ export const REACTIVE_BOSS_CONFIG = {
     bossHeavyDamage: 20,
     mistakenCutDamage: 5,
     invincibleDuration: 0.3,
+    // P4.4B-R2 P0-B: 玩家受击线 Y（720→690，配合弹速提升让弹幕能真实到达）
+    playerLineY: 690,
   },
   armor: {
     durabilityPerPiece: 100,
@@ -43,14 +45,16 @@ export const REACTIVE_BOSS_CONFIG = {
   },
   projectiles: {
     normal: {
-      speed: 120,
+      // P4.4B-R2 P0-B: 120→145，确保弹幕能在阶段切换前到达玩家线
+      speed: 145,
       radius: 10,
       color: "#9b59b6",
       glowColor: "rgba(155,89,182,0.6)",
       maxLife: 4,
     },
     reflective: {
-      speed: 90,
+      // P4.4B-R2 P0-B: 90→120（强化弹幕建议 110-130）
+      speed: 120,
       radius: 14,
       color: "#d4a0ff",
       glowColor: "rgba(212,160,255,0.7)",
@@ -75,5 +79,15 @@ export const REACTIVE_BOSS_CONFIG = {
     lowEnergyColor: "#666666",
     midEnergyColor: "#5bc0ff",
     highEnergyColor: "#fff4a0",
+  },
+  // P4.4B-R2 P1-A: Reactive 独立刀路规则 — 不读旧段位 duration/maxPathLength。
+  // 刀势只影响伤害/宽度/亮度/破甲/反射/穿透，不影响能否完成基础刀路。
+  reactiveSlash: {
+    activationDistance: 14,
+    maxDuration: 0.9,
+    maxPathLength: 360,
+    baseCost: 4,
+    costPer100Px: 2,
+    emptySwingPenalty: 3,
   },
 } as const;
