@@ -17,6 +17,8 @@ jobs:
       - run: npm run check:version
       - run: npm run test
       - run: npm run build
+      - name: Check E2E residue in prod build
+        run: npm run check:prod-no-e2e
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
       - uses: actions/upload-artifact@v4
