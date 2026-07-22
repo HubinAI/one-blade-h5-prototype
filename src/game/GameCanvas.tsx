@@ -11,9 +11,11 @@ type GameCanvasProps = {
   declineReviveSignal?: number;
   paused?: boolean;
   runMode?: "normal" | "challenge";
+  /** P4.4A.4: 执行失败重试信号 */
+  retryExecutionSignal?: number;
 };
 
-export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, declineReviveSignal = 0, paused = false, runMode }: GameCanvasProps) {
+export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, declineReviveSignal = 0, paused = false, runMode, retryExecutionSignal = 0 }: GameCanvasProps) {
   // 从currentLevel获取当前模式
   const effectiveMode = runMode === "challenge" ? "challenge" : "normal";
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -71,6 +73,10 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
   useEffect(() => {
     if (declineReviveSignal > 0) gameRef.current?.declineReviveOffer();
   }, [declineReviveSignal]);
+
+  useEffect(() => {
+    if (retryExecutionSignal > 0) gameRef.current?.retryExecution();
+  }, [retryExecutionSignal]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

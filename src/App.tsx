@@ -72,12 +72,13 @@ export default function App() {
   const [home, setHome] = useState(getHomeSnapshot);
   const [currentLevel, setCurrentLevel] = useState<LevelConfig>(LEVELS[0]);
   const [lastResult, setLastResult] = useState<BattleResult | null>(null);
-  const [appVersion] = useState("V0721020");
+  const [appVersion] = useState("V0722001");
   const [runIndex, setRunIndex] = useState(0);
   const [currentMode, setCurrentMode] = useState<RunMode>("normal");
   const [reviveOffer, setReviveOffer] = useState<ReviveOffer | null>(null);
   const [reviveSignal, setReviveSignal] = useState(0);
   const [declineReviveSignal, setDeclineReviveSignal] = useState(0);
+  const [retryExecutionSignal, setRetryExecutionSignal] = useState(0);
   const [showCodex, setShowCodex] = useState(false);
   const [paused, setPaused] = useState(false);
   const [showMerchant, setShowMerchant] = useState(false);
@@ -461,6 +462,7 @@ export default function App() {
             declineReviveSignal={declineReviveSignal}
             paused={paused || Boolean(reviveOffer)}
             runMode={currentMode === "challenge" ? "challenge" : "normal"}
+            retryExecutionSignal={retryExecutionSignal}
           />
           {!reviveOffer && !paused && (
             <button
@@ -529,11 +531,26 @@ export default function App() {
       {/* P4.4A.1: Boss失败临时页面 */}
       {screen === "bossFailScreen" && (
         <section className="screen" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0d0015', color: '#d7bde2' }}>
-          <h1 style={{ fontSize: 28, color: '#f0e130', marginBottom: 12 }}>挑战失败</h1>
-          <p style={{ fontSize: 14, marginBottom: 6, opacity: 0.7 }}>当前阶段：破甲</p>
-          <p style={{ fontSize: 14, marginBottom: 24, opacity: 0.7 }}>护甲进度：0/3</p>
-          <button className="battle-btn" style={{ width: 180, marginBottom: 8, background: '#6c3483', border: '1px solid #8e44ad' }} onClick={() => { setScreen("battle"); setCurrentMode("challenge"); }}>
-            再次挑战
+          <h1 style={{ fontSize: 28, color: '#ff6a33', marginBottom: 12 }}>挑战失败</h1>
+          <p style={{ fontSize: 14, marginBottom: 6, opacity: 0.7 }}>一刀未命中命核</p>
+          <p style={{ fontSize: 14, marginBottom: 24, opacity: 0.7 }}>终结阶段失败</p>
+          <button
+            className="battle-btn"
+            style={{ width: 180, marginBottom: 8, background: '#6c3483', border: '1px solid #8e44ad' }}
+            onClick={() => {
+              // P4.4A.4: 重试直接回到execution_intro
+              setRetryExecutionSignal((v) => v + 1);
+              setScreen("battle");
+            }}
+          >
+            再试一次
+          </button>
+          <button className="battle-btn" style={{ width: 180, marginBottom: 8, background: '#2c1038', border: '1px solid #4a2060' }} onClick={() => {
+            // P4.4A.4: 完全重新开始（从Boss intro开始）
+            const bossLevel = getBossLevelConfig(getCurrentRankId());
+            startLevel(bossLevel, "challenge");
+          }}>
+            重新挑战（从头开始）
           </button>
           <button className="battle-btn" style={{ width: 180, background: '#2c1038', border: '1px solid #4a2060' }} onClick={() => { setCurrentMode("normal"); setScreen("menu"); }}>
             返回
