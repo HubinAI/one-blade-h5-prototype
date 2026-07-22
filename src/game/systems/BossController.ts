@@ -194,9 +194,25 @@ export class BossController {
   private tribulationDarkAlpha = 0;
   private breakthroughParticles: { x: number; y: number; vy: number; life: number; maxLife: number; size: number }[] = [];
 
+  /** P4.4A.5 fix: Boss渲染透明度（tribulation阶段渐变） */
+  private bossRenderAlpha = 1.0;
+  /** P4.4A.5 fix: 缓存雷线路径（纯渲染） */
+  private boltPolyline: number[] = [];
+  /** P4.4A.5 fix: 防止音效重复触发的阶段记录 */
+  private _lastPlayedStage = -1;
+
+  /** P4.4A.5 fix: tribulation 快照（供测试验证） */
+  get tribulationSnapshot() {
+    return { phase: this._phase, inputLocked: this.inputLocked, freezeCombatResources: this.freezeCombatResources, tribulationIntroTimer: this.tribulationIntroTimer, tribulationTimer: this.tribulationTimer, tribulationStage: this.tribulationStage, tribulationDarkAlpha: this.tribulationDarkAlpha };
+  }
+
+  /** P4.4A.5 fix: 突破演出计时器（供外部读取） */
+  get breakthroughShowTimerValue(): number { return this.breakthroughShowTimer; }
+
   private readonly VICTORY_SHOW_HOLD = 0.5;
   private readonly TRIBULATION_INTRO_DURATION = 1.5;
-  private readonly TRIBULATION_STAGE_DURATION = 0.6;
+  private readonly TRIBULATION_STAGE_DURATION = 0.7;
+  private readonly TRIBULATION_TOTAL = 2.1; // 3 * 0.7
   private readonly BREAKTHROUGH_SHOW_DURATION = 2.0;
 
   private _bossHP = 16;
@@ -265,6 +281,9 @@ export class BossController {
     this.breakthroughShowTimer = 0;
     this.tribulationDarkAlpha = 0;
     this.breakthroughParticles = [];
+    this.bossRenderAlpha = 1.0;
+    this.boltPolyline = [];
+    this._lastPlayedStage = -1;
     this.initArmorTargets();
     this.armorTargets[ARMOR_L].active = true;
   }
@@ -388,22 +407,60 @@ export class BossController {
     if (this._phase === "tribulation_intro") {
       this.tribulationIntroTimer += dt;
       this.tribulationDarkAlpha = Math.min(0.5, this.tribulationIntroTimer / 0.5);
+      // Fix 3: 统一渐变变量：alpha 1.0→0.8
+      this.bossRenderAlpha = 1.0 - 0.2 * (this.tribulationIntroTimer / this.TRIBULATION_INTRO_DURATION);
       if (this.tribulationIntroTimer >= this.TRIBULATION_INTRO_DURATION) {
         (this._phase as BossPhaseState) = "tribulation";
         this.tribulationTimer = 0;
         this.tribulationStage = 0;
+        this._lastPlayedStage = -1;
+        // Fix 9: 在阶段开始时生成雷线路径缓存（基于核心位置）
+        this.boltPolyline = [];
+        const coreY = this.getExecutionCoreWorldPos().cy;
+        const boltEndY = coreY;
+        for (let y = 0; y < boltEndY; y += 20) {
+          this.boltPolyline.push(y, (Math.random() - 0.5) * 16);
+        }
       }
       return;
     }
     if (this._phase === "tribulation") {
       this.tribulationTimer += dt;
       this.tribulationStage = Math.min(2, Math.floor(this.tribulationTimer / this.TRIBULATION_STAGE_DURATION));
-      if (this.tribulationStage >= 1) this.bossRenderScale = 0.6;
-      if (this.tribulationStage >= 2) this.bossRenderScale = 0;
       const stageT = this.tribulationTimer % this.TRIBULATION_STAGE_DURATION;
-      if (stageT < 0.15) this.flash = Math.max(this.flash, stageT / 0.15);
-      if (stageT >= 0.15 && stageT < 0.45) this.flash = Math.max(this.flash, 0.3);
-      if (this.tribulationTimer >= 1.8) {
+      // Fix 3: 统一渐变变量
+      if (this.tribulationStage === 0) {
+        this.bossRenderAlpha = 0.9;
+        this.bossRenderScale = 1.0;
+      } else if (this.tribulationStage === 1) {
+        this.bossRenderAlpha = 0.65;
+        this.bossRenderScale = 0.6;
+      } else {
+        this.bossRenderAlpha = Math.max(0, 0.65 * (1 - (this.tribulationTimer - 1.2) / 0.6));
+        this.bossRenderScale = 0.6 * (1 - (this.tribulationTimer - 1.2) / 0.6);
+      }
+      // Fix 5: flash 改为 stageT 函数，直接赋值（不累计，确保每段之间归零）
+      let tribFlash = 0;
+      if (stageT < 0.08) tribFlash = stageT / 0.08;
+      else if (stageT < 0.16) tribFlash = 1 - (stageT - 0.08) / 0.08;
+      else if (stageT < 0.28) tribFlash = 0.25 * (1 - (stageT - 0.16) / 0.12);
+      this.flash = tribFlash;
+      // Fix 9: screenShake 从 drawLightningBolt 移到这里
+      if (stageT >= 0.18 && stageT < 0.28) {
+        this.screenShake = Math.max(this.screenShake, 0.3);
+      } else {
+        this.screenShake = Math.max(0, this.screenShake - dt * 5);
+      }
+      // Fix 4: 音效
+      if (this.tribulationStage > this._lastPlayedStage) {
+        this._lastPlayedStage = this.tribulationStage;
+        AudioService.armorComplete(); // 借用 armorComplete 作为雷击重音
+      }
+      if (this.tribulationStage === 0 && stageT < 0.01) {
+        AudioService.armorComplete(); // 第一段雷击开始
+      }
+      // Fix 6: 三段雷击 timing 改为 0.7s each, total 2.1s
+      if (this.tribulationTimer >= this.TRIBULATION_TOTAL) {
         (this._phase as BossPhaseState) = "breakthrough_show";
         this.breakthroughShowTimer = 0;
         this.executionShards = [];
@@ -524,12 +581,12 @@ export class BossController {
 
   /** P2: 终结流程阶段统一判定（含非终端状态execution_intro/execution） */
   private isExecutionFlowPhase(p: BossPhaseState): boolean {
-    return ["execution_intro", "execution", "execution_success", "execution_fail", "fail", "victory_show", "tribulation_intro", "tribulation", "breakthrough_show"].includes(p);
+    return ["execution_intro", "execution", "execution_success", "execution_fail", "fail", "victory_show", "tribulation_intro", "tribulation", "breakthrough_show", "result"].includes(p);
   }
 
   /** P1-2: 终结锁定阶段（不含execution，该阶段允许输入） */
   private isExecutionLockedPhase(p: BossPhaseState): boolean {
-    return ["execution_intro", "execution_success", "execution_fail", "fail", "victory_show", "tribulation_intro", "tribulation", "breakthrough_show"].includes(p);
+    return ["execution_intro", "execution_success", "execution_fail", "fail", "victory_show", "tribulation_intro", "tribulation", "breakthrough_show", "result"].includes(p);
   }
 
   /** P4.4A.2: 覆盖层（在刀光/命中文字上方） */
@@ -906,21 +963,21 @@ export class BossController {
       ctx.translate(DESIGN_WIDTH / 2, this.renderY);
       ctx.scale(this.bossRenderScale, this.bossRenderScale);
 
-      // P4.4A.5: tribulation_intro 继续绘制分裂态
+      // P4.4A.5: tribulation_intro 继续绘制分裂态（不再让 splitAlpha 归零消失）
       if (this._phase === "tribulation_intro") {
-        const splitAlpha = Math.max(0, 1 - this.tribulationIntroTimer / 1.0);
-        if (splitAlpha > 0.01) {
+        // Fix 3: 使用统一渐变变量，不消失
+        if (this.bossRenderAlpha > 0.01) {
           const splitOffset = 40;
           // 左半
           ctx.save();
           ctx.beginPath(); ctx.rect(-100, -120, 100, 240); ctx.clip();
-          ctx.globalAlpha = splitAlpha;
+          ctx.globalAlpha = this.bossRenderAlpha;
           ctx.save(); ctx.translate(-splitOffset, 0); this.drawBossBody(ctx); ctx.restore();
           ctx.restore();
           // 右半
           ctx.save();
           ctx.beginPath(); ctx.rect(0, -120, 100, 240); ctx.clip();
-          ctx.globalAlpha = splitAlpha;
+          ctx.globalAlpha = this.bossRenderAlpha;
           ctx.save(); ctx.translate(splitOffset, 0); this.drawBossBody(ctx); ctx.restore();
           ctx.restore();
         }
@@ -930,11 +987,10 @@ export class BossController {
       if (this._phase === "tribulation") {
         const tribShakeX = this.tribulationStage === 0 ? (Math.random() - 0.5) * 4 : 0;
         const tribShakeY = this.tribulationStage === 0 ? (Math.random() - 0.5) * 3 : 0;
-        const tribAlpha = this.tribulationStage >= 2 ? 0 : Math.max(0, 1 - this.tribulationTimer / 1.8);
-        if (tribAlpha > 0.01) {
+        if (this.bossRenderAlpha > 0.01) {
           ctx.save();
           ctx.translate(tribShakeX, tribShakeY);
-          ctx.globalAlpha = tribAlpha;
+          ctx.globalAlpha = this.bossRenderAlpha;
           const splitOffset = 40;
           // 左半
           ctx.save();
@@ -1498,15 +1554,21 @@ export class BossController {
     }
   }
 
-  /** 绘制竖直雷柱（白→紫渐变） */
+  /** 绘制竖直雷柱（白→紫渐变）— 纯渲染，不修改状态 */
   private drawLightningBolt(ctx: any, stageT: number): void {
-    if (stageT < 0.15) return; // 蓄能期不画
+    // Fix 6: 雷柱只在 stageT 0.18~0.28 之间绘制（短劈）
+    if (stageT < 0.18 || stageT >= 0.28) return;
+    // Fix 2: 雷柱落点改为 Boss 真实坐标
+    const core = this.getExecutionCoreWorldPos();
     const boltX = DESIGN_WIDTH / 2;
     const boltY0 = 0;
-    const boltY1 = 200 + this.renderY;
+    const boltY1 = core.cy;
+    // Fix 6: 三段略微偏移 X
+    const stageXOffsets = [-4, 5, 0];
+    const xOff = stageXOffsets[this.tribulationStage] ?? 0;
     ctx.save();
-    ctx.globalAlpha = Math.min(1, (stageT - 0.15) / 0.1);
-    const boltGrad = ctx.createLinearGradient(boltX, boltY0, boltX, boltY1);
+    ctx.globalAlpha = Math.min(1, (stageT - 0.18) / 0.05);
+    const boltGrad = ctx.createLinearGradient(boltX + xOff, boltY0, boltX + xOff, boltY1);
     boltGrad.addColorStop(0, "#ffffff");
     boltGrad.addColorStop(0.5, "#d4a0ff");
     boltGrad.addColorStop(1, "#7b2ff7");
@@ -1515,14 +1577,15 @@ export class BossController {
     ctx.shadowColor = "#ffffff";
     ctx.shadowBlur = 10;
     ctx.beginPath();
-    ctx.moveTo(boltX, boltY0);
-    // 锯齿路径
-    for (let y = boltY0; y < boltY1; y += 20) {
-      ctx.lineTo(boltX + (Math.random() - 0.5) * 16, y);
+    // Fix 9: 使用缓存的 polyline 绘制
+    ctx.moveTo(boltX + xOff, boltY0);
+    for (let i = 0; i < this.boltPolyline.length; i += 2) {
+      const y = this.boltPolyline[i];
+      const xOffRand = this.boltPolyline[i + 1];
+      ctx.lineTo(boltX + xOff + xOffRand, y);
     }
-    ctx.lineTo(boltX, boltY1);
+    ctx.lineTo(boltX + xOff, boltY1);
     ctx.stroke();
-    if (stageT < 0.3) this.screenShake = Math.max(this.screenShake, 0.3);
     ctx.restore();
   }
 
@@ -1554,7 +1617,7 @@ export class BossController {
     ctx.restore();
   }
 
-  /** 绘制破境粒子 */
+  /** 绘制破境粒子 — Fix 8: 直接使用 p.y，不减去 renderY */
   private drawBreakthroughParticles(ctx: any): void {
     ctx.save();
     for (const p of this.breakthroughParticles) {
@@ -1564,7 +1627,7 @@ export class BossController {
       ctx.shadowColor = "#ffd700";
       ctx.shadowBlur = 6;
       ctx.beginPath();
-      ctx.arc(p.x, p.y - this.renderY, p.size, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();

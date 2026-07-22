@@ -433,7 +433,7 @@ export type CodexEntry = {
 
 /** 所有演出阶段（含新增天雷劫/破境） */
 export function isBossCinematicPhase(phase: BossPhaseState): boolean {
-  return ["victory_show", "tribulation_intro", "tribulation", "breakthrough_show"].includes(phase);
+  return ["victory_show", "tribulation_intro", "tribulation", "breakthrough_show", "result"].includes(phase);
 }
 
 /** 所有输入锁定阶段 */
@@ -445,6 +445,7 @@ export function isBossInputLockedPhase(phase: BossPhaseState): boolean {
     "execution_intro", "execution_success", "execution_fail",
     "fail", "victory_show",
     "tribulation_intro", "tribulation", "breakthrough_show",
+    "result",
   ].includes(phase);
 }
 
@@ -454,5 +455,6 @@ export function isExecutionFlowPhase(phase: BossPhaseState): boolean {
     "execution_intro", "execution", "execution_success", "execution_fail",
     "fail", "victory_show",
     "tribulation_intro", "tribulation", "breakthrough_show",
+    "result",
   ].includes(phase);
 }

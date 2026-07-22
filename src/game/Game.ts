@@ -943,7 +943,7 @@ export class Game {
     this.drawParticles(ctx);
     // P4.4A.4: execution阶段隐藏普通斩/破按钮和技能倒计时
     const phase = this.bossController?.phase;
-    const inExecution = phase && ["execution_intro", "execution", "execution_success", "execution_fail", "fail", "victory_show", "tribulation_intro", "tribulation", "breakthrough_show"].includes(phase);
+    const inExecution = phase && ["execution_intro", "execution", "execution_success", "execution_fail", "fail", "victory_show", "tribulation_intro", "tribulation", "breakthrough_show", "result"].includes(phase);
     if (!inExecution) {
       this.drawDefenseAndWarrior(ctx);
     }

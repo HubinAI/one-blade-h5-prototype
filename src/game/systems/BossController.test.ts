@@ -706,7 +706,7 @@ describe("BossController - 天雷劫终端状态", () => {
     // victory_show → tribulation_intro → tribulation → breakthrough_show
     bc.update(0.5); // tribulation_intro
     bc.update(1.5); // tribulation
-    bc.update(1.8); // breakthrough_show
+    bc.update(2.1); // breakthrough_show
     expect(bc.phase).toBe("breakthrough_show");
     // bossRenderScale 在 tribulation stage 2 设为 0
   });
@@ -716,8 +716,8 @@ describe("BossController - 天雷劫终端状态", () => {
     const bc = new BossController("thunderGeneral");
     toVictoryShow(bc);
     bc.update(0.5); // tribulation_intro
-    bc.update(1.5); // tribulation (三段)
-    bc.update(1.8); // breakthrough_show
+    bc.update(1.5); // tribulation
+    bc.update(2.1); // breakthrough_show (三段完成, 2.1s)
     bc.update(2.0); // → result
     expect(bc.phase).toBe("result");
   });
@@ -730,6 +730,41 @@ describe("BossController - 天雷劫终端状态", () => {
     bc.update(0.5); // 过了 VICTORY_SHOW_HOLD
     expect(bc.phase).toBe("tribulation_intro");
     expect(bc.phase).not.toBe("result");
+  });
+
+  // ===== P4.4A.5 fix: Tribulation snapshot 测试 =====
+
+  it("tribulation_intro 0.25秒 darkAlpha 有进度", () => {
+    const bc = new BossController("thunderGeneral");
+    toVictoryShow(bc);
+    bc.update(0.5); // → tribulation_intro
+    bc.update(0.25); // tribulationIntroTimer = 0.25
+    const snap = bc.tribulationSnapshot;
+    expect(snap.phase).toBe("tribulation_intro");
+    expect(snap.tribulationDarkAlpha).toBeGreaterThan(0);
+    expect(snap.tribulationDarkAlpha).toBeLessThanOrEqual(0.5);
+  });
+
+  it("result 阶段 inputLocked=true", () => {
+    const bc = new BossController("thunderGeneral");
+    toVictoryShow(bc);
+    bc.update(0.5); // tribulation_intro
+    bc.update(1.5); // tribulation
+    bc.update(2.1); // breakthrough_show
+    bc.update(2.0); // result
+    expect(bc.phase).toBe("result");
+    expect(bc.inputLocked).toBe(true);
+  });
+
+  it("result 阶段 freezeCombatResources=true", () => {
+    const bc = new BossController("thunderGeneral");
+    toVictoryShow(bc);
+    bc.update(0.5); // tribulation_intro
+    bc.update(1.5); // tribulation
+    bc.update(2.1); // breakthrough_show
+    bc.update(2.0); // result
+    expect(bc.phase).toBe("result");
+    expect(bc.freezeCombatResources).toBe(true);
   });
 
 });
