@@ -1,0 +1,31 @@
+sequenceDiagram
+    participant User as 用户
+    participant App as App.tsx
+    participant GC as GameCanvas.tsx
+    participant Game as Game.ts
+    participant BC as BossController.ts
+
+    User->>App: 点击"再试一次"
+    App->>App: setRetryExecutionRequested(true)
+    App->>App: setScreen("battle")
+    
+    Note over GC: useEffect[retryExecutionRequested] 触发
+    GC->>GC: retryExecutionRequested === true
+    GC->>Game: gameRef.current.retryExecution()
+    Game->>BC: resetToExecutionIntro()
+    BC->>BC: phase = "execution_intro"
+    BC->>BC: 重置所有 execution 计时器/状态
+    Game->>Game: finished = false, phase = "playing"
+    
+    GC->>App: onRetryExecutionConsumed()
+    App->>App: setRetryExecutionRequested(false)
+    
+    Note over GC: 继续正常 rAF 循环
+    GC->>Game: update(dt)
+    Game->>BC: update(dt)
+    BC->>BC: executionIntroTimer 递增
+    BC->>BC: 2秒后 phase = "execution"
+    GC->>GC: bossPhase 变化检测
+    GC->>App: onBossPhaseChange("execution")
+    
+    Note over User,App: 用户可再次挥刀

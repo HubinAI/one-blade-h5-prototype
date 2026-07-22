@@ -50,6 +50,8 @@ import type {
   CombatFloatPriority,
   EnemyFlowRole,
   BattlefieldPressureLayer,
+  BossPhaseState,
+  ExecutionResolveResult,
 } from "./types";
 import { choose, clamp, distance, distanceToSegment, randomRange } from "../utils/math";
 
@@ -248,7 +250,7 @@ export class Game {
   private eliteSpawned = false;
   private bossSpawned = false;
   /** P4.4A: Boss控制器（新状态机系统） */
-  private bossController: import("./systems/BossController").BossController | null = null;
+  private bossController: BossController | null = null;
   /** P4.2A.1: 统一中央播报调度器 */
   private activeBattleNotice: BattleNotice | null = null;
   private battleNoticeQueue: BattleNotice[] = [];
@@ -427,9 +429,9 @@ export class Game {
       // 程序化命中闭包：随本 if 块被 DCE 消除，不进入生产包。
       // 复用 BossController 真实 resolve 逻辑，规避坐标采样 flaky。
       // 返回布尔与历史 debugForce*Hit 契约一致（smoke 测试 expect(ok).toBe(true)）。
-      const forceArmorHit = (bc: any): boolean => {
+      const forceArmorHit = (bc: BossController): boolean => {
         if (!bc || bc.phase !== "armor") return false;
-        const idx = bc.activeArmorIndex as number;
+        const idx = bc["activeArmorIndex"] as number;
         const t = bc.getArmorTargetWorldPos(idx);
         if (!t) return false;
         const slashId = `e2e_a_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -437,7 +439,7 @@ export class Game {
         const segB = { x: t.cx + 1, y: t.cy + 1 };
         return !!bc.resolveArmorSegment(segA, segB, slashId);
       };
-      const forcePursuitHit = (bc: any): boolean => {
+      const forcePursuitHit = (bc: BossController): boolean => {
         if (!bc || bc.phase !== "pursuit") return false;
         const core = bc.getCoreWorldPos();
         if (!core) return false;
@@ -445,6 +447,15 @@ export class Game {
         const segA = { x: core.cx - 1, y: core.cy - 1 };
         const segB = { x: core.cx + 1, y: core.cy + 1 };
         return !!bc.resolvePursuitSegment(segA, segB, slashId);
+      };
+      const forceExecutionHit = (bc: BossController): boolean => {
+        if (!bc || bc.phase !== "execution") return false;
+        const core = bc.getExecutionCoreWorldPos();
+        if (!core) return false;
+        const slashId = `e2e_e_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const segA = { x: core.cx - 1, y: core.cy - 1 };
+        const segB = { x: core.cx + 1, y: core.cy + 1 };
+        return !!bc.resolveExecutionSegment(segA, segB, slashId);
       };
 
       (window as any).__ONE_BLADE_E2E__ = {
@@ -463,12 +474,14 @@ export class Game {
         getTargets: () => ({
           coreTarget: self.bossController?.getCoreWorldPos(),
           armorTargets: [0, 1, 2].map(i => self.bossController?.getArmorTargetWorldPos(i)).filter(Boolean),
+          executionTarget: self.bossController?.getExecutionCoreWorldPos() ?? null,
         }),
         // 程序化命中：复用 BossController 真实 resolve 逻辑，规避坐标采样 flaky
-        slashArmor: () => forceArmorHit(self.bossController as any),
-        slashCore: () => forcePursuitHit(self.bossController as any),
+        slashArmor: () => forceArmorHit(self.bossController!),
+        slashCore: () => forcePursuitHit(self.bossController!),
+        slashExecution: () => forceExecutionHit(self.bossController!),
         // 跳过 Boss 开场动画（仅加速到达 armor 阶段）
-        skipIntro: () => (self.bossController as any)?.skipIntro(),
+        skipIntro: () => self.bossController?.skipIntro(),
       };
     }
 
@@ -655,8 +668,7 @@ export class Game {
   /** P4.4A.4: 失败后重试——重置Boss到execution_intro */
   retryExecution(): void {
     if (!this.bossController) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (this.bossController as any).resetToExecutionIntro();
+    this.bossController.resetToExecutionIntro();
     // 重置游戏状态（关键：清除finish标记和lost phase）
     this.finished = false;
     this.phase = "playing";
@@ -670,6 +682,11 @@ export class Game {
     // 确保有能量
     this.energy = Math.max(this.energy, 60);
     console.log("[Execution] Boss重置到execution_intro");
+  }
+
+  /** P4.4A.4: Boss阶段getter（供GameCanvas轮询） */
+  get bossPhase(): BossPhaseState | null {
+    return this.bossController?.phase ?? null;
   }
 
   reviveFromRewardedAd() {
@@ -918,11 +935,11 @@ export class Game {
     // P4.4A.4: execution phase flash effects
     if (this.bossController?.phase === "execution_success") {
       // 闪白
-      ctx.fillStyle = `rgba(255, 255, 255, ${0.4 * Math.max(0, 1 - (this.bossController as any).executionResultTimer / 1.0)})`;
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.4 * Math.max(0, 1 - this.bossController.executionResultTimerValue / 1.0)})`;
       ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
     } else if (this.bossController?.phase === "execution_fail") {
       // 闪红
-      ctx.fillStyle = `rgba(180, 30, 30, ${0.35 * Math.max(0, 1 - (this.bossController as any).executionResultTimer / 1.5)})`;
+      ctx.fillStyle = `rgba(180, 30, 30, ${0.35 * Math.max(0, 1 - this.bossController.executionResultTimerValue / 1.5)})`;
       ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
     }
     // 4. Debug/Flash
@@ -1621,8 +1638,7 @@ export class Game {
     if (this.gameMode === "boss" && this.bossController) {
       // P4.4A.4: execution阶段路由到命核判定
       if (this.bossController.phase === "execution") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const result = (this.bossController as any).resolveExecutionSegment(a, b, trail.id);
+        const result = this.bossController.resolveExecutionSegment(a, b, trail.id);
         if (result) {
           this.applyExecutionResolveResult(result, a, b);
         }
@@ -3804,8 +3820,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   const finishResult = this.bossController?.finishBossSlash(trail.id);
   if (finishResult) {
     if (finishResult.kind === "execution_hit" || finishResult.kind === "execution_miss") {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      this.applyExecutionResolveResult(finishResult as any, trail.points[0], trail.points[trail.points.length - 1]);
+      this.applyExecutionResolveResult(finishResult, trail.points[0], trail.points[trail.points.length - 1]);
     } else if (finishResult.kind === "pursuit_hit" || finishResult.kind === "pursuit_body_hit" || finishResult.kind === "pursuit_miss") {
       this.applyPursuitResolveResult(finishResult, trail.points[0], trail.points[trail.points.length - 1]);
     } else if (finishResult.kind !== "miss") {
@@ -3882,7 +3897,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   }
 
   /** P4.4A.4: 终结一刀结果反馈 */
-  private applyExecutionResolveResult(result: import("./systems/BossController").ExecutionResolveResult, _segA: Vec2, _segB: Vec2): void {
+  private applyExecutionResolveResult(result: ExecutionResolveResult, _segA: Vec2, _segB: Vec2): void {
     if (result.kind === "execution_hit") {
       this.flash = Math.max(this.flash, 0.9);
       this.screenShake = Math.max(this.screenShake, 0.5);
@@ -3894,8 +3909,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         text: "命核命中", color: "#f0e130", size: 22, duration: 1.0,
         category: "mechanic", priority: "A", mergeKey: `execution-hit-${result.slashId}`
       });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (this.bossController as any).triggerExecutionSuccess();
+      this.bossController?.triggerExecutionSuccess();
     } else if (result.kind === "execution_miss") {
       // 状态已由finishExecutionSlash在BossController中设置
       const corePos = this.bossController?.getCoreWorldPos() ?? { cx: DESIGN_WIDTH / 2, cy: 195, rx: 0, ry: 0 };

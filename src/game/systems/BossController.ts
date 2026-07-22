@@ -4,7 +4,7 @@
 // 护甲: 左肩/右肩/胸甲、三态命中(armor_hit/wrong_hit/miss)
 // 单刀单甲: slashId级别解析锁
 // ========================================================================
-import type { BossId, BossPhaseState, Vec2 } from "../types";
+import type { BossId, BossPhaseState, Vec2, ExecutionResolveResult } from "../types";
 import { DESIGN_WIDTH, DESIGN_HEIGHT } from "../config/constants";
 import { distanceToSegment } from "../../utils/math";
 import { AudioService } from "../services/AudioService";
@@ -32,11 +32,6 @@ export type ArmorResolveResult =
   | { kind: "armor_hit"; targetId: number; hitPos: Vec2; armorCenter: Vec2; shardOrigin: Vec2; progress: number; maxProgress: number; completed: boolean; slashId: string }
   | { kind: "wrong_hit"; hitPos: Vec2; rePrompt: boolean; slashId: string }
   | { kind: "miss"; slashId: string };
-
-/** P4.4A.4: 终结一刀判定结果 */
-export type ExecutionResolveResult =
-  | { kind: "execution_hit"; hitPos: Vec2; coreCenter: Vec2; slashId: string }
-  | { kind: "execution_miss"; slashId: string };
 
 type ArmorTarget = {
   id: number; name: string;
@@ -170,11 +165,16 @@ export class BossController {
   /** P4.4A.4: execution粒子（成功/失败特效） */
   private executionParticles: { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; size: number; color: string }[] = [];
   /** P4.4A.4: execution命核命中区域（DPR归一化） */
-  private static readonly EXECUTION_CORE_RADIUS = 55;
+  private static readonly EXECUTION_CORE_HIT_RX = 20;
+  private static readonly EXECUTION_CORE_HIT_RY = 48;
+  private static readonly EXECUTION_CORE_VISUAL_HW = 12;
+  private static readonly EXECUTION_CORE_VISUAL_HH = 42;
   /** 屏幕震动（供Game读取） */
   screenShake: number = 0;
   /** 闪屏（供Game读取） */
   flash: number = 0;
+  /** execution结果动画计时（供Game读取） */
+  get executionResultTimerValue(): number { return this.executionResultTimer; }
   /** 追击能量增幅标记 */
   pursuitEnergyBoosted = false;
   /** 追击整刀Session */
@@ -517,20 +517,35 @@ export class BossController {
   }
 
   /** P4.4A.4: 命核命中区域世界坐标 */
-  getExecutionCoreWorldPos(): { cx: number; cy: number; radius: number } {
+  getExecutionCoreWorldPos(): { cx: number; cy: number; rx: number; ry: number } {
     return {
       cx: DESIGN_WIDTH / 2,
       cy: this.renderY + 2,
-      radius: BossController.EXECUTION_CORE_RADIUS,
+      rx: BossController.EXECUTION_CORE_HIT_RX,
+      ry: BossController.EXECUTION_CORE_HIT_RY,
     };
   }
 
-  /** P4.4A.4: 终结一刀段判定 */
+  /** P4.4A.4: 终结一刀段判定（椭圆命中检测：沿线段采样8点） */
   resolveExecutionSegment(segA: Vec2, segB: Vec2, slashId: string): ExecutionResolveResult | null {
     if (this._phase !== "execution") return null;
     if (this._resolvedSlashId === slashId) return null;
     const core = this.getExecutionCoreWorldPos();
-    if (this.segmentHitCircle(segA, segB, core.cx, core.cy, core.radius)) {
+    // 椭圆方程 (dx/rx)² + (dy/ry)² <= 1，沿线段采样8个点
+    const samples = 8;
+    let hit = false;
+    for (let i = 0; i <= samples; i++) {
+      const t = i / samples;
+      const sx = segA.x + (segB.x - segA.x) * t;
+      const sy = segA.y + (segB.y - segA.y) * t;
+      const dx = (sx - core.cx) / core.rx;
+      const dy = (sy - core.cy) / core.ry;
+      if (dx * dx + dy * dy <= 1) {
+        hit = true;
+        break;
+      }
+    }
+    if (hit) {
       this._resolvedSlashId = slashId;
       this._executionHitDetected = true;
       this.screenShake = Math.max(this.screenShake, 0.5);
@@ -745,10 +760,55 @@ export class BossController {
   private drawBoss(ctx: any): void {
     const shakeX = this.shakeTimer > 0 ? (Math.random() - 0.5) * 4 : 0;
     const shakeY = this.shakeTimer > 0 ? (Math.random() - 0.5) * 3 : 0;
-    // P4.4A.2: 不使用setTransform(1)，保留DPR和上层transform
+    const isSplit = this.p() === "execution_success";
+    const splitT = isSplit ? Math.min(this.executionResultTimer, 2.0) : 0;
+    const splitOffset = isSplit ? 40 * (splitT / 2.0) : 0;
+    const splitAlpha = isSplit ? Math.max(0, 1 - splitT / 1.8) : 1;
+
     ctx.save();
     ctx.translate(DESIGN_WIDTH / 2 + shakeX, this.renderY + shakeY);
     ctx.scale(this.bossRenderScale, this.bossRenderScale);
+
+    if (isSplit && splitAlpha > 0.01) {
+      // 左半：沿竖向中心线左侧clip，向左偏移
+      ctx.save();
+      ctx.beginPath(); ctx.rect(-100, -120, 100, 240); ctx.clip();
+      ctx.globalAlpha = splitAlpha;
+      ctx.save();
+      ctx.translate(-splitOffset, 0);
+      this.drawBossBody(ctx);
+      ctx.restore();
+      ctx.restore();
+
+      // 右半：沿竖向中心线右侧clip，向右偏移
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, -120, 100, 240); ctx.clip();
+      ctx.globalAlpha = splitAlpha;
+      ctx.save();
+      ctx.translate(splitOffset, 0);
+      this.drawBossBody(ctx);
+      ctx.restore();
+      ctx.restore();
+    } else if (!isSplit) {
+      this.drawBossBody(ctx);
+    }
+
+    // 雷核（根据阶段动态亮度）——不分裂
+    this.drawCore(ctx);
+    // P4.4A.4: execution阶段绘制命核裂缝
+    const ep = this.p();
+    if (ep === "execution_intro" || ep === "execution" || ep === "execution_success" || ep === "execution_fail") {
+      this.drawExecutionCrack(ctx);
+    }
+    // P4.4A.4: execution粒子
+    if (ep === "execution_success" || ep === "execution_fail") {
+      this.drawExecutionParticles(ctx);
+    }
+    ctx.restore();
+  }
+
+  /** Boss本体渲染（剪影、头盔、护甲——不含核心/裂缝/粒子） */
+  private drawBossBody(ctx: any): void {
     ctx.save();
     ctx.shadowColor = "rgba(108, 52, 131, 0.3)"; ctx.shadowBlur = 18;
     ctx.fillStyle = "#1a0a26"; this.drawSilhouette(ctx); ctx.fill();
@@ -767,18 +827,6 @@ export class BossController {
     this.drawArmorPiece(ctx, this.armorTargets[ARMOR_R], 50, -30, 30, 22);
     // 胸甲
     this.drawChestPiece(ctx, this.armorTargets[ARMOR_C]);
-    // 雷核（根据阶段动态亮度）
-    this.drawCore(ctx);
-    // P4.4A.4: execution阶段绘制命核裂缝
-    const ep = this.p();
-    if (ep === "execution_intro" || ep === "execution" || ep === "execution_success" || ep === "execution_fail") {
-      this.drawExecutionCrack(ctx);
-    }
-    // P4.4A.4: execution粒子
-    if (ep === "execution_success" || ep === "execution_fail") {
-      this.drawExecutionParticles(ctx);
-    }
-    ctx.restore();
   }
 
   private drawSilhouette(ctx: any): void {
@@ -957,7 +1005,7 @@ export class BossController {
     const hudTop = Math.max(8, this.hudSlideY);
     const hudW = DESIGN_WIDTH - 12;
     const hudX = 6;
-    const hpRatio = this._bossHP / Math.max(1, this._bossMaxHP);
+    const hpRatio = p === "execution_success" ? 0 : this._bossHP / Math.max(1, this._bossMaxHP);
     ctx.save();
     ctx.globalAlpha = 0.90;
     ctx.fillStyle = "rgba(24, 10, 34, 0.90)";
@@ -1040,13 +1088,16 @@ export class BossController {
     const crackAlpha = isFail ? Math.max(0, 1 - this.executionResultTimer * 0.6) : 1;
     if (crackAlpha <= 0.01) return;
 
+    const hw = BossController.EXECUTION_CORE_VISUAL_HW;
+    const hh = BossController.EXECUTION_CORE_VISUAL_HH;
+    const crackTop = -hh;
+    const crackBottom = hh;
+
     ctx.save();
     ctx.globalAlpha = crackAlpha;
 
-    // 竖向裂缝（锯齿状）
-    const crackTop = -30;
-    const crackBottom = 35;
-    const crackWidth = isSuccess ? 12 : (isExecPhase ? 8 : (isFail ? 6 : 6));
+    // 竖向裂缝（锯齿状），宽度基于EXECUTION_CORE_VISUAL_HW
+    const crackWidth = isSuccess ? hw : (isExecPhase ? hw * 0.67 : (isFail ? hw * 0.5 : hw * 0.5));
     ctx.strokeStyle = isSuccess ? "#ffffff" : (isExecPhase ? "#2a0a3a" : "#1a0a26");
     ctx.lineWidth = isSuccess ? 2.5 : 2;
     ctx.shadowColor = isExecPhase ? "#f0e130" : "#6c3483";
@@ -1054,12 +1105,12 @@ export class BossController {
 
     ctx.beginPath();
     ctx.moveTo(-2, crackTop);
-    ctx.lineTo(2, crackTop + 8);
-    ctx.lineTo(-3, crackTop + 18);
-    ctx.lineTo(1, crackTop + 28);
-    ctx.lineTo(-1, crackTop + 36);
-    ctx.lineTo(3, crackTop + 44);
-    ctx.lineTo(-2, crackTop + 52);
+    ctx.lineTo(2, crackTop + 10);
+    ctx.lineTo(-3, crackTop + 22);
+    ctx.lineTo(1, crackTop + 34);
+    ctx.lineTo(-1, crackTop + 44);
+    ctx.lineTo(3, crackTop + 54);
+    ctx.lineTo(-2, crackTop + 64);
     ctx.lineTo(1, crackBottom);
     ctx.moveTo(1, crackBottom);
     ctx.lineTo(-1, crackBottom + 4);
@@ -1076,7 +1127,7 @@ export class BossController {
       ctx.shadowColor = "#f0e130";
       ctx.shadowBlur = 20;
       ctx.beginPath();
-      ctx.ellipse(0, 2, crackWidth, crackBottom - crackTop, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 2, crackWidth, hh, 0, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -1123,13 +1174,15 @@ export class BossController {
 
   /** P4.4A.4: execution_success - "一刀两断！" */
   private drawExecutionSuccess(ctx: any): void {
-    const t = Math.min(this.executionResultTimer / 0.3, 1);
-    const alpha = t < 0.8 ? t / 0.8 : Math.max(0, 1 - (t - 0.8) / 0.2);
-    const scale = 1 + t * 0.5;
+    const t = this.executionResultTimer;
+    let alpha: number, scale: number;
+    if (t < 0.15) { alpha = t / 0.15; scale = 0.8 + 0.2 * (t / 0.15); }
+    else if (t < 1.2) { alpha = 1; scale = 1; }
+    else if (t < 1.8) { const fp = (t - 1.2) / 0.6; alpha = 1 - fp; scale = 1 + 0.1 * fp; }
+    else { alpha = 0; scale = 1.1; }
 
     ctx.save();
     ctx.globalAlpha = alpha;
-    // 白色闪屏在Game.ts用flash处理，这里绘制大字
     ctx.fillStyle = "#f0e130";
     ctx.font = `700 ${Math.round(36 * scale)}px "Microsoft YaHei", sans-serif`;
     ctx.textAlign = "center";
@@ -1148,20 +1201,24 @@ export class BossController {
 
   /** P4.4A.4: execution_fail - "失手..." */
   private drawExecutionFail(ctx: any): void {
-    const t = Math.min(this.executionResultTimer / 0.3, 1);
-    const alpha = t < 0.7 ? t / 0.7 : Math.max(0, 1 - (t - 0.7) / 0.3);
+    const t = this.executionResultTimer;
+    let alpha: number, scale: number;
+    if (t < 0.15) { alpha = t / 0.15; scale = 0.8 + 0.2 * (t / 0.15); }
+    else if (t < 1.2) { alpha = 1; scale = 1; }
+    else if (t < 1.8) { const fp = (t - 1.2) / 0.6; alpha = 1 - fp; scale = 1 + 0.1 * fp; }
+    else { alpha = 0; scale = 1.1; }
 
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.fillStyle = "#ff6a33";
-    ctx.font = '700 30px "Microsoft YaHei", sans-serif';
+    ctx.font = `700 ${Math.round(30 * scale)}px "Microsoft YaHei", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.shadowColor = "#c0392b";
     ctx.shadowBlur = 20;
     ctx.fillText("失手...", DESIGN_WIDTH / 2, 290);
 
-    ctx.font = '16px "Microsoft YaHei", sans-serif';
+    ctx.font = `${Math.round(16 * scale)}px "Microsoft YaHei", sans-serif`;
     ctx.fillStyle = "#d7bde2";
     ctx.shadowBlur = 0;
     ctx.fillText("未命中命核", DESIGN_WIDTH / 2, 340);

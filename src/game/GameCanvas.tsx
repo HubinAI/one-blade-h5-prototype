@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from "./config/constants";
 import { Game, type ReviveOffer } from "./Game";
-import type { BattleResult, LevelConfig, Vec2 } from "./types";
+import type { BattleResult, BossPhaseState, LevelConfig, Vec2 } from "./types";
 
 type GameCanvasProps = {
   level: LevelConfig;
@@ -12,15 +12,20 @@ type GameCanvasProps = {
   paused?: boolean;
   runMode?: "normal" | "challenge";
   /** P4.4A.4: 执行失败重试信号 */
-  retryExecutionSignal?: number;
+  retryExecutionRequested?: boolean;
+  /** P4.4A.4: 重试信号已消费回调 */
+  onRetryExecutionConsumed?: () => void;
+  /** P4.4A.4: Boss阶段变更回调 */
+  onBossPhaseChange?: (phase: BossPhaseState | null) => void;
 };
 
-export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, declineReviveSignal = 0, paused = false, runMode, retryExecutionSignal = 0 }: GameCanvasProps) {
+export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, declineReviveSignal = 0, paused = false, runMode, retryExecutionRequested = false, onRetryExecutionConsumed, onBossPhaseChange }: GameCanvasProps) {
   // 从currentLevel获取当前模式
   const effectiveMode = runMode === "challenge" ? "challenge" : "normal";
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const gameRef = useRef<Game | null>(null);
   const pausedRef = useRef(paused);
+  const lastBossPhaseRef = useRef<BossPhaseState | null>(null);
 
   useEffect(() => {
     pausedRef.current = paused;
@@ -50,6 +55,14 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
         game.update(dt);
       }
       game.render(ctx);
+      // P4.4A.4: Boss阶段变更检测
+      if (gameRef.current) {
+        const currentPhase = gameRef.current.bossPhase ?? null;
+        if (currentPhase !== lastBossPhaseRef.current) {
+          lastBossPhaseRef.current = currentPhase;
+          onBossPhaseChange?.(currentPhase);
+        }
+      }
       frame = requestAnimationFrame(tick);
     };
 
@@ -75,8 +88,11 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
   }, [declineReviveSignal]);
 
   useEffect(() => {
-    if (retryExecutionSignal > 0) gameRef.current?.retryExecution();
-  }, [retryExecutionSignal]);
+    if (retryExecutionRequested && gameRef.current) {
+      gameRef.current.retryExecution();
+      onRetryExecutionConsumed?.();
+    }
+  }, [retryExecutionRequested]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

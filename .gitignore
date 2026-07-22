@@ -27,3 +27,4 @@ dist_old2/
 # 临时验证构建产物（审计六：prod/e2e 分离验证用，不进仓库）
 dist_prod_clean*/
 dist_e2e_clean*/
+dist_prod_check*/

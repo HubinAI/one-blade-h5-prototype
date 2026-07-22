@@ -465,3 +465,176 @@ describe("BossController - 护甲解析", () => {
     expect(bc3.debugSnapshot["Pursuit"]).toBe("0/3");
   });
 });
+
+// ================================================================
+// P4.4A.4: Execution 阶段测试
+// ================================================================
+describe("BossController - Execution 阶段", () => {
+
+  /** 推进到 execution_intro 阶段 */
+  function toExecutionIntro(bc: BossController): void {
+    bc.enterLoading(); bc.skipIntro();
+    // 3次破甲 → armor_break_show → armor_complete_hold
+    bc.resolveArmorSegment(v(141, 145), v(181, 185), "a1"); bc.update(0.5);
+    bc.resolveArmorSegment(v(221, 135), v(301, 195), "a2"); bc.update(0.5);
+    bc.resolveArmorSegment(v(181, 171), v(241, 231), "a3");
+    bc.update(0.5); bc.update(0.5); bc.update(0.5); // → armor_complete_hold
+    bc.update(0.5); bc.update(1.0); // → pursuit
+    // 3次追击 → core_break
+    bc.resolvePursuitSegment(v(195, 190), v(225, 200), "p1");
+    bc.resolvePursuitSegment(v(195, 190), v(225, 200), "p2");
+    bc.resolvePursuitSegment(v(195, 190), v(225, 200), "p3");
+    bc.update(1.2); // → execution_intro
+  }
+
+  /** 推进到 execution 阶段 */
+  function toExecution(bc: BossController): void {
+    toExecutionIntro(bc);
+    bc.update(2.0); // execution_intro → execution
+  }
+
+  // 1
+  it("execution_intro 初始 phase=inputLocked=true, freezeCombatResources=true", () => {
+    const bc = new BossController("thunderGeneral");
+    toExecutionIntro(bc);
+    expect(bc.phase).toBe("execution_intro");
+    expect(bc.inputLocked).toBe(true);
+    expect(bc.freezeCombatResources).toBe(true);
+  });
+
+  // 2
+  it("execution_intro 2秒后自动进入 execution", () => {
+    const bc = new BossController("thunderGeneral");
+    toExecutionIntro(bc);
+    expect(bc.phase).toBe("execution_intro");
+    bc.update(2.0);
+    expect(bc.phase).toBe("execution");
+  });
+
+  // 3
+  it("execution_intro 1.9秒时仍保持", () => {
+    const bc = new BossController("thunderGeneral");
+    toExecutionIntro(bc);
+    bc.update(1.9);
+    expect(bc.phase).toBe("execution_intro");
+  });
+
+  // 4
+  it("execution 阶段 inputLocked=false, freezeCombatResources=true", () => {
+    const bc = new BossController("thunderGeneral");
+    toExecution(bc);
+    expect(bc.phase).toBe("execution");
+    expect(bc.inputLocked).toBe(false);
+    expect(bc.freezeCombatResources).toBe(true);
+  });
+
+  // 5
+  it("命中命核返回 execution_hit，phase 变为 execution_success", () => {
+    const bc = new BossController("thunderGeneral");
+    toExecution(bc);
+    // 命核世界坐标：cx=211, cy=197, rx=20, ry=48
+    const result = bc.resolveExecutionSegment(v(191, 180), v(231, 220), "s1");
+    expect(result).not.toBeNull();
+    expect(result!.kind).toBe("execution_hit");
+    if (result!.kind === "execution_hit") {
+      expect(result!.hitPos).toBeDefined();
+      expect(result!.coreCenter).toBeDefined();
+    }
+    // triggerExecutionSuccess 将阶段变为 execution_success
+    bc.triggerExecutionSuccess();
+    expect(bc.phase).toBe("execution_success");
+  });
+
+  // 6
+  it("segment 不经过命核 → resolveExecutionSegment 返回 null", () => {
+    const bc = new BossController("thunderGeneral");
+    toExecution(bc);
+    // 线段远离命核区域（屏幕底部）
+    const result = bc.resolveExecutionSegment(v(50, 700), v(100, 750), "s1");
+    expect(result).toBeNull();
+  });
+
+  // 7
+  it("同一 slashId 第二次 resolveExecutionSegment 返回 null", () => {
+    const bc = new BossController("thunderGeneral");
+    toExecution(bc);
+    // 第一次命中
+    const r1 = bc.resolveExecutionSegment(v(191, 180), v(231, 220), "s1");
+    expect(r1).not.toBeNull();
+    expect(r1!.kind).toBe("execution_hit");
+    // 第二次同一slashId
+    const r2 = bc.resolveExecutionSegment(v(191, 180), v(231, 220), "s1");
+    expect(r2).toBeNull();
+  });
+
+  // 8
+  it("finishExecutionSlash 未命中时 phase→execution_fail", () => {
+    const bc = new BossController("thunderGeneral");
+    toExecution(bc);
+    // 无任何命中，直接收刀
+    const result = bc.finishExecutionSlash("s1");
+    expect(result).not.toBeNull();
+    expect(result!.kind).toBe("execution_miss");
+    expect(bc.phase).toBe("execution_fail");
+  });
+
+  // 9
+  it("命中后 finishExecutionSlash 返回 null（已 resolved）", () => {
+    const bc = new BossController("thunderGeneral");
+    toExecution(bc);
+    // 先命中
+    bc.resolveExecutionSegment(v(191, 180), v(231, 220), "s1");
+    // 收刀时已resolved，返回null
+    const finish = bc.finishExecutionSlash("s1");
+    expect(finish).toBeNull();
+  });
+
+  // 10
+  it("execution_success 2秒后 → victory_show", () => {
+    const bc = new BossController("thunderGeneral");
+    toExecution(bc);
+    bc.resolveExecutionSegment(v(191, 180), v(231, 220), "s1");
+    bc.triggerExecutionSuccess();
+    expect(bc.phase).toBe("execution_success");
+    bc.update(2.0);
+    expect(bc.phase).toBe("victory_show");
+  });
+
+  // 11
+  it("execution_fail 2秒后 → fail", () => {
+    const bc = new BossController("thunderGeneral");
+    toExecution(bc);
+    bc.finishExecutionSlash("s1"); // → execution_fail
+    expect(bc.phase).toBe("execution_fail");
+    bc.update(2.0);
+    expect(bc.phase).toBe("fail");
+  });
+
+  // 12
+  it("resetToExecutionIntro 完整重置所有计时器和锁", () => {
+    const bc = new BossController("thunderGeneral");
+    toExecution(bc);
+    // 命中并触发成功
+    bc.resolveExecutionSegment(v(191, 180), v(231, 220), "s1");
+    bc.triggerExecutionSuccess();
+    expect(bc.phase).toBe("execution_success");
+    // 重置
+    bc.resetToExecutionIntro();
+    expect(bc.phase).toBe("execution_intro");
+    expect(bc.inputLocked).toBe(true);
+    expect(bc.freezeCombatResources).toBe(true);
+    expect(bc.debugSnapshot["Execution Hit"]).toBe("否");
+  });
+
+  // 13
+  it("resetToExecutionIntro 后 _resolvedSlashId 为空字符串", () => {
+    const bc = new BossController("thunderGeneral");
+    toExecution(bc);
+    bc.resolveExecutionSegment(v(191, 180), v(231, 220), "s1");
+    // 验证已命中
+    expect(bc["_resolvedSlashId"]).toBe("s1");
+    // 重置
+    bc.resetToExecutionIntro();
+    expect(bc["_resolvedSlashId"]).toBe("");
+  });
+});

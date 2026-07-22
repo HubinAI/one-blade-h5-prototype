@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { GameCanvas } from "./game/GameCanvas";
 import { LEVELS } from "./data/levels";
-import type { BattleResult, LevelConfig } from "./game/types";
+import type { BattleResult, BossPhaseState, LevelConfig } from "./game/types";
 import { MainMenu } from "./components/MainMenu";
 import { LevelSelect } from "./components/LevelSelect";
 import { ResultScreen } from "./components/ResultScreen";
@@ -72,13 +72,16 @@ export default function App() {
   const [home, setHome] = useState(getHomeSnapshot);
   const [currentLevel, setCurrentLevel] = useState<LevelConfig>(LEVELS[0]);
   const [lastResult, setLastResult] = useState<BattleResult | null>(null);
-  const [appVersion] = useState("V0722002");
+  const [appVersion] = useState("V0722003");
   const [runIndex, setRunIndex] = useState(0);
   const [currentMode, setCurrentMode] = useState<RunMode>("normal");
   const [reviveOffer, setReviveOffer] = useState<ReviveOffer | null>(null);
   const [reviveSignal, setReviveSignal] = useState(0);
   const [declineReviveSignal, setDeclineReviveSignal] = useState(0);
-  const [retryExecutionSignal, setRetryExecutionSignal] = useState(0);
+  const [retryExecutionRequested, setRetryExecutionRequested] = useState(false);
+  const handleRetryExecutionConsumed = () => setRetryExecutionRequested(false);
+  const [bossPhase, setBossPhase] = useState<BossPhaseState | null>(null);
+  const handleBossPhaseChange = (phase: BossPhaseState | null) => setBossPhase(phase);
   const [showCodex, setShowCodex] = useState(false);
   const [paused, setPaused] = useState(false);
   const [showMerchant, setShowMerchant] = useState(false);
@@ -462,17 +465,22 @@ export default function App() {
             declineReviveSignal={declineReviveSignal}
             paused={paused || Boolean(reviveOffer)}
             runMode={currentMode === "challenge" ? "challenge" : "normal"}
-            retryExecutionSignal={retryExecutionSignal}
+            retryExecutionRequested={retryExecutionRequested}
+            onRetryExecutionConsumed={handleRetryExecutionConsumed}
+            onBossPhaseChange={handleBossPhaseChange}
           />
-          {!reviveOffer && !paused && (
-            <button
-              className="battle-pause-btn"
-              onClick={() => setPaused(true)}
-              aria-label="暂停"
-            >
-              ❚❚
-            </button>
-          )}
+          {(() => {
+            const isExecutionPhase = bossPhase && ["execution_intro", "execution", "execution_success", "execution_fail"].includes(bossPhase);
+            return !reviveOffer && !paused && !isExecutionPhase ? (
+              <button
+                className="battle-pause-btn"
+                onClick={() => setPaused(true)}
+                aria-label="暂停"
+              >
+                ❚❚
+              </button>
+            ) : null;
+          })()}
           {paused && !reviveOffer && (
             <PauseOverlay
               onResume={() => setPaused(false)}
@@ -539,7 +547,7 @@ export default function App() {
             style={{ width: 180, marginBottom: 8, background: '#6c3483', border: '1px solid #8e44ad' }}
             onClick={() => {
               // P4.4A.4: 重试直接回到execution_intro
-              setRetryExecutionSignal((v) => v + 1);
+              setRetryExecutionRequested(true);
               setScreen("battle");
             }}
           >
