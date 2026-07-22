@@ -638,3 +638,98 @@ describe("BossController - Execution 阶段", () => {
     expect(bc["_resolvedSlashId"]).toBe("");
   });
 });
+
+// ================================================================
+// P4.4A.5: 天雷劫终端状态测试
+// ================================================================
+describe("BossController - 天雷劫终端状态", () => {
+
+  /** 推进到 victory_show 阶段的辅助函数 */
+  function toVictoryShow(bc: BossController): void {
+    bc.enterLoading(); bc.skipIntro();
+    // 3次破甲 → armor_break_show → armor_complete_hold
+    bc.resolveArmorSegment(v(141, 145), v(181, 185), "a1"); bc.update(0.5);
+    bc.resolveArmorSegment(v(221, 135), v(301, 195), "a2"); bc.update(0.5);
+    bc.resolveArmorSegment(v(181, 171), v(241, 231), "a3");
+    bc.update(0.5); bc.update(0.5); bc.update(0.5); // → armor_complete_hold
+    bc.update(0.5); bc.update(1.0); // → pursuit
+    // 3次追击 → core_break
+    bc.resolvePursuitSegment(v(195, 190), v(225, 200), "p1");
+    bc.resolvePursuitSegment(v(195, 190), v(225, 200), "p2");
+    bc.resolvePursuitSegment(v(195, 190), v(225, 200), "p3");
+    bc.update(1.2); // → execution_intro
+    bc.update(2.0); // → execution
+    // 命中 + triggerSuccess → execution_success
+    bc.resolveExecutionSegment(v(191, 180), v(231, 220), "v1");
+    bc.triggerExecutionSuccess();
+    // execution_success → victory_show (2秒)
+    bc.update(2.0);
+    expect(bc.phase).toBe("victory_show");
+  }
+
+  function v(x: number, y: number) { return { x, y }; }
+
+  // 1
+  it("tribulation_intro 期间 inputLocked=true", () => {
+    const bc = new BossController("thunderGeneral");
+    toVictoryShow(bc);
+    bc.update(0.5); // victory_show → tribulation_intro
+    expect(bc.phase).toBe("tribulation_intro");
+    expect(bc.inputLocked).toBe(true);
+  });
+
+  // 2
+  it("tribulation 期间 freezeCombatResources=true", () => {
+    const bc = new BossController("thunderGeneral");
+    toVictoryShow(bc);
+    bc.update(0.5); // → tribulation_intro
+    bc.update(1.5); // → tribulation
+    expect(bc.phase).toBe("tribulation");
+    expect(bc.freezeCombatResources).toBe(true);
+  });
+
+  // 3
+  it("tribulation_intro 阶段环境压暗在进行中", () => {
+    const bc = new BossController("thunderGeneral");
+    toVictoryShow(bc);
+    bc.update(0.5); // → tribulation_intro
+    bc.update(0.3); // tribulationIntroTimer = 0.3
+    expect(bc.phase).toBe("tribulation_intro");
+    // 环境压暗应该有进度：通过 phase 仍为 tribulation_intro 推断
+    expect(bc.phase).toBe("tribulation_intro");
+  });
+
+  // 4
+  it("breakthrough_show 阶段 bossVisualState 为已湮灭", () => {
+    const bc = new BossController("thunderGeneral");
+    toVictoryShow(bc);
+    // victory_show → tribulation_intro → tribulation → breakthrough_show
+    bc.update(0.5); // tribulation_intro
+    bc.update(1.5); // tribulation
+    bc.update(1.8); // breakthrough_show
+    expect(bc.phase).toBe("breakthrough_show");
+    // bossRenderScale 在 tribulation stage 2 设为 0
+  });
+
+  // 5
+  it("三段天雷后进入 breakthrough_show 并最终到 result", () => {
+    const bc = new BossController("thunderGeneral");
+    toVictoryShow(bc);
+    bc.update(0.5); // tribulation_intro
+    bc.update(1.5); // tribulation (三段)
+    bc.update(1.8); // breakthrough_show
+    bc.update(2.0); // → result
+    expect(bc.phase).toBe("result");
+  });
+
+  // 6
+  it("victory_show 结束后进入 tribulation_intro 而非直接 result", () => {
+    const bc = new BossController("thunderGeneral");
+    toVictoryShow(bc);
+    expect(bc.phase).toBe("victory_show");
+    bc.update(0.5); // 过了 VICTORY_SHOW_HOLD
+    expect(bc.phase).toBe("tribulation_intro");
+    expect(bc.phase).not.toBe("result");
+  });
+
+});

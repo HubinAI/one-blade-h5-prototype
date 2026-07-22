@@ -60,15 +60,15 @@ export class BossController {
   /** 避开TS类型缩窄 */
   private p(): BossPhaseState { return this._phase; }
   get inputLocked(): boolean {
-    // P4.4A.4: execution允许输入（一刀决断），其余终结锁定；P1-2: fail/victory_show纳入锁定
+    // P4.4A.5: tribulation_intro/tribulation/breakthrough_show 纳入锁定
     const p = this.p();
-    return p === "loading" || p === "intro" || p === "armor_break_show" || p === "armor_complete_hold" || this.armorSwitching || p === "pursuit_intro" || p === "core_break" || this.isExecutionLockedPhase(p);
+    return p === "loading" || p === "intro" || p === "armor_break_show" || p === "armor_complete_hold" || this.armorSwitching || p === "pursuit_intro" || p === "core_break" || this.isExecutionLockedPhase(p) || p === "tribulation_intro" || p === "tribulation" || p === "breakthrough_show";
   }
   /** 完成Hold时冻结战斗资源 */
   get freezeCombatResources(): boolean {
-    // P1-2: fail/victory_show纳入冻结
+    // P4.4A.5: tribulation_intro/tribulation/breakthrough_show 纳入冻结
     const p = this.p();
-    return p === "armor_break_show" || p === "armor_complete_hold" || p === "pursuit_intro" || p === "core_break" || this.isExecutionFlowPhase(p);
+    return p === "armor_break_show" || p === "armor_complete_hold" || p === "pursuit_intro" || p === "core_break" || this.isExecutionFlowPhase(p) || p === "tribulation_intro" || p === "tribulation" || p === "breakthrough_show";
   }
   /** 雷核是否暴露 */
   get coreExposed(): boolean {
@@ -185,6 +185,20 @@ export class BossController {
   private breakShowTimer = 0;
   private readonly BREAK_SHOW_DURATION = 1.2;
 
+  // P4.4A.5: 天雷劫与破境演出
+  private victoryShowTimer = 0;
+  private tribulationIntroTimer = 0;
+  private tribulationTimer = 0;
+  private tribulationStage = 0; // 0, 1, 2
+  private breakthroughShowTimer = 0;
+  private tribulationDarkAlpha = 0;
+  private breakthroughParticles: { x: number; y: number; vy: number; life: number; maxLife: number; size: number }[] = [];
+
+  private readonly VICTORY_SHOW_HOLD = 0.5;
+  private readonly TRIBULATION_INTRO_DURATION = 1.5;
+  private readonly TRIBULATION_STAGE_DURATION = 0.6;
+  private readonly BREAKTHROUGH_SHOW_DURATION = 2.0;
+
   private _bossHP = 16;
   private _bossMaxHP = 16;
 
@@ -243,6 +257,14 @@ export class BossController {
     this._pursuitProgress = 0; this.pursuitEnergyBoosted = false;
     this.screenShake = 0; this.flash = 0;
     this.lastErrorRePromptElapsed = -99;
+    // P4.4A.5: 重置天雷劫与破境属性
+    this.victoryShowTimer = 0;
+    this.tribulationIntroTimer = 0;
+    this.tribulationTimer = 0;
+    this.tribulationStage = 0;
+    this.breakthroughShowTimer = 0;
+    this.tribulationDarkAlpha = 0;
+    this.breakthroughParticles = [];
     this.initArmorTargets();
     this.armorTargets[ARMOR_L].active = true;
   }
@@ -349,6 +371,62 @@ export class BossController {
       this.flash = Math.max(0, this.flash - dt * 1.5);
       if (this.executionResultTimer >= 2.0) {
         (this._phase as BossPhaseState) = "victory_show";
+        this.victoryShowTimer = 0;
+      }
+      return;
+    }
+    // P4.4A.5: 天雷劫与破境演出
+    if (this._phase === "victory_show") {
+      this.victoryShowTimer += dt;
+      if (this.victoryShowTimer >= this.VICTORY_SHOW_HOLD) {
+        (this._phase as BossPhaseState) = "tribulation_intro";
+        this.tribulationIntroTimer = 0;
+        this.tribulationDarkAlpha = 0;
+      }
+      return;
+    }
+    if (this._phase === "tribulation_intro") {
+      this.tribulationIntroTimer += dt;
+      this.tribulationDarkAlpha = Math.min(0.5, this.tribulationIntroTimer / 0.5);
+      if (this.tribulationIntroTimer >= this.TRIBULATION_INTRO_DURATION) {
+        (this._phase as BossPhaseState) = "tribulation";
+        this.tribulationTimer = 0;
+        this.tribulationStage = 0;
+      }
+      return;
+    }
+    if (this._phase === "tribulation") {
+      this.tribulationTimer += dt;
+      this.tribulationStage = Math.min(2, Math.floor(this.tribulationTimer / this.TRIBULATION_STAGE_DURATION));
+      if (this.tribulationStage >= 1) this.bossRenderScale = 0.6;
+      if (this.tribulationStage >= 2) this.bossRenderScale = 0;
+      const stageT = this.tribulationTimer % this.TRIBULATION_STAGE_DURATION;
+      if (stageT < 0.15) this.flash = Math.max(this.flash, stageT / 0.15);
+      if (stageT >= 0.15 && stageT < 0.45) this.flash = Math.max(this.flash, 0.3);
+      if (this.tribulationTimer >= 1.8) {
+        (this._phase as BossPhaseState) = "breakthrough_show";
+        this.breakthroughShowTimer = 0;
+        this.executionShards = [];
+        this.breakthroughParticles = [];
+      }
+      return;
+    }
+    if (this._phase === "breakthrough_show") {
+      this.breakthroughShowTimer += dt;
+      // 粒子生成
+      if (this.breakthroughShowTimer > 0.5 && this.breakthroughShowTimer < 1.8 && this.breakthroughParticles.length < 30) {
+        if (Math.random() < 0.3) {
+          this.breakthroughParticles.push({ x: 185 + Math.random() * 20, y: 200 + Math.random() * 50, vy: -40 - Math.random() * 60, life: 0, maxLife: 1.2 + Math.random() * 0.5, size: 3 + Math.random() * 5 });
+        }
+      }
+      // 粒子更新
+      for (const p of this.breakthroughParticles) {
+        p.life += dt;
+        p.y += p.vy * dt;
+      }
+      this.breakthroughParticles = this.breakthroughParticles.filter(p => p.life < p.maxLife);
+      if (this.breakthroughShowTimer >= this.BREAKTHROUGH_SHOW_DURATION) {
+        (this._phase as BossPhaseState) = "result";
       }
       return;
     }
@@ -446,12 +524,12 @@ export class BossController {
 
   /** P2: 终结流程阶段统一判定（含非终端状态execution_intro/execution） */
   private isExecutionFlowPhase(p: BossPhaseState): boolean {
-    return ["execution_intro", "execution", "execution_success", "execution_fail", "fail", "victory_show"].includes(p);
+    return ["execution_intro", "execution", "execution_success", "execution_fail", "fail", "victory_show", "tribulation_intro", "tribulation", "breakthrough_show"].includes(p);
   }
 
   /** P1-2: 终结锁定阶段（不含execution，该阶段允许输入） */
   private isExecutionLockedPhase(p: BossPhaseState): boolean {
-    return ["execution_intro", "execution_success", "execution_fail", "fail", "victory_show"].includes(p);
+    return ["execution_intro", "execution_success", "execution_fail", "fail", "victory_show", "tribulation_intro", "tribulation", "breakthrough_show"].includes(p);
   }
 
   /** P4.4A.2: 覆盖层（在刀光/命中文字上方） */
@@ -468,6 +546,16 @@ export class BossController {
     if (p === "execution") this.drawExecutionHUD(ctx);
     if (p === "execution_success") this.drawExecutionSuccess(ctx);
     if (p === "execution_fail") this.drawExecutionFail(ctx);
+    // P4.4A.5: 天雷劫与破境渲染
+    if (p === "tribulation_intro") this.drawTribulationDarkOverlay(ctx);
+    if (p === "tribulation") {
+      const stageT = this.tribulationTimer % this.TRIBULATION_STAGE_DURATION;
+      this.drawLightningBolt(ctx, stageT);
+    }
+    if (p === "breakthrough_show") {
+      this.drawBreakthroughColumn(ctx);
+      this.drawBreakthroughParticles(ctx);
+    }
     if (p !== "loading" && p !== "intro" && !this.isExecutionFlowPhase(p)) this.drawBossHud(ctx);
   }
 
@@ -812,11 +900,56 @@ export class BossController {
   // Boss 武将剪影
   // ================================================================
   private drawBoss(ctx: any): void {
-    // P1-1: victory_show阶段不绘制Boss身体/护甲/核心/裂缝，只保留粒子余光
-    if (this._phase === "victory_show") {
+    // P4.4A.5: tribulation/breakthrough_show阶段不绘制Boss身体/护甲/核心/裂缝
+    if (this._phase === "victory_show" || this._phase === "tribulation_intro" || this._phase === "tribulation" || this._phase === "breakthrough_show") {
       ctx.save();
       ctx.translate(DESIGN_WIDTH / 2, this.renderY);
       ctx.scale(this.bossRenderScale, this.bossRenderScale);
+
+      // P4.4A.5: tribulation_intro 继续绘制分裂态
+      if (this._phase === "tribulation_intro") {
+        const splitAlpha = Math.max(0, 1 - this.tribulationIntroTimer / 1.0);
+        if (splitAlpha > 0.01) {
+          const splitOffset = 40;
+          // 左半
+          ctx.save();
+          ctx.beginPath(); ctx.rect(-100, -120, 100, 240); ctx.clip();
+          ctx.globalAlpha = splitAlpha;
+          ctx.save(); ctx.translate(-splitOffset, 0); this.drawBossBody(ctx); ctx.restore();
+          ctx.restore();
+          // 右半
+          ctx.save();
+          ctx.beginPath(); ctx.rect(0, -120, 100, 240); ctx.clip();
+          ctx.globalAlpha = splitAlpha;
+          ctx.save(); ctx.translate(splitOffset, 0); this.drawBossBody(ctx); ctx.restore();
+          ctx.restore();
+        }
+      }
+
+      // P4.4A.5: tribulation 阶段根据 stage 叠加震动/缩放/淡出
+      if (this._phase === "tribulation") {
+        const tribShakeX = this.tribulationStage === 0 ? (Math.random() - 0.5) * 4 : 0;
+        const tribShakeY = this.tribulationStage === 0 ? (Math.random() - 0.5) * 3 : 0;
+        const tribAlpha = this.tribulationStage >= 2 ? 0 : Math.max(0, 1 - this.tribulationTimer / 1.8);
+        if (tribAlpha > 0.01) {
+          ctx.save();
+          ctx.translate(tribShakeX, tribShakeY);
+          ctx.globalAlpha = tribAlpha;
+          const splitOffset = 40;
+          // 左半
+          ctx.save();
+          ctx.beginPath(); ctx.rect(-100, -120, 100, 240); ctx.clip();
+          ctx.save(); ctx.translate(-splitOffset, 0); this.drawBossBody(ctx); ctx.restore();
+          ctx.restore();
+          // 右半
+          ctx.save();
+          ctx.beginPath(); ctx.rect(0, -120, 100, 240); ctx.clip();
+          ctx.save(); ctx.translate(splitOffset, 0); this.drawBossBody(ctx); ctx.restore();
+          ctx.restore();
+          ctx.restore();
+        }
+      }
+
       this.drawExecutionParticles(ctx);
       ctx.restore();
       return;
@@ -859,9 +992,9 @@ export class BossController {
 
     // 雷核（根据阶段动态亮度）——不分裂
     this.drawCore(ctx);
-    // P4.4A.4: execution阶段绘制命核裂缝
+    // P4.4A.4: execution阶段绘制命核裂缝；P4.4A.5: tribulation_intro 继续绘制裂缝
     const ep = this.p();
-    if (ep === "execution_intro" || ep === "execution" || ep === "execution_success" || ep === "execution_fail") {
+    if (ep === "execution_intro" || ep === "execution" || ep === "execution_success" || ep === "execution_fail" || ep === "tribulation_intro") {
       this.drawExecutionCrack(ctx);
     }
     // P1-3: 命核碎片独立绘制（移出 drawCore）
@@ -1165,7 +1298,8 @@ export class BossController {
     const isExecPhase = p === "execution";
     const isSuccess = p === "execution_success";
     const isFail = p === "execution_fail";
-    const crackAlpha = isFail ? Math.max(0, 1 - this.executionResultTimer * 0.6) : 1;
+    const isTribIntro = p === "tribulation_intro";
+    const crackAlpha = isFail ? Math.max(0, 1 - this.executionResultTimer * 0.6) : (isTribIntro ? Math.max(0, 1 - this.tribulationIntroTimer / 1.5) : 1);
     if (crackAlpha <= 0.01) return;
 
     const hw = BossController.EXECUTION_CORE_VISUAL_HW;
@@ -1176,11 +1310,34 @@ export class BossController {
     ctx.save();
     ctx.globalAlpha = crackAlpha;
 
+    // P4.4A.5: tribulation_intro 阶段裂缝颜色白→紫→白过渡
+    let strokeColor: string;
+    let shadowColor: string;
+    let innerColor0: string;
+    let innerColor1: string;
+    if (isTribIntro) {
+      const t = this.tribulationIntroTimer / 1.5;
+      const lerpVal = Math.sin(t * Math.PI);
+      // 白→紫→白 lerp
+      const r = Math.round(255 - lerpVal * 155);
+      const g = Math.round(255 - lerpVal * 200);
+      const b = Math.round(255 - lerpVal * 100);
+      strokeColor = `rgb(${r},${g},${b})`;
+      shadowColor = `rgba(${r},${g},${b},0.8)`;
+      innerColor0 = `rgba(240, 225, 48, ${0.5 * (1 - lerpVal * 0.5)})`;
+      innerColor1 = `rgba(168, 85, 247, ${0.5 * lerpVal})`;
+    } else {
+      strokeColor = isSuccess ? "#ffffff" : (isExecPhase ? "#2a0a3a" : "#1a0a26");
+      shadowColor = isExecPhase ? "#f0e130" : "#6c3483";
+      innerColor0 = `rgba(240, 225, 48, ${(isExecPhase ? 0.7 : 0.9) * 0.3})`;
+      innerColor1 = `rgba(240, 225, 48, ${(isExecPhase ? 0.7 : 0.9)})`;
+    }
+
     // 竖向裂缝（锯齿状），宽度基于EXECUTION_CORE_VISUAL_HW
     const crackWidth = isSuccess ? hw : (isExecPhase ? hw * 0.67 : (isFail ? hw * 0.5 : hw * 0.5));
-    ctx.strokeStyle = isSuccess ? "#ffffff" : (isExecPhase ? "#2a0a3a" : "#1a0a26");
+    ctx.strokeStyle = strokeColor;
     ctx.lineWidth = isSuccess ? 2.5 : 2;
-    ctx.shadowColor = isExecPhase ? "#f0e130" : "#6c3483";
+    ctx.shadowColor = shadowColor;
     ctx.shadowBlur = isExecPhase ? 12 : 6;
 
     ctx.beginPath();
@@ -1197,15 +1354,21 @@ export class BossController {
     ctx.stroke();
 
     // P1-2: execution_success 0.15s后不再绘制完整椭圆（只保留裂缝线）
-    const shouldDrawEllipse = isExecPhase || (isSuccess && this.executionResultTimer < 0.15);
+    const shouldDrawEllipse = isExecPhase || (isSuccess && this.executionResultTimer < 0.15) || isTribIntro;
     if (shouldDrawEllipse) {
-      const innerAlpha = isExecPhase ? 0.7 : 0.9;
+      const innerAlpha = isExecPhase ? 0.7 : (isTribIntro ? 0.5 : 0.9);
       const innerGrd = ctx.createLinearGradient(0, crackTop, 0, crackBottom);
-      innerGrd.addColorStop(0, `rgba(240, 225, 48, ${innerAlpha * 0.3})`);
-      innerGrd.addColorStop(0.5, `rgba(240, 225, 48, ${innerAlpha})`);
-      innerGrd.addColorStop(1, `rgba(240, 225, 48, ${innerAlpha * 0.2})`);
+      if (isTribIntro) {
+        innerGrd.addColorStop(0, innerColor0);
+        innerGrd.addColorStop(0.5, `rgba(240, 225, 48, ${innerAlpha})`);
+        innerGrd.addColorStop(1, innerColor1);
+      } else {
+        innerGrd.addColorStop(0, `rgba(240, 225, 48, ${innerAlpha * 0.3})`);
+        innerGrd.addColorStop(0.5, `rgba(240, 225, 48, ${innerAlpha})`);
+        innerGrd.addColorStop(1, `rgba(240, 225, 48, ${innerAlpha * 0.2})`);
+      }
       ctx.fillStyle = innerGrd;
-      ctx.shadowColor = "#f0e130";
+      ctx.shadowColor = isTribIntro ? "#a855f7" : "#f0e130";
       ctx.shadowBlur = 20;
       ctx.beginPath();
       ctx.ellipse(0, 2, crackWidth, hh, 0, 0, Math.PI * 2);
@@ -1318,6 +1481,92 @@ export class BossController {
     ctx.fillStyle = "#d7bde2";
     ctx.shadowBlur = 0;
     ctx.fillText("未命中命核", DESIGN_WIDTH / 2, 340);
+    ctx.restore();
+  }
+
+  // ================================================================
+  // P4.4A.5: 天雷劫与破境渲染
+  // ================================================================
+
+  /** 绘制环境压暗叠加层 */
+  private drawTribulationDarkOverlay(ctx: any): void {
+    if (this.tribulationDarkAlpha > 0) {
+      ctx.save(); ctx.resetTransform();
+      ctx.fillStyle = `rgba(0,0,0,${this.tribulationDarkAlpha})`;
+      ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      ctx.restore();
+    }
+  }
+
+  /** 绘制竖直雷柱（白→紫渐变） */
+  private drawLightningBolt(ctx: any, stageT: number): void {
+    if (stageT < 0.15) return; // 蓄能期不画
+    const boltX = DESIGN_WIDTH / 2;
+    const boltY0 = 0;
+    const boltY1 = 200 + this.renderY;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, (stageT - 0.15) / 0.1);
+    const boltGrad = ctx.createLinearGradient(boltX, boltY0, boltX, boltY1);
+    boltGrad.addColorStop(0, "#ffffff");
+    boltGrad.addColorStop(0.5, "#d4a0ff");
+    boltGrad.addColorStop(1, "#7b2ff7");
+    ctx.strokeStyle = boltGrad;
+    ctx.lineWidth = 3 + Math.random() * 2;
+    ctx.shadowColor = "#ffffff";
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.moveTo(boltX, boltY0);
+    // 锯齿路径
+    for (let y = boltY0; y < boltY1; y += 20) {
+      ctx.lineTo(boltX + (Math.random() - 0.5) * 16, y);
+    }
+    ctx.lineTo(boltX, boltY1);
+    ctx.stroke();
+    if (stageT < 0.3) this.screenShake = Math.max(this.screenShake, 0.3);
+    ctx.restore();
+  }
+
+  /** 绘制金色光柱（底部宽顶部窄梯形） */
+  private drawBreakthroughColumn(ctx: any): void {
+    const progress = this.breakthroughShowTimer < 0.5 ? this.breakthroughShowTimer / 0.5 : 1;
+    const colX = DESIGN_WIDTH / 2;
+    const colY = 200;
+    const colH = 300 * progress;
+    const colBW = 40 * progress;
+    const colTW = 10 * progress;
+    ctx.save();
+    const colGrad = ctx.createLinearGradient(colX, colY, colX, colY - colH);
+    colGrad.addColorStop(0, "rgba(255,215,0,0.9)");
+    colGrad.addColorStop(0.5, "rgba(255,255,200,0.6)");
+    colGrad.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = colGrad;
+    ctx.beginPath();
+    ctx.moveTo(colX - colBW, colY);
+    ctx.lineTo(colX + colBW, colY);
+    ctx.lineTo(colX + colTW, colY - colH);
+    ctx.lineTo(colX - colTW, colY - colH);
+    ctx.closePath();
+    ctx.fill();
+    // 光柱内部发光
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /** 绘制破境粒子 */
+  private drawBreakthroughParticles(ctx: any): void {
+    ctx.save();
+    for (const p of this.breakthroughParticles) {
+      const alpha = p.life < 0.2 ? p.life / 0.2 : p.life > p.maxLife - 0.3 ? (p.maxLife - p.life) / 0.3 : 1;
+      ctx.globalAlpha = alpha * 0.7;
+      ctx.fillStyle = "#ffd700";
+      ctx.shadowColor = "#ffd700";
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - this.renderY, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
   }
 }

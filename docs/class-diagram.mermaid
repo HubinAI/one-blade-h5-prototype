@@ -1,82 +1,63 @@
 classDiagram
-    class App {
-        +retryExecutionRequested: boolean
-        +bossPhase: BossPhaseState
-        +handleRetryExecution() void
-        +onRetryExecutionConsumed() void
-        +onBossPhaseChange(phase: BossPhaseState) void
-        +render() JSX
-    }
-    
-    class GameCanvas {
-        +level: LevelConfig
-        +onFinish: (result: BattleResult) => void
-        +onReviveOffer?: (offer: ReviveOffer) => void
-        +reviveSignal?: number
-        +declineReviveSignal?: number
-        +paused?: boolean
-        +runMode?: "normal" | "challenge"
-        +retryExecutionRequested?: boolean
-        +onRetryExecutionConsumed?: () => void
-        +onBossPhaseChange?: (phase: BossPhaseState) => void
-        -gameRef: MutableRefObject<Game | null>
-        -lastBossPhase: BossPhaseState
-        +useEffect[retryExecutionRequested]() void
-        +useEffect[rAF loop]() void
-    }
-    
-    class Game {
-        +bossController: BossController | null
-        +retryExecution() void
-        +get bossPhase(): BossPhaseState
-        -checkSegmentHits(a: Vec2, b: Vec2, trail: SlashTrail) void
-        -applyExecutionResolveResult(result: ExecutionResolveResult, ...) void
-        -finalizeBossSlashCommon(trail: SlashTrail) void
-        -renderBossMode(ctx: CanvasRenderingContext2D) void
-        -updateBossMode(dt: number) void
-    }
-    
-    class BossController {
-        -_phase: BossPhaseState
-        +get phase(): BossPhaseState
-        +get inputLocked(): boolean
-        +get freezeCombatResources(): boolean
-        +resolveExecutionSegment(segA: Vec2, segB: Vec2, slashId: string): ExecutionResolveResult | null
-        +finishExecutionSlash(slashId: string): ExecutionResolveResult | null
-        +triggerExecutionSuccess(): void
-        +resetToExecutionIntro(): void
-        +getExecutionCoreWorldPos(): { cx: number; cy: number; rx: number; ry: number }
-        +finishBossSlash(slashId: string): ... | null
-        +update(dt: number): void
-        -drawBoss(ctx: any): void
-        -drawExecutionSuccess(ctx: any): void
-        -drawExecutionFail(ctx: any): void
-        -EXECUTION_CORE_HIT_RX: number
-        -EXECUTION_CORE_HIT_RY: number
-        -EXECUTION_CORE_VISUAL_HW: number
-        -EXECUTION_CORE_VISUAL_HH: number
-        -executionResultTimer: number
-        -executionParticles: array
-    }
-    
-    class ExecutionResolveResult {
-        <<union>>
-        +kind: "execution_hit" | "execution_miss"
-        +hitPos?: Vec2
-        +coreCenter?: Vec2
-        +slashId: string
-    }
-    
     class BossPhaseState {
-        <<enum>>
-        "loading" | "intro" | "armor" | "armor_break_show" | "armor_complete_hold" | 
-        "pursuit_intro" | "pursuit" | "core_break" | "execution_intro" | 
-        "execution" | "execution_success" | "execution_fail" | 
-        "victory_show" | "result" | "fail" | "exit"
+        <<type>>
+        "loading" | "intro" | "armor" | "armor_break_show"
+        | "armor_complete_hold" | "pursuit_intro" | "pursuit"
+        | "core_break" | "execution_intro" | "execution"
+        | "execution_success" | "execution_fail" | "victory_show"
+        | "tribulation_intro" | "tribulation" | "breakthrough_show"
+        | "result" | "fail" | "exit"
     }
-    
-    App --> GameCanvas : props
-    GameCanvas --> Game : creates & manages
-    Game --> BossController : creates & routes
-    BossController --> ExecutionResolveResult : returns
+
+    class BossController {
+        - _phase: BossPhaseState
+        - tribulationIntroTimer: number
+        - tribulationTimer: number
+        - tribulationStage: number
+        - breakthroughShowTimer: number
+        - tribulationDarkAlpha: number
+        - lightningFlash: number
+        - breakthroughLightColumn: number
+        + get inputLocked(): boolean
+        + get freezeCombatResources(): boolean
+        + update(dt: number): void
+        + renderWorld(ctx): void
+        + renderOverlay(ctx): void
+        - updateTribulationIntro(dt): void
+        - updateTribulation(dt): void
+        - updateBreakthroughShow(dt): void
+        - drawTribulationDarkOverlay(ctx): void
+        - drawLightningBolt(ctx, stage, stageT): void
+        - drawBreakthroughColumn(ctx): void
+        - drawBreakthroughParticles(ctx): void
+        - drawBreakthroughRibbon(ctx): void
+    }
+
+    class TribulationOverlay {
+        + props: { bossPhase: BossPhaseState; tribulationIntroTimer: number; breakthroughShowTimer: number }
+        - cloudAlpha: number
+        - bigTextAlpha: number
+        + render(): ReactNode
+        - renderClouds(): ReactNode
+        - renderBreakthroughText(): ReactNode
+    }
+
+    class Game {
+        - bossController: BossController
+        - updateBossMode(scaledDt, frameDt): void
+        - renderBossMode(ctx): void
+        + get bossPhase(): BossPhaseState | null
+    }
+
+    class GameCanvas {
+        - tribulationOverlayRef
+        + props: { onBossPhaseChange }
+        - renderTribulationOverlay(): ReactNode
+    }
+
     BossController --> BossPhaseState : uses
+    Game --> BossController : owns
+    GameCanvas --> TribulationOverlay : renders
+    GameCanvas --> Game : owns
+    GameCanvas --> BossPhaseState : reads via onBossPhaseChange
+    TribulationOverlay --> BossPhaseState : reads props

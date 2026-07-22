@@ -943,7 +943,7 @@ export class Game {
     this.drawParticles(ctx);
     // P4.4A.4: execution阶段隐藏普通斩/破按钮和技能倒计时
     const phase = this.bossController?.phase;
-    const inExecution = phase && ["execution_intro", "execution", "execution_success", "execution_fail", "fail", "victory_show"].includes(phase);
+    const inExecution = phase && ["execution_intro", "execution", "execution_success", "execution_fail", "fail", "victory_show", "tribulation_intro", "tribulation", "breakthrough_show"].includes(phase);
     if (!inExecution) {
       this.drawDefenseAndWarrior(ctx);
     }
@@ -960,6 +960,15 @@ export class Game {
       // 闪红
       ctx.fillStyle = `rgba(180, 30, 30, ${0.35 * Math.max(0, 1 - this.bossController.executionResultTimerValue / 1.5)})`;
       ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+    }
+    // P4.4A.5: tribulation flash effects
+    if (this.bossController?.phase === "tribulation") {
+      // 闪白（天雷劈落）
+      const flashAlpha = 0.25 * this.bossController.flash;
+      if (flashAlpha > 0.01) {
+        ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha})`;
+        ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+      }
     }
     // 4. Debug/Flash
     if (this.debugEnabled) this.drawDebugPanel(ctx);
@@ -978,8 +987,8 @@ export class Game {
     this.updateTexts(scaledDt);
     this.updateBossSpawn();
     this.updateBossController(scaledDt);
-    // P4.4A.4: execution terminal states → finish battle
-    if (this.bossController?.phase === "victory_show") {
+    // P4.4A.5: result terminal state → finish battle
+    if (this.bossController?.phase === "result") {
       this.finish(true);
       return;
     }

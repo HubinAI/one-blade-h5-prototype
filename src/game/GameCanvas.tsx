@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from "./config/constants";
 import { Game, type ReviveOffer } from "./Game";
 import type { BattleResult, BossPhaseState, LevelConfig, Vec2 } from "./types";
+import { TribulationOverlay } from "../components/TribulationOverlay";
 
 type GameCanvasProps = {
   level: LevelConfig;
@@ -26,6 +27,7 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
   const gameRef = useRef<Game | null>(null);
   const pausedRef = useRef(paused);
   const lastBossPhaseRef = useRef<BossPhaseState | null>(null);
+  const [overlayPhase, setOverlayPhase] = useState<BossPhaseState | null>(null);
 
   useEffect(() => {
     pausedRef.current = paused;
@@ -61,6 +63,7 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
         if (currentPhase !== lastBossPhaseRef.current) {
           lastBossPhaseRef.current = currentPhase;
           onBossPhaseChange?.(currentPhase);
+          setOverlayPhase(currentPhase);
         }
       }
       frame = requestAnimationFrame(tick);
@@ -124,28 +127,31 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
   }
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="game-canvas"
-      width={DESIGN_WIDTH}
-      height={DESIGN_HEIGHT}
-      onPointerDown={(event) => {
-        event.preventDefault();
-        event.currentTarget.setPointerCapture(event.pointerId);
-        gameRef.current?.handlePointerDown(toGamePoint(event));
-      }}
-      onPointerMove={(event) => {
-        event.preventDefault();
-        gameRef.current?.handlePointerMove(toGamePoint(event));
-      }}
-      onPointerUp={(event) => {
-        event.preventDefault();
-        gameRef.current?.handlePointerUp();
-      }}
-      onPointerCancel={(event) => {
-        event.preventDefault();
-        gameRef.current?.handlePointerUp();
-      }}
-    />
+    <div style={{ position: "relative", width: DESIGN_WIDTH, height: DESIGN_HEIGHT }}>
+      <canvas
+        ref={canvasRef}
+        className="game-canvas"
+        width={DESIGN_WIDTH}
+        height={DESIGN_HEIGHT}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          gameRef.current?.handlePointerDown(toGamePoint(event));
+        }}
+        onPointerMove={(event) => {
+          event.preventDefault();
+          gameRef.current?.handlePointerMove(toGamePoint(event));
+        }}
+        onPointerUp={(event) => {
+          event.preventDefault();
+          gameRef.current?.handlePointerUp();
+        }}
+        onPointerCancel={(event) => {
+          event.preventDefault();
+          gameRef.current?.handlePointerUp();
+        }}
+      />
+      <TribulationOverlay bossPhase={overlayPhase} />
+    </div>
   );
 }

@@ -8,7 +8,7 @@ export type EnemyKind = "infantry" | "shield" | "powder" | "core" | "elite" | "b
 export type EliteKind = "fireRing" | "heal" | "aura";
 export type BossId = "yaoWang" | "moXiu" | "huaYao" | "thunderGeneral";
 /** P4.4A: Boss状态机阶段 */
-export type BossPhaseState = "loading" | "intro" | "armor" | "armor_break_show" | "armor_complete_hold" | "pursuit_intro" | "pursuit" | "core_break" | "execution_intro" | "execution" | "execution_success" | "execution_fail" | "victory_show" | "result" | "fail" | "exit";
+export type BossPhaseState = "loading" | "intro" | "armor" | "armor_break_show" | "armor_complete_hold" | "pursuit_intro" | "pursuit" | "core_break" | "execution_intro" | "execution" | "execution_success" | "execution_fail" | "victory_show" | "tribulation_intro" | "tribulation" | "breakthrough_show" | "result" | "fail" | "exit";
 export type PickupKind = "drum" | "soul" | "oil";
 export type GamePhase = "playing" | "buffChoice" | "revive" | "won" | "lost" | "chestOpen" | "paused_for_chest";
 export type RatingGrade = "C" | "B" | "A" | "S" | "SS" | "神之一刀";
@@ -428,3 +428,31 @@ export type CodexEntry = {
   description: string;
   unlocked: boolean;
 };
+
+// ---- P4.4A.5: 共享阶段判断函数 ----
+
+/** 所有演出阶段（含新增天雷劫/破境） */
+export function isBossCinematicPhase(phase: BossPhaseState): boolean {
+  return ["victory_show", "tribulation_intro", "tribulation", "breakthrough_show"].includes(phase);
+}
+
+/** 所有输入锁定阶段 */
+export function isBossInputLockedPhase(phase: BossPhaseState): boolean {
+  return [
+    "loading", "intro",
+    "armor_break_show", "armor_complete_hold",
+    "pursuit_intro", "core_break",
+    "execution_intro", "execution_success", "execution_fail",
+    "fail", "victory_show",
+    "tribulation_intro", "tribulation", "breakthrough_show",
+  ].includes(phase);
+}
+
+/** 终结流程阶段（含新增演出阶段，用于 freezeCombatResources） */
+export function isExecutionFlowPhase(phase: BossPhaseState): boolean {
+  return [
+    "execution_intro", "execution", "execution_success", "execution_fail",
+    "fail", "victory_show",
+    "tribulation_intro", "tribulation", "breakthrough_show",
+  ].includes(phase);
+}
