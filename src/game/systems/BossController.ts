@@ -60,15 +60,15 @@ export class BossController {
   /** 避开TS类型缩窄 */
   private p(): BossPhaseState { return this._phase; }
   get inputLocked(): boolean {
-    // P4.4A.4: execution允许输入（一刀决断），execution_success/execution_fail锁定
+    // P4.4A.4: execution允许输入（一刀决断），其余终结锁定；P1-2: fail/victory_show纳入锁定
     const p = this.p();
-    return p === "loading" || p === "intro" || p === "armor_break_show" || p === "armor_complete_hold" || this.armorSwitching || p === "pursuit_intro" || p === "core_break" || p === "execution_intro" || p === "execution_success" || p === "execution_fail";
+    return p === "loading" || p === "intro" || p === "armor_break_show" || p === "armor_complete_hold" || this.armorSwitching || p === "pursuit_intro" || p === "core_break" || this.isExecutionLockedPhase(p);
   }
   /** 完成Hold时冻结战斗资源 */
   get freezeCombatResources(): boolean {
-    // P4.4A.4: execution期间冻结刀势回复
+    // P1-2: fail/victory_show纳入冻结
     const p = this.p();
-    return p === "armor_break_show" || p === "armor_complete_hold" || p === "pursuit_intro" || p === "core_break" || p === "execution_intro" || p === "execution" || p === "execution_success" || p === "execution_fail";
+    return p === "armor_break_show" || p === "armor_complete_hold" || p === "pursuit_intro" || p === "core_break" || this.isExecutionFlowPhase(p);
   }
   /** 雷核是否暴露 */
   get coreExposed(): boolean {
@@ -444,9 +444,14 @@ export class BossController {
     this.drawParticles(ctx);
   }
 
-  /** P4.4A.4-R1: 终结终端阶段统一判定集合 */
-  private isTerminalExecutionPhase(p: BossPhaseState): boolean {
+  /** P2: 终结流程阶段统一判定（含非终端状态execution_intro/execution） */
+  private isExecutionFlowPhase(p: BossPhaseState): boolean {
     return ["execution_intro", "execution", "execution_success", "execution_fail", "fail", "victory_show"].includes(p);
+  }
+
+  /** P1-2: 终结锁定阶段（不含execution，该阶段允许输入） */
+  private isExecutionLockedPhase(p: BossPhaseState): boolean {
+    return ["execution_intro", "execution_success", "execution_fail", "fail", "victory_show"].includes(p);
   }
 
   /** P4.4A.2: 覆盖层（在刀光/命中文字上方） */
@@ -463,7 +468,7 @@ export class BossController {
     if (p === "execution") this.drawExecutionHUD(ctx);
     if (p === "execution_success") this.drawExecutionSuccess(ctx);
     if (p === "execution_fail") this.drawExecutionFail(ctx);
-    if (p !== "loading" && p !== "intro" && !this.isTerminalExecutionPhase(p)) this.drawBossHud(ctx);
+    if (p !== "loading" && p !== "intro" && !this.isExecutionFlowPhase(p)) this.drawBossHud(ctx);
   }
 
   /** 获取Boss身体世界坐标（用于wrong_hit参考） */
@@ -698,6 +703,7 @@ export class BossController {
       const shardLife = Math.max(0, (t - 0.15) / 0.65);
       shard.alpha = Math.max(0, 1 - shardLife);
     }
+    this.executionShards = this.executionShards.filter(s => s.alpha > 0.01);
   }
 
   /** P4.4A.3: 统一Boss收刀路由（严格switch） */
@@ -806,6 +812,16 @@ export class BossController {
   // Boss 武将剪影
   // ================================================================
   private drawBoss(ctx: any): void {
+    // P1-1: victory_show阶段不绘制Boss身体/护甲/核心/裂缝，只保留粒子余光
+    if (this._phase === "victory_show") {
+      ctx.save();
+      ctx.translate(DESIGN_WIDTH / 2, this.renderY);
+      ctx.scale(this.bossRenderScale, this.bossRenderScale);
+      this.drawExecutionParticles(ctx);
+      ctx.restore();
+      return;
+    }
+
     const shakeX = this.shakeTimer > 0 ? (Math.random() - 0.5) * 4 : 0;
     const shakeY = this.shakeTimer > 0 ? (Math.random() - 0.5) * 3 : 0;
     const isSplit = this.p() === "execution_success";
