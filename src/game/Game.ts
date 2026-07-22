@@ -465,6 +465,7 @@ export class Game {
           phase: self.bossController?.phase,
           armorProgress: self.bossController?.debugSnapshot?.["Armor Progress"],
           pursuitProgress: self.bossController?.debugSnapshot?.["Pursuit"],
+          armorBroken: self.bossController?.getArmorBrokenFlags() ?? [],
           energy: self.energy,
           pointerDown: self.pointerDown,
           currentSlashActive: self.currentSlash?.active ?? false,
@@ -942,7 +943,7 @@ export class Game {
     this.drawParticles(ctx);
     // P4.4A.4: execution阶段隐藏普通斩/破按钮和技能倒计时
     const phase = this.bossController?.phase;
-    const inExecution = phase && ["execution_intro", "execution", "execution_success", "execution_fail"].includes(phase);
+    const inExecution = phase && ["execution_intro", "execution", "execution_success", "execution_fail", "fail", "victory_show"].includes(phase);
     if (!inExecution) {
       this.drawDefenseAndWarrior(ctx);
     }

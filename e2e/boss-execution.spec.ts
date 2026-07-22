@@ -187,6 +187,20 @@ test.describe("Boss Execution 阶段 E2E", () => {
       return s.phase;
     }, { timeout: 15000 }).toBe("execution_intro");
 
+    // P1-4: 断言重试后护甲/追击/破碎状态完整恢复
+    await expect.poll(async () => {
+      const s = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
+      return s.armorBroken;
+    }, { timeout: 5000 }).toEqual([true, true, true]);
+    await expect.poll(async () => {
+      const s = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
+      return s.armorProgress;
+    }, { timeout: 5000 }).toBe("3/3");
+    await expect.poll(async () => {
+      const s = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
+      return s.pursuitProgress;
+    }, { timeout: 5000 }).toBe("3/3");
+
     // 等 2 秒进入 execution
     await expect.poll(async () => {
       const s = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
