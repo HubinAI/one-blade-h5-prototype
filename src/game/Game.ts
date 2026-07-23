@@ -516,6 +516,8 @@ export class Game {
               activeArmorIndex: snap.activeArmorIndex,
               armorDurability: snap.armorDurability,
               bridgeTriggered: snap.bridgeTriggered,
+              // P4.4B-R5.7: reactiveController 置空前捕获的最终快照
+              lastReactiveExitSnapshot: self._lastReactiveExitSnapshot ?? undefined,
             };
           }
           // 旧 Boss / 普通模式：读 bossController
@@ -1109,20 +1111,35 @@ export class Game {
   private _lastReactiveResolve: {
     slashId: string;
     primaryResult: string;
+    secondaryResults: string[];
     primarySource: string;
     energyBefore: number;
     baseCost: number;
-    projectileCutReward: number;
-    projectileReflectReward: number;
+    cutReward: number;
+    reflectReward: number;
     armorReward: number;
     dangerousWrongCutPenalty: number;
     bodyWrongHitPenalty: number;
     emptySwingPenalty: number;
     energyAfter: number;
+    unclampedAfter: number;
+    cutCount: number;
+    reflectCount: number;
+    dangerousCount: number;
+    eventsSummary: string;
   } | null = null;
 
   /** P0: 最近一次碰撞事件列表（供 Debug 粒子回溯） */
   private _lastReactiveEvents: ReactiveCollisionEvent[] = [];
+
+  /** P4.4B-R5.7: reactiveController 置空前捕获的最终快照（供 E2E 第三甲断言） */
+  private _lastReactiveExitSnapshot: {
+    armorProgress: string;
+    armorBroken: boolean[];
+    armorDurability: number[];
+    bridgeTriggered: boolean;
+    gameMode: "bossReactive" | "boss";
+  } | null = null;
 
   /** P4.4A.2: Boss模式渲染白名单 */
   private renderBossMode(ctx: CanvasRenderingContext2D): void {
@@ -1313,6 +1330,15 @@ export class Game {
 
     // 桥接检测：reactiveController完成后进入pursuit
     if (rc.bridgeTriggered && this.bossController) {
+      // P4.4B-R5.7: 在 reactiveController 置空前捕获最终快照（供 E2E 第三甲断言）
+      const snap = rc.getReactiveSnapshot();
+      this._lastReactiveExitSnapshot = {
+        armorProgress: snap.armorProgress,
+        armorBroken: [...snap.armorBroken],
+        armorDurability: [...snap.armorDurability],
+        bridgeTriggered: snap.bridgeTriggered,
+        gameMode: "bossReactive",
+      };
       this.bossController.enterPursuitDirectly();
       this.reactiveController = null;
       this.gameMode = "boss";
@@ -2226,14 +2252,18 @@ export class Game {
       // P0: 使用 Controller 返回的 primaryResult/Source 和拆分字段
       `lastResult: ${resolve?.primaryResult ?? "-"}`,
       `lastSource: ${resolve?.primarySource ?? "-"}`,
-      `projReward: ${resolve?.projectileCutReward ?? "-"}`,
+      `secondary: ${resolve?.secondaryResults?.join(",") || "-"}`,
+      `cutReward: ${resolve?.cutReward ?? "-"} (x${resolve?.cutCount ?? 0})`,
+      `reflectReward: ${resolve?.reflectReward ?? "-"} (x${resolve?.reflectCount ?? 0})`,
       `armorReward: ${resolve?.armorReward ?? "-"}`,
-      `dangerousPen: ${resolve?.dangerousWrongCutPenalty ?? "-"}`,
+      `dangerousPen: ${resolve?.dangerousWrongCutPenalty ?? "-"} (x${resolve?.dangerousCount ?? 0})`,
       `bodyPen: ${resolve?.bodyWrongHitPenalty ?? "-"}`,
       `emptySwing: ${resolve?.emptySwingPenalty ?? "-"}`,
       `eBefore: ${resolve?.energyBefore ?? "-"}`,
       `baseCost: ${resolve?.baseCost ?? "-"}`,
       `eAfter: ${resolve?.energyAfter ?? "-"}`,
+      `unclamped: ${resolve?.unclampedAfter ?? "-"}`,
+      `summary: ${resolve?.eventsSummary ?? "-"}`,
       `events: ${this._lastReactiveEvents.length}`,
     ];
     ctx.save();
@@ -4467,16 +4497,26 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._lastReactiveResolve = {
       slashId: trail.id,
       primaryResult: result.primaryResult,
+      secondaryResults: result.secondaryResults,
       primarySource: result.primarySource as string,
       energyBefore: result.energyBefore,
       baseCost: result.baseCost,
-      projectileCutReward: result.projectileCutReward,
-      projectileReflectReward: result.projectileReflectReward,
+      cutReward: result.projectileCutReward,
+      reflectReward: result.projectileReflectReward,
       armorReward: result.armorReward,
       dangerousWrongCutPenalty: result.dangerousWrongCutPenalty,
       bodyWrongHitPenalty: result.bodyWrongHitPenalty,
       emptySwingPenalty: result.emptySwingPenalty,
       energyAfter: result.energyAfter,
+      unclampedAfter: result.unclampedAfter,
+      cutCount: result.projectileCutCount,
+      reflectCount: result.projectileReflectCount,
+      dangerousCount: result.dangerousWrongCutCount,
+      eventsSummary: [
+        result.projectileCutCount > 0 ? `cut:${result.projectileCutCount}` : "",
+        result.projectileReflectCount > 0 ? `reflect:${result.projectileReflectCount}` : "",
+        result.dangerousWrongCutCount > 0 ? `danger:${result.dangerousWrongCutCount}` : "",
+      ].filter(Boolean).join(" ") || "-",
     };
     this._lastReactiveEvents = result.events;
 

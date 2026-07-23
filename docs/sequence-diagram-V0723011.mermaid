@@ -1,0 +1,37 @@
+sequenceDiagram
+    autonumber
+    participant Player
+    participant Game
+    participant RC as BossReactiveController
+    participant State as Phase State Machine
+
+    Player->>Game: pointerDown
+    Game->>RC: registerReactiveSlashStart(slashId)
+    Game->>RC: currentSlashEnergy = lockedEnergy
+
+    loop pointerMove
+        Game->>RC: resolveGeometry(geometry)
+        RC->>RC: 检测弹幕/护甲/身体
+        alt 首次命中护甲
+            RC->>RC: commitArmorDamage(energy, armorIndex, source, hitPos)
+            RC->>RC: 立即扣减 durability、设置 broken
+            RC->>RC: _pendingSlashResult = {...}
+            RC->>RC: _session.events.push(armorEvent)
+            RC->>State: transitionToResolve()
+            State-->>RC: phase = armor_resolve
+        end
+    end
+
+    Note over RC: 0.12s 后
+    State->>RC: updateArmorResolve timeout
+    RC->>State: transitionToRecovery()
+    Note right of RC: 不再清空 _session 和 _pendingSlashResult
+
+    Player->>Game: pointerUp (延迟 300ms)
+    Game->>RC: finishSlash(slashId, energyBefore, pathLen)
+    RC->>RC: 匹配 _pendingSlashResult.slashId
+    RC->>RC: buildResolveResult(pending)
+    RC-->>Game: ReactiveSlashResolveResult
+    Game->>Game: this.energy = result.energyAfter
+    Game->>Game: _lastReactiveResolve = result
+    Game->>Game: 视觉反馈

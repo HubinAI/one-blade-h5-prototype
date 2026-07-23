@@ -1,0 +1,120 @@
+classDiagram
+    class BossReactiveController {
+        -_phase: BossPhaseState
+        -_session: ReactiveSlashSession
+        -_pendingSlashResult: PendingReactiveSlashResult
+        -_resolvedSlashId: string
+        -_graceSlashId: string
+        -armorTargets: ReactiveArmorTarget[]
+        -activeArmorIndex: number
+        -projectiles: Projectile[]
+        -playerHp: PlayerHpState
+        -_lastArmorCollisionSource: CapsuleSource
+        -_lastArmorHitPos: Vec2
+        +currentSlashEnergy: number
+        +phase: BossPhaseState
+        +inputLocked: boolean
+        +bossModeActive: boolean
+        +reset()
+        +update(dt)
+        +registerReactiveSlashStart(slashId)
+        +resolveGeometry(geometry): ReactiveCollisionEvent[]
+        +finishSlash(slashId, energyBefore, pathLen): ReactiveSlashResolveResult
+        +getReactiveSnapshot()
+        +getProjectiles(): Projectile[]
+        +markProjectilePlayerHit(id): ProjectileKind
+        +getActiveArmorWorldPos()
+        +getArmorDurability()
+        +takeDamage(amount)
+        -commitArmorDamage(energy, armorIndex, source, hitPos): PendingReactiveSlashResult
+        -buildResolveResult(slashId, energyBefore, baseCost, pending): ReactiveSlashResolveResult
+        -transitionToResolve()
+        -transitionToRecovery()
+    }
+
+    class ReactiveSlashSession {
+        +slashId: string
+        +events: ReactiveCollisionEvent[]
+        +bodyContact: boolean
+        +lastBodyHitPos: Vec2
+        +hitProjectileIds: Set~string~
+    }
+
+    class PendingReactiveSlashResult {
+        +slashId: string
+        +resolved: boolean
+        +consumed: boolean
+        +armorIndex: number
+        +armorDamage: number
+        +armorBroken: boolean
+        +allArmorBroken: boolean
+        +armorCollisionSource: CapsuleSource
+        +armorHitPos: Vec2
+        +events: ReactiveCollisionEvent[]
+        +bodyContact: boolean
+    }
+
+    class ReactiveSlashResolveResult {
+        +slashId: string
+        +energyAfter: number
+        +energyBefore: number
+        +baseCost: number
+        +projectileCutCount: number
+        +projectileReflectCount: number
+        +dangerousWrongCutCount: number
+        +projectileCutReward: number
+        +projectileReflectReward: number
+        +dangerousWrongCutPenalty: number
+        +armorReward: number
+        +bodyWrongHitPenalty: number
+        +emptySwingPenalty: number
+        +armorHit: boolean
+        +armorDurabilityDamage: number
+        +armorBroken: boolean
+        +allArmorBroken: boolean
+        +bodyWrongHit: boolean
+        +primaryResult: string
+        +secondaryResults: string[]
+        +primarySource: CapsuleSource
+        +armorHitPos: Vec2
+        +events: ReactiveCollisionEvent[]
+        +unclampedAfter: number
+    }
+
+    class Projectile {
+        +id: string
+        +kind: ProjectileKind
+        +x, y, vx, vy: number
+        +active: boolean
+        +reflected: boolean
+        +resolved: boolean
+        +resolution: string
+        +hitBySlashId: string
+    }
+
+    class Game {
+        -reactiveController: BossReactiveController
+        -_lastReactiveResolve: object
+        -_lastReactiveEvents: ReactiveCollisionEvent[]
+        -_lastReactiveSlashGeometry: ReactiveSlashGeometry
+        +updateReactiveBossMode(dt)
+        +checkReactiveProjectileHits(a, b, trail)
+        +finalizeBossSlashCommon(trail)
+        +drawReactiveDebugOverlay(ctx, rc)
+        +handlePointerDown(pos)
+        +handlePointerUp()
+    }
+
+    class reactiveSlashGeometry {
+        +buildReactiveSlashGeometry(...): ReactiveSlashGeometry
+        +capsuleHitsEllipse(...): boolean
+        +geometryHitsArmor(...): boolean
+        +computeArmorContactPoint(cap, center, rx, ry): Vec2
+    }
+
+    BossReactiveController --> ReactiveSlashSession : holds
+    BossReactiveController --> PendingReactiveSlashResult : holds
+    BossReactiveController --> ReactiveSlashResolveResult : produces
+    BossReactiveController --> Projectile : manages
+    Game --> BossReactiveController : owns
+    Game --> reactiveSlashGeometry : uses
