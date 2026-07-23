@@ -1,55 +1,57 @@
 sequenceDiagram
-    participant Player as 玩家
-    participant Game as Game
-    participant BRC as BossReactiveController
-    participant PS as ProjectileSystem
-    participant BC as BossController(现有)
+    participant E2E as E2E Test
+    participant Game as Game.getState
+    participant RC as BossReactiveController
 
-    Note over BRC: === 第1块护甲循环 ===
-    BRC->>BRC: armor_prepare (0.3s)
-    Note right of BRC: Boss 抬手预告
-    
-    BRC->>BRC: armor_threat (2~3s)
-    BRC->>PS: spawnProjectile("normal")
-    PS-->>BRC: 弹幕列表
-    BRC->>PS: spawnProjectile("reflective")
-    PS-->>BRC: 弹幕列表
-    
-    loop 每帧更新弹幕
-        BRC->>PS: updateProjectiles(dt)
-        PS-->>BRC: 更新后弹幕列表
+    Note over E2E,RC: 场景1: bridgeTriggered 前（bossReactive 模式）
+    E2E->>Game: getState()
+    Game->>Game: gameMode === "bossReactive" && reactiveController
+    Game-->>E2E: { ..., lastReactiveExitSnapshot: undefined }
+
+    Note over E2E,RC: bridgeTriggered → 捕获 snapshot
+    RC->>RC: bridgeTriggered = true
+    Game->>Game: _lastReactiveExitSnapshot = snap
+    Game->>Game: reactiveController = null, gameMode = "boss"
+
+    Note over E2E,RC: 场景2: 切到 boss 模式后
+    E2E->>Game: getState()
+    Game->>Game: gameMode === "boss"
+    Game-->>E2E: { ..., lastReactiveExitSnapshot: { armorProgress: "3/3", ... } }
+
+sequenceDiagram
+    participant Game as Game
+    participant RC as BossReactiveController
+
+    Game->>RC: resolveGeometry(geometry)
+    RC->>RC: commitArmorDamage(energy, index, source, hitPos)
+    RC->>RC: _session.events.push(armorEv)  // 第1次 push
+    RC-->>Game: [armorEv]  // newEvents 包含 armorEv
+
+    Game->>RC: finishSlash(slashId, energyBefore, pathLen)
+    RC->>RC: events = [...this._session.events]  // 已含 armorEv
+    Note over RC: 不再 push armorEv 到 events
+    RC-->>Game: { events: [armorEv], ... }  // 仅1次
+
+sequenceDiagram
+    participant Game as Game
+    participant RC as BossReactiveController
+
+    Note over Game,RC: 起刀
+    Game->>Game: _currentReactiveSegmentEvents = []
+
+    loop 每帧 pointerMove
+        Game->>RC: resolveGeometry(geometry)
+        RC-->>Game: newEvents
+        Game->>Game: _currentReactiveSegmentEvents = newEvents
+        Game->>Game: 粒子反馈（从 _currentReactiveSegmentEvents 读）
     end
-    
-    BRC->>BRC: armor_opportunity (1.5s)
-    Note right of BRC: 护甲发光，可攻击
-    
-    Player->>Game: handlePointerDown → handlePointerMove
-    Game->>Game: startSlash → extendSlash
-    Game->>BRC: resolveSegment(segA, segB, slashId)
-    alt 命中护甲
-        BRC-->>Game: armor_hit {damage, completed}
-        Game->>Game: applyReactiveArmorResult()
-    else 命中Boss身体
-        BRC-->>Game: wrong_hit
-    else 挥空
-        BRC-->>Game: miss
-    end
-    
-    Player->>Game: handlePointerUp
-    Game->>BRC: finishSlash(slashId)
-    BRC-->>Game: 最终结算结果
-    
-    BRC->>BRC: armor_recovery (0.2s)
-    
-    Note over BRC: === 第2块护甲循环 ===
-    BRC->>BRC: armor_prepare → threat → opportunity → resolve → recovery
-    
-    Note over BRC: === 第3块护甲循环 ===
-    BRC->>BRC: armor_prepare → threat → opportunity → resolve → recovery
-    
-    alt 三块护甲全部击破
-        BRC->>BC: bridgeToPursuit()
-        BC->>BC: enterPursuitDirectly()
-        Note over BC: 进入现有 pursuit 流程
-        Note over BC: 追击→终结→天雷劫(保持不变)
-    end
+
+    Note over Game,RC: 收刀
+    Game->>RC: finishSlash(slashId, ...)
+    RC-->>Game: result
+    Game->>Game: _lastReactiveResolve = result
+    Game->>Game: _lastResolvedReactiveEvents = result.events
+
+    Note over Game,RC: Debug 绘制（全部来自同一时间点）
+    Game->>Game: drawReactiveDebugOverlay
+    Note over Game: lastResult ← _lastReactiveResolve.primaryResult<br/>eventsSummary ← _lastReactiveResolve.eventsSummary<br/>counts ← _lastReactiveResolve.cutCount/etc.

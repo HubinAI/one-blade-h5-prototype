@@ -1,91 +1,124 @@
 classDiagram
+    class Game {
+        -_lastReactiveResolve: object
+        -_currentReactiveSegmentEvents: ReactiveCollisionEvent[]
+        -_lastResolvedReactiveEvents: ReactiveCollisionEvent[]
+        -_lastReactiveExitSnapshot: object
+        -_lastReactiveSlashGeometry: ReactiveSlashGeometry
+        +getState() : object
+        -checkReactiveProjectileHits(a, b, trail)
+        -finalizeBossSlashCommon(trail)
+        -drawReactiveDebugOverlay(ctx, rc)
+    }
+
     class BossReactiveController {
         -_phase: BossPhaseState
-        -_armorCycle: number
-        -_activeArmorIndex: number
-        -_armorTargets: ReactiveArmorTarget[]
-        -_projectiles: Projectile[]
-        -_threatTimer: number
-        -_opportunityTimer: number
-        -_recoveryTimer: number
-        -_prepareTimer: number
-        -_elapsed: number
-        -_session: SlashSession
+        -_session: ReactiveSlashSession
+        -_pendingSlashResult: PendingReactiveSlashResult
         -_resolvedSlashId: string
-        -_playerHp: PlayerHpState
-        -_bladeEffect: BladeContinuousEffect
-        +bossId: BossId
-        +renderY: number
-        +bossRenderScale: number
-        +screenShake: number
-        +flash: number
-        
-        +constructor(bossId: BossId)
-        +enterLoading(): void
-        +update(dt: number): void
-        +resolveSegment(segA: Vec2, segB: Vec2, slashId: string): ReactiveArmorResolveResult | null
-        +finishSlash(slashId: string): ReactiveArmorResolveResult | null
-        +getPlayerHp(): PlayerHpState
-        +takeDamage(amount: number, source: string): void
-        +getBladeEffect(energy: number): BladeContinuousEffect
-        +renderWorld(ctx: any): void
-        +renderOverlay(ctx: any): void
-        +bridgeToPursuit(): void
-        +getArmorBrokenFlags(): boolean[]
-        
-        -updateArmorPrepare(dt): void
-        -updateThreatPhase(dt): void
-        -updateOpportunityPhase(dt): void
-        -updateResolvePhase(dt): void
-        -updateRecoveryPhase(dt): void
-        -spawnProjectile(kind: ProjectileKind): void
-        -updateProjectiles(dt): void
-        -drawBoss(ctx): void
-        -drawProjectiles(ctx): void
-        -drawArmorHUD(ctx): void
-        -drawPlayerHUD(ctx): void
-        -drawEnergyBar(ctx): void
-    }
-
-    class ProjectileSystem {
-        +createProjectile(kind: ProjectileKind, x: number, y: number, targetX: number, targetY: number): Projectile
-        +updateProjectiles(projectiles: Projectile[], dt: number): Projectile[]
-        +checkSlashHit(projectile: Projectile, segA: Vec2, segB: Vec2, bladeReach: number): boolean
-        +checkPlayerHit(projectile: Projectile, playerX: number, playerY: number, playerRadius: number): boolean
-        +getProjectileConfig(kind: ProjectileKind): ProjectileConfig
-    }
-
-    class BossReactiveHUD {
-        +drawEnergyBar(ctx, x, y, energy, maxEnergy): void
-        +drawHpBar(ctx, x, y, hp, maxHp, flash): void
-        +drawArmorIndicators(ctx, armors: ReactiveArmorTarget[], activeIndex: number): void
-        +drawFloatText(ctx, texts: FloatingText[]): void
-        +drawProjectileWarning(ctx, projectiles: Projectile[]): void
-    }
-
-    class BossController {
-        <<existing>>
-        +bridgeToPursuit(): void
-        +enterPursuitDirectly(): void
-    }
-
-    class Game {
-        <<modified>>
-        -bossFlow: "legacy" | "reactive"
-        -reactiveController: BossReactiveController | null
+        -_graceSlashId: string
+        -armorTargets: ReactiveArmorTarget[]
+        -activeArmorIndex: number
+        -projectiles: Projectile[]
         -playerHp: PlayerHpState
-        +handlePointerDown(pos): void
-        +handlePointerUp(): void
-        -updateBossMode(dt): void
-        -updateReactiveBossMode(dt): void
-        -renderBossMode(ctx): void
-        -renderReactiveBossMode(ctx): void
-        -checkReactiveProjectileHits(a, b, trail): void
-        -applyReactiveArmorResult(result): void
+        -_lastArmorCollisionSource: CapsuleSource
+        -_lastArmorHitPos: Vec2
+        +currentSlashEnergy: number
+        +phase: BossPhaseState
+        +inputLocked: boolean
+        +bossModeActive: boolean
+        +reset()
+        +update(dt)
+        +registerReactiveSlashStart(slashId)
+        +resolveGeometry(geometry): ReactiveCollisionEvent[]
+        +finishSlash(slashId, energyBefore, pathLen): ReactiveSlashResolveResult
+        +getReactiveSnapshot()
+        +getProjectiles(): Projectile[]
+        +markProjectilePlayerHit(id): ProjectileKind
+        +getActiveArmorWorldPos()
+        +getArmorDurability()
+        +takeDamage(amount)
+        +spawnProjectileForTest(kind, x, y, vx?, vy?): Projectile
+        +getBodyWorldGeometry(): BodyPartGeometry[]
+        -commitArmorDamage(energy, index, source, hitPos): PendingReactiveSlashResult
+        -buildResolveResult(slashId, energyBefore, baseCost, pending): ReactiveSlashResolveResult
+        -transitionToResolve()
+        -transitionToRecovery()
+        ~~resolveSegment(segA, segB, slashId, bladeReach)~~
+        ~~segmentHitEllipse(segA, segB, cx, cy, rx, ry)~~
     }
 
-    BossReactiveController --> ProjectileSystem : uses
-    BossReactiveController --> BossReactiveHUD : uses
-    BossReactiveController --> BossController : bridges to pursuit
-    Game --> BossReactiveController : owns (reactive flow)
-    Game --> BossController : owns (legacy flow)
+    class ReactiveSlashSession {
+        +slashId: string
+        +events: ReactiveCollisionEvent[]
+        +bodyContact: boolean
+        +lastBodyHitPos: Vec2
+        +hitProjectileIds: Set~string~
+    }
+
+    class PendingReactiveSlashResult {
+        +slashId: string
+        +resolved: boolean
+        +consumed: boolean
+        +armorIndex: number
+        +armorDamage: number
+        +armorBroken: boolean
+        +allArmorBroken: boolean
+        +armorCollisionSource: CapsuleSource
+        +armorHitPos: Vec2
+        +events: ReactiveCollisionEvent[]
+        +bodyContact: boolean
+    }
+
+    class ReactiveSlashResolveResult {
+        +slashId: string
+        +energyAfter: number
+        +energyBefore: number
+        +baseCost: number
+        +projectileCutCount: number
+        +projectileReflectCount: number
+        +dangerousWrongCutCount: number
+        +projectileCutReward: number
+        +projectileReflectReward: number
+        +dangerousWrongCutPenalty: number
+        +armorReward: number
+        +bodyWrongHitPenalty: number
+        +emptySwingPenalty: number
+        +armorHit: boolean
+        +armorDurabilityDamage: number
+        +armorBroken: boolean
+        +allArmorBroken: boolean
+        +bodyWrongHit: boolean
+        +primaryResult: string
+        +secondaryResults: string[]
+        +primarySource: CapsuleSource
+        +armorHitPos: Vec2
+        +events: ReactiveCollisionEvent[]
+        +unclampedAfter: number
+    }
+
+    class Projectile {
+        +id: string
+        +kind: ProjectileKind
+        +x, y, vx, vy: number
+        +active: boolean
+        +reflected: boolean
+        +resolved: boolean
+        +resolution: string
+        +hitBySlashId: string
+    }
+
+    class ReactiveCollisionEvent {
+        +kind: string
+        +hitPos: Vec2
+        +collisionSource: CapsuleSource
+        +projectileId: string
+        +projectileKind: ProjectileKind
+    }
+
+    BossReactiveController --> ReactiveSlashSession : holds
+    BossReactiveController --> PendingReactiveSlashResult : holds
+    BossReactiveController --> ReactiveSlashResolveResult : produces
+    BossReactiveController --> Projectile : manages
+    BossReactiveController --> ReactiveCollisionEvent : produces
+    Game --> BossReactiveController : owns

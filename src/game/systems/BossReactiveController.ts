@@ -6,7 +6,7 @@
 import type { BossPhaseState, Vec2, Projectile, ProjectileKind, ReactiveArmorTarget, PlayerHpState, BladeContinuousEffect } from "../types";
 import { DESIGN_WIDTH, DESIGN_HEIGHT } from "../config/constants";
 import { REACTIVE_BOSS_CONFIG } from "../config/bossReactiveFlow";
-import { distanceToSegment, clamp, randomRange } from "../../utils/math";
+import { clamp } from "../../utils/math";
 import { createProjectile, updateProjectiles, checkSlashHit, cleanInactiveProjectiles, cleanResolvedProjectiles, resetProjectileIdCounter } from "./projectileSystem";
 import { capsuleHitsEllipse, geometryHitsArmor } from "./reactiveSlashGeometry";
 import type { ReactiveSlashGeometry, CapsuleSource } from "./reactiveSlashGeometry";
@@ -500,6 +500,15 @@ export class BossReactiveController {
   /** P4.4B-R3 P0-D: 当前激活护甲索引（供 E2E reactiveSnapshot 读） */
   getActiveArmorIndex(): number { return this.activeArmorIndex; }
 
+  /** P0-5: 测试专用 — 确定性注入弹幕（跳过随机生成） */
+  spawnProjectileForTest(kind: ProjectileKind, x: number, y: number, vx?: number, vy?: number): Projectile {
+    const cfgKey = kind === "dangerous" ? "normal" : kind;
+    const speed = REACTIVE_BOSS_CONFIG.projectiles[cfgKey]?.speed ?? REACTIVE_BOSS_CONFIG.projectiles.normal.speed;
+    const p = createProjectile(kind, x, y, vx ?? 0, vy ?? speed);
+    this.projectiles.push(p);
+    return p;
+  }
+
   // ================================================================
   // P4.4B-R5.1 P1-3: 统一 Boss 世界变换接口
   // 审计 §12 指出：多处重复手写 BOSS_CX + relX * bossRenderScale。
@@ -544,6 +553,15 @@ export class BossReactiveController {
     return { cx: g.center.x, cy: g.center.y, rx: g.rx, ry: g.ry };
   }
 
+  /** P1-3: 身体部位世界几何（返回所有身体椭圆的世界坐标） */
+  getBodyWorldGeometry(): Array<{ center: Vec2; rx: number; ry: number }> {
+    return BODY_PARTS.map(p => ({
+      center: this.localToBossWorld({ x: p.cx, y: p.cy }),
+      rx: p.rx * this.bossRenderScale,
+      ry: p.ry * this.bossRenderScale,
+    }));
+  }
+
   /** P4.4B-R3 P0-D: 设置程序化命中的刀势能量（E2E 用，避免依赖外部 Game 注入） */
   setProgrammaticSlashEnergy(energy: number): void {
     this.currentSlashEnergy = energy;
@@ -562,78 +580,6 @@ export class BossReactiveController {
   // ================================================================
   // 挥刀判定
   // ================================================================
-
-  /** 椭圆-线段相交检测 */
-  private segmentHitEllipse(segA: Vec2, segB: Vec2, cx: number, cy: number, rx: number, ry: number): boolean {
-    const scaleX = 1 / Math.max(1, rx);
-    const scaleY = 1 / Math.max(1, ry);
-    const a: Vec2 = { x: (segA.x - cx) * scaleX, y: (segA.y - cy) * scaleY };
-    const b: Vec2 = { x: (segB.x - cx) * scaleX, y: (segB.y - cy) * scaleY };
-    const origin: Vec2 = { x: 0, y: 0 };
-    return distanceToSegment(origin, a, b) <= 1;
-  }
-
-  /**
-   * 解析弹幕命中 + 护甲命中
-   * @returns 弹幕命中结果列表
-   */
-  private resolveSegment(segA: Vec2, segB: Vec2, slashId: string, bladeReach: number): Array<{ projectileIndex: number; hitPos: Vec2 }> {
-    if (this._phase !== "armor_threat" && this._phase !== "armor_opportunity") return [];
-    if (this._resolvedSlashId === slashId) return [];
-
-    // 初始化Session
-    if (this._session.slashId !== slashId) {
-      this._session = { slashId, events: [], bodyContact: false, hitProjectileIds: new Set() };
-    }
-
-    const hits: Array<{ projectileIndex: number; hitPos: Vec2 }> = [];
-
-    // 1. 检测弹幕碰撞
-    const projHits = checkSlashHit(this.projectiles, segA, segB, bladeReach);
-    for (const idx of projHits) {
-      const p = this.projectiles[idx];
-      if (!p.active) continue;
-      hits.push({ projectileIndex: idx, hitPos: { x: (segA.x + segB.x) / 2, y: (segA.y + segB.y) / 2 } });
-    }
-
-    // 2. 在opportunity阶段检测护甲命中
-    if (this._phase === "armor_opportunity") {
-      const armor = this.getCurrentArmor();
-      if (armor && !armor.broken) {
-        // P4.4B-R4 P0-B: 护甲坐标和半径乘以 bossRenderScale，与 drawBoss 中的 translate+scale 视觉一致。
-        // 修复审计 §3.2 "护甲碰撞没有应用相同缩放"——视觉护甲中心与碰撞中心错位 7.5px。
-        const cx = BOSS_CX + armor.relX * this.bossRenderScale;
-        const cy = this.renderY + armor.relY * this.bossRenderScale;
-        const rx = armor.radiusX * this.bossRenderScale;
-        const ry = armor.radiusY * this.bossRenderScale;
-        // P4.4B-R4 P0-A: 护甲判定使用 capsuleHitsEllipse（支持刀身宽度半径）。
-        // bladeReach 现在代表有效碰撞半径（刀身宽度/2 + 移动端容差）。
-        // 修复审计 §2 "可见刀体和护甲碰撞使用了两套几何"——让刀尖/刀身也参与碰撞。
-        if (capsuleHitsEllipse(segA, segB, bladeReach, { x: cx, y: cy }, rx, ry)) {
-          // 护甲命中 → 进入resolve
-          this._resolvedSlashId = slashId;
-          this.transitionToResolve();
-        }
-      }
-
-      // 检测身体碰撞（wrong_hit候选）— 同样乘 bossRenderScale
-      if (!this._resolvedSlashId) {
-        const bodyHit = BODY_PARTS.some(p =>
-          capsuleHitsEllipse(
-            segA, segB, bladeReach,
-            { x: BOSS_CX + p.cx * this.bossRenderScale, y: this.renderY + p.cy * this.bossRenderScale },
-            p.rx * this.bossRenderScale, p.ry * this.bossRenderScale,
-          )
-        );
-        if (bodyHit && !this._session.bodyContact) {
-          this._session.bodyContact = true;
-          this._session.lastBodyHitPos = segB;
-        }
-      }
-    }
-
-    return hits;
-  }
 
   /**
    * P4.4B-R5 P0-C: 接收完整 ReactiveSlashGeometry，真正遍历三胶囊做护甲/弹幕/身体判定。
@@ -719,16 +665,13 @@ export class BossReactiveController {
     if (this.canResolveArmorForSlash(geometry.slashId)) {
       const armor = this.getCurrentArmor();
       if (armor && !armor.broken) {
-        const cx = BOSS_CX + armor.relX * this.bossRenderScale;
-        const cy = this.renderY + armor.relY * this.bossRenderScale;
-        const rx = armor.radiusX * this.bossRenderScale;
-        const ry = armor.radiusY * this.bossRenderScale;
-        if (geometryHitsArmor(geometry, { x: cx, y: cy }, rx, ry)) {
+        const armorGeom = this.getArmorWorldGeometry(this.activeArmorIndex);
+        if (armorGeom && geometryHitsArmor(geometry, armorGeom.center, armorGeom.rx, armorGeom.ry)) {
           const hitCap = geometry.capsules.find(cap =>
-            capsuleHitsEllipse(cap.a, cap.b, cap.radius, { x: cx, y: cy }, rx, ry)
+            capsuleHitsEllipse(cap.a, cap.b, cap.radius, armorGeom.center, armorGeom.rx, armorGeom.ry)
           );
           const source = hitCap?.source ?? null;
-          const hitPos = this.computeArmorContactPoint(hitCap, { x: cx, y: cy }, rx, ry);
+          const hitPos = this.computeArmorContactPoint(hitCap, armorGeom.center, armorGeom.rx, armorGeom.ry);
           this._lastArmorCollisionSource = source;
           this._lastArmorHitPos = hitPos;
           // P4.4B-R5.7: 立即提交伤害，写入 pendingSlashResult
@@ -738,15 +681,12 @@ export class BossReactiveController {
         }
       }
 
-      // 3. 身体碰撞
+      // 3. 身体碰撞 — P1-3: 使用 getBodyWorldGeometry 统一世界变换
       if (!this._resolvedSlashId) {
+        const bodyParts = this.getBodyWorldGeometry();
         for (const cap of geometry.capsules) {
-          const bodyHit = BODY_PARTS.some(p =>
-            capsuleHitsEllipse(
-              cap.a, cap.b, cap.radius,
-              { x: BOSS_CX + p.cx * this.bossRenderScale, y: this.renderY + p.cy * this.bossRenderScale },
-              p.rx * this.bossRenderScale, p.ry * this.bossRenderScale,
-            )
+          const bodyHit = bodyParts.some(bp =>
+            capsuleHitsEllipse(cap.a, cap.b, cap.radius, bp.center, bp.rx, bp.ry)
           );
           if (bodyHit && !this._session.bodyContact) {
             this._session.bodyContact = true;
@@ -907,13 +847,8 @@ export class BossReactiveController {
       armorReward = pending.armorBroken ? cfg.armorBreakReward : cfg.armorCrackReward;
       pending.consumed = true;
 
-      // 护甲事件加到 events
-      const armorEv: ReactiveCollisionEvent = {
-        kind: "armor",
-        hitPos: armorHitPos ?? { x: BOSS_CX, y: this.renderY },
-        collisionSource: armorCollisionSource ?? "visibleBlade",
-      };
-      events.push(armorEv);
+      // P0-3: 不再 push armorEv 到 events（已在 commitArmorDamage 时加入 _session.events，
+      // events 从 _session.events 拷贝已包含唯一 armor event，此处 push 会导致重复）
     }
 
     // ---- 身体误击 ----

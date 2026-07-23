@@ -531,6 +531,8 @@ export class Game {
             currentSlashActive: self.currentSlash?.active ?? false,
             inputLocked: self.bossController?.inputLocked ?? false,
             gameMode: self.gameMode,
+            // P0-1: exitSnapshot 提到公共返回层，boss 模式也能读取
+            lastReactiveExitSnapshot: self._lastReactiveExitSnapshot ?? undefined,
           };
         },
         // P4.4B-R4 P0-C: getTargets 按 gameMode 路由。
@@ -1129,8 +1131,10 @@ export class Game {
     eventsSummary: string;
   } | null = null;
 
-  /** P0: 最近一次碰撞事件列表（供 Debug 粒子回溯） */
-  private _lastReactiveEvents: ReactiveCollisionEvent[] = [];
+  /** P0-4: 当前 segment 的 resolveGeometry 事件（用于同帧粒子反馈） */
+  private _currentReactiveSegmentEvents: ReactiveCollisionEvent[] = [];
+  /** P0-4: 上一次 finishSlash 的完整事件列表（与 _lastReactiveResolve 同一次结算） */
+  private _lastResolvedReactiveEvents: ReactiveCollisionEvent[] = [];
 
   /** P4.4B-R5.7: reactiveController 置空前捕获的最终快照（供 E2E 第三甲断言） */
   private _lastReactiveExitSnapshot: {
@@ -1525,7 +1529,7 @@ export class Game {
       // P4.4B-R5.2 P0-6: 注册 Reactive 挥刀起始，供机会窗口按 slashId 宽限
       this.reactiveController?.registerReactiveSlashStart(this.currentSlash!.id);
       // P0: 每次起刀重置碰撞事件列表
-      this._lastReactiveEvents = [];
+      this._currentReactiveSegmentEvents = [];
     } else {
       this.energy = consumeEnergyByTier(this.energy, tier);
     }
@@ -2264,7 +2268,7 @@ export class Game {
       `eAfter: ${resolve?.energyAfter ?? "-"}`,
       `unclamped: ${resolve?.unclampedAfter ?? "-"}`,
       `summary: ${resolve?.eventsSummary ?? "-"}`,
-      `events: ${this._lastReactiveEvents.length}`,
+      `events: ${resolve?.eventsSummary ?? "-"}`,
     ];
     ctx.save();
     ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
@@ -2308,7 +2312,7 @@ export class Game {
 
     // P0: resolveGeometry 返回 ReactiveCollisionEvent[]（匿名逐段事件，用于同帧粒子反馈）
     const events = rc.resolveGeometry(geometry);
-    this._lastReactiveEvents = events;
+    this._currentReactiveSegmentEvents = events;
 
     // P0: 从 events 做粒子反馈，不再使用 _lastCollisionSource
     for (const ev of events) {
@@ -4518,7 +4522,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         result.dangerousWrongCutCount > 0 ? `danger:${result.dangerousWrongCutCount}` : "",
       ].filter(Boolean).join(" ") || "-",
     };
-    this._lastReactiveEvents = result.events;
+    this._lastResolvedReactiveEvents = result.events;
 
     this.warriorSheathTimer = 0.38;
     this.warriorDrawTimer = 0;

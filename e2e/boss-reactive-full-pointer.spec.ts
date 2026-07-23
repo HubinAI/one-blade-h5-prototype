@@ -81,7 +81,14 @@ test.describe("Reactive Boss 全Pointer三甲→pursuit", () => {
 
         await realMouseDragThroughArmor();
 
-        // poll 直到 armorProgress 或 durability 稳定变化
+        // P0-2: mouseUp 后改为 expect.poll 轮询 durability/progress/mode 变化
+        await expect.poll(async () => {
+          const s = await getState();
+          return s.armorProgress !== beforeProgress
+            || (s.armorDurability?.[expectedIndex] ?? 100) < previousDurability
+            || s.gameMode === "boss";
+        }, { timeout: 10000 }).toBe(true);
+
         const after = await getState();
 
         if (after.armorProgress !== beforeProgress) {
