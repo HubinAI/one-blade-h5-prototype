@@ -250,12 +250,13 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
     const cScaleX = canvasBox!.width / 390;
     const cScaleY = canvasBox!.height / 844;
 
-    // 策略：手指在护甲下方水平拖拽，手指轨迹避开护甲。
-    // 可见刀身从手指向上延伸（方向指向 warrior → 手指，向上），命中护甲。
-    const dragStartX = armorPos!.cx - 50;
-    const dragStartY = armorPos!.cy + armorPos!.ry + 25;
-    const dragEndX = armorPos!.cx + 50;
-    const dragEndY = armorPos!.cy + armorPos!.ry + 25;
+    // 策略：从护甲右上方拖拽到左下方，斜穿护甲边缘。
+    // 手指起点和终点在护甲外侧，baseTrail 只经过边缘，
+    // visibleBlade 从 trail 两端向外延伸并覆盖护甲中心区域。
+    const dragStartX = armorPos!.cx + armorPos!.rx + 15;
+    const dragStartY = armorPos!.cy - armorPos!.ry - 15;
+    const dragEndX = armorPos!.cx - armorPos!.rx - 15;
+    const dragEndY = armorPos!.cy + armorPos!.ry + 15;
 
     const sx = canvasBox!.x + dragStartX * cScaleX;
     const sy = canvasBox!.y + dragStartY * cScaleY;
@@ -264,11 +265,11 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
 
     await page.mouse.move(sx, sy);
     await page.mouse.down();
-    const steps = 12;
+    const steps = 16;
     for (let i = 1; i <= steps; i++) {
       const t = i / steps;
       await page.mouse.move(sx + (ex - sx) * t, sy + (ey - sy) * t);
-      await page.waitForTimeout(12);
+      await page.waitForTimeout(10);
     }
     await page.mouse.up();
 
@@ -350,30 +351,21 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
     const cScaleX = canvasBox!.width / 390;
     const cScaleY = canvasBox!.height / 844;
 
-    // 策略：V字形快速拖拽，方向突变。手指轨迹和可见刀身都避开护甲，但刀尖扫掠区（tipSweep）横跨护甲。
-    // start: 护甲右下 → mid: 护甲下方（略向左） → end: 护甲左上方
-    const sx = canvasBox!.x + (armorPos!.cx + 50) * cScaleX;
-    const sy = canvasBox!.y + (armorPos!.cy + 25) * cScaleY;
-    const mx = canvasBox!.x + (armorPos!.cx - 20) * cScaleX;
-    const my = canvasBox!.y + (armorPos!.cy + 35) * cScaleY;
-    const ex = canvasBox!.x + (armorPos!.cx - 40) * cScaleX;
-    const ey = canvasBox!.y + (armorPos!.cy - 10) * cScaleY;
+    // 策略：高速斜向拖拽穿过护甲，方向角大幅变化使 tipSweep 扫掠覆盖护甲。
+    // 起点和终点在护甲外侧，中间高速经过护甲边缘，刀尖扫掠区命中护甲。
+    const sx = canvasBox!.x + (armorPos!.cx + armorPos!.rx + 15) * cScaleX;
+    const sy = canvasBox!.y + (armorPos!.cy - armorPos!.ry - 15) * cScaleY;
+    const ex = canvasBox!.x + (armorPos!.cx - armorPos!.rx - 15) * cScaleX;
+    const ey = canvasBox!.y + (armorPos!.cy + armorPos!.ry + 15) * cScaleY;
 
     await page.mouse.move(sx, sy);
     await page.mouse.down();
-    // 第一段：向右下 → 向左下
-    const seg1Steps = 6;
-    for (let i = 1; i <= seg1Steps; i++) {
-      const t = i / seg1Steps;
-      await page.mouse.move(sx + (mx - sx) * t, sy + (my - sy) * t);
-      await page.waitForTimeout(10);
-    }
-    // 第二段：方向突变，向左上（方向角大幅变化，tipSweep 覆盖面积大）
-    const seg2Steps = 6;
-    for (let i = 1; i <= seg2Steps; i++) {
-      const t = i / seg2Steps;
-      await page.mouse.move(mx + (ex - mx) * t, my + (ey - my) * t);
-      await page.waitForTimeout(10);
+    // 极速拖拽：少步数 + 短间隔 = 高速扫掠
+    const steps = 8;
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      await page.mouse.move(sx + (ex - sx) * t, sy + (ey - sy) * t);
+      await page.waitForTimeout(8);
     }
     await page.mouse.up();
 
