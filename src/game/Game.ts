@@ -15,7 +15,7 @@ import { getBladeTier, getBladeTierName, getTierConfig, canSlash, consumeEnergyB
 import { isSharpTurn, segmentHitCircle } from "./systems/collisionSystem";
 import { paperBurst, ringParticle, sparkBurst, glowParticle, explosionBurst, coreCollapseBurst } from "./systems/particleSystem";
 import { BossController } from "./systems/BossController";
-import { BossReactiveController } from "./systems/BossReactiveController";
+import { BossReactiveController, type ReactiveCollisionEvent } from "./systems/BossReactiveController";
 import { drawEnergyBar, drawHpBar, drawArmorIndicators } from "./systems/bossReactiveHUD";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
@@ -1105,10 +1105,10 @@ export class Game {
   /** P4.4B-R4 P0-A: 最近一次 Reactive 挥刀的真实刀体几何（供 debug 绘制） */
   private _lastReactiveSlashGeometry: ReactiveSlashGeometry | null = null;
 
-  /** P4.4B-R5.2 P0-2: 最近一次实际碰撞来源（从 resolveGeometry 返回值取，非恒 baseTrail） */
-  private _lastCollisionSource: string = "-";
+  /** P4.4B-R5.5 P0-3: 最近一次 resolveGeometry 返回的完整碰撞事件（用于 primary event 关联） */
+  private _lastReactiveEvents: ReactiveCollisionEvent[] = [];
 
-  /** P4.4B-R5.1 P1-2: 最近一次 Reactive 收刀结算结果（供 Debug 遥测显示） */
+  /** P4.4B-R5.5 P0-5: 最近一次 Reactive 收刀结算结果（供 Debug 遥测显示，拆分字段） */
   private _lastReactiveResolve: {
     slashId: string;
     collisionResult: string;
@@ -1116,8 +1116,12 @@ export class Game {
     actualArmorDamage: number;
     energyBefore: number;
     baseCost: number;
-    energyReward: number;
-    penalty: number;
+    projectileReward: number;
+    armorReward: number;
+    dangerousPenalty: number;
+    bodyPenalty: number;
+    emptySwingPenalty: number;
+    unclampedEnergyAfter: number;
     energyAfter: number;
   } | null = null;
 
@@ -1497,7 +1501,7 @@ export class Game {
       // P4.4B-R5.2 P0-6: 注册 Reactive 挥刀起始，供机会窗口按 slashId 宽限
       this.reactiveController?.registerReactiveSlashStart(this.currentSlash!.id);
       // P4.4B-R5.4 P0-3: 每次起刀重置碰撞来源（防止上一刀残留值）
-      this._lastCollisionSource = "-";
+      this._lastReactiveEvents = [];
     } else {
       this.energy = consumeEnergyByTier(this.energy, tier);
     }
@@ -2206,7 +2210,7 @@ export class Game {
       ctx.restore();
     }
 
-    // 3. 文字信息面板（右上角）— P4.4B-R5.1 P1-2: 补全遥测字段
+    // 3. 文字信息面板（右上角）— P4.4B-R5.5 P0-5: 拆分字段展示
     const snap = rc.getReactiveSnapshot();
     const resolve = this._lastReactiveResolve;
     const lines = [
@@ -2221,14 +2225,18 @@ export class Game {
       `playerHp: ${snap.playerHp.current}/${snap.playerHp.max}`,
       `slashActive: ${this.currentSlash?.active ?? false}`,
       `slashEnergy: ${this.currentSlash?.lockedEnergy ?? "-"}`,
-      // P4.4B-R5.1 P1-2: 新增遥测字段
+      // P4.4B-R5.5 P0-5: 拆分遥测字段
       `lastResult: ${resolve?.collisionResult ?? "-"}`,
       `lastSource: ${resolve?.collisionSource ?? "-"}`,
       `actualDmg: ${resolve?.actualArmorDamage ?? "-"}`,
       `eBefore: ${resolve?.energyBefore ?? "-"}`,
       `baseCost: ${resolve?.baseCost ?? "-"}`,
-      `eReward: ${resolve?.energyReward ?? "-"}`,
-      `penalty: ${resolve?.penalty ?? "-"}`,
+      `projReward: ${resolve?.projectileReward ?? "-"}`,
+      `armorReward: ${resolve?.armorReward ?? "-"}`,
+      `dangerousPen: ${resolve?.dangerousPenalty ?? "-"}`,
+      `bodyPen: ${resolve?.bodyPenalty ?? "-"}`,
+      `emptySwing: ${resolve?.emptySwingPenalty ?? "-"}`,
+      `unclamped: ${resolve?.unclampedEnergyAfter ?? "-"}`,
       `eAfter: ${resolve?.energyAfter ?? "-"}`,
     ];
     ctx.save();
@@ -2274,12 +2282,10 @@ export class Game {
     // P4.4B-R5 P0-C + R5.5 P0-3: 真正传完整 geometry 给 Controller，让三胶囊全部参与碰撞。
     const events = rc.resolveGeometry(geometry);
 
-    // R5.5 P0-3: 弹幕命中由 resolveGeometry 通过 ReactiveCollisionEvent 返回，
-    // 不再需要通过 rc["projectiles"] 访问私有数组。
-    // P4.4B-R5.2 P0-2: 保存实际碰撞来源（从第一个 event 取 collisionSource）
-    if (events.length > 0) {
-      this._lastCollisionSource = events[0].collisionSource;
-    }
+    // R5.5 P0-3: 保存完整碰撞事件列表，供 finalizeBossSlashCommon 做 primary event 关联
+    this._lastReactiveEvents = events;
+
+    // 粒子效果：按事件种类触发
     for (const event of events) {
       if (event.kind === "projectile_cut" || event.kind === "projectile_reflect") {
         this.particles.push(...sparkBurst(event.hitPos, 4, "#9b59b6"));
@@ -4424,9 +4430,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
     // ---- 护甲命中视觉反馈 ----
     if (result.armorHit) {
-      const armorPos = rc.getActiveArmorWorldPos();
-      const fx = armorPos?.cx ?? trail.points[trail.points.length - 1].x;
-      const fy = armorPos?.cy ?? trail.points[trail.points.length - 1].y;
+      // P4.4B-R5.5 P1-6: 直接使用 result.armorHitPos，而非 getActiveArmorWorldPos()。
+      // 护甲破碎后 getActiveArmorWorldPos 返回 null，反馈会退到刀轨末端。
+      const fx = result.armorHitPos?.x ?? trail.points[trail.points.length - 1].x;
+      const fy = result.armorHitPos?.y ?? trail.points[trail.points.length - 1].y;
 
       this.flash = Math.max(this.flash, 0.35);
       this.screenShake = Math.max(this.screenShake, 0.25);
@@ -4477,22 +4484,41 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       : dangerousWrongCutCount > 0 ? "dangerous_wrong_cut"
       : result.wrongHit ? "body_wrong_hit"
       : "empty_swing";
-    const collisionSource = collisionResult === "armor_broken" || collisionResult === "armor_hit"
+
+    // P4.4B-R5.5 P0-3: primary source 从 primary event 本身读取，不使用全局单字符串。
+    // 合并 Controller 碰撞事件（armor/body）+ resolveGeometry 事件（projectile）找 primary event source。
+    const allEvents = [...result.collisionEvents, ...this._lastReactiveEvents];
+    const primarySource = collisionResult === "armor_broken" || collisionResult === "armor_hit"
       ? (result.armorCollisionSource ?? "-")
       : collisionResult === "body_wrong_hit"
       ? (result.bodyCollisionSource ?? "-")
       : collisionResult === "empty_swing"
       ? "-"
-      : this._lastCollisionSource;
+      : (() => {
+          // projectile_cut/projectile_reflect/dangerous_wrong_cut: 从 events 找匹配事件
+          const kindMap: Record<string, string> = {
+            projectile_cut: "projectile_cut",
+            projectile_reflect: "projectile_reflect",
+            dangerous_wrong_cut: "projectile_dangerous",
+          };
+          const targetKind = kindMap[collisionResult];
+          const match = allEvents.find(e => e.kind === targetKind);
+          return match?.collisionSource ?? "-";
+        })();
+
     this._lastReactiveResolve = {
       slashId: trail.id,
       collisionResult,
-      collisionSource,
+      collisionSource: primarySource,
       actualArmorDamage: result.armorDurabilityDamage,
       energyBefore: result.energyBefore,
       baseCost: result.baseCost,
-      energyReward: result.projectileCutReward + result.projectileReflectReward + result.armorReward,
-      penalty: result.dangerousWrongCutPenalty + result.bodyWrongHitPenalty + result.emptySwingPenalty,
+      projectileReward: result.projectileCutReward + result.projectileReflectReward,
+      armorReward: result.armorReward,
+      dangerousPenalty: result.dangerousWrongCutPenalty,
+      bodyPenalty: result.bodyWrongHitPenalty,
+      emptySwingPenalty: result.emptySwingPenalty,
+      unclampedEnergyAfter: result.energyBefore - result.baseCost + result.projectileCutReward + result.projectileReflectReward + result.armorReward - result.dangerousWrongCutPenalty - result.bodyWrongHitPenalty - result.emptySwingPenalty,
       energyAfter: result.energyAfter,
     };
     this.warriorSheathTimer = 0.38;

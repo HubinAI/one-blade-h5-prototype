@@ -218,6 +218,10 @@ export class BossReactiveController {
     this.bossRenderScale = REACTIVE_BOSS_CONFIG.visual.bossScale;
     resetProjectileIdCounter();
     this.initArmorTargets();
+    // P4.4B-R5.5 P1-7: 清理碰撞遥测，避免失败重试后调试数据残留
+    this._lastArmorCollisionSource = null;
+    this._lastBodyCollisionSource = null;
+    this._lastArmorHitPos = null;
   }
 
   // ================================================================
@@ -912,7 +916,11 @@ export class BossReactiveController {
     if (this._session.slashId === slashId) {
       this._session = { slashId: "", bodyContact: false, hitProjectileIds: new Set() };
     }
-    if (this._graceSlashId === slashId && this._resolvedSlashId !== slashId) {
+    // P4.4B-R5.5 P0-4: 只要 graceSlashId===slashId 就清理。
+    // 不再检查 _resolvedSlashId !== slashId —— body wrong hit 也会设置 resolvedSlashId，
+    // 旧条件导致命中身体后 grace 残留。
+    // 护甲命中的 grace 已在 transitionToResolve() 中提前清理，不会重复。
+    if (this._graceSlashId === slashId) {
       this.clearOpportunityGrace();
     }
 
