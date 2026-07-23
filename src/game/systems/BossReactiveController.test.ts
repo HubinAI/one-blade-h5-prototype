@@ -1481,6 +1481,7 @@ describe("BossReactiveController", () => {
 
     // 分别检查每个胶囊对护甲椭圆的命中状态
     const armorGeom = c.getArmorWorldGeometry(c.getActiveArmorIndex());
+    expect(armorGeom).not.toBeNull();
     let baseTrailHit = false;
     let visibleBladeHit = false;
     let tipSweepHit = false;
@@ -1488,7 +1489,7 @@ describe("BossReactiveController", () => {
     for (const cap of geometry.capsules) {
       const hit = capsuleHitsEllipse(
         cap.a, cap.b, cap.radius,
-        armorGeom.center, armorGeom.rx, armorGeom.ry
+        armorGeom!.center, armorGeom!.rx, armorGeom!.ry
       );
       if (cap.source === "baseTrail") baseTrailHit = hit;
       else if (cap.source === "visibleBlade") visibleBladeHit = hit;
