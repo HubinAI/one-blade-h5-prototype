@@ -58,7 +58,6 @@ interface PendingReactiveSlashResult {
   allArmorBroken: boolean;
   armorCollisionSource: CapsuleSource | null;
   armorHitPos: Vec2 | null;
-  events: ReactiveCollisionEvent[];
   bodyContact: boolean;
   lastBodyHitPos?: Vec2;
 }
@@ -793,7 +792,6 @@ export class BossReactiveController {
       allArmorBroken,
       armorCollisionSource: source,
       armorHitPos: hitPos ? { ...hitPos } : null,
-      events: [...this._session.events],
       bodyContact: this._session.bodyContact,
       lastBodyHitPos: this._session.lastBodyHitPos,
     };

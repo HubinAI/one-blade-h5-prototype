@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { APP_VERSION } from "./version";
 import { GameCanvas } from "./game/GameCanvas";
 import { LEVELS } from "./data/levels";
 import type { BattleResult, BossPhaseState, LevelConfig } from "./game/types";
@@ -72,7 +73,8 @@ export default function App() {
   const [home, setHome] = useState(getHomeSnapshot);
   const [currentLevel, setCurrentLevel] = useState<LevelConfig>(LEVELS[0]);
   const [lastResult, setLastResult] = useState<BattleResult | null>(null);
-  const [appVersion] = useState("V0723013");
+  const appVersion = APP_VERSION;
+
   /** P0: bossFlow 参数（双入口） */
   const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const bossFlow: "legacy" | "reactive" = urlParams.get("bossFlow") === "reactive" ? "reactive" : "legacy";

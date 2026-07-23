@@ -28,3 +28,5 @@ dist_old2/
 dist_prod_clean*/
 dist_e2e_clean*/
 dist_prod_check*/
+dist_check/
+test_output*.txt

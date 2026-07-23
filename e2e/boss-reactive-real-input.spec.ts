@@ -1,13 +1,54 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * P4.4B-R5.7: Reactive Boss 真实 Pointer E2E（V0723013 更新）
+ * P4.4B-R5.7: Reactive Boss 真实 Pointer E2E（V0723013-Final 收口）
  *
  * 变更：
- * 1. 松手后改为 expect.poll ��询真实状态（替代固定 waitForTimeout）
+ * 1. 松手后改为 expect.poll 查询真实状态（替代固定 waitForTimeout）
  * 2. 新增 test：命中后等 300ms 松手仍结算 armor_hit
- * 3. V0723013 P1-1: 三胶囊真实 Pointer 分来源测试
+ * 3. V0723013 P1-1: 三胶囊真实 Pointer 分来源测试（严格断言）
  */
+
+// ---- 碰撞检测辅助函数（与 reactiveSlashGeometry.ts 胶囊-椭圆检测逻辑一致） ----
+
+function distanceToSegment(
+  px: number, py: number,
+  ax: number, ay: number,
+  bx: number, by: number,
+): number {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const apx = px - ax;
+  const apy = py - ay;
+  const abLenSq = abx * abx + aby * aby;
+  if (abLenSq === 0) {
+    return Math.sqrt((px - ax) * (px - ax) + (py - ay) * (py - ay));
+  }
+  let t = (apx * abx + apy * aby) / abLenSq;
+  if (t < 0) t = 0;
+  if (t > 1) t = 1;
+  const projX = ax + abx * t;
+  const projY = ay + aby * t;
+  return Math.sqrt((px - projX) * (px - projX) + (py - projY) * (py - projY));
+}
+
+function capsuleHitsEllipse(
+  segA: { x: number; y: number },
+  segB: { x: number; y: number },
+  radius: number,
+  center: { x: number; y: number },
+  rx: number,
+  ry: number,
+): boolean {
+  const safeRx = Math.max(1, rx);
+  const safeRy = Math.max(1, ry);
+  const scaleX = 1 / safeRx;
+  const scaleY = 1 / safeRy;
+  const a = { x: (segA.x - center.x) * scaleX, y: (segA.y - center.y) * scaleY };
+  const b = { x: (segB.x - center.x) * scaleX, y: (segB.y - center.y) * scaleY };
+  const r = Math.max(radius * scaleX, radius * scaleY);
+  return distanceToSegment(0, 0, a.x, a.y, b.x, b.y) <= 1 + r;
+}
 
 test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
   test("真实鼠标拖拽——刀尖穿过护甲时护甲耐久下降", async ({ page }) => {
@@ -76,7 +117,6 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
     }
     await page.mouse.up();
 
-    // V0723011: 使用 poll 轮询真实��态（替代固定 waitForTimeout）
     await expect.poll(async () => {
       const s = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
       return s.armorDurability?.[0] ?? 100;
@@ -165,10 +205,10 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
   });
 
   // ================================================================
-  // V0723013 P1-1: 三胶囊真实 Pointer 分来源测试
+  // V0723013 P1-1: 三胶囊真实 Pointer 分来源测试（严格断言）
   // ================================================================
 
-  test("P1-1 visibleBlade-only — 刀尖延伸命中护甲 primarySource=visibleBlade", async ({ page }) => {
+  test("P1-1 visibleBlade-only — 严格断言 armorHit=true, primarySource=visibleBlade, 其他胶囊未命中", async ({ page }) => {
     const pageErrors: string[] = [];
     page.on("pageerror", (err) => pageErrors.push(err.message));
     page.on("console", (msg) => {
@@ -207,33 +247,28 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
 
     const canvasBox = await page.locator("canvas").boundingBox();
     expect(canvasBox).not.toBeNull();
-    const scaleX = canvasBox!.width / 390;
-    const scaleY = canvasBox!.height / 844;
+    const cScaleX = canvasBox!.width / 390;
+    const cScaleY = canvasBox!.height / 844;
 
-    // 策略：从护甲上方拖拽，手指轨迹（baseTrail）在护甲上方，刀尖（visibleBlade）向下延伸命中护甲
-    // 左肩护甲大约在 cx≈145, cy≈190, ry≈30，顶部在 y≈160
-    // 手指从 (100, 130) 拖到 (180, 155) —— 终点在护甲上方但非常近
-    // 刀尖沿方向 (atan2(25, 80)≈17°) 延伸 visualLength，可能命中护甲
-    const dragStartX = armorPos!.cx - 45;
-    const dragStartY = armorPos!.cy - 60;
-    const dragEndX = armorPos!.cx + 35;
-    const dragEndY = armorPos!.cy - 40;
+    // 策略：手指在护甲下方水平拖拽，手指轨迹避开护甲。
+    // 可见刀身从手指向上延伸（方向指向 warrior → 手指，向上），命中护甲。
+    const dragStartX = armorPos!.cx - 50;
+    const dragStartY = armorPos!.cy + armorPos!.ry + 25;
+    const dragEndX = armorPos!.cx + 50;
+    const dragEndY = armorPos!.cy + armorPos!.ry + 25;
 
-    const screenStartX = canvasBox!.x + dragStartX * scaleX;
-    const screenStartY = canvasBox!.y + dragStartY * scaleY;
-    const screenEndX = canvasBox!.x + dragEndX * scaleX;
-    const screenEndY = canvasBox!.y + dragEndY * scaleY;
+    const sx = canvasBox!.x + dragStartX * cScaleX;
+    const sy = canvasBox!.y + dragStartY * cScaleY;
+    const ex = canvasBox!.x + dragEndX * cScaleX;
+    const ey = canvasBox!.y + dragEndY * cScaleY;
 
-    await page.mouse.move(screenStartX, screenStartY);
+    await page.mouse.move(sx, sy);
     await page.mouse.down();
-    const steps = 10;
+    const steps = 12;
     for (let i = 1; i <= steps; i++) {
       const t = i / steps;
-      await page.mouse.move(
-        screenStartX + (screenEndX - screenStartX) * t,
-        screenStartY + (screenEndY - screenStartY) * t,
-      );
-      await page.waitForTimeout(15);
+      await page.mouse.move(sx + (ex - sx) * t, sy + (ey - sy) * t);
+      await page.waitForTimeout(12);
     }
     await page.mouse.up();
 
@@ -243,16 +278,37 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
       return s.armorDurability?.[0] ?? 100;
     }, { timeout: 5000 }).toBeLessThan(durabilityBefore);
 
-    // 读取 recentResult 验证 primarySource
-    const recentResult = await page.evaluate(() => window.__ONE_BLADE_E2E__.recentResult());
+    // 严格断言 recentResult
+    const recentResult: any = await page.evaluate(() => window.__ONE_BLADE_E2E__.recentResult());
     expect(recentResult).not.toBeNull();
-    // P1-1: 真实 Pointer 命中护甲，primarySource 记录实际碰撞来源
     expect(recentResult!.armorHit).toBe(true);
+    expect(recentResult!.primarySource).toBe("visibleBlade");
+
+    // 严格断言 recentGeometry：三胶囊各自命中状态
+    const recentGeom: any = await page.evaluate(() => window.__ONE_BLADE_E2E__.recentGeometry());
+    expect(recentGeom).not.toBeNull();
+    expect(recentGeom!.armor).not.toBeNull();
+
+    const armor = recentGeom!.armor as { center: { x: number; y: number }; rx: number; ry: number };
+    let baseTrailHit = false;
+    let visibleBladeHit = false;
+    let tipSweepHit = false;
+
+    for (const cap of (recentGeom!.capsules as Array<{ source: string; a: { x: number; y: number }; b: { x: number; y: number }; radius: number }>)) {
+      const hit = capsuleHitsEllipse(cap.a, cap.b, cap.radius, armor.center, armor.rx, armor.ry);
+      if (cap.source === "baseTrail") baseTrailHit = hit;
+      else if (cap.source === "visibleBlade") visibleBladeHit = hit;
+      else if (cap.source === "tipSweep") tipSweepHit = hit;
+    }
+
+    expect(baseTrailHit).toBe(false);
+    expect(visibleBladeHit).toBe(true);
+    expect(tipSweepHit).toBe(false);
 
     expect(pageErrors).toEqual([]);
   });
 
-  test("P1-1 tipSweep-only — 刀尖扫掠命中护甲 primarySource=tipSweep", async ({ page }) => {
+  test("P1-1 tipSweep-only — 严格断言 armorHit=true, primarySource=tipSweep, 手指避开护甲但刀尖扫掠命中", async ({ page }) => {
     const pageErrors: string[] = [];
     page.on("pageerror", (err) => pageErrors.push(err.message));
     page.on("console", (msg) => {
@@ -291,47 +347,73 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
 
     const canvasBox = await page.locator("canvas").boundingBox();
     expect(canvasBox).not.toBeNull();
-    const scaleX = canvasBox!.width / 390;
-    const scaleY = canvasBox!.height / 844;
+    const cScaleX = canvasBox!.width / 390;
+    const cScaleY = canvasBox!.height / 844;
 
-    // 策略：快速大范围拖拽穿过护甲区域，刀尖扫掠（tipSweep）覆盖面积大，概率命中
-    // 手指路径短，但扫掠区可能覆盖护甲边缘
-    const dragStartX = armorPos!.cx - 60;
-    const dragStartY = armorPos!.cy - 15;
-    const dragEndX = armorPos!.cx + 60;
-    const dragEndY = armorPos!.cy + 15;
+    // 策略：V字形快速拖拽，方向突变。手指轨迹和可见刀身都避开护甲，但刀尖扫掠区（tipSweep）横跨护甲。
+    // start: 护甲右下 → mid: 护甲下方（略向左） → end: 护甲左上方
+    const sx = canvasBox!.x + (armorPos!.cx + 50) * cScaleX;
+    const sy = canvasBox!.y + (armorPos!.cy + 25) * cScaleY;
+    const mx = canvasBox!.x + (armorPos!.cx - 20) * cScaleX;
+    const my = canvasBox!.y + (armorPos!.cy + 35) * cScaleY;
+    const ex = canvasBox!.x + (armorPos!.cx - 40) * cScaleX;
+    const ey = canvasBox!.y + (armorPos!.cy - 10) * cScaleY;
 
-    const screenStartX = canvasBox!.x + dragStartX * scaleX;
-    const screenStartY = canvasBox!.y + dragStartY * scaleY;
-    const screenEndX = canvasBox!.x + dragEndX * scaleX;
-    const screenEndY = canvasBox!.y + dragEndY * scaleY;
-
-    await page.mouse.move(screenStartX, screenStartY);
+    await page.mouse.move(sx, sy);
     await page.mouse.down();
-    const steps = 10;
-    for (let i = 1; i <= steps; i++) {
-      const t = i / steps;
-      await page.mouse.move(
-        screenStartX + (screenEndX - screenStartX) * t,
-        screenStartY + (screenEndY - screenStartY) * t,
-      );
-      await page.waitForTimeout(15);
+    // 第一段：向右下 → 向左下
+    const seg1Steps = 6;
+    for (let i = 1; i <= seg1Steps; i++) {
+      const t = i / seg1Steps;
+      await page.mouse.move(sx + (mx - sx) * t, sy + (my - sy) * t);
+      await page.waitForTimeout(10);
+    }
+    // 第二段：方向突变，向左上（方向角大幅变化，tipSweep 覆盖面积大）
+    const seg2Steps = 6;
+    for (let i = 1; i <= seg2Steps; i++) {
+      const t = i / seg2Steps;
+      await page.mouse.move(mx + (ex - mx) * t, my + (ey - my) * t);
+      await page.waitForTimeout(10);
     }
     await page.mouse.up();
 
+    // 等待结算
     await expect.poll(async () => {
       const s = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
       return s.armorDurability?.[0] ?? 100;
     }, { timeout: 5000 }).toBeLessThan(durabilityBefore);
 
-    const recentResult = await page.evaluate(() => window.__ONE_BLADE_E2E__.recentResult());
+    // 严格断言
+    const recentResult: any = await page.evaluate(() => window.__ONE_BLADE_E2E__.recentResult());
     expect(recentResult).not.toBeNull();
     expect(recentResult!.armorHit).toBe(true);
+    expect(recentResult!.primarySource).toBe("tipSweep");
+
+    // 严格断言 recentGeometry：三胶囊各自命中状态
+    const recentGeom: any = await page.evaluate(() => window.__ONE_BLADE_E2E__.recentGeometry());
+    expect(recentGeom).not.toBeNull();
+    expect(recentGeom!.armor).not.toBeNull();
+
+    const armor = recentGeom!.armor as { center: { x: number; y: number }; rx: number; ry: number };
+    let baseTrailHit = false;
+    let visibleBladeHit = false;
+    let tipSweepHit = false;
+
+    for (const cap of (recentGeom!.capsules as Array<{ source: string; a: { x: number; y: number }; b: { x: number; y: number }; radius: number }>)) {
+      const hit = capsuleHitsEllipse(cap.a, cap.b, cap.radius, armor.center, armor.rx, armor.ry);
+      if (cap.source === "baseTrail") baseTrailHit = hit;
+      else if (cap.source === "visibleBlade") visibleBladeHit = hit;
+      else if (cap.source === "tipSweep") tipSweepHit = hit;
+    }
+
+    expect(baseTrailHit).toBe(false);
+    expect(visibleBladeHit).toBe(false);
+    expect(tipSweepHit).toBe(true);
 
     expect(pageErrors).toEqual([]);
   });
 
-  test("P1-1 全miss — 三胶囊全部不交护甲，durability 不变", async ({ page }) => {
+  test("P1-1 全miss — 严格断言 recentResult 存在, primaryResult=empty_swing, armorHit=false, eventCount=0, durability不变, 三胶囊全未命中", async ({ page }) => {
     const pageErrors: string[] = [];
     page.on("pageerror", (err) => pageErrors.push(err.message));
     page.on("console", (msg) => {
@@ -366,45 +448,59 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
 
     const canvasBox = await page.locator("canvas").boundingBox();
     expect(canvasBox).not.toBeNull();
-    const scaleX = canvasBox!.width / 390;
-    const scaleY = canvasBox!.height / 844;
+    const cScaleX = canvasBox!.width / 390;
+    const cScaleY = canvasBox!.height / 844;
 
-    // 策略：在远离护甲的屏幕底部拖拽（y=650，护甲在 y≈190）
-    const dragStartX = 100;
-    const dragStartY = 620;
-    const dragEndX = 250;
-    const dragEndY = 630;
+    // 策略：在远离护甲的屏幕底部拖拽（y=620，护甲在 y≈190），三胶囊全部不碰护甲
+    const sx = canvasBox!.x + 100 * cScaleX;
+    const sy = canvasBox!.y + 620 * cScaleY;
+    const ex = canvasBox!.x + 250 * cScaleX;
+    const ey = canvasBox!.y + 630 * cScaleY;
 
-    const screenStartX = canvasBox!.x + dragStartX * scaleX;
-    const screenStartY = canvasBox!.y + dragStartY * scaleY;
-    const screenEndX = canvasBox!.x + dragEndX * scaleX;
-    const screenEndY = canvasBox!.y + dragEndY * scaleY;
-
-    await page.mouse.move(screenStartX, screenStartY);
+    await page.mouse.move(sx, sy);
     await page.mouse.down();
     const steps = 8;
     for (let i = 1; i <= steps; i++) {
       const t = i / steps;
-      await page.mouse.move(
-        screenStartX + (screenEndX - screenStartX) * t,
-        screenStartY + (screenEndY - screenStartY) * t,
-      );
+      await page.mouse.move(sx + (ex - sx) * t, sy + (ey - sy) * t);
       await page.waitForTimeout(20);
     }
     await page.mouse.up();
 
-    // 等待一小段时间确保结算完成
+    // 等待结算完成
     await page.waitForTimeout(500);
 
+    // 严格断言 durability 不变
     const stateAfter = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
-    // P1-1: 全miss 时 durability 不变
     expect(stateAfter.armorDurability?.[0] ?? 100).toBe(durabilityBefore);
 
-    const recentResult = await page.evaluate(() => window.__ONE_BLADE_E2E__.recentResult());
-    if (recentResult) {
-      // 如果有 recentResult，检查 armorHit=false（即空挥）
-      expect(recentResult.armorHit).toBe(false);
+    // 严格断言 recentResult：存在且 primaryResult=empty_swing, armorHit=false, eventCount=0
+    const recentResult: any = await page.evaluate(() => window.__ONE_BLADE_E2E__.recentResult());
+    expect(recentResult).not.toBeNull();
+    expect(recentResult!.primaryResult).toBe("empty_swing");
+    expect(recentResult!.armorHit).toBe(false);
+    expect(recentResult!.eventCount).toBe(0);
+
+    // 严格断言 recentGeometry：三胶囊全未命中
+    const recentGeom: any = await page.evaluate(() => window.__ONE_BLADE_E2E__.recentGeometry());
+    expect(recentGeom).not.toBeNull();
+    expect(recentGeom!.armor).not.toBeNull();
+
+    const armor = recentGeom!.armor as { center: { x: number; y: number }; rx: number; ry: number };
+    let baseTrailHit = false;
+    let visibleBladeHit = false;
+    let tipSweepHit = false;
+
+    for (const cap of (recentGeom!.capsules as Array<{ source: string; a: { x: number; y: number }; b: { x: number; y: number }; radius: number }>)) {
+      const hit = capsuleHitsEllipse(cap.a, cap.b, cap.radius, armor.center, armor.rx, armor.ry);
+      if (cap.source === "baseTrail") baseTrailHit = hit;
+      else if (cap.source === "visibleBlade") visibleBladeHit = hit;
+      else if (cap.source === "tipSweep") tipSweepHit = hit;
     }
+
+    expect(baseTrailHit).toBe(false);
+    expect(visibleBladeHit).toBe(false);
+    expect(tipSweepHit).toBe(false);
 
     expect(pageErrors).toEqual([]);
   });

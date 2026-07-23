@@ -606,10 +606,23 @@ export class Game {
         recentGeometry: () => {
           if (!self._lastReactiveSlashGeometry) return null;
           const g = self._lastReactiveSlashGeometry;
+          // 当前护甲椭圆（供 E2E 计算各胶囊命中）
+          let armor: { center: { x: number; y: number }; rx: number; ry: number } | null = null;
+          if (self.reactiveController) {
+            const ap = self.reactiveController.getActiveArmorWorldPos();
+            if (ap) {
+              armor = { center: { x: ap.cx, y: ap.cy }, rx: ap.rx, ry: ap.ry };
+            }
+          }
           return {
             slashId: g.slashId,
-            capsuleCount: g.capsules.length,
-            capsuleSources: g.capsules.map(c => c.source),
+            capsules: g.capsules.map(c => ({
+              source: c.source,
+              a: { x: c.a.x, y: c.a.y },
+              b: { x: c.b.x, y: c.b.y },
+              radius: c.radius,
+            })),
+            armor,
           };
         },
       };
@@ -1158,10 +1171,10 @@ export class Game {
     bodyEventCount: number;
     /** P0-C: 事件种类列表（逗号分隔） */
     eventKinds: string;
-    /** P0-C: 当前 segment 事件数 */
-    currentSegmentEventCount: number;
-    /** P0-C: 当前 segment 事件种类 */
-    currentSegmentKinds: string;
+    /** P0-C: 最后 segment 事件数 */
+    lastSegmentEventCount: number;
+    /** P0-C: 最后 segment 事件种类 */
+    lastSegmentKinds: string;
   } | null = null;
 
   /** P0-4: 当前 segment 的 resolveGeometry 事件（用于同帧粒子反馈） */
@@ -2300,13 +2313,12 @@ export class Game {
       `baseCost: ${resolve?.baseCost ?? "-"}`,
       `eAfter: ${resolve?.energyAfter ?? "-"}`,
       `unclamped: ${resolve?.unclampedAfter ?? "-"}`,
-      `summary: ${resolve?.eventsSummary ?? "-"}`,
       `events: ${resolve?.eventsSummary ?? "-"}`,
-      `resolvedEventCount: ${resolve?.eventCount ?? "-"}/${resolve?.eventCount ?? "-"}`,
+      `resolvedEvents: ${resolve?.eventCount ?? "-"}`,
       `resolvedKinds: ${resolve?.eventKinds ?? "-"}`,
-      `armorEvents: ${resolve?.armorEventCount ?? "-"}/${resolve?.eventCount ?? "-"}`,
-      `curSegmentEventCount: ${resolve?.currentSegmentEventCount ?? "-"}/${resolve?.eventCount ?? "-"}`,
-      `curSegmentKinds: ${resolve?.currentSegmentKinds ?? "-"}`,
+      `armorEvents: ${resolve?.armorEventCount ?? "-"}`,
+      `lastSegmentEvents: ${resolve?.lastSegmentEventCount ?? "-"}`,
+      `lastSegmentKinds: ${resolve?.lastSegmentKinds ?? "-"}`,
     ];
     ctx.save();
     ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
@@ -4580,8 +4592,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       armorEventCount,
       bodyEventCount,
       eventKinds,
-      currentSegmentEventCount,
-      currentSegmentKinds,
+      lastSegmentEventCount: currentSegmentEventCount,
+      lastSegmentKinds: currentSegmentKinds,
     };
     this._lastResolvedReactiveEvents = result.events;
 
