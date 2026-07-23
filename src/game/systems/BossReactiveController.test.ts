@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { BossReactiveController } from "./BossReactiveController";
 import { REACTIVE_BOSS_CONFIG } from "../config/bossReactiveFlow";
 import { resetProjectileIdCounter } from "./projectileSystem";
-import { buildReactiveSlashGeometry, type ReactiveSlashGeometry, type CapsuleSource } from "./reactiveSlashGeometry";
+import { buildReactiveSlashGeometry, capsuleHitsEllipse, type ReactiveSlashGeometry, type CapsuleSource } from "./reactiveSlashGeometry";
 import type { ProjectileKind } from "../types";
 
 /** 测试辅助：创建 Vec2 */
@@ -1435,5 +1435,76 @@ describe("BossReactiveController", () => {
     expect(result.events.length).toBe(2); // 1 armor + 1 projectile_cut from first resolve
     const kinds = result.events.map(e => e.kind).sort();
     expect(kinds).toEqual(["armor", "projectile_cut"]);
+  });
+
+  // ================================================================
+  // Section W: V0723013-Final.1 tipSweep 确定性输入-几何集成测试
+  // ================================================================
+
+  it("V0723013-Final.1 tipSweep-only deterministic input-trace integration", () => {
+    expect.assertions(6);
+    const c = new BossReactiveController();
+    advanceToOpportunity(c);
+    const pos = c.getActiveArmorWorldPos()!;
+    // energy=80：damage=20+80*0.8=84，armor 不会一击破 → primaryResult=armor_hit 而非 armor_broken
+    c.setProgrammaticSlashEnergy(80);
+
+    // ============================================================
+    // 固定 pointer 采样点：模拟手指在护甲边缘快速从右向左掠过
+    // 起点在护甲右边缘外侧，终点在护甲左边缘外侧，3 个中间点
+    // 所有点在护甲顶部上方（cy-ry-15），速度快（跨度大）
+    // ============================================================
+    // 第一护甲（左肩）：cx≈137.5, cy≈185.5, rx≈39.1, ry≈29.9
+    const topY = pos.cy - pos.ry - 15;  // 护甲顶部上方 15px
+
+    // 5 个采样点（起点 + 3 中间点 + 终点）
+    const p0 = v(pos.cx + pos.rx + 5, topY);   // 起点：右边缘外侧
+    const p1 = v(pos.cx + pos.rx * 0.35, topY); // 中间点 1
+    const p2 = v(pos.cx, topY);                  // 中间点 2：护甲正上方
+    const p3 = v(pos.cx - pos.rx * 0.35, topY); // 中间点 3
+    const p4 = v(pos.cx - pos.rx - 20, topY);   // 终点：左边缘外侧（-20 确保护甲右侧不碰 visibleBlade）
+
+    // 计算起始方向/位移矢量：从起点到终点的位移 → 向下（π/2），
+    // 这样 blade 垂直向下延伸，tipSweep 扫入护甲椭圆区域
+    const directionAngle = Math.PI / 2;
+
+    // 通过真实 Game 链路 buildReactiveSlashGeometry 构建刀体几何
+    // 使用默认 visualLength=30, width=3（与生产链路一致）
+    const geometry = buildReactiveSlashGeometry(
+      p0, p4,          // baseA = 起点, baseB = 终点
+      directionAngle,   // 刀身方向：向下
+      30,               // visualLength（默认值）
+      3,                // width（默认值）
+      "s_tipsweep_int",
+      80                // lockedEnergy
+    );
+
+    // 分别检查每个胶囊对护甲椭圆的命中状态
+    const armorGeom = c.getArmorWorldGeometry(c.getActiveArmorIndex());
+    let baseTrailHit = false;
+    let visibleBladeHit = false;
+    let tipSweepHit = false;
+
+    for (const cap of geometry.capsules) {
+      const hit = capsuleHitsEllipse(
+        cap.a, cap.b, cap.radius,
+        armorGeom.center, armorGeom.rx, armorGeom.ry
+      );
+      if (cap.source === "baseTrail") baseTrailHit = hit;
+      else if (cap.source === "visibleBlade") visibleBladeHit = hit;
+      else if (cap.source === "tipSweep") tipSweepHit = hit;
+    }
+
+    // 严格断言：仅 tipSweep 命中护甲
+    expect(baseTrailHit).toBe(false);
+    expect(visibleBladeHit).toBe(false);
+    expect(tipSweepHit).toBe(true);
+
+    // 验证完整 Game 生产链路：resolveGeometry → finishSlash → primarySource
+    c.resolveGeometry(geometry);
+    const result = c.finishSlash("s_tipsweep_int", 80, 200);
+    expect(result.armorHit).toBe(true);
+    expect(result.primarySource).toBe("tipSweep");
+    expect(result.primaryResult).toBe("armor_broken");
   });
 });
