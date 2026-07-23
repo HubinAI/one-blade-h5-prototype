@@ -330,21 +330,20 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
     const cScaleX = canvasBox!.width / 390;
     const cScaleY = canvasBox!.height / 844;
 
-    // 策略：高速斜向拖拽穿过护甲，方向角大幅变化使 tipSweep 扫掠覆盖护甲。
-    // 起点和终点在护甲外侧，中间高速经过护甲边缘，刀尖扫掠区命中护甲。
-    const sx = canvasBox!.x + (armorPos!.cx + armorPos!.rx + 15) * cScaleX;
-    const sy = canvasBox!.y + (armorPos!.cy - armorPos!.ry - 15) * cScaleY;
-    const ex = canvasBox!.x + (armorPos!.cx - armorPos!.rx - 15) * cScaleX;
-    const ey = canvasBox!.y + (armorPos!.cy + armorPos!.ry + 15) * cScaleY;
+    // 策略：极短极快拖拽——起点在护甲右上角外侧，终点在左下角外侧，
+    // 4 步 + 4ms 间隔 = 高速扫掠，baseTrail 极短不覆盖护甲中心，tipSweep 延伸命中。
+    const sx = canvasBox!.x + (armorPos!.cx + armorPos!.rx + 10) * cScaleX;
+    const sy = canvasBox!.y + (armorPos!.cy - armorPos!.ry - 10) * cScaleY;
+    const ex = canvasBox!.x + (armorPos!.cx - armorPos!.rx - 10) * cScaleX;
+    const ey = canvasBox!.y + (armorPos!.cy + armorPos!.ry + 10) * cScaleY;
 
     await page.mouse.move(sx, sy);
     await page.mouse.down();
-    // 极速拖拽：少步数 + 短间隔 = 高速扫掠
-    const steps = 8;
+    const steps = 4;
     for (let i = 1; i <= steps; i++) {
       const t = i / steps;
       await page.mouse.move(sx + (ex - sx) * t, sy + (ey - sy) * t);
-      await page.waitForTimeout(8);
+      await page.waitForTimeout(4);
     }
     await page.mouse.up();
 
