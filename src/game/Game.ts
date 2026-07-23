@@ -1495,6 +1495,8 @@ export class Game {
       // 不执行 consumeEnergyByTier — 由 endSlash/finalizeBossSlashCommon 统一结算
       // P4.4B-R5.2 P0-6: 注册 Reactive 挥刀起始，供机会窗口按 slashId 宽限
       this.reactiveController?.registerReactiveSlashStart(this.currentSlash!.id);
+      // P4.4B-R5.4 P0-3: 每次起刀重置碰撞来源（防止上一刀残留值）
+      this._lastCollisionSource = "-";
     } else {
       this.energy = consumeEnergyByTier(this.energy, tier);
     }
@@ -4503,15 +4505,35 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       : dangerousWrongCutCount > 0 ? "dangerous_wrong_cut"
       : result.wrongHit ? "body_wrong_hit"
       : "empty_swing";
+    // P4.4B-R5.4 P0-3: collisionSource 从 Controller 取对应事件的真实来源，不再从弹幕残留值取。
+    // armor_hit/armor_broken → rc.getLastArmorCollisionSource()
+    // body_wrong_hit → rc.getLastBodyCollisionSource()
+    // projectile_cut/reflect/dangerous → this._lastCollisionSource（resolveGeometry 返回值）
+    // empty_swing → "-"
+    const collisionSource = collisionResult === "armor_broken" || collisionResult === "armor_hit"
+      ? (rc.getLastArmorCollisionSource() ?? "-")
+      : collisionResult === "body_wrong_hit"
+      ? (rc.getLastBodyCollisionSource() ?? "-")
+      : collisionResult === "empty_swing"
+      ? "-"
+      : this._lastCollisionSource;
+    // P4.4B-R5.4 P0-4: 拆分真实能量组成（不再用近似净值）
+    const projectileReward = projectileCutCount * cfg.normalBulletReward + projectileReflectCount * cfg.reflectReward;
+    const armorReward = result.armorBroken ? REACTIVE_BOSS_CONFIG.bladeEnergy.armorBreakReward
+      : result.armorHit ? REACTIVE_BOSS_CONFIG.bladeEnergy.armorCrackReward : 0;
+    const dangerousPenalty = dangerousWrongCutCount * REACTIVE_BOSS_CONFIG.bladeEnergy.wrongHitPenalty;
+    const bodyPenalty = result.wrongHit ? REACTIVE_BOSS_CONFIG.bladeEnergy.wrongHitPenalty : 0;
+    const emptySwingPenalty = (!result.armorHit && !result.wrongHit && projectileCutCount === 0 && projectileReflectCount === 0 && dangerousWrongCutCount === 0)
+      ? REACTIVE_BOSS_CONFIG.bladeEnergy.emptySwingPenalty : 0;
     this._lastReactiveResolve = {
       slashId: trail.id,
       collisionResult,
-      collisionSource: this._lastCollisionSource,
+      collisionSource,
       actualArmorDamage: result.armorDurabilityDamage,
       energyBefore,
       baseCost,
-      energyReward: Math.max(0, this.energy + baseCost - energyBefore),
-      penalty: result.wrongHit ? REACTIVE_BOSS_CONFIG.bladeEnergy.wrongHitPenalty : 0,
+      energyReward: projectileReward + armorReward, // P0-4: 真实奖励总和
+      penalty: dangerousPenalty + bodyPenalty + emptySwingPenalty, // P0-4: 真实惩罚总和
       energyAfter: this.energy,
     };
     this.warriorSheathTimer = 0.38;

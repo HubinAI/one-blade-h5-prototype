@@ -90,10 +90,13 @@ export class BossReactiveController {
   /** 当前挥刀的刀势能量（由外部设置） */
   currentSlashEnergy: number = 0;
 
-  /** P4.4B-R5.2 P0-6: 机会窗口按 slashId 宽限。
-   *  只有在黄圈有效期内正式起刀的 slashId 才享受结束后 0.12s 宽限。
-   *  没在窗口内起刀时，窗口按原 1.5s 结束，不无条件延长。 */
+  /** P4.4B-R5.2 P0-6: 机会窗口按 slashId 宽限。 */
   private _graceSlashId: string | null = null;
+
+  /** P4.4B-R5.4 P0-3: 护甲/身体命中的真实碰撞来源（供 Debug 遥测） */
+  private _lastArmorCollisionSource: CapsuleSource | null = null;
+  private _lastBodyCollisionSource: CapsuleSource | null = null;
+  private _lastArmorHitPos: Vec2 | null = null;
 
   constructor() {
     this.initArmorTargets();
@@ -248,6 +251,13 @@ export class BossReactiveController {
 
   /** P4.4B-R5.2 P0-2: 获取 graceSlashId（供 Debug 遥测显示） */
   getGraceSlashId(): string | null { return this._graceSlashId; }
+
+  /** P4.4B-R5.4 P0-3: 获取最近一次护甲命中的碰撞来源 */
+  getLastArmorCollisionSource(): CapsuleSource | null { return this._lastArmorCollisionSource; }
+  /** P4.4B-R5.4 P0-3: 获取最近一次身体命中的碰撞来源 */
+  getLastBodyCollisionSource(): CapsuleSource | null { return this._lastBodyCollisionSource; }
+  /** P4.4B-R5.4 P0-3: 获取最近一次护甲命中的世界坐标 */
+  getLastArmorHitPos(): Vec2 | null { return this._lastArmorHitPos; }
 
   private updateArmorRecovery(dt: number): void {
     if (this.phaseTimer >= REACTIVE_BOSS_CONFIG.phaseTimers.recoveryDuration) {
@@ -604,6 +614,12 @@ export class BossReactiveController {
         const rx = armor.radiusX * this.bossRenderScale;
         const ry = armor.radiusY * this.bossRenderScale;
         if (geometryHitsArmor(geometry, { x: cx, y: cy }, rx, ry)) {
+          // P4.4B-R5.4 P0-3: 记录护甲命中的真实碰撞来源（从命中的胶囊取）
+          const hitCap = geometry.capsules.find(cap =>
+            capsuleHitsEllipse(cap.a, cap.b, cap.radius, { x: cx, y: cy }, rx, ry)
+          );
+          this._lastArmorCollisionSource = hitCap?.source ?? null;
+          this._lastArmorHitPos = { x: cx, y: cy };
           this._resolvedSlashId = geometry.slashId;
           this.transitionToResolve();
         }
@@ -622,6 +638,8 @@ export class BossReactiveController {
           if (bodyHit && !this._session.bodyContact) {
             this._session.bodyContact = true;
             this._session.lastBodyHitPos = cap.b;
+            // P4.4B-R5.4 P0-3: 记录身体命中的碰撞来源
+            this._lastBodyCollisionSource = cap.source;
             break;
           }
         }
@@ -717,6 +735,13 @@ export class BossReactiveController {
     // 清理session
     if (this._session.slashId === slashId) {
       this._session = { slashId: "", bodyContact: false, hitProjectileIds: new Set() };
+    }
+
+    // P4.4B-R5.4 P0-1: 空挥/提前收刀后清理 graceSlashId。
+    // 如果该 slashId 仍是 graceSlashId 且没有完成护甲 resolve，立即清理。
+    // 修复审计 P0-1：空挥后 graceSlashId 残留导致窗口错误延长 0.12s。
+    if (this._graceSlashId === slashId && this._resolvedSlashId !== slashId) {
+      this.clearOpportunityGrace();
     }
 
     return result;

@@ -594,4 +594,89 @@ describe("BossReactiveController", () => {
     expect(pos!.rx).toBeCloseTo(34 * 1.15, 1);
     expect(pos!.ry).toBeCloseTo(26 * 1.15, 1);
   });
+
+  // ================================================================
+  // P4.4B-R5.4 P1-2: 严格固定伤害序列（审计要求禁止"循环最多20次最后破甲"）
+  // ================================================================
+  it("P1-2 严格低刀势4刀序列 — 100→75→50→25→0", () => {
+    const c = new BossReactiveController();
+    c.setProgrammaticSlashEnergy(20);
+    const durabilitySeq: number[] = [100];
+    for (let i = 0; i < 4; i++) {
+      advanceToOpportunity(c);
+      c.setProgrammaticSlashEnergy(20);
+      const pos = c.getActiveArmorWorldPos()!;
+      c.resolveSegment(
+        v(pos.cx - pos.rx * 0.5, pos.cy - pos.ry * 0.5),
+        v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5),
+        `s_low_${i}`, 10
+      );
+      c.finishSlash(`s_low_${i}`);
+      durabilitySeq.push(c.getArmorDurability()[0]);
+      if (c.getArmorBrokenFlags()[0]) break;
+      advanceThroughResolveAndRecovery(c);
+    }
+    expect(durabilitySeq).toEqual([100, 75, 50, 25, 0]);
+    expect(c.getArmorBrokenFlags()[0]).toBe(true);
+  });
+
+  it("P1-2 严格中刀势2刀序列 — 100→45→0", () => {
+    const c = new BossReactiveController();
+    const durabilitySeq: number[] = [100];
+    for (let i = 0; i < 2; i++) {
+      advanceToOpportunity(c);
+      c.setProgrammaticSlashEnergy(50);
+      const pos = c.getActiveArmorWorldPos()!;
+      c.resolveSegment(
+        v(pos.cx - pos.rx * 0.5, pos.cy - pos.ry * 0.5),
+        v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5),
+        `s_mid_${i}`, 10
+      );
+      c.finishSlash(`s_mid_${i}`);
+      durabilitySeq.push(c.getArmorDurability()[0]);
+      if (c.getArmorBrokenFlags()[0]) break;
+      advanceThroughResolveAndRecovery(c);
+    }
+    expect(durabilitySeq).toEqual([100, 45, 0]);
+    expect(c.getArmorBrokenFlags()[0]).toBe(true);
+  });
+
+  it("P1-2 严格高刀势1刀序列 — 100→0", () => {
+    const c = new BossReactiveController();
+    advanceToOpportunity(c);
+    c.setProgrammaticSlashEnergy(100);
+    const pos = c.getActiveArmorWorldPos()!;
+    c.resolveSegment(
+      v(pos.cx - pos.rx * 0.5, pos.cy - pos.ry * 0.5),
+      v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5),
+      "s_high", 10
+    );
+    const f = c.finishSlash("s_high");
+    expect(f.armorBroken).toBe(true);
+    expect(c.getArmorDurability()[0]).toBe(0);
+  });
+
+  // ================================================================
+  // P4.4B-R5.4 P0-1: 空挥后 grace 清理（审计 P0-1）
+  // ================================================================
+  it("P0-1 空挥后graceSlashId清理 — 空挥收刀后窗口不延长", () => {
+    const c = new BossReactiveController();
+    advanceToOpportunity(c);
+    // 在窗口内起刀
+    c.registerReactiveSlashStart("s_empty");
+    expect(c.getGraceSlashId()).toBe("s_empty");
+    // 空挥收刀（没命中护甲）
+    c.finishSlash("s_empty");
+    // grace 应被清理
+    expect(c.getGraceSlashId()).toBe(null);
+  });
+
+  it("P0-1 reset后graceSlashId为null", () => {
+    const c = new BossReactiveController();
+    advanceToOpportunity(c);
+    c.registerReactiveSlashStart("s_test");
+    expect(c.getGraceSlashId()).toBe("s_test");
+    c.reset();
+    expect(c.getGraceSlashId()).toBe(null);
+  });
 });
