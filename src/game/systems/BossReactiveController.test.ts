@@ -251,7 +251,7 @@ describe("BossReactiveController", () => {
   it("护甲伤害公式 — 低/中/高刀势伤害值正确", () => {
     const durability = REACTIVE_BOSS_CONFIG.armor.durabilityPerPiece; // 100
 
-    // --- 低能量 (<30): 25% 伤害 ---
+    // --- 低能量 (<30): 固定 25 伤害 ---
     const c1 = new BossReactiveController();
     advanceToOpportunity(c1);
     c1.setProgrammaticSlashEnergy(20);
@@ -263,10 +263,10 @@ describe("BossReactiveController", () => {
     );
     const fLow = c1.finishSlash("s_low");
     expect(fLow.armorHit).toBe(true);
-    // 低能量: durability * 0.25 = 25, ceil → 25
+    // P4.4B-R5 P0-A: 固定绝对值 25（不再按剩余耐久百分比递减）
     expect(fLow.armorDurabilityDamage).toBe(25);
 
-    // --- 中能量 (30~69): 55% 伤害 ---
+    // --- 中能量 (30~69): 固定 55 伤害 ---
     const c2 = new BossReactiveController();
     advanceToOpportunity(c2);
     c2.setProgrammaticSlashEnergy(50);
@@ -277,10 +277,10 @@ describe("BossReactiveController", () => {
     );
     const fMid = c2.finishSlash("s_mid");
     expect(fMid.armorHit).toBe(true);
-    // 中能量: durability * 0.55 = 55.000000000000004, ceil → 56
-    expect(fMid.armorDurabilityDamage).toBe(56);
+    // P4.4B-R5 P0-A: 固定绝对值 55（不再 ceil(55.0004)=56）
+    expect(fMid.armorDurabilityDamage).toBe(55);
 
-    // --- 高能量 (≥70): 一刀碎 (durability) ---
+    // --- 高能量 (≥70): 一刀碎 (剩余耐久全扣) ---
     const c3 = new BossReactiveController();
     advanceToOpportunity(c3);
     c3.setProgrammaticSlashEnergy(100);
@@ -291,7 +291,7 @@ describe("BossReactiveController", () => {
     );
     const fHigh = c3.finishSlash("s_high");
     expect(fHigh.armorHit).toBe(true);
-    // 高能量: durability = 100
+    // 高能量: 直接破甲，剩余耐久全扣 = 100
     expect(fHigh.armorDurabilityDamage).toBe(100);
     expect(fHigh.armorBroken).toBe(true);
   });

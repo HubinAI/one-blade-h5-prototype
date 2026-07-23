@@ -8,7 +8,8 @@ import { DESIGN_WIDTH, DESIGN_HEIGHT } from "../config/constants";
 import { REACTIVE_BOSS_CONFIG } from "../config/bossReactiveFlow";
 import { distanceToSegment, clamp, randomRange } from "../../utils/math";
 import { createProjectile, updateProjectiles, checkSlashHit, cleanInactiveProjectiles, cleanResolvedProjectiles, resetProjectileIdCounter } from "./projectileSystem";
-import { capsuleHitsEllipse } from "./reactiveSlashGeometry";
+import { capsuleHitsEllipse, geometryHitsArmor } from "./reactiveSlashGeometry";
+import type { ReactiveSlashGeometry } from "./reactiveSlashGeometry";
 
 const BOSS_CY = 220;
 const BOSS_CX = DESIGN_WIDTH / 2;
@@ -67,7 +68,7 @@ export class BossReactiveController {
 
   // ---- 渲染 ----
   private renderY = BOSS_CY;
-  private bossRenderScale = 1.15;
+  private bossRenderScale = REACTIVE_BOSS_CONFIG.visual.bossScale;
 
   // Debug mode — controls phase text visibility
   private _debugMode = false;
@@ -144,7 +145,7 @@ export class BossReactiveController {
     this.screenShake = 0;
     this.particles = [];
     this.renderY = BOSS_CY;
-    this.bossRenderScale = 1;
+    this.bossRenderScale = REACTIVE_BOSS_CONFIG.visual.bossScale;
     resetProjectileIdCounter();
     this.initArmorTargets();
   }
@@ -313,8 +314,10 @@ export class BossReactiveController {
 
   private spawnProjectileForCurrentArmor(): void {
     const armor = this.getCurrentArmor();
-    const bx = BOSS_CX + armor.relX;
-    const by = this.renderY + armor.relY;
+    // P4.4B-R5 P1-B: 弹幕出生点乘以 bossRenderScale，与护甲视觉/碰撞中心一致。
+    // 审计 §12.2 指出：弹幕从护甲内侧偏移位置出生。
+    const bx = BOSS_CX + armor.relX * this.bossRenderScale;
+    const by = this.renderY + armor.relY * this.bossRenderScale;
 
     if (armor.projectileKind === "normal") {
       // 普通弹幕：直线向下
@@ -465,6 +468,100 @@ export class BossReactiveController {
     return hits;
   }
 
+  /**
+   * P4.4B-R5 P0-C: 接收完整 ReactiveSlashGeometry，真正遍历三胶囊做护甲/弹幕/身体判定。
+   * 审计 §6 指出：R4 把 geometry 压缩成 baseA→tipB 一条线传给 resolveSegment，
+   * 只对这一个胶囊做护甲检测。Debug 画三胶囊但实际碰撞只用一条，误导验证。
+   *
+   * 本方法遍历 geometry.capsules 的全部3个胶囊：
+   * - 手指轨迹(baseA→baseB)
+   * - 可见刀身(baseB→tipB)
+   * - 刀尖扫掠区(tipA→tipB)
+   * 只要任意胶囊命中护甲/弹幕/身体，即视为命中。
+   */
+  resolveGeometry(geometry: ReactiveSlashGeometry): Array<{ projectileIndex: number; hitPos: Vec2 }> {
+    if (this._phase !== "armor_threat" && this._phase !== "armor_opportunity") return [];
+    if (this._resolvedSlashId === geometry.slashId) return [];
+
+    // 初始化 Session
+    if (this._session.slashId !== geometry.slashId) {
+      this._session = { slashId: geometry.slashId, bodyContact: false };
+    }
+
+    const hits: Array<{ projectileIndex: number; hitPos: Vec2 }> = [];
+    const hitProjectileSet = new Set<number>(); // 去重：同一弹幕只命中一次
+
+    // 1. 弹幕判定：遍历 geometry.capsules，每个胶囊用 cap.radius 作为碰撞半径
+    for (const cap of geometry.capsules) {
+      const projHits = checkSlashHit(this.projectiles, cap.a, cap.b, cap.radius);
+      for (const idx of projHits) {
+        if (hitProjectileSet.has(idx)) continue;
+        hitProjectileSet.add(idx);
+        hits.push({ projectileIndex: idx, hitPos: { x: (cap.a.x + cap.b.x) / 2, y: (cap.a.y + cap.b.y) / 2 } });
+      }
+    }
+
+    // 2. 在 opportunity 阶段检测护甲命中：用 geometryHitsArmor 遍历全部胶囊
+    if (this._phase === "armor_opportunity") {
+      const armor = this.getCurrentArmor();
+      if (armor && !armor.broken) {
+        // P0-B: 护甲坐标和半径乘以 bossRenderScale，与视觉一致
+        const cx = BOSS_CX + armor.relX * this.bossRenderScale;
+        const cy = this.renderY + armor.relY * this.bossRenderScale;
+        const rx = armor.radiusX * this.bossRenderScale;
+        const ry = armor.radiusY * this.bossRenderScale;
+        // 真正遍历三胶囊，只要任意一个命中即视为护甲命中
+        if (geometryHitsArmor(geometry, { x: cx, y: cy }, rx, ry)) {
+          this._resolvedSlashId = geometry.slashId;
+          this.transitionToResolve();
+        }
+      }
+
+      // 3. 身体碰撞（wrong_hit候选）：遍历三胶囊，但只有未命中护甲时才记录
+      if (!this._resolvedSlashId) {
+        for (const cap of geometry.capsules) {
+          const bodyHit = BODY_PARTS.some(p =>
+            capsuleHitsEllipse(
+              cap.a, cap.b, cap.radius,
+              { x: BOSS_CX + p.cx * this.bossRenderScale, y: this.renderY + p.cy * this.bossRenderScale },
+              p.rx * this.bossRenderScale, p.ry * this.bossRenderScale,
+            )
+          );
+          if (bodyHit && !this._session.bodyContact) {
+            this._session.bodyContact = true;
+            this._session.lastBodyHitPos = cap.b;
+            break;
+          }
+        }
+      }
+    }
+
+    return hits;
+  }
+
+  /**
+   * P4.4B-R5 P0-A: 计算护甲固定绝对值伤害。
+   * 审计 §2/§3 指出：旧公式 armor.durability*0.25/0.55 按剩余耐久百分比递减，
+   * 导致"越打伤害越低"，左肩需 12-14 次低刀势命中，形成负反馈死循环。
+   *
+   * 新规则（固定绝对值，不超过剩余耐久）：
+   * - 高刀势(≥70)：直接破甲（剩余耐久全扣）
+   * - 中刀势(30-69)：固定 55 点
+   * - 低刀势(<30)：固定 25 点
+   *
+   * 验收：低4刀(100→75→50→25→0)、中2刀(100→45→0)、高1刀(100→0)。
+   */
+  private calculateArmorDamage(energy: number, armor: ReactiveArmorTarget): number {
+    const cfg = REACTIVE_BOSS_CONFIG.armor;
+    if (energy >= 70) {
+      return armor.durability; // 高刀势直接破甲
+    }
+    if (energy >= 30) {
+      return Math.min(armor.durability, cfg.midEnergyDamage); // 固定55
+    }
+    return Math.min(armor.durability, cfg.lowEnergyCrack); // 固定25
+  }
+
   /** 收刀结算 */
   finishSlash(slashId: string): {
     armorHit: boolean;
@@ -491,17 +588,12 @@ export class BossReactiveController {
     if (this._resolvedSlashId === slashId) {
       const armor = this.getCurrentArmor();
       if (armor && !armor.broken) {
-        // 计算护甲伤害
-        let damage = 0;
-        const energy = this.currentSlashEnergy;
-        if (energy >= 70) {
-          damage = armor.durability; // 一刀碎
-        } else if (energy >= 30) {
-          damage = armor.durability * 0.55; // 55%
-        } else {
-          damage = armor.durability * 0.25; // 25%
-        }
-        damage = Math.max(1, Math.ceil(damage));
+        // P4.4B-R5 P0-A: 固定绝对值伤害，不再按剩余耐久百分比递减。
+        // 审计 §2 指出：旧公式 armor.durability*0.25 导致"越打伤害越低"，
+        // 左肩需要 12-14 次低刀势命中，形成负反馈死循环。
+        // 新规则：低刀势固定25、中刀势固定55、高刀势直接破甲。
+        // 验收：低4刀破甲(100→75→50→25→0)、中2刀(100→45→0)、高1刀(100→0)。
+        const damage = this.calculateArmorDamage(this.currentSlashEnergy, armor);
         armor.durability = Math.max(0, armor.durability - damage);
         armor.crackProgress = 1 - armor.durability / armor.maxDurability;
         armor.animTimer = 0.4;

@@ -478,16 +478,14 @@ export class Game {
         const t = rc.getActiveArmorWorldPos();
         if (!t) return false;
         const slashId = `e2e_ra_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        // 用穿过护甲中心的小线段（保证 segmentHitEllipse 命中）
+        // P4.4B-R5 P0-C: 构建完整 geometry 传给 resolveGeometry（三胶囊遍历）
         const segA = { x: t.cx - Math.max(2, t.rx * 0.5), y: t.cy - Math.max(2, t.ry * 0.5) };
         const segB = { x: t.cx + Math.max(2, t.rx * 0.5), y: t.cy + Math.max(2, t.ry * 0.5) };
+        const angle = Math.atan2(segB.y - segA.y, segB.x - segA.x);
+        const geometry = buildReactiveSlashGeometry(segA, segB, angle, 30, 3, slashId, 100);
         // 高能量一刀碎（与玩家真实高刀势命中一致）
         rc.setProgrammaticSlashEnergy(100);
-        const hits = rc.resolveSegment(segA, segB, slashId, 10);
-        if (hits.length === 0) {
-          // 仍可能命中护甲（resolveSegment 在 opportunity 阶段会触发 transitionToResolve）
-          // 即使无弹幕命中，只要 _resolvedSlashId 被设置就说明护甲命中
-        }
+        rc.resolveGeometry(geometry);
         const result = rc.finishSlash(slashId);
         return result.armorHit;
       };
@@ -1153,8 +1151,9 @@ export class Game {
       drawArmorIndicators(ctx, armors, DESIGN_WIDTH / 2 - 80, 28, activeIndex);
       //    底部：刀势条（靠近玩家操作区）
       drawEnergyBar(ctx, this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.max, DESIGN_WIDTH / 2 - 90, DESIGN_HEIGHT - 60, 180, 18);
-      // 9. Debug
-      if (this.debugEnabled) this.drawDebugPanel(ctx);
+      // P4.4B-R5 P1-A: Reactive 模式禁止旧 drawDebugPanel（审计 §10.1 "两套Debug面板同时显示且矛盾"）。
+      // Debug 信息已由 drawReactiveDebugOverlay 在上方绘制（紧凑 Reactive 专用面板）。
+      // 旧面板显示 "Boss State: loading / Input Locked: true" 等旧 bossController 状态，与 Reactive 实际矛盾。
       // 10. Flash
       if (this.flash > 0) {
         ctx.fillStyle = `rgba(255, 232, 146, ${this.flash * 0.18})`;
@@ -2159,19 +2158,29 @@ export class Game {
       const rEff = this.currentSlash?.reactiveBladeEffect;
       const width = rEff ? rEff.width : 3;
       const effectiveRadius = width / 2 + 10;
-      // 绿色椭圆：碰撞区（rx + effectiveRadius, ry + effectiveRadius）
+      // P4.4B-R5 P1-A: 审计 §10.4 "绿圈和黄圈不可能完全重合"——旧实现绿圈=视觉+容错比黄圈大。
+      // 新实现：黄实线=视觉基础椭圆、绿虚线=基础碰撞椭圆（必须重合）、青外圈=容错后有效判定边界。
       ctx.save();
-      ctx.strokeStyle = "rgba(50, 255, 100, 0.7)";
+      // 1. 黄色实线：护甲视觉基础椭圆
+      ctx.strokeStyle = "rgba(255, 225, 48, 0.8)";
       ctx.lineWidth = 1.5;
-      ctx.setLineDash([3, 3]);
-      ctx.beginPath();
-      ctx.ellipse(armorPos.cx, armorPos.cy, armorPos.rx + effectiveRadius, armorPos.ry + effectiveRadius, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      // 黄色椭圆：视觉区（rx, ry，不含有效半径）
-      ctx.strokeStyle = "rgba(255, 225, 48, 0.7)";
       ctx.setLineDash([]);
       ctx.beginPath();
       ctx.ellipse(armorPos.cx, armorPos.cy, armorPos.rx, armorPos.ry, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      // 2. 绿色虚线：护甲基础碰撞椭圆（必须与黄色重合）
+      ctx.strokeStyle = "rgba(50, 255, 100, 0.7)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.ellipse(armorPos.cx, armorPos.cy, armorPos.rx, armorPos.ry, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      // 3. 青色外圈：移动端容错后的有效判定边界
+      ctx.strokeStyle = "rgba(91, 192, 255, 0.5)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.ellipse(armorPos.cx, armorPos.cy, armorPos.rx + effectiveRadius, armorPos.ry + effectiveRadius, 0, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
@@ -2231,8 +2240,10 @@ export class Game {
     // 保存当前 geometry 供 debug 绘制
     this._lastReactiveSlashGeometry = geometry;
 
-    // 用扩展线段（手指 baseA → 刀尖 tipB）传给 resolveSegment，让护甲判定覆盖可见刀身
-    const hits = rc.resolveSegment(geometry.effectiveSegA, geometry.effectiveSegB, trail.id, bladeReach);
+    // P4.4B-R5 P0-C: 真正传完整 geometry 给 Controller，让三胶囊全部参与碰撞。
+    // 审计 §6 指出：R4 把 geometry 压缩成 baseA→tipB 一条线，只对一个胶囊做护甲检测。
+    // 现在调 resolveGeometry 遍历全部3个胶囊（手指轨迹+可见刀身+刀尖扫掠区）。
+    const hits = rc.resolveGeometry(geometry);
 
     // 处理弹幕命中效果 — P0-D: 仅标记命中，不结算能量/粒子/文字
     for (const hit of hits) {

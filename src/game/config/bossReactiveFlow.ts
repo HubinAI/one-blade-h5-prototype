@@ -4,6 +4,10 @@
 // ========================================================================
 
 export const REACTIVE_BOSS_CONFIG = {
+  // P4.4B-R5 P1-B: Boss 视觉缩放统一配置（构造与 reset 都读此值，避免不一致）
+  visual: {
+    bossScale: 1.15,
+  },
   phaseTimers: {
     armorPrepare: 0.3,
     threatDuration: [2.0, 3.0],

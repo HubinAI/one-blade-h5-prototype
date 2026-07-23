@@ -72,7 +72,7 @@ export default function App() {
   const [home, setHome] = useState(getHomeSnapshot);
   const [currentLevel, setCurrentLevel] = useState<LevelConfig>(LEVELS[0]);
   const [lastResult, setLastResult] = useState<BattleResult | null>(null);
-  const [appVersion] = useState("V0723001");
+  const [appVersion] = useState("V0723002");
   /** P0: bossFlow 参数（双入口） */
   const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const bossFlow: "legacy" | "reactive" = urlParams.get("bossFlow") === "reactive" ? "reactive" : "legacy";
