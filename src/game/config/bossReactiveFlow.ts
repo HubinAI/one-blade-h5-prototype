@@ -96,14 +96,20 @@ export const REACTIVE_BOSS_CONFIG = {
     midEnergyColor: "#5bc0ff",
     highEnergyColor: "#fff4a0",
   },
-  // P4.4B-R2 P1-A: Reactive 独立刀路规则 — 不读旧段位 duration/maxPathLength。
-  // 刀势只影响伤害/宽度/亮度/破甲/反射/穿透，不影响能否完成基础刀路。
+  // P4.4B-R5.6 P0-A/P0-B: Reactive 独立刀路规则 — 唯一消耗配置源。
+  // 旧 bladeEnergy 配置不再用于 Reactive 挥刀消耗。
+  // 验证：两次300px后 35-16=19 >=19（旧两刀归零）
   reactiveSlash: {
     activationDistance: 14,
     maxDuration: 0.9,
     maxPathLength: 360,
+    /** 基础消耗 */
     baseCost: 4,
-    costPer100Px: 2,
-    emptySwingPenalty: 3,
+    /** 每100px额外消耗 */
+    costPer100Px: 1,
+    /** 单次最大消耗 */
+    maxCost: 8,
+    /** 空挥惩罚（验证期暂关闭，基础消耗已足够抑制无脑挥刀） */
+    emptySwingPenalty: 0,
   },
 } as const;
