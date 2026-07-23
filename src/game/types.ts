@@ -525,6 +525,8 @@ export type BladeContinuousEffect = {
 // 将"是否显示"与"是否造成伤害"解耦，让 Reactive/Boss 模式可以
 // 保留玩家主体+主刀气场+副刀视觉，但冻结副刀锁敌与伤害。
 // 来源：审计文档"显示与战斗解耦"共识 A/B/C。
+// P4.4B-R4 P0-D: 新增 showLegacyHpHearts/showLegacyEnergyBar，
+// 让 Boss 模式隐藏旧三心 HP + 旧刀势条，避免与 Reactive HUD 双源重复显示。
 export type PlayerCombatLayerPolicy = {
   /** 城墙（普通关卡底部防御线，Boss 模式不画） */
   showDefenseWall: boolean;
@@ -542,4 +544,8 @@ export type PlayerCombatLayerPolicy = {
   enableSubBladeTargeting: boolean;
   /** 副刀造成伤害（命中敌人/弹幕/护甲） */
   enableSubBladeDamage: boolean;
+  /** P4.4B-R4 P0-D: 旧三心 HP（玩家头顶心形生命），Boss 模式隐藏避免与左上 HP 条双源重复 */
+  showLegacyHpHearts: boolean;
+  /** P4.4B-R4 P0-D: 旧三段刀势条（底部能量条+段位刻度+段位名），Boss 模式隐藏避免与底部 Reactive 刀势条重复 */
+  showLegacyEnergyBar: boolean;
 };

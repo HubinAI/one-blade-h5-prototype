@@ -18,6 +18,7 @@ import { BossController } from "./systems/BossController";
 import { BossReactiveController } from "./systems/BossReactiveController";
 import { drawEnergyBar, drawHpBar, drawArmorIndicators } from "./systems/bossReactiveHUD";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
+import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
 import { BLADE_BASE_STATS, QUALITY_ORDER } from "./config/synthesis";
 import type { Blade } from "./services/BladeService";
@@ -532,11 +533,28 @@ export class Game {
             gameMode: self.gameMode,
           };
         },
-        getTargets: () => ({
-          coreTarget: self.bossController?.getCoreWorldPos(),
-          armorTargets: [0, 1, 2].map(i => self.bossController?.getArmorTargetWorldPos(i)).filter(Boolean),
-          executionTarget: self.bossController?.getExecutionCoreWorldPos() ?? null,
-        }),
+        // P4.4B-R4 P0-C: getTargets 按 gameMode 路由。
+        // - bossReactive：返回 reactiveController.getActiveArmorWorldPos()（乘 bossRenderScale 的护甲坐标）
+        // - boss：返回旧 bossController 的护甲坐标
+        getTargets: () => {
+          if (self.gameMode === "bossReactive" && self.reactiveController) {
+            const rc = self.reactiveController;
+            return {
+              coreTarget: null,
+              armorTargets: [rc.getActiveArmorWorldPos()],
+              executionTarget: null,
+              // 额外暴露 reactive 状态供真实 Pointer E2E 断言
+              reactivePhase: rc.phase,
+              reactiveArmorDurability: rc.getArmorDurability(),
+              reactiveActiveArmorIndex: rc.getActiveArmorIndex(),
+            };
+          }
+          return {
+            coreTarget: self.bossController?.getCoreWorldPos(),
+            armorTargets: [0, 1, 2].map(i => self.bossController?.getArmorTargetWorldPos(i)).filter(Boolean),
+            executionTarget: self.bossController?.getExecutionCoreWorldPos() ?? null,
+          };
+        },
         // P4.4B-R3 P0-D: 程序化命中按 gameMode 路由。
         // - bossReactive：调 forceReactiveArmorHit（resolveSegment + finishSlash 真实链路）
         // - boss：调 forceArmorHit（旧 BossController.resolveArmorSegment）
@@ -1026,12 +1044,12 @@ export class Game {
         updateSubBladeIdle: true,
         enableSubBladeTargeting: false,
         enableSubBladeDamage: false,
+        // P4.4B-R4 P0-D: 隐藏旧三心 HP + 旧刀势条，避免与左上 Reactive HP + 底部 Reactive 刀势条双源重复
+        showLegacyHpHearts: false,
+        showLegacyEnergyBar: false,
       };
     }
     if (this.gameMode === "boss") {
-      // 旧 Boss 模式（pursuit/终结/天雷）：玩家+主刀气场+副刀视觉保留，
-      // 副刀锁敌/伤害冻结，避免在 Boss 战中污染验证或造成数值溢出。
-      // 终结/天雷演出阶段（inExecution）由调用方决定是否调用本层。
       return {
         showDefenseWall: false,
         showWarrior: true,
@@ -1041,9 +1059,12 @@ export class Game {
         updateSubBladeIdle: true,
         enableSubBladeTargeting: false,
         enableSubBladeDamage: false,
+        // P4.4B-R4 P0-D: 旧 Boss 模式也隐藏旧 HUD，避免桥接时 UI 跳变
+        showLegacyHpHearts: false,
+        showLegacyEnergyBar: false,
       };
     }
-    // 普通关卡：完整玩家+主刀气场+副刀+锁敌+伤害
+    // 普通关卡：完整玩家+主刀气场+副刀+锁敌+伤害+旧HUD
     return {
       showDefenseWall: true,
       showWarrior: true,
@@ -1053,6 +1074,8 @@ export class Game {
       updateSubBladeIdle: true,
       enableSubBladeTargeting: true,
       enableSubBladeDamage: true,
+      showLegacyHpHearts: true,
+      showLegacyEnergyBar: true,
     };
   }
 
@@ -1081,6 +1104,9 @@ export class Game {
   /** 临时保存当前玩家战斗层策略（仅供 drawDefenseAndWarrior/drawSubBladeVisual 内部读取，不可外部依赖） */
   private _playerCombatLayerPolicy: import("../game/types").PlayerCombatLayerPolicy | null = null;
 
+  /** P4.4B-R4 P0-A: 最近一次 Reactive 挥刀的真实刀体几何（供 debug 绘制） */
+  private _lastReactiveSlashGeometry: ReactiveSlashGeometry | null = null;
+
   /** P4.4A.2: Boss模式渲染白名单 */
   private renderBossMode(ctx: CanvasRenderingContext2D): void {
     ctx.save();
@@ -1107,6 +1133,9 @@ export class Game {
       this.renderPlayerCombatLayer(ctx);
       // 5. P4.4B-R3 P0-A: 玩家受击线仅 debug 模式显示（debug 时为碰撞参考，正式画面不显示）
       if (this.debugEnabled) this.drawReactiveDefenseLine(ctx);
+      // P4.4B-R4 P0-C: Debug 碰撞可视化工具（审计 §12）
+      // 红色虚线=手指轨迹 / 蓝色半透明区=真实可命中刀体 / 绿色椭圆=碰撞区 / 黄色椭圆=视觉区 / 文字信息
+      if (this.debugEnabled) this.drawReactiveDebugOverlay(ctx, rc);
       // 6. 浮字 + 边缘闪屏
       this.drawFloatingTexts(ctx);
       this.drawEdgeFlash(ctx);
@@ -2107,6 +2136,74 @@ export class Game {
     ctx.restore();
   }
 
+  /**
+   * P4.4B-R4 P0-C: Reactive Debug 碰撞可视化工具（审计 §12）。
+   * 在 ?bossFlow=reactive&debug=1 模式下绘制：
+   * - 红色虚线：真实手指轨迹（来自 _lastReactiveSlashGeometry）
+   * - 蓝色半透明区：真实可命中刀体（3个胶囊）
+   * - 绿色椭圆：当前护甲真实碰撞区（乘 bossRenderScale，含有效半径）
+   * - 黄色椭圆：画面护甲视觉区（乘 bossRenderScale）
+   * - 文字信息：phase/lockedEnergy/armorDurability/lastCollisionResult/bridgeTriggered
+   * 正常情况下绿色碰撞椭圆与黄色视觉椭圆完全重合。
+   */
+  private drawReactiveDebugOverlay(ctx: CanvasRenderingContext2D, rc: BossReactiveController): void {
+    // 1. 真实刀体几何（红色手指轨迹 + 蓝色胶囊 + 绿色刀尖点）
+    if (this._lastReactiveSlashGeometry) {
+      drawReactiveSlashDebug(ctx, this._lastReactiveSlashGeometry);
+    }
+
+    // 2. 护甲碰撞椭圆（绿色）与视觉椭圆（黄色）
+    const armorPos = rc.getActiveArmorWorldPos();
+    if (armorPos) {
+      // 有效碰撞半径（含刀身宽度/2 + 移动端容差）
+      const rEff = this.currentSlash?.reactiveBladeEffect;
+      const width = rEff ? rEff.width : 3;
+      const effectiveRadius = width / 2 + 10;
+      // 绿色椭圆：碰撞区（rx + effectiveRadius, ry + effectiveRadius）
+      ctx.save();
+      ctx.strokeStyle = "rgba(50, 255, 100, 0.7)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.ellipse(armorPos.cx, armorPos.cy, armorPos.rx + effectiveRadius, armorPos.ry + effectiveRadius, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      // 黄色椭圆：视觉区（rx, ry，不含有效半径）
+      ctx.strokeStyle = "rgba(255, 225, 48, 0.7)";
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.ellipse(armorPos.cx, armorPos.cy, armorPos.rx, armorPos.ry, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // 3. 文字信息面板（右上角）
+    const snap = rc.getReactiveSnapshot();
+    const lines = [
+      `phase: ${snap.phase}`,
+      `armorProgress: ${snap.armorProgress}`,
+      `activeArmorIdx: ${snap.activeArmorIndex}`,
+      `armorDurability: [${snap.armorDurability.join(", ")}]`,
+      `energy: ${Math.round(this.energy)}`,
+      `inputLocked: ${snap.inputLocked}`,
+      `projectileCount: ${snap.projectileCount}`,
+      `bridgeTriggered: ${snap.bridgeTriggered}`,
+      `playerHp: ${snap.playerHp.current}/${snap.playerHp.max}`,
+      `slashActive: ${this.currentSlash?.active ?? false}`,
+      `slashEnergy: ${this.currentSlash?.lockedEnergy ?? "-"}`,
+    ];
+    ctx.save();
+    ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+    ctx.fillRect(DESIGN_WIDTH - 170, 50, 160, lines.length * 14 + 8);
+    ctx.fillStyle = "#5bc0ff";
+    ctx.font = '10px "Consolas", monospace';
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i], DESIGN_WIDTH - 165, 54 + i * 14);
+    }
+    ctx.restore();
+  }
+
   private checkReactiveProjectileHits(a: Vec2, b: Vec2, trail: SlashTrail): void {
     const rc = this.reactiveController;
     if (!rc) return;
@@ -2117,13 +2214,25 @@ export class Game {
     // 设置当前刀势能量（供 finishSlash 使用）
     rc.currentSlashEnergy = slashEnergy;
 
-    // 计算刀芒检测范围
-    const stage = SWORD_STAGE_BY_ID[trail.tier];
-    const ratio = Math.max(0.06, trail.remainingPathLength / Math.max(1, trail.maxPathLength));
-    const bladeReach = BALANCE.slash.touchHitPadding + stage.width * trail.widthMultiplier * (0.75 + ratio);
+    // P4.4B-R4 P0-A: 构建真实刀体几何（手指轨迹 + 可见刀身 + 扫掠区）。
+    // 审计 §2 "可见刀体和护甲碰撞使用了两套几何"——旧代码只检测手指采样点 segA-segB，
+    // 不检测可见刀尖延伸。现统一为 ReactiveSlashGeometry，让刀尖/刀身也参与碰撞。
+    const rEff = trail.reactiveBladeEffect;
+    const visualLength = rEff ? rEff.visualLength : 30;
+    const width = rEff ? rEff.width : 3;
+    const geometry = buildReactiveSlashGeometry(
+      a, b,
+      this.lastSlashAngle,
+      visualLength, width,
+      trail.id, trail.lockedEnergy,
+    );
+    // 有效碰撞半径 = 刀身宽度/2 + 移动端容差(10px)
+    const bladeReach = geometry.effectiveRadius;
+    // 保存当前 geometry 供 debug 绘制
+    this._lastReactiveSlashGeometry = geometry;
 
-    // 调用reactiveController的resolveSegment
-    const hits = rc.resolveSegment(a, b, trail.id, bladeReach);
+    // 用扩展线段（手指 baseA → 刀尖 tipB）传给 resolveSegment，让护甲判定覆盖可见刀身
+    const hits = rc.resolveSegment(geometry.effectiveSegA, geometry.effectiveSegB, trail.id, bladeReach);
 
     // 处理弹幕命中效果 — P0-D: 仅标记命中，不结算能量/粒子/文字
     for (const hit of hits) {
@@ -4281,25 +4390,65 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const cost = cfg.baseSlashCost + Math.floor(pathLen / 100) * cfg.longSlashExtraCost;
     this.energy = Math.max(0, this.energy - cost);
 
-    // 处理护甲命中
+    // 处理护甲命中 — P4.4B-R4 P1-A: 区分低/中/高刀势反馈
     if (result.armorHit) {
+      const hitX = trail.points[trail.points.length - 1].x;
+      const hitY = trail.points[trail.points.length - 1].y;
+      // 取护甲世界坐标作为反馈位置（比刀尖更准）
+      const armorPos = rc.getActiveArmorWorldPos();
+      const fx = armorPos?.cx ?? hitX;
+      const fy = armorPos?.cy ?? hitY;
+
       this.flash = Math.max(this.flash, 0.35);
       this.screenShake = Math.max(this.screenShake, 0.25);
-      this.particles.push(...sparkBurst({ x: trail.points[trail.points.length - 1].x, y: trail.points[trail.points.length - 1].y }, 8, "#f0e130"));
-      this.addText(trail.points[trail.points.length - 1].x, trail.points[trail.points.length - 1].y - 20, "破甲", "#f0e130", 18, 0.6);
+      this.particles.push(...sparkBurst({ x: fx, y: fy }, 8, "#f0e130"));
+
       if (result.armorBroken) {
+        // 高刀势（≥70）直接破甲
         this.energy = gainEnergyByAction(this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.armorBreakReward, REACTIVE_BOSS_CONFIG.bladeEnergy.max);
         this.screenShake = Math.max(this.screenShake, 0.5);
         this.flash = Math.max(this.flash, 0.5);
-        this.particles.push(...sparkBurst({ x: trail.points[trail.points.length - 1].x, y: trail.points[trail.points.length - 1].y }, 12, "#f0e130"));
+        this.particles.push(...sparkBurst({ x: fx, y: fy }, 16, "#f0e130"));
+        this.addText(fx, fy - 24, "破甲！", "#f0e130", 22, 1.0);
+        AudioService.defenseHit();
       } else {
+        // 低刀势（<30）→ "裂痕 25%" / 中刀势（30-69）→ "护甲 -55"
         this.energy = gainEnergyByAction(this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.armorCrackReward, REACTIVE_BOSS_CONFIG.bladeEnergy.max);
+        const pct = Math.round(result.armorDurabilityDamage / (rc.getActiveArmorWorldPos()?.rx ?? 34) * 100);
+        if (slashEnergy < 30) {
+          this.addText(fx, fy - 20, `裂痕 ${result.armorDurabilityDamage}`, "#d9b45b", 14, 0.7);
+        } else {
+          this.addText(fx, fy - 20, `护甲 -${result.armorDurabilityDamage}`, "#f0e130", 16, 0.7);
+        }
+        // 轻微命中停顿
+        this.screenShake = Math.max(this.screenShake, 0.15);
       }
+    } else if (!result.wrongHit) {
+      // P4.4B-R4 P1-A: 未命中原因反馈
+      // 区分"未到机会窗口"和"刀体擦过"
+      const phase = rc.phase;
+      if (phase === "armor_threat") {
+        // threat 阶段砍中护甲区域但护甲未开 → "破绽未开"
+        const armorPos = rc.getActiveArmorWorldPos();
+        if (armorPos) {
+          // 检查刀体是否接近护甲（近似：刀尖距离护甲中心 < 60px）
+          const tipX = trail.points[trail.points.length - 1].x;
+          const tipY = trail.points[trail.points.length - 1].y;
+          const dist = Math.hypot(tipX - armorPos.cx, tipY - armorPos.cy);
+          if (dist < armorPos.rx + 40) {
+            this.addText(armorPos.cx, armorPos.cy - 20, "破绽未开", "#8e44ad", 13, 0.6);
+            this.particles.push(...sparkBurst({ x: armorPos.cx, y: armorPos.cy }, 4, "#6c3483"));
+          }
+        }
+      }
+      // opportunity 阶段未命中护甲 → 无反馈（刀体擦过，静默）
     }
     if (result.wrongHit) {
       this.energy = Math.max(0, this.energy - REACTIVE_BOSS_CONFIG.bladeEnergy.wrongHitPenalty);
-      this.particles.push(...sparkBurst({ x: trail.points[trail.points.length - 1].x, y: trail.points[trail.points.length - 1].y }, 6, "#6c3483"));
-      this.addText(trail.points[trail.points.length - 1].x, trail.points[trail.points.length - 1].y - 20, "打偏 -10", "#ff6a33", 14, 0.6);
+      const wx = trail.points[trail.points.length - 1].x;
+      const wy = trail.points[trail.points.length - 1].y;
+      this.particles.push(...sparkBurst({ x: wx, y: wy }, 6, "#6c3483"));
+      this.addText(wx, wy - 20, "偏斩 -10", "#ff6a33", 14, 0.6);
     }
     this.warriorSheathTimer = 0.38;
     this.warriorDrawTimer = 0;
@@ -7024,6 +7173,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.shadowBlur = 0;
 
     // 头顶心形：显示当前生命
+    // P4.4B-R4 P0-D: Boss 模式隐藏旧三心 HP（policy.showLegacyHpHearts=false），
+    // 避免与左上 Reactive HP 条双源重复。
+    // 普通模式 policy 可能 null，默认显示。
+    if (policy?.showLegacyHpHearts ?? true) {
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0); // 重置到屏幕坐标
     for (let i = 0; i < this.maxHp; i += 1) {
@@ -7047,6 +7200,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.stroke();
     }
     ctx.restore();
+    } // end if (policy.showLegacyHpHearts)
 
     ctx.restore();
 
@@ -7060,6 +7214,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.drawSubBladeSlot(ctx, 1, rightSlot.boxX, rightSlot.boxY, rightSlot.iconR, 0xb58cff);
 
     // 刀势三段能量条 —— 屏幕底部居中（窄条）
+    // P4.4B-R4 P0-D: Boss 模式隐藏旧刀势条（policy.showLegacyEnergyBar=false），
+    // 避免与底部 Reactive 刀势条双源重复。普通模式默认显示。
+    if (policy?.showLegacyEnergyBar ?? true) {
     const eBarW = 200;
     const eBarH = 14;
     const eBarX = (DESIGN_WIDTH - eBarW) / 2;
@@ -7178,6 +7335,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       this.slowMoTimer = Math.max(this.slowMoTimer, 0.06);
     }
     ctx.restore();
+    } // end if (policy.showLegacyEnergyBar)
   }
 
   /** 右下角临时效果图标：鼓/魂/油，含圆形旋转倒计时 */

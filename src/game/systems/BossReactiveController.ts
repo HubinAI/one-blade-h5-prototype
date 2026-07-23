@@ -8,6 +8,7 @@ import { DESIGN_WIDTH, DESIGN_HEIGHT } from "../config/constants";
 import { REACTIVE_BOSS_CONFIG } from "../config/bossReactiveFlow";
 import { distanceToSegment, clamp, randomRange } from "../../utils/math";
 import { createProjectile, updateProjectiles, checkSlashHit, cleanInactiveProjectiles, cleanResolvedProjectiles, resetProjectileIdCounter } from "./projectileSystem";
+import { capsuleHitsEllipse } from "./reactiveSlashGeometry";
 
 const BOSS_CY = 220;
 const BOSS_CX = DESIGN_WIDTH / 2;
@@ -216,8 +217,11 @@ export class BossReactiveController {
 
   private updateArmorOpportunity(dt: number): void {
     // 不生成新弹幕，等待玩家挥刀
-    if (this.phaseTimer >= REACTIVE_BOSS_CONFIG.phaseTimers.opportunityDuration) {
-      // 超时未命中→进入recovery
+    // P4.4B-R4 P1-B: 机会窗口输入容错——opportunity 结束后额外 0.12s 宽限。
+    // 禁止"黄圈还亮着但阶段已不可命中"。玩家在窗口内起刀则允许在宽限内完成结算。
+    const gracePeriod = 0.12;
+    if (this.phaseTimer >= REACTIVE_BOSS_CONFIG.phaseTimers.opportunityDuration + gracePeriod) {
+      // 超时（含宽限）未命中→进入recovery
       this.transitionToRecovery();
     }
   }
@@ -357,15 +361,16 @@ export class BossReactiveController {
   /** P4.4B-R3 P0-D: 当前激活护甲索引（供 E2E reactiveSnapshot 读） */
   getActiveArmorIndex(): number { return this.activeArmorIndex; }
 
-  /** P4.4B-R3 P0-D: 当前激活护甲的世界坐标 + 半径（供 E2E 程序化命中使用，避免硬编码） */
+  /** P4.4B-R3 P0-D: 当前激活护甲的世界坐标 + 半径（供 E2E 程序化命中使用，避免硬编码）。
+   *  P4.4B-R4 P0-B: 坐标和半径乘以 bossRenderScale，与视觉绘制一致。 */
   getActiveArmorWorldPos(): { cx: number; cy: number; rx: number; ry: number } | null {
     const armor = this.armorTargets[this.activeArmorIndex];
     if (!armor || armor.broken) return null;
     return {
-      cx: BOSS_CX + armor.relX,
-      cy: this.renderY + armor.relY,
-      rx: armor.radiusX,
-      ry: armor.radiusY,
+      cx: BOSS_CX + armor.relX * this.bossRenderScale,
+      cy: this.renderY + armor.relY * this.bossRenderScale,
+      rx: armor.radiusX * this.bossRenderScale,
+      ry: armor.radiusY * this.bossRenderScale,
     };
   }
 
@@ -425,19 +430,30 @@ export class BossReactiveController {
     if (this._phase === "armor_opportunity") {
       const armor = this.getCurrentArmor();
       if (armor && !armor.broken) {
-        const cx = BOSS_CX + armor.relX;
-        const cy = this.renderY + armor.relY;
-        if (this.segmentHitEllipse(segA, segB, cx, cy, armor.radiusX, armor.radiusY)) {
+        // P4.4B-R4 P0-B: 护甲坐标和半径乘以 bossRenderScale，与 drawBoss 中的 translate+scale 视觉一致。
+        // 修复审计 §3.2 "护甲碰撞没有应用相同缩放"——视觉护甲中心与碰撞中心错位 7.5px。
+        const cx = BOSS_CX + armor.relX * this.bossRenderScale;
+        const cy = this.renderY + armor.relY * this.bossRenderScale;
+        const rx = armor.radiusX * this.bossRenderScale;
+        const ry = armor.radiusY * this.bossRenderScale;
+        // P4.4B-R4 P0-A: 护甲判定使用 capsuleHitsEllipse（支持刀身宽度半径）。
+        // bladeReach 现在代表有效碰撞半径（刀身宽度/2 + 移动端容差）。
+        // 修复审计 §2 "可见刀体和护甲碰撞使用了两套几何"——让刀尖/刀身也参与碰撞。
+        if (capsuleHitsEllipse(segA, segB, bladeReach, { x: cx, y: cy }, rx, ry)) {
           // 护甲命中 → 进入resolve
           this._resolvedSlashId = slashId;
           this.transitionToResolve();
         }
       }
 
-      // 检测身体碰撞（wrong_hit候选）
+      // 检测身体碰撞（wrong_hit候选）— 同样乘 bossRenderScale
       if (!this._resolvedSlashId) {
         const bodyHit = BODY_PARTS.some(p =>
-          this.segmentHitEllipse(segA, segB, BOSS_CX + p.cx, this.renderY + p.cy, p.rx, p.ry)
+          capsuleHitsEllipse(
+            segA, segB, bladeReach,
+            { x: BOSS_CX + p.cx * this.bossRenderScale, y: this.renderY + p.cy * this.bossRenderScale },
+            p.rx * this.bossRenderScale, p.ry * this.bossRenderScale,
+          )
         );
         if (bodyHit && !this._session.bodyContact) {
           this._session.bodyContact = true;

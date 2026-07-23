@@ -82,8 +82,8 @@ describe("BossReactiveController", () => {
     controller.update(3.0);
     expect(controller.phase).toBe("armor_opportunity");
 
-    // armor_opportunity 超时未命中 → armor_recovery (超时 1.5s)
-    controller.update(1.5);
+    // armor_opportunity 超时未命中 → armor_recovery (超时 1.5s + P1-B 容错 0.12s = 1.62s)
+    controller.update(1.7);
     expect(controller.phase).toBe("armor_recovery");
 
     // armor_recovery → armor_prepare (recovery 持续 0.2s)
@@ -507,7 +507,7 @@ describe("BossReactiveController", () => {
 
     // 真实推进到 recovery 阶段（不写私有字段）
     advanceToOpportunity(controller); // → opportunity
-    controller.update(1.5); // opportunity 超时 → recovery
+    controller.update(1.7); // opportunity 超时(1.5s) + P1-B 容错(0.12s) = 1.62s → recovery
     expect(controller.phase).toBe("armor_recovery");
     const r2 = controller.resolveSegment(v(0, 0), v(500, 500), "test_recovery", 50);
     expect(r2).toEqual([]);
@@ -581,13 +581,17 @@ describe("BossReactiveController", () => {
   // ================================================================
   // Test 20: P0-D 新增 — getActiveArmorWorldPos 返回当前护甲世界坐标
   // ================================================================
-  it("P0-D getActiveArmorWorldPos — 返回当前激活护甲的世界坐标", () => {
+  it("P0-D getActiveArmorWorldPos — 返回当前激活护甲的世界坐标（乘 bossRenderScale）", () => {
     const pos = controller.getActiveArmorWorldPos();
     expect(pos).not.toBeNull();
-    // 左肩初始激活
-    expect(pos!.cx).toBe(BOSS_CX - 50);
-    expect(pos!.cy).toBe(BOSS_CY - 30);
-    expect(pos!.rx).toBe(34);
-    expect(pos!.ry).toBe(26);
+    // 左肩初始激活。P4.4B-R4 P0-B: 坐标和半径乘以 bossRenderScale(1.15)，与视觉一致
+    // cx = BOSS_CX + (-50) * 1.15 = 137.5
+    // cy = BOSS_CY + (-30) * 1.15 = 185.5
+    // rx = 34 * 1.15 = 39.1
+    // ry = 26 * 1.15 = 29.9
+    expect(pos!.cx).toBeCloseTo(BOSS_CX - 50 * 1.15, 1);
+    expect(pos!.cy).toBeCloseTo(BOSS_CY - 30 * 1.15, 1);
+    expect(pos!.rx).toBeCloseTo(34 * 1.15, 1);
+    expect(pos!.ry).toBeCloseTo(26 * 1.15, 1);
   });
 });
