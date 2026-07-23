@@ -84,9 +84,16 @@ export class BossReactiveController {
 
   // ---- 内部状态 ----
   private _resolvedSlashId = "";
-  private _session: { slashId: string; bodyContact: boolean; lastBodyHitPos?: Vec2 } = { slashId: "", bodyContact: false };
+  // P4.4B-R5.2 P0-3: session 级别弹幕去重集合，同一弹幕跨多个 segment 只命中一次。
+  // 旧实现每次 resolveGeometry 调用新建本地 hitProjectileSet，同一刀多次调用会重复命中。
+  private _session: { slashId: string; bodyContact: boolean; lastBodyHitPos?: Vec2; hitProjectileIds: Set<string> } = { slashId: "", bodyContact: false, hitProjectileIds: new Set() };
   /** 当前挥刀的刀势能量（由外部设置） */
   currentSlashEnergy: number = 0;
+
+  /** P4.4B-R5.2 P0-6: 机会窗口按 slashId 宽限。
+   *  只有在黄圈有效期内正式起刀的 slashId 才享受结束后 0.12s 宽限。
+   *  没在窗口内起刀时，窗口按原 1.5s 结束，不无条件延长。 */
+  private _graceSlashId: string | null = null;
 
   constructor() {
     this.initArmorTargets();
@@ -138,7 +145,7 @@ export class BossReactiveController {
       flashTimer: 0,
     };
     this._resolvedSlashId = "";
-    this._session = { slashId: "", bodyContact: false };
+    this._session = { slashId: "", bodyContact: false, hitProjectileIds: new Set() };
     this._bridgeTriggered = false;
     this.shakeTimer = 0;
     this.flash = 0;
@@ -218,14 +225,30 @@ export class BossReactiveController {
 
   private updateArmorOpportunity(dt: number): void {
     // 不生成新弹幕，等待玩家挥刀
-    // P4.4B-R4 P1-B: 机会窗口输入容错——opportunity 结束后额外 0.12s 宽限。
-    // 禁止"黄圈还亮着但阶段已不可命中"。玩家在窗口内起刀则允许在宽限内完成结算。
-    const gracePeriod = 0.12;
+    // P4.4B-R5.2 P0-6: 机会窗口按 slashId 宽限。
+    // 旧实现无条件延长 0.12s（所有黄圈都延长）。
+    // 新实现：只有有 _graceSlashId（窗口内起刀的 slashId）时才延长 0.12s，
+    // 没有起刀时窗口按原 1.5s 结束，立即 recovery。
+    const gracePeriod = this._graceSlashId ? 0.12 : 0;
     if (this.phaseTimer >= REACTIVE_BOSS_CONFIG.phaseTimers.opportunityDuration + gracePeriod) {
       // 超时（含宽限）未命中→进入recovery
+      this._graceSlashId = null; // 清理 grace
       this.transitionToRecovery();
     }
   }
+
+  /** P4.4B-R5.2 P0-6: 注册 Reactive 挥刀起始（Game 在 startSlash 时调用）。
+   *  只有在 phase === armor_opportunity 且计时未超过正式窗口时起刀，才记录 graceSlashId。
+   *  窗口结束后，仅该 slashId 可继续 0.12s 完成。 */
+  registerReactiveSlashStart(slashId: string): void {
+    if (this._phase === "armor_opportunity"
+      && this.phaseTimer < REACTIVE_BOSS_CONFIG.phaseTimers.opportunityDuration) {
+      this._graceSlashId = slashId;
+    }
+  }
+
+  /** P4.4B-R5.2 P0-2: 获取 graceSlashId（供 Debug 遥测显示） */
+  getGraceSlashId(): string | null { return this._graceSlashId; }
 
   private updateArmorRecovery(dt: number): void {
     if (this.phaseTimer >= REACTIVE_BOSS_CONFIG.phaseTimers.recoveryDuration) {
@@ -265,7 +288,7 @@ export class BossReactiveController {
     this._phase = "armor_recovery";
     this.phaseTimer = 0;
     this._resolvedSlashId = "";
-    this._session = { slashId: "", bodyContact: false };
+    this._session = { slashId: "", bodyContact: false, hitProjectileIds: new Set() };
     // P4.4B-R2 P0-B: 只清理已 resolved 弹幕（被斩断/反射/命中玩家/过期），
     // 未解决弹幕继续飞行，直到玩家处理或命中防线。修复"recovery 切阶段清屏导致弹幕永远到不了玩家线"。
     cleanResolvedProjectiles(this.projectiles);
@@ -447,7 +470,7 @@ export class BossReactiveController {
 
     // 初始化Session
     if (this._session.slashId !== slashId) {
-      this._session = { slashId, bodyContact: false };
+      this._session = { slashId, bodyContact: false, hitProjectileIds: new Set() };
     }
 
     const hits: Array<{ projectileIndex: number; hitPos: Vec2 }> = [];
@@ -514,26 +537,27 @@ export class BossReactiveController {
     if (this._phase !== "armor_threat" && this._phase !== "armor_opportunity") return [];
     if (this._resolvedSlashId === geometry.slashId) return [];
 
-    // 初始化 Session
+    // 初始化 Session — P4.4B-R5.2 P0-3: session 级别 hitProjectileIds 去重
     if (this._session.slashId !== geometry.slashId) {
-      this._session = { slashId: geometry.slashId, bodyContact: false };
+      this._session = { slashId: geometry.slashId, bodyContact: false, hitProjectileIds: new Set() };
     }
 
-    // P4.4B-R5.1 P1-6: 返回稳定 projectileId + kind + collisionSource，
-    // Game 不再通过 rc["projectiles"] 访问私有数组。
+    // P4.4B-R5.1 P1-6: 返回稳定 projectileId + kind + collisionSource
     const hits: Array<{ projectileId: string; kind: ProjectileKind; collisionSource: CapsuleSource; hitPos: Vec2 }> = [];
-    const hitProjectileSet = new Set<number>(); // 去重：同一弹幕只命中一次
+    // P4.4B-R5.2 P0-3: 删除本地 hitProjectileSet，改用 session 级别去重。
+    // 旧实现每次调用新建本地 Set，同一刀多次调用（跨 segment）会重复命中同一弹幕。
     const slashEnergy = geometry.lockedEnergy;
 
     // 1. 弹幕判定：遍历 geometry.capsules，每个胶囊用 cap.radius 作为碰撞半径
     for (const cap of geometry.capsules) {
       const projHits = checkSlashHit(this.projectiles, cap.a, cap.b, cap.radius);
       for (const idx of projHits) {
-        if (hitProjectileSet.has(idx)) continue;
-        hitProjectileSet.add(idx);
         const p = this.projectiles[idx];
-        if (!p || !p.active) continue;
-        // P4.4B-R5.1: 内部标记弹幕命中（不再由 Game 访问私有数组）
+        // P0-3: 跨 segment 去重——检查 session 级别 hitProjectileIds + resolved + hitBySlashId
+        if (!p || !p.active || p.resolved || p.hitBySlashId === geometry.slashId) continue;
+        if (this._session.hitProjectileIds.has(p.id)) continue;
+        this._session.hitProjectileIds.add(p.id);
+        // 内部标记弹幕命中
         p.hitBySlashId = geometry.slashId;
         p.resolved = true;
         if (p.kind === "normal") {
@@ -674,7 +698,7 @@ export class BossReactiveController {
 
     // 清理session
     if (this._session.slashId === slashId) {
-      this._session = { slashId: "", bodyContact: false };
+      this._session = { slashId: "", bodyContact: false, hitProjectileIds: new Set() };
     }
 
     return result;
