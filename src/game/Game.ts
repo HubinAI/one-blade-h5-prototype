@@ -1287,18 +1287,19 @@ export class Game {
     // 刀光绘制时读 trail.reactiveBladeEffect（起刀快照），本帧更新只供气场/HUD 读 currentBladeEffect。
     rc.updateBladeEffect(this.energy);
 
-    // P0-B: 弹幕漏过玩家受击线
+    // P0-B: 弹幕漏过玩家受击线 — R5.5 P1-4: 通过 Controller 方法标记，不再直接修改弹幕
     const REACTIVE_PLAYER_Y = REACTIVE_BOSS_CONFIG.playerHp.playerLineY;
     const projectiles = rc.getProjectiles?.() || [];
     for (const p of projectiles) {
       if (!p.active || p.resolved || p.reflected) continue;
       if (p.y >= REACTIVE_PLAYER_Y && p.y - p.vy * scaledDt < REACTIVE_PLAYER_Y) {
-        p.resolved = true;
-        p.resolution = "player_hit";
-        const dmg = p.kind === "reflective" || p.kind === "dangerous"
-          ? REACTIVE_BOSS_CONFIG.playerHp.reflectiveBulletDamage
-          : REACTIVE_BOSS_CONFIG.playerHp.normalBulletDamage;
-        rc.takeDamage(dmg);
+        const kind = rc.markProjectilePlayerHit(p.id);
+        if (kind) {
+          const dmg = kind === "reflective" || kind === "dangerous"
+            ? REACTIVE_BOSS_CONFIG.playerHp.reflectiveBulletDamage
+            : REACTIVE_BOSS_CONFIG.playerHp.normalBulletDamage;
+          rc.takeDamage(dmg);
+        }
       }
     }
 
@@ -4413,9 +4414,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         projectileReflectCount++;
         this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 10, "#ffd700"));
         this.addText(p.x, p.y - 12, `+${cfg.reflectReward}`, "#ffd700", 14);
-        p.reflected = true;
-        p.vx = -p.vx;
-        p.vy = -p.vy;
+        // R5.5 P1-4: 反射逻辑已在 Controller.resolveGeometry 中完成（p.reflected + 反向 vx/vy）
       } else if (p.resolution === "wrong_cut") {
         dangerousWrongCutCount++;
         this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 12, "#c0392b"));

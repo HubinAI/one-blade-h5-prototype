@@ -52,6 +52,8 @@ export const REACTIVE_BOSS_CONFIG = {
     midEnergyDamage: 55,
     highEnergyOneShot: 100,
     damageFormula: "20 + energy * 0.8",
+    /** P4.4B-R5.5 P1-5: 危险弹幕横向扩散距离（乘 bossRenderScale 后为世界偏移） */
+    projectileSpread: 20,
   },
   projectiles: {
     normal: {

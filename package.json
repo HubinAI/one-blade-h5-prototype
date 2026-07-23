@@ -1,7 +1,7 @@
 {
   "name": "one-blade-h5-prototype",
   "private": true,
-  "version": "0723.007",
+  "version": "0723.008",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",

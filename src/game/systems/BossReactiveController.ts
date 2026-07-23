@@ -445,12 +445,11 @@ export class BossReactiveController {
       );
       this.projectiles.push(p);
     } else if (armor.projectileKind === "dangerous") {
-      // 混合模式：发射普通弹幕 + 危险雷球
-      // 普通弹幕x1
-      const p1 = createProjectile("normal", bx - 20, by, 0, REACTIVE_BOSS_CONFIG.projectiles.normal.speed);
+      // P4.4B-R5.5 P1-5: 使用统一接口获取扩散生成点
+      const origins = this.getProjectileSpawnOrigins();
+      const p1 = createProjectile("normal", origins.normal.x, origins.normal.y, 0, REACTIVE_BOSS_CONFIG.projectiles.normal.speed);
       this.projectiles.push(p1);
-      // 危险雷球x1
-      const p2 = createProjectile("dangerous", bx + 20, by, 0, REACTIVE_BOSS_CONFIG.projectiles.dangerous.speed);
+      const p2 = createProjectile("dangerous", origins.dangerous.x, origins.dangerous.y, 0, REACTIVE_BOSS_CONFIG.projectiles.dangerous.speed);
       this.projectiles.push(p2);
     }
   }
@@ -509,8 +508,27 @@ export class BossReactiveController {
     return this.localToBossWorld({ x: armor.relX, y: armor.relY });
   }
 
-  /** P4.4B-R3 P0-D: 当前激活护甲的世界坐标 + 半径（供 E2E 程序化命中使用）。
-   *  P4.4B-R5.1 P1-3: 内部调 getArmorWorldGeometry 统一接口。 */
+  /** P4.4B-R5.5 P1-5: 身体碰撞几何（多椭圆并集，已乘 bossRenderScale） */
+  getBodyWorldGeometry(): Array<{ center: Vec2; rx: number; ry: number }> {
+    return BODY_PARTS.map(p => ({
+      center: this.localToBossWorld({ x: p.cx, y: p.cy }),
+      rx: p.rx * this.bossRenderScale,
+      ry: p.ry * this.bossRenderScale,
+    }));
+  }
+
+  /** P4.4B-R5.5 P1-5: 危险弹幕扩散生成点（已乘 bossRenderScale） */
+  getProjectileSpawnOrigins(): { normal: Vec2; dangerous: Vec2 } {
+    const armor = this.getCurrentArmor();
+    const center = this.localToBossWorld({ x: armor.relX, y: armor.relY });
+    const spread = REACTIVE_BOSS_CONFIG.armor.projectileSpread * this.bossRenderScale;
+    return {
+      normal: { x: center.x - spread, y: center.y },
+      dangerous: { x: center.x + spread, y: center.y },
+    };
+  }
+
+  /** P4.4B-R3 P0-D: 当前激活护甲的世界坐标 + 半径（供 E2E 程序化命中使用）。 */
   getActiveArmorWorldPos(): { cx: number; cy: number; rx: number; ry: number } | null {
     const g = this.getArmorWorldGeometry(this.activeArmorIndex);
     if (!g) return null;
@@ -589,14 +607,11 @@ export class BossReactiveController {
         }
       }
 
-      // 检测身体碰撞（wrong_hit候选）— 同样乘 bossRenderScale
+      // 检测身体碰撞（wrong_hit候选）— 使用统一世界几何接口
       if (!this._resolvedSlashId) {
-        const bodyHit = BODY_PARTS.some(p =>
-          capsuleHitsEllipse(
-            segA, segB, bladeReach,
-            { x: BOSS_CX + p.cx * this.bossRenderScale, y: this.renderY + p.cy * this.bossRenderScale },
-            p.rx * this.bossRenderScale, p.ry * this.bossRenderScale,
-          )
+        const bodyParts = this.getBodyWorldGeometry();
+        const bodyHit = bodyParts.some(bp =>
+          capsuleHitsEllipse(segA, segB, bladeReach, bp.center, bp.rx, bp.ry)
         );
         if (bodyHit && !this._session.bodyContact) {
           this._session.bodyContact = true;
@@ -644,9 +659,13 @@ export class BossReactiveController {
         this._session.hitProjectileIds.add(p.id);
         // 内部标记弹幕命中
         p.hitBySlashId = geometry.slashId;
-        p.resolved = true;
+
+        // P4.4B-R5.5 P1-3: 弹幕生命周期
         if (p.kind === "normal") {
+          // cut: 立即停止移动和渲染
           p.resolution = "cut";
+          p.resolved = true;
+          p.active = false;
           events.push({
             kind: "projectile_cut",
             projectileId: p.id,
@@ -657,7 +676,12 @@ export class BossReactiveController {
           });
         } else if (p.kind === "reflective") {
           if (slashEnergy >= 70) {
+            // reflect: 反向继续运动，不伤害玩家，不被 recovery 清理
             p.resolution = "reflect";
+            p.reflected = true;
+            p.vx = -p.vx;
+            p.vy = -p.vy;
+            // 注意：不设置 p.resolved（避免被 cleanResolvedProjectiles 删除）
             events.push({
               kind: "projectile_reflect",
               projectileId: p.id,
@@ -667,7 +691,10 @@ export class BossReactiveController {
               hitPos: { x: (cap.a.x + cap.b.x) / 2, y: (cap.a.y + cap.b.y) / 2 },
             });
           } else {
+            // 低能量反射弹 = cut
             p.resolution = "cut";
+            p.resolved = true;
+            p.active = false;
             events.push({
               kind: "projectile_cut",
               projectileId: p.id,
@@ -678,7 +705,10 @@ export class BossReactiveController {
             });
           }
         } else if (p.kind === "dangerous") {
+          // wrong_cut: 立即停止移动和渲染
           p.resolution = "wrong_cut";
+          p.resolved = true;
+          p.active = false;
           this.takeDamage(REACTIVE_BOSS_CONFIG.playerHp.mistakenCutDamage);
           events.push({
             kind: "projectile_dangerous",
@@ -717,13 +747,10 @@ export class BossReactiveController {
 
       // 3. 身体碰撞（wrong_hit候选）：遍历三胶囊，但只有未命中护甲时才记录
       if (!this._resolvedSlashId) {
+        const bodyParts = this.getBodyWorldGeometry();
         for (const cap of geometry.capsules) {
-          const bodyHit = BODY_PARTS.some(p =>
-            capsuleHitsEllipse(
-              cap.a, cap.b, cap.radius,
-              { x: BOSS_CX + p.cx * this.bossRenderScale, y: this.renderY + p.cy * this.bossRenderScale },
-              p.rx * this.bossRenderScale, p.ry * this.bossRenderScale,
-            )
+          const bodyHit = bodyParts.some(bp =>
+            capsuleHitsEllipse(cap.a, cap.b, cap.radius, bp.center, bp.rx, bp.ry)
           );
           if (bodyHit && !this._session.bodyContact) {
             this._session.bodyContact = true;
@@ -986,9 +1013,22 @@ export class BossReactiveController {
     return this._bridgeTriggered;
   }
 
-  /** 获取弹幕列表副本（供外部只读访问） */
-  getProjectiles(): Projectile[] {
+  /** P4.4B-R5.5 P1-4: 获取弹幕列表只读副本（禁止外部修改内部数组） */
+  getProjectiles(): ReadonlyArray<Readonly<Projectile>> {
     return this.projectiles;
+  }
+
+  /**
+   * P4.4B-R5.5 P1-4: 标记弹幕被玩家防线命中。
+   * 由 Game 在 update 循环中检测到弹幕越线时调用，而非直接改 p.resolved。
+   * @returns 该弹幕的种类（用于 Game 计算伤害）
+   */
+  markProjectilePlayerHit(projectileId: string): ProjectileKind | null {
+    const p = this.projectiles.find(p => p.id === projectileId);
+    if (!p || !p.active || p.resolved || p.reflected) return null;
+    p.resolved = true;
+    p.resolution = "player_hit";
+    return p.kind;
   }
   getArmorBrokenFlags(): boolean[] {
     return this.armorTargets.map(a => a.broken);
