@@ -112,13 +112,7 @@ test.describe("Boss Execution 阶段 E2E", () => {
       return s.phase;
     }, { timeout: 5000 }).toBe("execution_success");
 
-    // 等待 victory_show（execution_success 2 秒后）
-    await expect.poll(async () => {
-      const s = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
-      return s.phase;
-    }, { timeout: 10000 }).toBe("victory_show");
-
-    // 断言破境成功页出现
+    // 等待 victory_show — 此时 E2E 桥可能已被销毁，改用 DOM 检查
     await expect.poll(async () =>
       page.locator(".breakthrough-title").textContent()
     , { timeout: 10000 }).toContain("破境成功");
@@ -161,15 +155,10 @@ test.describe("Boss Execution 阶段 E2E", () => {
       return s.phase;
     }, { timeout: 10000 }).toBe("execution_fail");
 
-    await expect.poll(async () => {
-      const s = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
-      return s.phase;
-    }, { timeout: 10000 }).toBe("fail");
-
-    // 断言 bossFailScreen 出现
+    // 等待 fail — E2E 桥可能被销毁，改用 DOM 检查
     await expect(
       page.locator("h1", { hasText: "挑战失败" })
-    ).toBeVisible({ timeout: 5000 });
+    ).toBeVisible({ timeout: 10000 });
 
     // 点击"再试一次"
     await page.locator("button", { hasText: "再试一次" }).click();
