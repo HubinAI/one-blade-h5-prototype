@@ -9,7 +9,7 @@ import { REACTIVE_BOSS_CONFIG } from "../config/bossReactiveFlow";
 import { distanceToSegment, clamp, randomRange } from "../../utils/math";
 import { createProjectile, updateProjectiles, checkSlashHit, cleanInactiveProjectiles, cleanResolvedProjectiles, resetProjectileIdCounter } from "./projectileSystem";
 import { capsuleHitsEllipse, geometryHitsArmor } from "./reactiveSlashGeometry";
-import type { ReactiveSlashGeometry } from "./reactiveSlashGeometry";
+import type { ReactiveSlashGeometry, CapsuleSource } from "./reactiveSlashGeometry";
 
 const BOSS_CY = 220;
 const BOSS_CX = DESIGN_WIDTH / 2;
@@ -314,10 +314,10 @@ export class BossReactiveController {
 
   private spawnProjectileForCurrentArmor(): void {
     const armor = this.getCurrentArmor();
-    // P4.4B-R5 P1-B: 弹幕出生点乘以 bossRenderScale，与护甲视觉/碰撞中心一致。
-    // 审计 §12.2 指出：弹幕从护甲内侧偏移位置出生。
-    const bx = BOSS_CX + armor.relX * this.bossRenderScale;
-    const by = this.renderY + armor.relY * this.bossRenderScale;
+    // P4.4B-R5.1 P1-3: 使用统一世界变换接口获取弹幕出生点
+    const origin = this.getProjectileSpawnOrigin();
+    const bx = origin.x;
+    const by = origin.y;
 
     if (armor.projectileKind === "normal") {
       // 普通弹幕：直线向下
@@ -364,17 +364,48 @@ export class BossReactiveController {
   /** P4.4B-R3 P0-D: 当前激活护甲索引（供 E2E reactiveSnapshot 读） */
   getActiveArmorIndex(): number { return this.activeArmorIndex; }
 
-  /** P4.4B-R3 P0-D: 当前激活护甲的世界坐标 + 半径（供 E2E 程序化命中使用，避免硬编码）。
-   *  P4.4B-R4 P0-B: 坐标和半径乘以 bossRenderScale，与视觉绘制一致。 */
-  getActiveArmorWorldPos(): { cx: number; cy: number; rx: number; ry: number } | null {
-    const armor = this.armorTargets[this.activeArmorIndex];
+  // ================================================================
+  // P4.4B-R5.1 P1-3: 统一 Boss 世界变换接口
+  // 审计 §12 指出：多处重复手写 BOSS_CX + relX * bossRenderScale。
+  // 渲染、碰撞、Debug、弹幕出生和 E2E 全部调用这些接口，删除重复公式。
+  // ================================================================
+
+  /** Boss 世界变换参数 */
+  getBossWorldTransform(): { center: Vec2; scale: number } {
+    return { center: { x: BOSS_CX, y: this.renderY }, scale: this.bossRenderScale };
+  }
+
+  /** 局部坐标 → 世界坐标 */
+  localToBossWorld(local: Vec2): Vec2 {
+    return {
+      x: BOSS_CX + local.x * this.bossRenderScale,
+      y: this.renderY + local.y * this.bossRenderScale,
+    };
+  }
+
+  /** 指定护甲的世界几何（中心 + 半径，乘 bossRenderScale） */
+  getArmorWorldGeometry(index: number): { center: Vec2; rx: number; ry: number } | null {
+    const armor = this.armorTargets[index];
     if (!armor || armor.broken) return null;
     return {
-      cx: BOSS_CX + armor.relX * this.bossRenderScale,
-      cy: this.renderY + armor.relY * this.bossRenderScale,
+      center: this.localToBossWorld({ x: armor.relX, y: armor.relY }),
       rx: armor.radiusX * this.bossRenderScale,
       ry: armor.radiusY * this.bossRenderScale,
     };
+  }
+
+  /** 弹幕出生原点（当前护甲世界中心） */
+  getProjectileSpawnOrigin(): Vec2 {
+    const armor = this.getCurrentArmor();
+    return this.localToBossWorld({ x: armor.relX, y: armor.relY });
+  }
+
+  /** P4.4B-R3 P0-D: 当前激活护甲的世界坐标 + 半径（供 E2E 程序化命中使用）。
+   *  P4.4B-R5.1 P1-3: 内部调 getArmorWorldGeometry 统一接口。 */
+  getActiveArmorWorldPos(): { cx: number; cy: number; rx: number; ry: number } | null {
+    const g = this.getArmorWorldGeometry(this.activeArmorIndex);
+    if (!g) return null;
+    return { cx: g.center.x, cy: g.center.y, rx: g.rx, ry: g.ry };
   }
 
   /** P4.4B-R3 P0-D: 设置程序化命中的刀势能量（E2E 用，避免依赖外部 Game 注入） */
@@ -479,7 +510,7 @@ export class BossReactiveController {
    * - 刀尖扫掠区(tipA→tipB)
    * 只要任意胶囊命中护甲/弹幕/身体，即视为命中。
    */
-  resolveGeometry(geometry: ReactiveSlashGeometry): Array<{ projectileIndex: number; hitPos: Vec2 }> {
+  resolveGeometry(geometry: ReactiveSlashGeometry): Array<{ projectileId: string; kind: ProjectileKind; collisionSource: CapsuleSource; hitPos: Vec2 }> {
     if (this._phase !== "armor_threat" && this._phase !== "armor_opportunity") return [];
     if (this._resolvedSlashId === geometry.slashId) return [];
 
@@ -488,8 +519,11 @@ export class BossReactiveController {
       this._session = { slashId: geometry.slashId, bodyContact: false };
     }
 
-    const hits: Array<{ projectileIndex: number; hitPos: Vec2 }> = [];
+    // P4.4B-R5.1 P1-6: 返回稳定 projectileId + kind + collisionSource，
+    // Game 不再通过 rc["projectiles"] 访问私有数组。
+    const hits: Array<{ projectileId: string; kind: ProjectileKind; collisionSource: CapsuleSource; hitPos: Vec2 }> = [];
     const hitProjectileSet = new Set<number>(); // 去重：同一弹幕只命中一次
+    const slashEnergy = geometry.lockedEnergy;
 
     // 1. 弹幕判定：遍历 geometry.capsules，每个胶囊用 cap.radius 作为碰撞半径
     for (const cap of geometry.capsules) {
@@ -497,7 +531,25 @@ export class BossReactiveController {
       for (const idx of projHits) {
         if (hitProjectileSet.has(idx)) continue;
         hitProjectileSet.add(idx);
-        hits.push({ projectileIndex: idx, hitPos: { x: (cap.a.x + cap.b.x) / 2, y: (cap.a.y + cap.b.y) / 2 } });
+        const p = this.projectiles[idx];
+        if (!p || !p.active) continue;
+        // P4.4B-R5.1: 内部标记弹幕命中（不再由 Game 访问私有数组）
+        p.hitBySlashId = geometry.slashId;
+        p.resolved = true;
+        if (p.kind === "normal") {
+          p.resolution = "cut";
+        } else if (p.kind === "reflective") {
+          p.resolution = slashEnergy >= 70 ? "reflect" : "cut";
+        } else if (p.kind === "dangerous") {
+          p.resolution = "wrong_cut";
+          this.takeDamage(REACTIVE_BOSS_CONFIG.playerHp.mistakenCutDamage);
+        }
+        hits.push({
+          projectileId: p.id,
+          kind: p.kind,
+          collisionSource: cap.source,
+          hitPos: { x: (cap.a.x + cap.b.x) / 2, y: (cap.a.y + cap.b.y) / 2 },
+        });
       }
     }
 
@@ -505,12 +557,10 @@ export class BossReactiveController {
     if (this._phase === "armor_opportunity") {
       const armor = this.getCurrentArmor();
       if (armor && !armor.broken) {
-        // P0-B: 护甲坐标和半径乘以 bossRenderScale，与视觉一致
         const cx = BOSS_CX + armor.relX * this.bossRenderScale;
         const cy = this.renderY + armor.relY * this.bossRenderScale;
         const rx = armor.radiusX * this.bossRenderScale;
         const ry = armor.radiusY * this.bossRenderScale;
-        // 真正遍历三胶囊，只要任意一个命中即视为护甲命中
         if (geometryHitsArmor(geometry, { x: cx, y: cy }, rx, ry)) {
           this._resolvedSlashId = geometry.slashId;
           this.transitionToResolve();

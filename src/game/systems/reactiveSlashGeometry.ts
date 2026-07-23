@@ -10,13 +10,18 @@
 // 每个胶囊半径 = reactiveBladeEffect.width / 2 + 移动端容差(8~12px)。
 // 只要任意胶囊与护甲椭圆相交，即视为视觉刀体命中。
 // ========================================================================
-import type { Vec2 } from "../types";
+import type { Vec2, ProjectileKind } from "../types";
 import { distanceToSegment } from "../../utils/math";
+
+/** P4.4B-R5.1 P1-6: 胶囊来源标识（用于 Debug 和碰撞来源追踪） */
+export type CapsuleSource = "baseTrail" | "visibleBlade" | "tipSweep";
 
 export type Capsule = {
   a: Vec2;
   b: Vec2;
   radius: number;
+  /** P4.4B-R5.1: 胶囊来源（手指轨迹/可见刀身/刀尖扫掠区） */
+  source: CapsuleSource;
 };
 
 export type ReactiveSlashGeometry = {
@@ -94,11 +99,11 @@ export function buildReactiveSlashGeometry(
     effectiveRadius: capsuleRadius,
     capsules: [
       // 1. 手指真实轨迹
-      { a: baseA, b: baseB, radius: capsuleRadius },
+      { a: baseA, b: baseB, radius: capsuleRadius, source: "baseTrail" as const },
       // 2. 当前帧可见刀身（手指点 → 刀尖）
-      { a: baseB, b: tipB, radius: capsuleRadius },
+      { a: baseB, b: tipB, radius: capsuleRadius, source: "visibleBlade" as const },
       // 3. 刀尖扫掠区（上一帧刀尖 → 当前帧刀尖）
-      { a: tipA, b: tipB, radius: capsuleRadius },
+      { a: tipA, b: tipB, radius: capsuleRadius, source: "tipSweep" as const },
     ],
   };
 }
