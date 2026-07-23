@@ -130,6 +130,7 @@ export class BossReactiveController {
 
   /** 重置所有状态 */
   reset(): void {
+    this.clearOpportunityGrace(); // P0-2: reset 时清理
     this._phase = "armor_prepare";
     this._elapsed = 0;
     this.phaseTimer = 0;
@@ -224,15 +225,13 @@ export class BossReactiveController {
   }
 
   private updateArmorOpportunity(dt: number): void {
-    // 不生成新弹幕，等待玩家挥刀
-    // P4.4B-R5.2 P0-6: 机会窗口按 slashId 宽限。
-    // 旧实现无条件延长 0.12s（所有黄圈都延长）。
-    // 新实现：只有有 _graceSlashId（窗口内起刀的 slashId）时才延长 0.12s，
+    // P4.4B-R5.3 P0-2: 机会窗口按 slashId 宽限。
+    // 正式窗口 1.5s 结束后，如果有 graceSlashId（窗口内起刀的 slashId），延长 0.12s 宽限。
     // 没有起刀时窗口按原 1.5s 结束，立即 recovery。
-    const gracePeriod = this._graceSlashId ? 0.12 : 0;
-    if (this.phaseTimer >= REACTIVE_BOSS_CONFIG.phaseTimers.opportunityDuration + gracePeriod) {
-      // 超时（含宽限）未命中→进入recovery
-      this._graceSlashId = null; // 清理 grace
+    const baseEnd = REACTIVE_BOSS_CONFIG.phaseTimers.opportunityDuration;
+    const graceEnd = this._graceSlashId ? baseEnd + 0.12 : baseEnd;
+    if (this.phaseTimer >= graceEnd) {
+      this.clearOpportunityGrace();
       this.transitionToRecovery();
     }
   }
@@ -277,7 +276,26 @@ export class BossReactiveController {
     this.performBossAction(this.getCurrentArmor());
   }
 
+  /** P4.4B-R5.2 P0-2: 清理机会窗口宽限（必须在所有状态转换点调用） */
+  private clearOpportunityGrace(): void {
+    this._graceSlashId = null;
+  }
+
+  /** P4.4B-R5.3 P0-2: 判断当前 slashId 是否可在机会窗口内命中护甲。
+   *  正式窗口（≤1.5s）内任何刀可命中；
+   *  宽限期（1.5~1.62s）内仅 graceSlashId 对应的旧刀可命中；
+   *  窗口结束后新起刀不得命中。 */
+  private canResolveArmorForSlash(slashId: string): boolean {
+    if (this._phase !== "armor_opportunity") return false;
+    const baseEnd = REACTIVE_BOSS_CONFIG.phaseTimers.opportunityDuration;
+    const graceEnd = baseEnd + 0.12;
+    if (this.phaseTimer <= baseEnd) return true; // 正式窗口内
+    return this.phaseTimer <= graceEnd && this._graceSlashId === slashId; // 宽限期内仅旧刀
+  }
+
   private transitionToOpportunity(): void {
+    // P4.4B-R5.3 P0-2: 先清空旧 graceSlashId，等待本窗口的新刀注册
+    this.clearOpportunityGrace();
     this._phase = "armor_opportunity";
     this.phaseTimer = 0;
     // 护甲高亮发光
@@ -285,25 +303,24 @@ export class BossReactiveController {
   }
 
   private transitionToRecovery(): void {
+    this.clearOpportunityGrace(); // P0-2: 超时后清理
     this._phase = "armor_recovery";
     this.phaseTimer = 0;
     this._resolvedSlashId = "";
     this._session = { slashId: "", bodyContact: false, hitProjectileIds: new Set() };
-    // P4.4B-R2 P0-B: 只清理已 resolved 弹幕（被斩断/反射/命中玩家/过期），
-    // 未解决弹幕继续飞行，直到玩家处理或命中防线。修复"recovery 切阶段清屏导致弹幕永远到不了玩家线"。
     cleanResolvedProjectiles(this.projectiles);
   }
 
   private transitionToResolve(): void {
+    this.clearOpportunityGrace(); // P0-2: 命中后清理
     this._phase = "armor_resolve";
     this.phaseTimer = 0;
   }
 
   private finishRecovery(): void {
-    // 检查是否还有未破碎的护甲
+    this.clearOpportunityGrace(); // P0-2: 切换护甲时清理
     const remaining = this.armorTargets.filter(a => !a.broken);
     if (remaining.length === 0) {
-      // 全部击破 → 桥接
       this._phase = "exit";
       this._bridgeTriggered = true;
       return;
@@ -577,8 +594,9 @@ export class BossReactiveController {
       }
     }
 
-    // 2. 在 opportunity 阶段检测护甲命中：用 geometryHitsArmor 遍历全部胶囊
-    if (this._phase === "armor_opportunity") {
+    // 2. 在 opportunity 阶段检测护甲命中：用 canResolveArmorForSlash 判断窗口宽限
+    // P4.4B-R5.3 P0-2: 修复漏洞B——窗口结束后新起刀不得命中，仅 graceSlashId 旧刀可命中
+    if (this.canResolveArmorForSlash(geometry.slashId)) {
       const armor = this.getCurrentArmor();
       if (armor && !armor.broken) {
         const cx = BOSS_CX + armor.relX * this.bossRenderScale;
