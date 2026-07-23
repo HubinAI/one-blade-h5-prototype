@@ -92,10 +92,15 @@ test.describe("Reactive Boss 全Pointer三甲→pursuit", () => {
         const after = await getState();
 
         if (after.armorProgress !== beforeProgress) {
+          // P0-1: 切换到下一护甲后 poll activeArmorIndex；但第三甲破后 reactiveController 被置空，
+          // activeArmorIndex 变 undefined — 此时改用 exitSnapshot 验证
+          if (after.armorProgress === "3/3") {
+            return after;
+          }
           await expect.poll(async () => {
             const s = await getState();
             return `${s.armorProgress}|${s.activeArmorIndex}`;
-          }, { timeout: 5000 }).toBe(`${after.armorProgress}|${expectedIndex + 1 <= 2 ? expectedIndex + 1 : expectedIndex}`);
+          }, { timeout: 5000 }).toBe(`${after.armorProgress}|${expectedIndex + 1}`);
           return await getState();
         }
 
