@@ -486,7 +486,7 @@ export class Game {
         // 高能量一刀碎（与玩家真实高刀势命中一致）
         rc.setProgrammaticSlashEnergy(100);
         rc.resolveGeometry(geometry);
-        const result = rc.finishSlash(slashId);
+        const result = rc.finishSlash(slashId, 100, 100);
         return result.armorHit;
       };
 
@@ -2270,20 +2270,18 @@ export class Game {
     // 保存当前 geometry 供 debug 绘制
     this._lastReactiveSlashGeometry = geometry;
 
-    // P4.4B-R5 P0-C: 真正传完整 geometry 给 Controller，让三胶囊全部参与碰撞。
-    const hits = rc.resolveGeometry(geometry);
+    // P4.4B-R5 P0-C + R5.5 P0-3: 真正传完整 geometry 给 Controller，让三胶囊全部参与碰撞。
+    const events = rc.resolveGeometry(geometry);
 
-    // P4.4B-R5.1 P1-6: 弹幕命中由 resolveGeometry 内部标记，
-    // Game 不再通过 rc["projectiles"] 访问私有数组。
-    // P4.4B-R5.2 P0-2: 保存实际碰撞来源（从 hits 取第一个命中的 collisionSource）
-    if (hits.length > 0) {
-      this._lastCollisionSource = hits[0].collisionSource;
+    // R5.5 P0-3: 弹幕命中由 resolveGeometry 通过 ReactiveCollisionEvent 返回，
+    // 不再需要通过 rc["projectiles"] 访问私有数组。
+    // P4.4B-R5.2 P0-2: 保存实际碰撞来源（从第一个 event 取 collisionSource）
+    if (events.length > 0) {
+      this._lastCollisionSource = events[0].collisionSource;
     }
-    for (const hit of hits) {
-      if (hit.kind === "normal") {
-        this.particles.push(...sparkBurst(hit.hitPos, 4, "#9b59b6"));
-      } else if (hit.kind === "reflective") {
-        this.particles.push(...sparkBurst(hit.hitPos, 6, "#ffd700"));
+    for (const event of events) {
+      if (event.kind === "projectile_cut" || event.kind === "projectile_reflect") {
+        this.particles.push(...sparkBurst(event.hitPos, 4, "#9b59b6"));
       }
     }
   }
@@ -4391,26 +4389,28 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   if (this.reactiveController) {
     const rc = this.reactiveController;
     const slashEnergy = trail.lockedEnergy ?? this.energy;
-    // P4.4B-R5.1 P1-2: 记录结算前能量（供 Debug 遥测）
-    const energyBefore = this.energy;
     rc.currentSlashEnergy = slashEnergy;
-    const result = rc.finishSlash(trail.id);
+    const energyBefore = this.energy;
+    const pathLen = trail.pathUsed ?? 0;
 
-    // P0-D: 统一结算弹幕奖励（不依赖 controller 的 projectileResults）
-    const projectiles = rc.getProjectiles?.() || [];
+    // P4.4B-R5.5 P0-5: 单一结算 — Controller 一次性返回完整能量结算
+    const result = rc.finishSlash(trail.id, energyBefore, pathLen);
+
+    // R5.5 P0-5: 唯一能量写入点 — Game 不再逐段修改 energy
+    this.energy = result.energyAfter;
+
+    // ---- 弹幕命中视觉反馈（从 Controller 内部数据读取） ----
+    const projectiles = rc.getProjectiles();
     const cfg = REACTIVE_BOSS_CONFIG.bladeEnergy;
-    // P4.4B-R5.2 P0-2: 统计弹幕命中类型，供 Debug 遥测 collisionResult
     let projectileCutCount = 0, projectileReflectCount = 0, dangerousWrongCutCount = 0;
     for (const p of projectiles) {
       if (p.hitBySlashId !== trail.id || !p.resolved) continue;
       if (p.resolution === "cut") {
         projectileCutCount++;
-        this.energy = gainEnergyByAction(this.energy, cfg.normalBulletReward, cfg.max);
         this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 6, "#9b59b6"));
         this.addText(p.x, p.y - 12, `+${cfg.normalBulletReward}`, "#5bc0ff", 12);
       } else if (p.resolution === "reflect") {
         projectileReflectCount++;
-        this.energy = gainEnergyByAction(this.energy, cfg.reflectReward, cfg.max);
         this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 10, "#ffd700"));
         this.addText(p.x, p.y - 12, `+${cfg.reflectReward}`, "#ffd700", 14);
         p.reflected = true;
@@ -4418,59 +4418,41 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         p.vy = -p.vy;
       } else if (p.resolution === "wrong_cut") {
         dangerousWrongCutCount++;
-        this.energy = Math.max(0, this.energy - cfg.wrongHitPenalty);
         this.particles.push(...sparkBurst({ x: p.x, y: p.y }, 12, "#c0392b"));
         this.addText(p.x, p.y - 16, `-${cfg.wrongHitPenalty}`, "#ff4444", 14);
       }
     }
 
-    // P0-C: 收刀结算刀势消耗（reactive模式专用规则）
-    const pathLen = trail.pathUsed ?? 0;
-    const cost = cfg.baseSlashCost + Math.floor(pathLen / 100) * cfg.longSlashExtraCost;
-    this.energy = Math.max(0, this.energy - cost);
-
-    // 处理护甲命中 — P4.4B-R4 P1-A: 区分低/中/高刀势反馈
+    // ---- 护甲命中视觉反馈 ----
     if (result.armorHit) {
-      const hitX = trail.points[trail.points.length - 1].x;
-      const hitY = trail.points[trail.points.length - 1].y;
-      // 取护甲世界坐标作为反馈位置（比刀尖更准）
       const armorPos = rc.getActiveArmorWorldPos();
-      const fx = armorPos?.cx ?? hitX;
-      const fy = armorPos?.cy ?? hitY;
+      const fx = armorPos?.cx ?? trail.points[trail.points.length - 1].x;
+      const fy = armorPos?.cy ?? trail.points[trail.points.length - 1].y;
 
       this.flash = Math.max(this.flash, 0.35);
       this.screenShake = Math.max(this.screenShake, 0.25);
       this.particles.push(...sparkBurst({ x: fx, y: fy }, 8, "#f0e130"));
 
       if (result.armorBroken) {
-        // 高刀势（≥70）直接破甲
-        this.energy = gainEnergyByAction(this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.armorBreakReward, REACTIVE_BOSS_CONFIG.bladeEnergy.max);
         this.screenShake = Math.max(this.screenShake, 0.5);
         this.flash = Math.max(this.flash, 0.5);
         this.particles.push(...sparkBurst({ x: fx, y: fy }, 16, "#f0e130"));
         this.addText(fx, fy - 24, "破甲！", "#f0e130", 22, 1.0);
         AudioService.defenseHit();
       } else {
-        // 低刀势（<30）→ "裂痕 25%" / 中刀势（30-69）→ "护甲 -55"
-        this.energy = gainEnergyByAction(this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.armorCrackReward, REACTIVE_BOSS_CONFIG.bladeEnergy.max);
-        const pct = Math.round(result.armorDurabilityDamage / (rc.getActiveArmorWorldPos()?.rx ?? 34) * 100);
+        this.screenShake = Math.max(this.screenShake, 0.15);
         if (slashEnergy < 30) {
           this.addText(fx, fy - 20, `裂痕 ${result.armorDurabilityDamage}`, "#d9b45b", 14, 0.7);
         } else {
           this.addText(fx, fy - 20, `护甲 -${result.armorDurabilityDamage}`, "#f0e130", 16, 0.7);
         }
-        // 轻微命中停顿
-        this.screenShake = Math.max(this.screenShake, 0.15);
       }
     } else if (!result.wrongHit) {
-      // P4.4B-R4 P1-A: 未命中原因反馈
-      // 区分"未到机会窗口"和"刀体擦过"
+      // 未命中原因反馈
       const phase = rc.phase;
       if (phase === "armor_threat") {
-        // threat 阶段砍中护甲区域但护甲未开 → "破绽未开"
         const armorPos = rc.getActiveArmorWorldPos();
         if (armorPos) {
-          // 检查刀体是否接近护甲（近似：刀尖距离护甲中心 < 60px）
           const tipX = trail.points[trail.points.length - 1].x;
           const tipY = trail.points[trail.points.length - 1].y;
           const dist = Math.hypot(tipX - armorPos.cx, tipY - armorPos.cy);
@@ -4480,24 +4462,15 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
           }
         }
       }
-      // opportunity 阶段未命中护甲 → 无反馈（刀体擦过，静默）
     }
     if (result.wrongHit) {
-      this.energy = Math.max(0, this.energy - REACTIVE_BOSS_CONFIG.bladeEnergy.wrongHitPenalty);
       const wx = trail.points[trail.points.length - 1].x;
       const wy = trail.points[trail.points.length - 1].y;
       this.particles.push(...sparkBurst({ x: wx, y: wy }, 6, "#6c3483"));
       this.addText(wx, wy - 20, "偏斩 -10", "#ff6a33", 14, 0.6);
     }
-    // P4.4B-R5.1 P1-2: 记录最近一次结算结果供 Debug 遥测
-    const baseCost = (REACTIVE_BOSS_CONFIG.bladeEnergy.baseSlashCost ?? 0)
-      + Math.floor((trail.pathUsed ?? 0) / 100) * (REACTIVE_BOSS_CONFIG.bladeEnergy.longSlashExtraCost ?? 0);
-    // P4.4B-R5.2 P0-2: 修正 Debug 假遥测。
-    // 旧实现：collisionResult 没检查弹幕命中（命中弹幕仍显示 empty_swing），
-    //         collisionSource 恒取 capsules 第一个 source（恒为 baseTrail）。
-    // 新实现：collisionResult 按优先级检查（armor_broken > armor_hit > projectile_reflect >
-    //         projectile_cut > dangerous_wrong_cut > body_wrong_hit > empty_swing），
-    //         collisionSource 从 resolveGeometry 返回的实际碰撞来源取。
+
+    // ---- Debug 遥测 ----
     const collisionResult = result.armorBroken ? "armor_broken"
       : result.armorHit ? "armor_hit"
       : projectileReflectCount > 0 ? "projectile_reflect"
@@ -4505,36 +4478,23 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       : dangerousWrongCutCount > 0 ? "dangerous_wrong_cut"
       : result.wrongHit ? "body_wrong_hit"
       : "empty_swing";
-    // P4.4B-R5.4 P0-3: collisionSource 从 Controller 取对应事件的真实来源，不再从弹幕残留值取。
-    // armor_hit/armor_broken → rc.getLastArmorCollisionSource()
-    // body_wrong_hit → rc.getLastBodyCollisionSource()
-    // projectile_cut/reflect/dangerous → this._lastCollisionSource（resolveGeometry 返回值）
-    // empty_swing → "-"
     const collisionSource = collisionResult === "armor_broken" || collisionResult === "armor_hit"
-      ? (rc.getLastArmorCollisionSource() ?? "-")
+      ? (result.armorCollisionSource ?? "-")
       : collisionResult === "body_wrong_hit"
-      ? (rc.getLastBodyCollisionSource() ?? "-")
+      ? (result.bodyCollisionSource ?? "-")
       : collisionResult === "empty_swing"
       ? "-"
       : this._lastCollisionSource;
-    // P4.4B-R5.4 P0-4: 拆分真实能量组成（不再用近似净值）
-    const projectileReward = projectileCutCount * cfg.normalBulletReward + projectileReflectCount * cfg.reflectReward;
-    const armorReward = result.armorBroken ? REACTIVE_BOSS_CONFIG.bladeEnergy.armorBreakReward
-      : result.armorHit ? REACTIVE_BOSS_CONFIG.bladeEnergy.armorCrackReward : 0;
-    const dangerousPenalty = dangerousWrongCutCount * REACTIVE_BOSS_CONFIG.bladeEnergy.wrongHitPenalty;
-    const bodyPenalty = result.wrongHit ? REACTIVE_BOSS_CONFIG.bladeEnergy.wrongHitPenalty : 0;
-    const emptySwingPenalty = (!result.armorHit && !result.wrongHit && projectileCutCount === 0 && projectileReflectCount === 0 && dangerousWrongCutCount === 0)
-      ? REACTIVE_BOSS_CONFIG.bladeEnergy.emptySwingPenalty : 0;
     this._lastReactiveResolve = {
       slashId: trail.id,
       collisionResult,
       collisionSource,
       actualArmorDamage: result.armorDurabilityDamage,
-      energyBefore,
-      baseCost,
-      energyReward: projectileReward + armorReward, // P0-4: 真实奖励总和
-      penalty: dangerousPenalty + bodyPenalty + emptySwingPenalty, // P0-4: 真实惩罚总和
-      energyAfter: this.energy,
+      energyBefore: result.energyBefore,
+      baseCost: result.baseCost,
+      energyReward: result.projectileCutReward + result.projectileReflectReward + result.armorReward,
+      penalty: result.dangerousWrongCutPenalty + result.bodyWrongHitPenalty + result.emptySwingPenalty,
+      energyAfter: result.energyAfter,
     };
     this.warriorSheathTimer = 0.38;
     this.warriorDrawTimer = 0;

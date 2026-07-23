@@ -9,7 +9,7 @@ import { REACTIVE_BOSS_CONFIG } from "../config/bossReactiveFlow";
 import { distanceToSegment, clamp, randomRange } from "../../utils/math";
 import { createProjectile, updateProjectiles, checkSlashHit, cleanInactiveProjectiles, cleanResolvedProjectiles, resetProjectileIdCounter } from "./projectileSystem";
 import { capsuleHitsEllipse, geometryHitsArmor } from "./reactiveSlashGeometry";
-import type { ReactiveSlashGeometry, CapsuleSource } from "./reactiveSlashGeometry";
+import type { ReactiveSlashGeometry, CapsuleSource, ArmorHitResult } from "./reactiveSlashGeometry";
 
 const BOSS_CY = 220;
 const BOSS_CX = DESIGN_WIDTH / 2;
@@ -21,6 +21,65 @@ const BODY_PARTS = [
   { cx: 0, cy: 15, rx: 50, ry: 40 },
   { cx: 0, cy: -65, rx: 30, ry: 18 },
 ];
+
+// ================================================================
+// P4.4B-R5.5 P0-5/P0-3: 统一结算类型
+// ================================================================
+
+/** 完整碰撞事件（弹幕/护甲/身体统一） */
+export interface ReactiveCollisionEvent {
+  kind: "projectile_cut" | "projectile_reflect" | "projectile_dangerous" | "armor" | "body";
+  hitPos: Vec2;
+  collisionSource: CapsuleSource;
+  /** 仅 projectile_* 时有值 */
+  projectileId?: string;
+  projectileKind?: ProjectileKind;
+  projectileIndex?: number;
+  /** 仅 armor 时有值 */
+  armorDamage?: number;
+  armorBroken?: boolean;
+  allArmorBroken?: boolean;
+}
+
+/** P0-5: 单一结算结果 — Controller 一次性返回完整能量结算 */
+export interface ReactiveSlashResolveResult {
+  /** 最终能量（已 clamp [0,100]） */
+  energyAfter: number;
+  /** 结算前能量 */
+  energyBefore: number;
+  /** 挥刀基础消耗 */
+  baseCost: number;
+  /** normal 弹幕斩切奖励总和 */
+  projectileCutReward: number;
+  /** reflect 弹幕反射奖励总和 */
+  projectileReflectReward: number;
+  /** dangerous 弹幕误切惩罚总和（已从能量扣除） */
+  dangerousWrongCutPenalty: number;
+  /** 护甲命中奖励（crack 或 break） */
+  armorReward: number;
+  /** 身体误击惩罚 */
+  bodyWrongHitPenalty: number;
+  /** 空挥惩罚 */
+  emptySwingPenalty: number;
+  /** 是否命中护甲 */
+  armorHit: boolean;
+  /** 护甲伤害量 */
+  armorDurabilityDamage: number;
+  /** 是否击破当前护甲 */
+  armorBroken: boolean;
+  /** 是否全部护甲击破 */
+  allArmorBroken: boolean;
+  /** 是否误击身体 */
+  wrongHit: boolean;
+  /** 护甲碰撞来源（null = 未命中护甲） */
+  armorCollisionSource: CapsuleSource | null;
+  /** 身体碰撞来源（null = 未命中身体） */
+  bodyCollisionSource: CapsuleSource | null;
+  /** 护甲命中世界坐标（null = 未命中护甲） */
+  armorHitPos: Vec2 | null;
+  /** 完整碰撞事件列表 */
+  collisionEvents: ReactiveCollisionEvent[];
+}
 
 export class BossReactiveController {
   private _phase: BossPhaseState = "armor_prepare";
@@ -550,17 +609,19 @@ export class BossReactiveController {
   }
 
   /**
-   * P4.4B-R5 P0-C: 接收完整 ReactiveSlashGeometry，真正遍历三胶囊做护甲/弹幕/身体判定。
+   * P4.4B-R5 P0-C + R5.5 P0-3: 接收完整 ReactiveSlashGeometry，真正遍历三胶囊做护甲/弹幕/身体判定。
    * 审计 §6 指出：R4 把 geometry 压缩成 baseA→tipB 一条线传给 resolveSegment，
    * 只对这一个胶囊做护甲检测。Debug 画三胶囊但实际碰撞只用一条，误导验证。
+   *
+   * R5.5 P0-3: 返回完整 ReactiveCollisionEvent[]（含 armor/body/projectile 三种事件）。
+   * 调用方不再需要自行遍历弹幕数组或读取内部状态。
    *
    * 本方法遍历 geometry.capsules 的全部3个胶囊：
    * - 手指轨迹(baseA→baseB)
    * - 可见刀身(baseB→tipB)
    * - 刀尖扫掠区(tipA→tipB)
-   * 只要任意胶囊命中护甲/弹幕/身体，即视为命中。
    */
-  resolveGeometry(geometry: ReactiveSlashGeometry): Array<{ projectileId: string; kind: ProjectileKind; collisionSource: CapsuleSource; hitPos: Vec2 }> {
+  resolveGeometry(geometry: ReactiveSlashGeometry): ReactiveCollisionEvent[] {
     if (this._phase !== "armor_threat" && this._phase !== "armor_opportunity") return [];
     if (this._resolvedSlashId === geometry.slashId) return [];
 
@@ -569,10 +630,7 @@ export class BossReactiveController {
       this._session = { slashId: geometry.slashId, bodyContact: false, hitProjectileIds: new Set() };
     }
 
-    // P4.4B-R5.1 P1-6: 返回稳定 projectileId + kind + collisionSource
-    const hits: Array<{ projectileId: string; kind: ProjectileKind; collisionSource: CapsuleSource; hitPos: Vec2 }> = [];
-    // P4.4B-R5.2 P0-3: 删除本地 hitProjectileSet，改用 session 级别去重。
-    // 旧实现每次调用新建本地 Set，同一刀多次调用（跨 segment）会重复命中同一弹幕。
+    const events: ReactiveCollisionEvent[] = [];
     const slashEnergy = geometry.lockedEnergy;
 
     // 1. 弹幕判定：遍历 geometry.capsules，每个胶囊用 cap.radius 作为碰撞半径
@@ -589,18 +647,48 @@ export class BossReactiveController {
         p.resolved = true;
         if (p.kind === "normal") {
           p.resolution = "cut";
+          events.push({
+            kind: "projectile_cut",
+            projectileId: p.id,
+            projectileKind: "normal",
+            projectileIndex: idx,
+            collisionSource: cap.source,
+            hitPos: { x: (cap.a.x + cap.b.x) / 2, y: (cap.a.y + cap.b.y) / 2 },
+          });
         } else if (p.kind === "reflective") {
-          p.resolution = slashEnergy >= 70 ? "reflect" : "cut";
+          if (slashEnergy >= 70) {
+            p.resolution = "reflect";
+            events.push({
+              kind: "projectile_reflect",
+              projectileId: p.id,
+              projectileKind: "reflective",
+              projectileIndex: idx,
+              collisionSource: cap.source,
+              hitPos: { x: (cap.a.x + cap.b.x) / 2, y: (cap.a.y + cap.b.y) / 2 },
+            });
+          } else {
+            p.resolution = "cut";
+            events.push({
+              kind: "projectile_cut",
+              projectileId: p.id,
+              projectileKind: "reflective",
+              projectileIndex: idx,
+              collisionSource: cap.source,
+              hitPos: { x: (cap.a.x + cap.b.x) / 2, y: (cap.a.y + cap.b.y) / 2 },
+            });
+          }
         } else if (p.kind === "dangerous") {
           p.resolution = "wrong_cut";
           this.takeDamage(REACTIVE_BOSS_CONFIG.playerHp.mistakenCutDamage);
+          events.push({
+            kind: "projectile_dangerous",
+            projectileId: p.id,
+            projectileKind: "dangerous",
+            projectileIndex: idx,
+            collisionSource: cap.source,
+            hitPos: { x: (cap.a.x + cap.b.x) / 2, y: (cap.a.y + cap.b.y) / 2 },
+          });
         }
-        hits.push({
-          projectileId: p.id,
-          kind: p.kind,
-          collisionSource: cap.source,
-          hitPos: { x: (cap.a.x + cap.b.x) / 2, y: (cap.a.y + cap.b.y) / 2 },
-        });
       }
     }
 
@@ -613,15 +701,17 @@ export class BossReactiveController {
         const cy = this.renderY + armor.relY * this.bossRenderScale;
         const rx = armor.radiusX * this.bossRenderScale;
         const ry = armor.radiusY * this.bossRenderScale;
-        if (geometryHitsArmor(geometry, { x: cx, y: cy }, rx, ry)) {
-          // P4.4B-R5.4 P0-3: 记录护甲命中的真实碰撞来源（从命中的胶囊取）
-          const hitCap = geometry.capsules.find(cap =>
-            capsuleHitsEllipse(cap.a, cap.b, cap.radius, { x: cx, y: cy }, rx, ry)
-          );
-          this._lastArmorCollisionSource = hitCap?.source ?? null;
+        const armorHitResult = geometryHitsArmor(geometry, { x: cx, y: cy }, rx, ry);
+        if (armorHitResult) {
+          this._lastArmorCollisionSource = armorHitResult.source;
           this._lastArmorHitPos = { x: cx, y: cy };
           this._resolvedSlashId = geometry.slashId;
           this.transitionToResolve();
+          events.push({
+            kind: "armor",
+            collisionSource: armorHitResult.source,
+            hitPos: armorHitResult.hitPos,
+          });
         }
       }
 
@@ -638,15 +728,19 @@ export class BossReactiveController {
           if (bodyHit && !this._session.bodyContact) {
             this._session.bodyContact = true;
             this._session.lastBodyHitPos = cap.b;
-            // P4.4B-R5.4 P0-3: 记录身体命中的碰撞来源
             this._lastBodyCollisionSource = cap.source;
+            events.push({
+              kind: "body",
+              collisionSource: cap.source,
+              hitPos: cap.b,
+            });
             break;
           }
         }
       }
     }
 
-    return hits;
+    return events;
   }
 
   /**
@@ -672,79 +766,152 @@ export class BossReactiveController {
     return Math.min(armor.durability, cfg.lowEnergyCrack); // 固定25
   }
 
-  /** 收刀结算 */
-  finishSlash(slashId: string): {
-    armorHit: boolean;
-    armorDurabilityDamage: number;
-    armorBroken: boolean;
-    allArmorBroken: boolean;
-    projectileResults: Array<{ projectileIndex: number; kind: ProjectileKind; reflected: boolean; energyReward: number }>;
-    wrongHit: boolean;
-  } {
-    const result = {
-      armorHit: false,
-      armorDurabilityDamage: 0,
-      armorBroken: false,
-      allArmorBroken: false,
-      projectileResults: [] as Array<{ projectileIndex: number; kind: ProjectileKind; reflected: boolean; energyReward: number }>,
-      wrongHit: false,
-    };
+  /**
+   * P4.4B-R5.5 P0-5: 收刀结算 — 返回单一 ReactiveSlashResolveResult。
+   * Controller 内部完成全部能量计算，Game 只执行 `this.energy = result.energyAfter`。
+   *
+   * 结算顺序（严格）：
+   *   energyBefore - baseCost + projectileCutReward + projectileReflectReward + armorReward
+   *   - dangerousWrongCutPenalty - bodyWrongHitPenalty - emptySwingPenalty
+   *   → clamp(0, 100)
+   *
+   * @param slashId 挥刀 ID
+   * @param energyBefore 结算前 Game.energy 值
+   * @param pathLen 本次挥刀路径长度（用于计算 longSlashExtraCost）
+   */
+  finishSlash(slashId: string, energyBefore: number, pathLen: number): ReactiveSlashResolveResult {
+    const cfg = REACTIVE_BOSS_CONFIG.bladeEnergy;
+    const baseCost = cfg.baseSlashCost + Math.floor(pathLen / 100) * cfg.longSlashExtraCost;
 
-    // P0-D: 弹幕命中已在 checkReactiveProjectileHits 中标记，不再在此处结算
-    // 清理失活弹幕
-    cleanInactiveProjectiles(this.projectiles);
+    // ---- 统计当前挥刀的弹幕命中 ----
+    let projectileCutCount = 0;
+    let projectileReflectCount = 0;
+    let dangerousWrongCutCount = 0;
+    let bodyContactDetected = false;
 
-    // 处理护甲命中
+    for (const p of this.projectiles) {
+      if (p.hitBySlashId !== slashId || !p.resolved) continue;
+      if (p.resolution === "cut") {
+        projectileCutCount++;
+      } else if (p.resolution === "reflect") {
+        projectileReflectCount++;
+      } else if (p.resolution === "wrong_cut") {
+        dangerousWrongCutCount++;
+      }
+    }
+
+    // ---- 护甲命中结算 ----
+    let armorHit = false;
+    let armorDurabilityDamage = 0;
+    let armorBroken = false;
+    let allArmorBroken = false;
+    let armorReward = 0;
+
     if (this._resolvedSlashId === slashId) {
       const armor = this.getCurrentArmor();
       if (armor && !armor.broken) {
-        // P4.4B-R5 P0-A: 固定绝对值伤害，不再按剩余耐久百分比递减。
-        // 审计 §2 指出：旧公式 armor.durability*0.25 导致"越打伤害越低"，
-        // 左肩需要 12-14 次低刀势命中，形成负反馈死循环。
-        // 新规则：低刀势固定25、中刀势固定55、高刀势直接破甲。
-        // 验收：低4刀破甲(100→75→50→25→0)、中2刀(100→45→0)、高1刀(100→0)。
         const damage = this.calculateArmorDamage(this.currentSlashEnergy, armor);
         armor.durability = Math.max(0, armor.durability - damage);
         armor.crackProgress = 1 - armor.durability / armor.maxDurability;
         armor.animTimer = 0.4;
-        result.armorHit = true;
-        result.armorDurabilityDamage = damage;
+        armorHit = true;
+        armorDurabilityDamage = damage;
 
         if (armor.durability <= 0) {
           armor.broken = true;
           armor.active = false;
           this.armorProgress++;
-          result.armorBroken = true;
+          armorBroken = true;
+          armorReward = cfg.armorBreakReward;
 
-          // 检查是否全部击破
           if (this.armorProgress >= this.maxArmor) {
-            result.allArmorBroken = true;
+            allArmorBroken = true;
           }
+        } else {
+          armorReward = cfg.armorCrackReward;
         }
-
-        // 已经进入resolve状态，无需额外操作
       }
     }
 
-    // 检查wrong_hit
-    if (this._session.slashId === slashId && this._session.bodyContact && !this._resolvedSlashId) {
-      result.wrongHit = true;
+    // ---- 身体误击 ----
+    let wrongHit = false;
+    let bodyWrongHitPenalty = 0;
+    if (this._session.slashId === slashId && this._session.bodyContact && this._resolvedSlashId !== slashId) {
+      wrongHit = true;
+      bodyWrongHitPenalty = cfg.wrongHitPenalty;
       this._resolvedSlashId = slashId;
     }
 
-    // 清理session
+    // ---- 空挥惩罚 ----
+    const isFullMiss = !armorHit && !wrongHit && projectileCutCount === 0 && projectileReflectCount === 0 && dangerousWrongCutCount === 0;
+    const emptySwingPenalty = isFullMiss ? cfg.emptySwingPenalty : 0;
+
+    // ---- 能量结算（严格顺序） ----
+    const projectileCutReward = projectileCutCount * cfg.normalBulletReward;
+    const projectileReflectReward = projectileReflectCount * cfg.reflectReward;
+    const dangerousWrongCutPenaltyTotal = dangerousWrongCutCount * cfg.wrongHitPenalty;
+
+    let energyAfter = energyBefore
+      - baseCost
+      + projectileCutReward
+      + projectileReflectReward
+      + armorReward
+      - dangerousWrongCutPenaltyTotal
+      - bodyWrongHitPenalty
+      - emptySwingPenalty;
+    energyAfter = clamp(energyAfter, 0, cfg.max);
+
+    // ---- 收集碰撞事件 ----
+    const collisionEvents: ReactiveCollisionEvent[] = [];
+    if (armorHit) {
+      collisionEvents.push({
+        kind: "armor",
+        hitPos: this._lastArmorHitPos ?? { x: BOSS_CX, y: BOSS_CY },
+        collisionSource: this._lastArmorCollisionSource ?? "visibleBlade",
+        armorDamage: armorDurabilityDamage,
+        armorBroken,
+        allArmorBroken,
+      });
+    }
+    if (wrongHit) {
+      collisionEvents.push({
+        kind: "body",
+        hitPos: this._session.lastBodyHitPos ?? { x: BOSS_CX, y: BOSS_CY },
+        collisionSource: this._lastBodyCollisionSource ?? "visibleBlade",
+      });
+    }
+
+    // ---- 清理 session + graceSlashId ----
     if (this._session.slashId === slashId) {
       this._session = { slashId: "", bodyContact: false, hitProjectileIds: new Set() };
     }
-
-    // P4.4B-R5.4 P0-1: 空挥/提前收刀后清理 graceSlashId。
-    // 如果该 slashId 仍是 graceSlashId 且没有完成护甲 resolve，立即清理。
-    // 修复审计 P0-1：空挥后 graceSlashId 残留导致窗口错误延长 0.12s。
     if (this._graceSlashId === slashId && this._resolvedSlashId !== slashId) {
       this.clearOpportunityGrace();
     }
 
-    return result;
+    // ---- 清理失活弹幕 ----
+    cleanInactiveProjectiles(this.projectiles);
+
+    return {
+      energyAfter,
+      energyBefore,
+      baseCost,
+      projectileCutReward,
+      projectileReflectReward,
+      dangerousWrongCutPenalty: dangerousWrongCutPenaltyTotal,
+      armorReward,
+      bodyWrongHitPenalty,
+      emptySwingPenalty,
+      armorHit,
+      armorDurabilityDamage,
+      armorBroken,
+      allArmorBroken,
+      wrongHit,
+      armorCollisionSource: this._lastArmorCollisionSource,
+      bodyCollisionSource: this._lastBodyCollisionSource,
+      armorHitPos: this._lastArmorHitPos,
+      collisionEvents,
+    };
   }
 
   // ================================================================

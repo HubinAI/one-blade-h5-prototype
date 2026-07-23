@@ -105,7 +105,7 @@ describe("BossReactiveController", () => {
     const seg0A = v(armor0.cx - armor0.rx * 0.5, armor0.cy - armor0.ry * 0.5);
     const seg0B = v(armor0.cx + armor0.rx * 0.5, armor0.cy + armor0.ry * 0.5);
     controller.resolveSegment(seg0A, seg0B, "s_left", 10);
-    const f0 = controller.finishSlash("s_left");
+    const f0 = controller.finishSlash("s_left", 100, 100);
     expect(f0.armorHit).toBe(true);
     expect(f0.armorBroken).toBe(true);
     // 真实推进 resolve → recovery → 下一 prepare
@@ -120,7 +120,7 @@ describe("BossReactiveController", () => {
     const seg1A = v(armor1.cx - armor1.rx * 0.5, armor1.cy - armor1.ry * 0.5);
     const seg1B = v(armor1.cx + armor1.rx * 0.5, armor1.cy + armor1.ry * 0.5);
     controller.resolveSegment(seg1A, seg1B, "s_right", 10);
-    const f1 = controller.finishSlash("s_right");
+    const f1 = controller.finishSlash("s_right", 100, 100);
     expect(f1.armorHit).toBe(true);
     expect(f1.armorBroken).toBe(true);
     advanceThroughResolveAndRecovery(controller);
@@ -134,7 +134,7 @@ describe("BossReactiveController", () => {
     const seg2A = v(armor2.cx - armor2.rx * 0.5, armor2.cy - armor2.ry * 0.5);
     const seg2B = v(armor2.cx + armor2.rx * 0.5, armor2.cy + armor2.ry * 0.5);
     controller.resolveSegment(seg2A, seg2B, "s_chest", 10);
-    const f2 = controller.finishSlash("s_chest");
+    const f2 = controller.finishSlash("s_chest", 100, 100);
     expect(f2.armorHit).toBe(true);
     expect(f2.armorBroken).toBe(true);
     expect(f2.allArmorBroken).toBe(true);
@@ -190,7 +190,7 @@ describe("BossReactiveController", () => {
       v(armor0.cx + armor0.rx * 0.5, armor0.cy + armor0.ry * 0.5),
       "s_left", 10
     );
-    controller.finishSlash("s_left");
+    controller.finishSlash("s_left", 100, 100);
     advanceThroughResolveAndRecovery(controller);
     expect(controller.getActiveArmorIndex()).toBe(1); // 右肩
 
@@ -204,10 +204,10 @@ describe("BossReactiveController", () => {
     if (reflective) {
       expect(reflective.kind).toBe("reflective");
     }
-    // projectileResults 在 finishSlash 中不再返回（结算移至 Game.ts）
+    // collisionEvents 在 finishSlash 中不再返回（结算移至 Game.ts）
     controller.setProgrammaticSlashEnergy(50);
-    const result = controller.finishSlash("test_refl");
-    expect(result.projectileResults).toEqual([]);
+    const result = controller.finishSlash("test_refl", 100, 100);
+    expect(result.collisionEvents).toEqual([]);
   });
 
   // ================================================================
@@ -224,7 +224,7 @@ describe("BossReactiveController", () => {
         v(armor.cx + armor.rx * 0.5, armor.cy + armor.ry * 0.5),
         `s_${i}`, 10
       );
-      controller.finishSlash(`s_${i}`);
+      controller.finishSlash(`s_${i}`, 100, 100);
       advanceThroughResolveAndRecovery(controller);
     }
     expect(controller.getActiveArmorIndex()).toBe(2); // 胸甲
@@ -241,8 +241,8 @@ describe("BossReactiveController", () => {
     }
     // 结算移至 Game.ts
     controller.setProgrammaticSlashEnergy(80);
-    const result = controller.finishSlash("test_danger");
-    expect(result.projectileResults).toEqual([]);
+    const result = controller.finishSlash("test_danger", 100, 100);
+    expect(result.collisionEvents).toEqual([]);
   });
 
   // ================================================================
@@ -261,7 +261,7 @@ describe("BossReactiveController", () => {
       v(a0.cx + a0.rx * 0.5, a0.cy + a0.ry * 0.5),
       "s_low", 10
     );
-    const fLow = c1.finishSlash("s_low");
+    const fLow = c1.finishSlash("s_low", 100, 100);
     expect(fLow.armorHit).toBe(true);
     // P4.4B-R5 P0-A: 固定绝对值 25（不再按剩余耐久百分比递减）
     expect(fLow.armorDurabilityDamage).toBe(25);
@@ -275,7 +275,7 @@ describe("BossReactiveController", () => {
       v(a0.cx + a0.rx * 0.5, a0.cy + a0.ry * 0.5),
       "s_mid", 10
     );
-    const fMid = c2.finishSlash("s_mid");
+    const fMid = c2.finishSlash("s_mid", 100, 100);
     expect(fMid.armorHit).toBe(true);
     // P4.4B-R5 P0-A: 固定绝对值 55（不再 ceil(55.0004)=56）
     expect(fMid.armorDurabilityDamage).toBe(55);
@@ -289,7 +289,7 @@ describe("BossReactiveController", () => {
       v(a0.cx + a0.rx * 0.5, a0.cy + a0.ry * 0.5),
       "s_high", 10
     );
-    const fHigh = c3.finishSlash("s_high");
+    const fHigh = c3.finishSlash("s_high", 100, 100);
     expect(fHigh.armorHit).toBe(true);
     // 高能量: 直接破甲，剩余耐久全扣 = 100
     expect(fHigh.armorDurabilityDamage).toBe(100);
@@ -311,7 +311,7 @@ describe("BossReactiveController", () => {
       v(a0.cx + a0.rx * 0.5, a0.cy + a0.ry * 0.5),
       "s_0", 10
     );
-    let f = c.finishSlash("s_0");
+    let f = c.finishSlash("s_0", 100, 100);
     expect(f.armorHit).toBe(true);
     expect(f.armorBroken).toBe(false);
     expect(f.armorDurabilityDamage).toBe(25);
@@ -329,21 +329,21 @@ describe("BossReactiveController", () => {
         v(a0.cx + a0.rx * 0.5, a0.cy + a0.ry * 0.5),
         `s_${i}`, 10
       );
-      f = c.finishSlash(`s_${i}`);
+      f = c.finishSlash(`s_${i}`, 100, 100);
     }
     expect(c.getArmorBrokenFlags()[0]).toBe(true);
   });
 
   // ================================================================
-  // Test 9: 刀势经济正反馈 — 验证结算移至 Game.ts 后 controller 返回空 projectileResults
+  // Test 9: 刀势经济正反馈 — 验证结算移至 Game.ts 后 controller 返回空 collisionEvents
   // ================================================================
-  it("刀势经济正反馈 — controller 不再返回 projectileResults（结算移至 Game）", () => {
+  it("刀势经济正反馈 — controller 不再返回 collisionEvents（结算移至 Game）", () => {
     const c = new BossReactiveController();
     advanceToOpportunity(c);
     c.setProgrammaticSlashEnergy(50);
     // 空挥（不命中任何弹幕或护甲）
-    const result = c.finishSlash("test_reward");
-    expect(result.projectileResults).toEqual([]);
+    const result = c.finishSlash("test_reward", 100, 100);
+    expect(result.collisionEvents).toEqual([]);
     expect(result.armorHit).toBe(false);
   });
 
@@ -464,7 +464,7 @@ describe("BossReactiveController", () => {
         v(armor.cx + armor.rx * 0.5, armor.cy + armor.ry * 0.5),
         `s_${i}`, 10
       );
-      controller.finishSlash(`s_${i}`);
+      controller.finishSlash(`s_${i}`, 100, 100);
       advanceThroughResolveAndRecovery(controller);
     }
 
@@ -488,12 +488,12 @@ describe("BossReactiveController", () => {
     expect(hits2).toEqual([]);
 
     // 收刀时无护甲命中、无弹幕命中 → armorHit=false, wrongHit=false
-    const finish = controller.finishSlash("slash_miss2");
+    const finish = controller.finishSlash("slash_miss2", 100, 100);
     expect(finish.armorHit).toBe(false);
     expect(finish.armorDurabilityDamage).toBe(0);
     expect(finish.armorBroken).toBe(false);
     expect(finish.wrongHit).toBe(false);
-    expect(finish.projectileResults).toEqual([]);
+    expect(finish.collisionEvents).toEqual([]);
   });
 
   // ================================================================
@@ -522,7 +522,7 @@ describe("BossReactiveController", () => {
     // 真实推进到 threat，挥刀远离 Boss 和弹幕
     controller.update(0.35); // → threat
     controller.resolveSegment(v(50, 700), v(100, 750), "empty_swing", 10);
-    const result = controller.finishSlash("empty_swing");
+    const result = controller.finishSlash("empty_swing", 100, 100);
     expect(result.armorHit).toBe(false);
     expect(result.wrongHit).toBe(false);
     // 空挥不扣 HP
@@ -551,7 +551,7 @@ describe("BossReactiveController", () => {
       v(armor0.cx + armor0.rx * 0.5, armor0.cy + armor0.ry * 0.5),
       "s_left", 10
     );
-    controller.finishSlash("s_left");
+    controller.finishSlash("s_left", 100, 100);
     advanceThroughResolveAndRecovery(controller); // → 切换到右肩，触发 heal
 
     const hpAfter = controller.getPlayerHp().current;
@@ -611,7 +611,7 @@ describe("BossReactiveController", () => {
         v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5),
         `s_low_${i}`, 10
       );
-      c.finishSlash(`s_low_${i}`);
+      c.finishSlash(`s_low_${i}`, 100, 100);
       durabilitySeq.push(c.getArmorDurability()[0]);
       if (c.getArmorBrokenFlags()[0]) break;
       advanceThroughResolveAndRecovery(c);
@@ -632,7 +632,7 @@ describe("BossReactiveController", () => {
         v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5),
         `s_mid_${i}`, 10
       );
-      c.finishSlash(`s_mid_${i}`);
+      c.finishSlash(`s_mid_${i}`, 100, 100);
       durabilitySeq.push(c.getArmorDurability()[0]);
       if (c.getArmorBrokenFlags()[0]) break;
       advanceThroughResolveAndRecovery(c);
@@ -651,7 +651,7 @@ describe("BossReactiveController", () => {
       v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5),
       "s_high", 10
     );
-    const f = c.finishSlash("s_high");
+    const f = c.finishSlash("s_high", 100, 100);
     expect(f.armorBroken).toBe(true);
     expect(c.getArmorDurability()[0]).toBe(0);
   });
@@ -666,7 +666,7 @@ describe("BossReactiveController", () => {
     c.registerReactiveSlashStart("s_empty");
     expect(c.getGraceSlashId()).toBe("s_empty");
     // 空挥收刀（没命中护甲）
-    c.finishSlash("s_empty");
+    c.finishSlash("s_empty", 100, 100);
     // grace 应被清理
     expect(c.getGraceSlashId()).toBe(null);
   });

@@ -139,19 +139,34 @@ export function capsuleHitsEllipse(
 }
 
 /**
- * 检测整个刀体几何是否命中护甲椭圆。
- * 只要有任意一个胶囊命中，即视为命中。
+ * P4.4B-R5.5 P0-3: 检测整个刀体几何是否命中护甲椭圆。
+ * 从 boolean 改为返回 { hit, source, hitPos }，让调用方知道具体哪个胶囊命中。
+ * 只要有任意一个胶囊命中，返回命中详情；否则返回 null。
  */
+export type ArmorHitResult = {
+  hit: true;
+  /** 命中的胶囊来源 */
+  source: CapsuleSource;
+  /** 命中位置（取胶囊中点近似） */
+  hitPos: Vec2;
+};
+
 export function geometryHitsArmor(
   geometry: ReactiveSlashGeometry,
   center: Vec2,
   rx: number,
   ry: number,
-): boolean {
+): ArmorHitResult | null {
   for (const cap of geometry.capsules) {
-    if (capsuleHitsEllipse(cap.a, cap.b, cap.radius, center, rx, ry)) return true;
+    if (capsuleHitsEllipse(cap.a, cap.b, cap.radius, center, rx, ry)) {
+      return {
+        hit: true,
+        source: cap.source,
+        hitPos: { x: (cap.a.x + cap.b.x) / 2, y: (cap.a.y + cap.b.y) / 2 },
+      };
+    }
   }
-  return false;
+  return null;
 }
 
 /**
