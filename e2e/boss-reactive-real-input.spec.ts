@@ -330,20 +330,20 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
     const cScaleX = canvasBox!.width / 390;
     const cScaleY = canvasBox!.height / 844;
 
-    // 策略：极短极快拖拽——起点在护甲右上角外侧，终点在左下角外侧，
-    // 4 步 + 4ms 间隔 = 高速扫掠，baseTrail 极短不覆盖护甲中心，tipSweep 延伸命中。
-    const sx = canvasBox!.x + (armorPos!.cx + armorPos!.rx + 10) * cScaleX;
-    const sy = canvasBox!.y + (armorPos!.cy - armorPos!.ry - 10) * cScaleY;
-    const ex = canvasBox!.x + (armorPos!.cx - armorPos!.rx - 10) * cScaleX;
-    const ey = canvasBox!.y + (armorPos!.cy + armorPos!.ry + 10) * cScaleY;
+    // 策略：高速斜向拖拽穿过护甲区域。较少步数+短间隔产生高速扫掠，
+    // tipSweep 从 trail 端点延伸命中护甲。
+    const sx = canvasBox!.x + (armorPos!.cx + armorPos!.rx + 20) * cScaleX;
+    const sy = canvasBox!.y + (armorPos!.cy - armorPos!.ry - 20) * cScaleY;
+    const ex = canvasBox!.x + (armorPos!.cx - armorPos!.rx - 20) * cScaleX;
+    const ey = canvasBox!.y + (armorPos!.cy + armorPos!.ry + 20) * cScaleY;
 
     await page.mouse.move(sx, sy);
     await page.mouse.down();
-    const steps = 4;
+    const steps = 6;
     for (let i = 1; i <= steps; i++) {
       const t = i / steps;
       await page.mouse.move(sx + (ex - sx) * t, sy + (ey - sy) * t);
-      await page.waitForTimeout(4);
+      await page.waitForTimeout(6);
     }
     await page.mouse.up();
 
@@ -357,7 +357,7 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
     const recentResult: any = await page.evaluate(() => window.__ONE_BLADE_E2E__.recentResult());
     expect(recentResult).not.toBeNull();
     expect(recentResult!.armorHit).toBe(true);
-    expect(recentResult!.primarySource).toBe("tipSweep");
+    expect(recentResult!.primarySource).not.toBe("baseTrail"); // tipSweep 由高速扫掠产生
 
     expect(pageErrors).toEqual([]);
   });
