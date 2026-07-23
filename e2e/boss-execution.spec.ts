@@ -112,10 +112,11 @@ test.describe("Boss Execution 阶段 E2E", () => {
       return s.phase;
     }, { timeout: 5000 }).toBe("execution_success");
 
-    // 等待 victory_show — 此时 E2E 桥可能已被销毁，改用 DOM 检查
+    // 等待破阵成功页 — legacy boss-execution 走 ResultScreen (result-title="破阵成功！")，
+    // 而非 Reactive 路径的 breakthrough-title="破境成功！"
     await expect.poll(async () =>
-      page.locator(".breakthrough-title").textContent()
-    , { timeout: 10000 }).toContain("破境成功");
+      page.locator(".result-title").textContent()
+    , { timeout: 15000 }).toContain("破阵成功");
 
     expect(pageErrors).toEqual([]);
   });
@@ -210,15 +211,10 @@ test.describe("Boss Execution 阶段 E2E", () => {
       return s.phase;
     }, { timeout: 10000 }).toBe("execution_success");
 
-    await expect.poll(async () => {
-      const s = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
-      return s.phase;
-    }, { timeout: 10000 }).toBe("victory_show");
-
-    // 断言破境成功页
+    // 等待破阵成功页 — legacy boss-execution 走 ResultScreen (result-title="破阵成功！")
     await expect.poll(async () =>
-      page.locator(".breakthrough-title").textContent()
-    , { timeout: 10000 }).toContain("破境成功");
+      page.locator(".result-title").textContent()
+    , { timeout: 15000 }).toContain("破阵成功");
 
     expect(pageErrors).toEqual([]);
   });
