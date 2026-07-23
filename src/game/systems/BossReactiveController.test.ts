@@ -767,12 +767,29 @@ describe("BossReactiveController", () => {
     expect(result.energyAfter).toBeLessThanOrEqual(REACTIVE_BOSS_CONFIG.bladeEnergy.max);
   });
 
-  it("H10 finishSlash events 完整记录所有碰撞", () => {
-    expect.assertions(1);
-    controller.update(0.35);
-    controller.resolveGeometry(geom(v(50, 700), v(100, 750), "test_events", 50));
-    const result = controller.finishSlash("test_events", 100, 100);
-    expect(Array.isArray(result.events)).toBe(true);
+  it("H10 finishSlash events 完整记录所有碰撞 — cut+armor 严格验证", () => {
+    expect.assertions(5);
+    const c = new BossReactiveController();
+    // 切到胸甲（mixed），先破前两甲
+    for (let i = 0; i < 2; i++) {
+      advanceToOpportunity(c);
+      hitCurrentArmor(c, `s_h10_prep_${i}`);
+      advanceThroughResolveAndRecovery(c);
+    }
+    advanceToOpportunity(c);
+    c.setProgrammaticSlashEnergy(100);
+    const pos = c.getActiveArmorWorldPos()!;
+    // 在护甲中心确定性注入 normal 弹幕，确保 resolveGeometry 同时命中弹幕和护甲
+    c.spawnProjectileForTest("normal", pos.cx, pos.cy + 5, 0, 0);
+    c.resolveGeometry(geom(v(pos.cx - pos.rx, pos.cy - pos.ry), v(pos.cx + pos.rx, pos.cy + pos.ry), "s_h10", 100));
+    const result = c.finishSlash("s_h10", 100, 100);
+    // P0-D: H10 严格断言 events.length=2，kind 为 projectile_cut 和 armor
+    expect(result.armorHit).toBe(true);
+    expect(result.events.length).toBe(2);
+    const kinds = result.events.map(e => e.kind).sort();
+    expect(kinds).toContain("armor");
+    expect(kinds).toContain("projectile_cut");
+    expect(result.projectileCutCount).toBe(1);
   });
 
   it("H11 finishSlash armorHitPos 非空时有效", () => {
@@ -880,32 +897,28 @@ describe("BossReactiveController", () => {
     expect(result.primaryResult).toBe("dangerous_wrong_cut");
   });
 
-  it("J4 primaryResult 优先级 — body_wrong_hit > projectile_reflect（真实构造 body+reflect 混合场景）", () => {
-    expect.assertions(3);
-    // 先切到右肩（reflective 弹幕），进入 opportunity
+  it("J4 primaryResult 优先级 — body_wrong_hit > projectile_reflect（确定性构造 body+reflect 混合场景）", () => {
+    expect.assertions(5);
+    // 切到右肩（reflective），进入 opportunity，确保 activeArmor=右肩 不挡 body
     advanceToOpportunity(controller);
     hitCurrentArmor(controller, "s_left");
     advanceThroughResolveAndRecovery(controller);
     advanceToOpportunity(controller);
 
-    // 在身体中心放 reflective 弹幕（远离当前护甲=右肩 at x=252）
-    const refl = controller.spawnProjectileForTest("reflective", BOSS_CX, BOSS_CY, 0, 0);
+    // 确定性构造：在 BOSS_CX,BOSS_CY 放置静止 reflective 弹幕（同时在身体碰撞区域内）
+    const refl = controller.spawnProjectileForTest("reflective", BOSS_CX, BOSS_CY - 10, 0, 0);
     expect(refl.kind).toBe("reflective");
 
     controller.setProgrammaticSlashEnergy(100);
-    // 几何穿过身体中心（命中身体和弹幕），但远离右肩护甲
-    controller.resolveGeometry(geom(v(BOSS_CX - 40, BOSS_CY - 40), v(BOSS_CX + 40, BOSS_CY + 40), "s_j4", 80));
+    // 几何穿过身体中心，远离右肩护甲（x=252.5, y≈185.5）
+    controller.resolveGeometry(geom(v(BOSS_CX - 50, BOSS_CY - 50), v(BOSS_CX + 50, BOSS_CY + 50), "s_j4", 100));
     const result = controller.finishSlash("s_j4", 100, 100);
 
-    // body 命中且优先级高于 reflect，验证至少一种情况成立
-    if (result.bodyWrongHit) {
-      expect(result.primaryResult).toBe("body_wrong_hit");
-      expect(result.projectileReflectCount).toBeGreaterThanOrEqual(0);
-    } else {
-      // 如果 body 未命中（geometry 不够近），至少弹幕反射应该触发
-      expect(result.projectileReflectCount).toBeGreaterThanOrEqual(0);
-      expect(result.primaryResult).toBeTruthy();
-    }
+    // P0-D: 严格断言 body 为 primary，reflect 在 secondary
+    expect(result.bodyWrongHit).toBe(true);
+    expect(result.projectileReflectCount).toBe(1);
+    expect(result.primaryResult).toBe("body_wrong_hit");
+    expect(result.secondaryResults).toContain("projectile_reflect");
   });
 
   it("J5 primaryResult 优先级 — projectile_reflect > projectile_cut", () => {
@@ -957,38 +970,58 @@ describe("BossReactiveController", () => {
     expect(result.primaryResult).toBe("dangerous_wrong_cut");
   });
 
-  it("K2 混合事件 — secondaryResults 按事件顺序记录非 primaryResult", () => {
-    expect.assertions(2);
+  it("K2 混合事件 — 确定性构造 dangerous + projectile_cut，严格验证 primary/secondary", () => {
+    expect.assertions(4);
+    // 切到胸甲（mixed: normal + dangerous），破前两甲
     for (let i = 0; i < 2; i++) {
       advanceToOpportunity(controller);
-      hitCurrentArmor(controller, `s_mixed_k2_${i}`);
+      hitCurrentArmor(controller, `s_k2_prep_${i}`);
       advanceThroughResolveAndRecovery(controller);
     }
+    advanceToOpportunity(controller);
     controller.update(0.35);
-    controller.spawnProjectileForTest("normal", BOSS_CX - 30, BOSS_CY + 6, 0, 40);
-    controller.spawnProjectileForTest("dangerous", BOSS_CX + 30, BOSS_CY + 6, 0, 30);
+
+    // 确定性注入：一个 normal（可 cut）+ 一个 dangerous，放在 BOSS 下方避免碰护甲
+    controller.spawnProjectileForTest("normal", BOSS_CX - 30, BOSS_CY + 150, 0, 0);
+    controller.spawnProjectileForTest("dangerous", BOSS_CX + 30, BOSS_CY + 150, 0, 0);
     controller.setProgrammaticSlashEnergy(80);
-    controller.resolveGeometry(geom(v(60, 200), v(400, 300), "s_mixed_k2", 80));
-    const result = controller.finishSlash("s_mixed_k2", 100, 100);
-    expect(Array.isArray(result.secondaryResults)).toBe(true);
-    expect(result.secondaryResults).toBeDefined();
+
+    // 几何穿过两弹幕中心（BOSS下方，不碰护甲）
+    controller.resolveGeometry(geom(v(BOSS_CX - 50, BOSS_CY + 140), v(BOSS_CX + 50, BOSS_CY + 160), "s_k2", 80));
+    const result = controller.finishSlash("s_k2", 100, 100);
+
+    // P0-D: 严格断言 dangerous 为 primary，projectile_cut 在 secondary
+    expect(result.dangerousWrongCutCount).toBe(1);
+    expect(result.projectileCutCount).toBe(1);
+    expect(result.primaryResult).toBe("dangerous_wrong_cut");
+    expect(result.secondaryResults).toContain("projectile_cut");
   });
 
-  it("K3 混合事件 — 同刀 reflect + dangerous 也应记录 secondaryResults", () => {
-    expect.assertions(2);
+  it("K3 混合事件 — 确定性构造 dangerous + projectile_reflect，严格验证优先级", () => {
+    expect.assertions(4);
+    // 切到胸甲（mixed），破前两甲
     for (let i = 0; i < 2; i++) {
       advanceToOpportunity(controller);
-      hitCurrentArmor(controller, `s_mixed_k3_${i}`);
+      hitCurrentArmor(controller, `s_k3_prep_${i}`);
       advanceThroughResolveAndRecovery(controller);
     }
+    advanceToOpportunity(controller);
     controller.update(0.35);
-    controller.spawnProjectileForTest("reflective", BOSS_CX - 20, BOSS_CY + 6, 0, 60);
-    controller.spawnProjectileForTest("dangerous", BOSS_CX + 20, BOSS_CY + 6, 0, 30);
+
+    // 确定性注入：一个 reflective + 一个 dangerous，放在 BOSS 下方避免��护甲
+    controller.spawnProjectileForTest("reflective", BOSS_CX - 20, BOSS_CY + 150, 0, 0);
+    controller.spawnProjectileForTest("dangerous", BOSS_CX + 20, BOSS_CY + 150, 0, 0);
     controller.setProgrammaticSlashEnergy(80);
-    controller.resolveGeometry(geom(v(60, 200), v(400, 300), "s_mixed_k3", 80));
-    const result = controller.finishSlash("s_mixed_k3", 100, 100);
-    expect(result.secondaryResults).toBeDefined();
-    expect(Array.isArray(result.secondaryResults)).toBe(true);
+
+    // 几何穿过两弹幕中心（BOSS下方，不碰护甲）
+    controller.resolveGeometry(geom(v(BOSS_CX - 50, BOSS_CY + 140), v(BOSS_CX + 50, BOSS_CY + 160), "s_k3", 80));
+    const result = controller.finishSlash("s_k3", 100, 100);
+
+    // P0-D: dangerous > reflect 优先级，dangerous 为 primary，reflect 在 secondary
+    expect(result.dangerousWrongCutCount).toBe(1);
+    expect(result.projectileReflectCount).toBe(1);
+    expect(result.primaryResult).toBe("dangerous_wrong_cut");
+    expect(result.secondaryResults).toContain("projectile_reflect");
   });
 
   // ================================================================
@@ -1350,5 +1383,57 @@ describe("BossReactiveController", () => {
       expect(Math.abs(bp.center.x - BOSS_CX)).toBeLessThan(150);
     }
     expect(parts.length).toBe(3);
+  });
+
+  // ================================================================
+  // Section V: P1-B session 关闭（护甲提交后阻止后续写入）
+  // ================================================================
+
+  it("V1 P1-B session closedForCollision — 护甲提交后 resolveGeometry 返回空数组", () => {
+    expect.assertions(9);
+    const c = new BossReactiveController();
+    advanceToOpportunity(c);
+    c.setProgrammaticSlashEnergy(20);
+    const pos = c.getActiveArmorWorldPos()!;
+
+    // 第一次 resolveGeometry 命中护甲 → commitArmorDamage → closedForCollision = true
+    c.resolveGeometry(geom(v(pos.cx - pos.rx * 0.5, pos.cy - pos.ry * 0.5), v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5), "s_close", 20));
+
+    // 护甲提交后继续传入 5 个 segment
+    for (let i = 0; i < 5; i++) {
+      const segEvents = c.resolveGeometry(geom(v(pos.cx - pos.rx * 0.3, pos.cy - pos.ry * 0.3 + i), v(pos.cx + pos.rx * 0.3, pos.cy + pos.ry * 0.3 + i), "s_close", 20));
+      expect(segEvents).toEqual([]);
+    }
+
+    const result = c.finishSlash("s_close", 20, 100);
+    expect(result.armorHit).toBe(true);
+    // P1-B: 护甲只扣一次，events 不增加（仅 1 个 armor event）
+    expect(result.events.length).toBe(1);
+    expect(result.events[0].kind).toBe("armor");
+    expect(result.armorDurabilityDamage).toBe(25);
+  });
+
+  it("V2 P1-B session closedForCollision — 护甲提交后弹幕不追加到 session", () => {
+    expect.assertions(4);
+    const c = new BossReactiveController();
+    advanceToOpportunity(c);
+    c.setProgrammaticSlashEnergy(50);
+    const pos = c.getActiveArmorWorldPos()!;
+
+    // 第一次 resolveGeometry：命中护甲 + 正常弹幕
+    c.spawnProjectileForTest("normal", pos.cx, pos.cy + 5, 0, 0);
+    c.resolveGeometry(geom(v(pos.cx - pos.rx, pos.cy - pos.ry), v(pos.cx + pos.rx, pos.cy + pos.ry), "s_close2", 50));
+
+    // 注入新弹幕，第二次 resolveGeometry 应被 closedForCollision 阻止
+    c.spawnProjectileForTest("normal", pos.cx + 10, pos.cy + 10, 0, 0);
+    const segEvents2 = c.resolveGeometry(geom(v(pos.cx - pos.rx, pos.cy - pos.ry), v(pos.cx + pos.rx, pos.cy + pos.ry), "s_close2", 50));
+    expect(segEvents2).toEqual([]);
+
+    const result = c.finishSlash("s_close2", 50, 100);
+    expect(result.armorHit).toBe(true);
+    // armor-only: 只有 1 个 event（护甲），弹幕只命中一个且仅在第一次 resolveGeometry
+    expect(result.events.length).toBe(2); // 1 armor + 1 projectile_cut from first resolve
+    const kinds = result.events.map(e => e.kind).sort();
+    expect(kinds).toEqual(["armor", "projectile_cut"]);
   });
 });

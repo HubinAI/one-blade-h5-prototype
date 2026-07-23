@@ -43,6 +43,8 @@ interface ReactiveSlashSession {
   bodyContact: boolean;
   lastBodyHitPos?: Vec2;
   hitProjectileIds: Set<string>;
+  /** P1-B: 护甲提交后关闭碰撞写入，后续 segment 不再追加事件 */
+  closedForCollision: boolean;
 }
 
 /** P4.4B-R5.7: 命中后立即提交的护甲结算快照（二级生命周期） */
@@ -168,7 +170,7 @@ export class BossReactiveController {
   private _pendingSlashResult: PendingReactiveSlashResult | null = null;
   // P4.4B-R5.2 P0-3: session 级别弹幕去重集合，同一弹幕跨多个 segment 只命中一次。
   // 旧实现每次 resolveGeometry 调用新建本地 hitProjectileSet，同一刀多次调用会重复命中。
-  private _session: ReactiveSlashSession = { slashId: "", events: [], bodyContact: false, hitProjectileIds: new Set() };
+  private _session: ReactiveSlashSession = { slashId: "", events: [], bodyContact: false, hitProjectileIds: new Set(), closedForCollision: false };
   /** 当前挥刀的刀势能量（由外部设置） */
   currentSlashEnergy: number = 0;
 
@@ -231,7 +233,7 @@ export class BossReactiveController {
       flashTimer: 0,
     };
     this._resolvedSlashId = "";
-    this._session = { slashId: "", events: [], bodyContact: false, hitProjectileIds: new Set() };
+    this._session = { slashId: "", events: [], bodyContact: false, hitProjectileIds: new Set(), closedForCollision: false };
     this._pendingSlashResult = null; // P4.4B-R5.7: 清理 pending
     this._lastArmorCollisionSource = null; // P4.4B-R5.7: 清理碰撞来源
     this._lastBodyCollisionSource = null;
@@ -500,7 +502,8 @@ export class BossReactiveController {
   /** P4.4B-R3 P0-D: 当前激活护甲索引（供 E2E reactiveSnapshot 读） */
   getActiveArmorIndex(): number { return this.activeArmorIndex; }
 
-  /** P0-5: 测试专用 — 确定性注入弹幕（跳过随机生成） */
+  /** P0-5: 测试专用 — 确定性注入弹幕（跳过随机生成）
+   * @internal - 仅 Vitest 测试使用，V0723017 前从生产包移除 */
   spawnProjectileForTest(kind: ProjectileKind, x: number, y: number, vx?: number, vy?: number): Projectile {
     const cfgKey = kind === "dangerous" ? "normal" : kind;
     const speed = REACTIVE_BOSS_CONFIG.projectiles[cfgKey]?.speed ?? REACTIVE_BOSS_CONFIG.projectiles.normal.speed;
@@ -601,9 +604,15 @@ export class BossReactiveController {
     if (this._phase !== "armor_threat" && this._phase !== "armor_opportunity") return [];
     if (this._resolvedSlashId === geometry.slashId) return [];
 
+    // P1-B: 护甲已提交后，同一 slash 后续 segment 不再写入事件
+    if (
+      this._session.slashId === geometry.slashId &&
+      this._session.closedForCollision
+    ) return [];
+
     // 初始化 Session
     if (this._session.slashId !== geometry.slashId) {
-      this._session = { slashId: geometry.slashId, events: [], bodyContact: false, hitProjectileIds: new Set() };
+      this._session = { slashId: geometry.slashId, events: [], bodyContact: false, hitProjectileIds: new Set(), closedForCollision: false };
     }
 
     const newEvents: ReactiveCollisionEvent[] = [];
@@ -790,6 +799,9 @@ export class BossReactiveController {
     };
     this._pendingSlashResult = pending;
 
+    // P1-B: 护甲提交后立即关闭本 slash 的后续碰撞写入
+    this._session.closedForCollision = true;
+
     // 护甲事件加到 session
     const armorEv: ReactiveCollisionEvent = {
       kind: "armor",
@@ -946,7 +958,7 @@ export class BossReactiveController {
 
     // ---- 清理（在结果构建完成之后） ----
     if (this._session.slashId === slashId) {
-      this._session = { slashId: "", events: [], bodyContact: false, hitProjectileIds: new Set() };
+      this._session = { slashId: "", events: [], bodyContact: false, hitProjectileIds: new Set(), closedForCollision: false };
     }
     if (this._pendingSlashResult && this._pendingSlashResult.slashId === slashId) {
       this._pendingSlashResult = null;

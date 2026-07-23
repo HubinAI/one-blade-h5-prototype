@@ -591,6 +591,27 @@ export class Game {
           }
           self.bossController?.skipIntro();
         },
+        // P1-1: 只读快照 — 最近一次 Result 和 Geometry（供 E2E 真实 Pointer 分来源验证）
+        recentResult: () => {
+          if (!self._lastReactiveResolve) return null;
+          return {
+            primaryResult: self._lastReactiveResolve.primaryResult,
+            primarySource: self._lastReactiveResolve.primarySource,
+            eventCount: self._lastReactiveResolve.eventCount,
+            eventKinds: self._lastReactiveResolve.eventKinds,
+            armorEventCount: self._lastReactiveResolve.armorEventCount,
+            armorHit: self._lastReactiveResolve.primaryResult === "armor_hit" || self._lastReactiveResolve.primaryResult === "armor_broken",
+          };
+        },
+        recentGeometry: () => {
+          if (!self._lastReactiveSlashGeometry) return null;
+          const g = self._lastReactiveSlashGeometry;
+          return {
+            slashId: g.slashId,
+            capsuleCount: g.capsules.length,
+            capsuleSources: g.capsules.map(c => c.source),
+          };
+        },
       };
     }
 
@@ -1129,6 +1150,18 @@ export class Game {
     reflectCount: number;
     dangerousCount: number;
     eventsSummary: string;
+    /** P0-C: 本次 resolve 事件总数 */
+    eventCount: number;
+    /** P0-C: 护甲事件数（应为 0 或 1） */
+    armorEventCount: number;
+    /** P0-C: 身体事件数 */
+    bodyEventCount: number;
+    /** P0-C: 事件种类列表（逗号分隔） */
+    eventKinds: string;
+    /** P0-C: 当前 segment 事件数 */
+    currentSegmentEventCount: number;
+    /** P0-C: 当前 segment 事件种类 */
+    currentSegmentKinds: string;
   } | null = null;
 
   /** P0-4: 当前 segment 的 resolveGeometry 事件（用于同帧粒子反馈） */
@@ -2269,6 +2302,11 @@ export class Game {
       `unclamped: ${resolve?.unclampedAfter ?? "-"}`,
       `summary: ${resolve?.eventsSummary ?? "-"}`,
       `events: ${resolve?.eventsSummary ?? "-"}`,
+      `resolvedEventCount: ${resolve?.eventCount ?? "-"}/${resolve?.eventCount ?? "-"}`,
+      `resolvedKinds: ${resolve?.eventKinds ?? "-"}`,
+      `armorEvents: ${resolve?.armorEventCount ?? "-"}/${resolve?.eventCount ?? "-"}`,
+      `curSegmentEventCount: ${resolve?.currentSegmentEventCount ?? "-"}/${resolve?.eventCount ?? "-"}`,
+      `curSegmentKinds: ${resolve?.currentSegmentKinds ?? "-"}`,
     ];
     ctx.save();
     ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
@@ -4498,6 +4536,23 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
 
     // P0: 记录 Debug 遥测 — 直接存储 result 的 primaryResult/Source 和拆分字段
+    const resolvedEvents = result.events;
+    const eventCount = resolvedEvents.length;
+    let armorEventCount = 0;
+    let bodyEventCount = 0;
+    const eventKindSet: Set<string> = new Set();
+    for (const e of resolvedEvents) {
+      if (e.kind === "armor") armorEventCount++;
+      else if (e.kind === "body") bodyEventCount++;
+      eventKindSet.add(e.kind);
+    }
+    const eventKinds = [...eventKindSet].sort().join(",") || "-";
+
+    const segEvents = this._currentReactiveSegmentEvents;
+    const currentSegmentEventCount = segEvents.length;
+    const segKindSet = new Set(segEvents.map(e => e.kind));
+    const currentSegmentKinds = [...segKindSet].sort().join(",") || "-";
+
     this._lastReactiveResolve = {
       slashId: trail.id,
       primaryResult: result.primaryResult,
@@ -4521,6 +4576,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         result.projectileReflectCount > 0 ? `reflect:${result.projectileReflectCount}` : "",
         result.dangerousWrongCutCount > 0 ? `danger:${result.dangerousWrongCutCount}` : "",
       ].filter(Boolean).join(" ") || "-",
+      eventCount,
+      armorEventCount,
+      bodyEventCount,
+      eventKinds,
+      currentSegmentEventCount,
+      currentSegmentKinds,
     };
     this._lastResolvedReactiveEvents = result.events;
 
