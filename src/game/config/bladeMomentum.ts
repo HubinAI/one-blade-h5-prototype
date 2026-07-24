@@ -30,11 +30,23 @@ export interface BladeMomentumState {
 export interface BladeRunModifiers {
   /** 刀势上限加成 */
   maxBonus: number;
-  /** 刀势下限加成 */
+  /**
+   * 刀势下限加成
+   * @reserved V0723014未接入运行时，具体语义在下一轮肉鸽专项确认。
+   *           当前不生效，不应在配置中投放。
+   */
   floorBonus: number;
-  /** 获取倍率 */
+  /**
+   * 获取倍率
+   * @reserved V0723014未接入运行时，具体语义在下一轮肉鸽专项确认。
+   *           当前不生效，不应在配置中投放。
+   */
   gainMultiplier: number;
-  /** 消耗倍率 */
+  /**
+   * 消耗倍率
+   * @reserved V0723014未接入运行时，具体语义在下一轮肉鸽专项确认。
+   *           当前不生效，不应在配置中投放。
+   */
   costMultiplier: number;
   /** 节点阈值偏移（负值 = 提前解锁） */
   nodeThresholdShift: Partial<Record<BladeAbilityNodeId, number>>;

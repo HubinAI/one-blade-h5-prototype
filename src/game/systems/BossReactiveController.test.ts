@@ -1457,7 +1457,7 @@ describe("BossReactiveController", () => {
     const c = new BossReactiveController();
     advanceToOpportunity(c);
     const pos = c.getActiveArmorWorldPos()!;
-    // energy=80：damage=20+80*0.8=84，armor 不会一击破 → primaryResult=armor_hit 而非 armor_broken
+    // energy=80/100 → ratio 80% ≥ 70% → burst band → 直接破甲 → primaryResult=armor_broken
     c.setProgrammaticSlashEnergy(80);
 
     // ============================================================
@@ -1615,6 +1615,80 @@ describe("BossReactiveController", () => {
       expect(result.momentumBefore.activeNodes).toContain("blade_reach");
       expect(result.momentumBefore.activeNodes).toContain("armor_break");
       expect(result.momentumAfter.max).toBe(180);
+    });
+
+    // V0723014-Final.1 P0-4: 98/140 真实反射测试
+    it("max=140 burst (98/140) → 真实 reflective 弹幕反射", () => {
+      const c = new BossReactiveController();
+      // 切到右肩（reflective 护甲）
+      advanceToOpportunity(c);
+      hitCurrentArmor(c, "s_left");
+      advanceThroughResolveAndRecovery(c);
+      expect(c.getActiveArmorIndex()).toBe(1);
+
+      // threat 阶段注入 reflective 弹幕
+      c.update(0.35);
+      const refl = c.spawnProjectileForTest("reflective", BOSS_CX + 30, BOSS_CY - 20, 0, 60);
+      const origVx = refl.vx;
+      const origVy = refl.vy;
+
+      // 用 lockedMomentum=98/140 (burst) 命中弹幕
+      const momentum = createBladeMomentumState(98, 140);
+      expect(momentum.band).toBe("burst");
+      c.setProgrammaticSlashEnergy(98);
+      const segA = v(refl.x - 20, refl.y - 40);
+      const segB = v(refl.x + 20, refl.y + 20);
+      const angle = Math.atan2(segB.y - segA.y, segB.x - segA.x);
+      const geometry = buildReactiveSlashGeometry(segA, segB, angle, 30, 3, "s_refl_140", momentum);
+      c.resolveGeometry(geometry);
+      const result = c.finishSlash("s_refl_140", momentum, 100, DEFAULT_BLADE_RUN_MODIFIERS);
+
+      // 断言 events 包含 projectile_reflect
+      expect(result.projectileReflectCount).toBe(1);
+      expect(result.events.some(e => e.kind === "projectile_reflect")).toBe(true);
+
+      // 断言弹幕 reflected=true / velocity 反向
+      const projsAfter = c.getProjectiles();
+      const reflAfter = projsAfter.find(p => p.id === refl.id);
+      expect(reflAfter).toBeDefined();
+      expect(reflAfter!.reflected).toBe(true);
+      expect(reflAfter!.vx).toBeCloseTo(-origVx, 1);
+      expect(reflAfter!.vy).toBeCloseTo(-origVy, 1);
+      expect(reflAfter!.resolution).toBe("reflect");
+    });
+
+    // V0723014-Final.1 P0-5: 中途 max 变化时起刀快照不变
+    it("P0-5 中途 max 变化: 起刀 70/100 → finishSlash 前 maxBonus=40 → 结果仍用起刀 max=100", () => {
+      const c = new BossReactiveController();
+      advanceToOpportunity(c);
+      // 起刀时 momentumBefore=70/100 (burst)
+      const momentumBefore = createBladeMomentumState(70, 100);
+      c.setProgrammaticSlashEnergy(70);
+      const pos = c.getActiveArmorWorldPos()!;
+      const segA = v(pos.cx - pos.rx * 0.5, pos.cy - pos.ry * 0.5);
+      const segB = v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5);
+      const angle = Math.atan2(segB.y - segA.y, segB.x - segA.x);
+      const geometry = buildReactiveSlashGeometry(segA, segB, angle, 30, 3, "s_p5_lock", momentumBefore);
+      c.resolveGeometry(geometry);
+
+      // 模拟中途 max 变化：传入带 maxBonus=40 的 modifiers（理论上 max 应从 100→140）
+      const modifiersWithGrowth: BladeRunModifiers = {
+        maxBonus: 40,
+        floorBonus: 0,
+        gainMultiplier: 1,
+        costMultiplier: 1,
+        nodeThresholdShift: {},
+      };
+      const result = c.finishSlash("s_p5_lock", momentumBefore, 100, modifiersWithGrowth);
+
+      // 起刀快照不变：momentumBefore.max 仍为 100
+      expect(result.momentumBefore.max).toBe(100);
+      expect(result.momentumBefore.band).toBe("burst");
+      // 结算用起刀 max：momentumAfter.max 仍为 100（不受 modifiers.maxBonus 影响）
+      expect(result.momentumAfter.max).toBe(100);
+      // energyAfter 被 clamp 在 [0, 100]（起刀 max）
+      expect(result.energyAfter).toBeLessThanOrEqual(100);
+      expect(result.momentumAfter.current).toBeLessThanOrEqual(100);
     });
   });
 });

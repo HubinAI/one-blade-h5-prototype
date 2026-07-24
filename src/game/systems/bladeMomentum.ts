@@ -107,6 +107,8 @@ export function createBladeMomentumState(
  * 上限成长保持比例：将 current 等比例缩放到新上限。
  * 例：80/100 → (112, 140, 0.8)
  *
+ * V0723014-Final.1 P1-2: 对 NaN/Infinity oldMax/newMax 过滤（非有限值 fallback 到 1）。
+ *
  * @returns { current, max, ratio }
  */
 export function applyBladeMaxChangePreserveRatio(
@@ -114,8 +116,9 @@ export function applyBladeMaxChangePreserveRatio(
   oldMax: number,
   newMax: number,
 ): { current: number; max: number; ratio: number } {
-  const safeOldMax = Math.max(1, oldMax);
-  const safeNewMax = Math.max(1, newMax);
+  // P1-2: sanitize NaN/Infinity — 非有限值 fallback 到 1
+  const safeOldMax = Math.max(1, Number.isFinite(oldMax) ? oldMax : 1);
+  const safeNewMax = Math.max(1, Number.isFinite(newMax) ? newMax : 1);
   const ratio = resolveBladeMomentumRatio(current, safeOldMax);
   const newCurrent = ratio * safeNewMax; // P0-7: 删除 Math.round，内部保留浮点避免比例漂移
   return {
@@ -130,12 +133,16 @@ export function applyBladeMaxChangePreserveRatio(
  * P0-6: 使用 applyBladeMaxChangePreserveRatio 保持比例，避免成长掉档。
  * maxBonus 以 baseMax 为基准，不是在当前 max 上重复叠加。
  * 例：35/100 + maxBonus40 = 49/140（ratio 35% 不变，仍 enhanced）
+ *
+ * V0723014-Final.1 P1-2: 对 NaN/Infinity maxBonus 过滤（非有限值 fallback 到 0）。
  */
 export function applyBladeRunMaxModifier(
   state: BladeMomentumState,
   modifiers: BladeRunModifiers,
 ): BladeMomentumState {
-  const targetMax = BLADE_MOMENTUM_CONFIG.baseMax + (modifiers.maxBonus ?? 0);
+  // P1-2: sanitize NaN/Infinity maxBonus — 非有限值 fallback 到 0
+  const safeMaxBonus = Number.isFinite(modifiers.maxBonus) ? modifiers.maxBonus : 0;
+  const targetMax = BLADE_MOMENTUM_CONFIG.baseMax + safeMaxBonus;
   const preserved = applyBladeMaxChangePreserveRatio(state.current, state.max, targetMax);
   return createBladeMomentumState(preserved.current, preserved.max, modifiers);
 }

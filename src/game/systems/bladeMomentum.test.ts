@@ -11,6 +11,7 @@ import {
   applyBladeMaxChangePreserveRatio,
   applyBladeRunMaxModifier,
 } from "./bladeMomentum";
+import { recoverEnergy } from "./bladeEnergySystem";
 import type { BladeRunModifiers, BladeAbilityNodeId } from "../config/bladeMomentum";
 
 // ---- ratio 边界测试 ----
@@ -534,5 +535,138 @@ describe("max=140 集成测试（band → 预期伤害/反射行为）", () => {
     const state = createBladeMomentumState(126, 180);
     expect(state.ratio).toBeCloseTo(0.70, 2);
     expect(state.band).toBe("burst");
+  });
+});
+
+// ---- V0723014-Final.1 P1-2: NaN/Infinity sanitization for max change functions ----
+
+describe("P1-2 applyBladeMaxChangePreserveRatio NaN/Infinity 安全", () => {
+  it("NaN oldMax → safe 1, ratio 基于新 max", () => {
+    const result = applyBladeMaxChangePreserveRatio(50, NaN, 100);
+    expect(Number.isFinite(result.current)).toBe(true);
+    expect(Number.isFinite(result.max)).toBe(true);
+    expect(Number.isFinite(result.ratio)).toBe(true);
+    expect(result.max).toBe(100);
+  });
+
+  it("Infinity oldMax → safe 1, ratio 基于新 max", () => {
+    const result = applyBladeMaxChangePreserveRatio(50, Infinity, 100);
+    expect(Number.isFinite(result.current)).toBe(true);
+    expect(Number.isFinite(result.max)).toBe(true);
+    expect(Number.isFinite(result.ratio)).toBe(true);
+    expect(result.max).toBe(100);
+  });
+
+  it("NaN newMax → safe 1", () => {
+    const result = applyBladeMaxChangePreserveRatio(50, 100, NaN);
+    expect(Number.isFinite(result.current)).toBe(true);
+    expect(Number.isFinite(result.max)).toBe(true);
+    expect(Number.isFinite(result.ratio)).toBe(true);
+    expect(result.max).toBe(1);
+  });
+
+  it("Infinity newMax → safe 1", () => {
+    const result = applyBladeMaxChangePreserveRatio(50, 100, Infinity);
+    expect(Number.isFinite(result.current)).toBe(true);
+    expect(Number.isFinite(result.max)).toBe(true);
+    expect(Number.isFinite(result.ratio)).toBe(true);
+    expect(result.max).toBe(1);
+  });
+
+  it("NaN oldMax + NaN newMax → both safe 1", () => {
+    const result = applyBladeMaxChangePreserveRatio(50, NaN, NaN);
+    expect(Number.isFinite(result.current)).toBe(true);
+    expect(Number.isFinite(result.max)).toBe(true);
+    expect(Number.isFinite(result.ratio)).toBe(true);
+    expect(result.max).toBe(1);
+  });
+
+  it("正常值不受影响: 80/100 → 112/140", () => {
+    const result = applyBladeMaxChangePreserveRatio(80, 100, 140);
+    expect(result.current).toBe(112);
+    expect(result.max).toBe(140);
+    expect(result.ratio).toBeCloseTo(0.80, 2);
+  });
+});
+
+describe("P1-2 applyBladeRunMaxModifier NaN/Infinity maxBonus 安全", () => {
+  it("NaN maxBonus → fallback 0, max 不变", () => {
+    const state = createBladeMomentumState(35, 100);
+    const mods: BladeRunModifiers = {
+      maxBonus: NaN,
+      floorBonus: 0,
+      gainMultiplier: 1,
+      costMultiplier: 1,
+      nodeThresholdShift: {},
+    };
+    const newState = applyBladeRunMaxModifier(state, mods);
+    expect(Number.isFinite(newState.max)).toBe(true);
+    expect(Number.isFinite(newState.current)).toBe(true);
+    expect(newState.max).toBe(100); // maxBonus=0 → max=100
+  });
+
+  it("Infinity maxBonus → fallback 0, max 不变", () => {
+    const state = createBladeMomentumState(35, 100);
+    const mods: BladeRunModifiers = {
+      maxBonus: Infinity,
+      floorBonus: 0,
+      gainMultiplier: 1,
+      costMultiplier: 1,
+      nodeThresholdShift: {},
+    };
+    const newState = applyBladeRunMaxModifier(state, mods);
+    expect(Number.isFinite(newState.max)).toBe(true);
+    expect(Number.isFinite(newState.current)).toBe(true);
+    expect(newState.max).toBe(100); // maxBonus=0 → max=100
+  });
+
+  it("-Infinity maxBonus → fallback 0, max 不变", () => {
+    const state = createBladeMomentumState(35, 100);
+    const mods: BladeRunModifiers = {
+      maxBonus: -Infinity,
+      floorBonus: 0,
+      gainMultiplier: 1,
+      costMultiplier: 1,
+      nodeThresholdShift: {},
+    };
+    const newState = applyBladeRunMaxModifier(state, mods);
+    expect(Number.isFinite(newState.max)).toBe(true);
+    expect(Number.isFinite(newState.current)).toBe(true);
+    expect(newState.max).toBe(100); // maxBonus=0 → max=100
+  });
+
+  it("正常 maxBonus=40 不受影响: 35/100 → 49/140", () => {
+    const state = createBladeMomentumState(35, 100);
+    const mods: BladeRunModifiers = {
+      maxBonus: 40,
+      floorBonus: 0,
+      gainMultiplier: 1,
+      costMultiplier: 1,
+      nodeThresholdShift: {},
+    };
+    const newState = applyBladeRunMaxModifier(state, mods);
+    expect(newState.max).toBe(140);
+    expect(newState.current).toBe(49);
+    expect(newState.ratio).toBeCloseTo(0.35, 2);
+  });
+});
+
+// ---- V0723014-Final.1 P1-1: max=180 恢复测试 ----
+
+describe("P1-1 recoverEnergy max=180 恢复", () => {
+  it("current=100/max=180 → recoverEnergy 后 current>100 → current<=180", () => {
+    const recovered = recoverEnergy(100, 1.0, 0, true, 180);
+    expect(recovered).toBeGreaterThan(100);
+    expect(recovered).toBeLessThanOrEqual(180);
+  });
+
+  it("current=179/max=180 → recoverEnergy 不超过 180", () => {
+    const recovered = recoverEnergy(179, 1.0, 0, true, 180);
+    expect(recovered).toBeLessThanOrEqual(180);
+  });
+
+  it("current=180/max=180 → recoverEnergy 保持 180（封顶）", () => {
+    const recovered = recoverEnergy(180, 1.0, 0, true, 180);
+    expect(recovered).toBe(180);
   });
 });

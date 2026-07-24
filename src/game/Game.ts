@@ -122,6 +122,10 @@ export class Game {
     hasSoul: boolean;
     hasOil: boolean;
     oneBladeBoost: number;
+    /** V0723014-Final.1 P0-1: Reactive 模式起刀锁定的完整 Momentum 快照。
+     *  在 handlePointerDown 时生成，startSlash 时继承，禁止重新读取 getReactiveBladeMomentum()。
+     *  避免 pending 期间 max 成长/modifier 变化导致按下状态与正式起刀状态不一致。 */
+    lockedMomentum?: BladeMomentumState;
   } | null = null;
   private elapsed = 0;
   private idCounter = 0;
@@ -1475,6 +1479,9 @@ export class Game {
     if (this.currentSlash?.active) this.endSlash("收刀");
     // P4.1A.7：按下只锁定Pending，不消耗刀势
     const lockedEnergy = clamp(this.energy, 0, BALANCE.swordEnergy.max);
+    // V0723014-Final.1 P0-1: Reactive 模式在 PointerDown 时锁定完整 Momentum 快照。
+    // startSlash 继承此快照，禁止重新调用 getReactiveBladeMomentum()。
+    const lockedMomentum = isReactive ? this.getReactiveBladeMomentum() : undefined;
     this.pendingSlash = {
       startPos: start,
       lockedEnergy,
@@ -1482,7 +1489,8 @@ export class Game {
       startedAt: this.elapsed,
       hasSoul: this.nextSoul,
       hasOil: this.nextOil,
-      oneBladeBoost: this.oneBladeModeTimer > 0 ? 2.0 : 1.0
+      oneBladeBoost: this.oneBladeModeTimer > 0 ? 2.0 : 1.0,
+      lockedMomentum,
     };
   }
 
@@ -1545,10 +1553,24 @@ export class Game {
 
   private startSlash(pos: Vec2, pending?: NonNullable<typeof this.pendingSlash>) {
     const lockedEnergy = pending ? pending.lockedEnergy : clamp(this.energy, 0, BALANCE.swordEnergy.max);
-    // V0723014: Reactive 模式起刀时锁定 momentum 快照（整刀不变）
+    // V0723014-Final.1 P0-1: Reactive 模式起刀时继承 pending.lockedMomentum（PointerDown 时锁定）。
+    // 禁止重新调用 this.getReactiveBladeMomentum()，避免 pending 期间 max 变化导致快照不一致。
+    // 无 pending 的程序化入口（如 E2E 桥）才允许创建新快照。
     const isReactiveMode = this.gameMode === "bossReactive";
-    const lockedMomentum = isReactiveMode ? this.getReactiveBladeMomentum() : undefined;
-    const tier = (pending ? pending.tier : getBladeTier(lockedEnergy)) as "weak" | "normal" | "strong" | "burst";
+    const lockedMomentum = isReactiveMode
+      ? (pending?.lockedMomentum ?? this.getReactiveBladeMomentum())
+      : undefined;
+    // V0723014-Final.1 P0-2: Reactive 模式归一化 tier。
+    // 禁止 getBladeTier(lockedMomentum.current)（max=140 时 42 会被识别成旧 strong 段位，
+    // 但 42/140=30% 应该是 enhanced → 归一化后 30 → normal 段位）。
+    // 非 Reactive 模式保持旧逻辑（pending.tier 或 getBladeTier(lockedEnergy)）。
+    let tier: "weak" | "normal" | "strong" | "burst";
+    if (isReactiveMode && lockedMomentum) {
+      const normalizedEnergy = lockedMomentum.ratio * BALANCE.swordEnergy.max;
+      tier = getBladeTier(normalizedEnergy);
+    } else {
+      tier = (pending ? pending.tier : getBladeTier(lockedEnergy)) as "weak" | "normal" | "strong" | "burst";
+    }
     const stage = SWORD_STAGE_BY_ID[tier];
     const pathMultiplier = (pending && pending.hasSoul ? PICKUP_BALANCE.soul.pathLengthMultiplier ?? 1 : (this.nextSoul ? PICKUP_BALANCE.soul.pathLengthMultiplier ?? 1 : 1)) * this.getPathLengthMultiplier();
     const widthMultiplier = pending && pending.hasSoul ? PICKUP_BALANCE.soul.widthMultiplier ?? 1 : (this.nextSoul ? PICKUP_BALANCE.soul.widthMultiplier ?? 1 : 1);
@@ -1612,7 +1634,7 @@ export class Game {
 
     // P0: Reactive模式起刀时锁定刀势快照，不执行旧版消耗
     if (this.gameMode === "bossReactive") {
-      // 起刀快照已在 lockedEnergy 中，整刀使用
+      // V0723014-Final.1 P0-1: 起刀快照已锁定在 lockedMomentum 中（PointerDown 时生成），整刀使用
       // 不执行 consumeEnergyByTier — 由 endSlash/finalizeBossSlashCommon 统一结算
       // P4.4B-R5.2 P0-6: 注册 Reactive 挥刀起始，供机会窗口按 slashId 宽限
       this.reactiveController?.registerReactiveSlashStart(this.currentSlash!.id);
@@ -1625,13 +1647,16 @@ export class Game {
     this.nextSoul = false;
     this.nextOil = false;
     this.stats.slashes += 1;
-    this.totalSlashEnergy += lockedEnergy;
+    // V0723014-Final.1 P0-2: Reactive 模式用 lockedMomentum.current 统计（反映真实刀势值）。
+    // 非 Reactive 模式保持旧 lockedEnergy 统计。
+    this.totalSlashEnergy += isReactiveMode && lockedMomentum ? lockedMomentum.current : lockedEnergy;
     // P1-2: Reactive 模式不写入普通关卡绝对阈值统计（max=180 时 60/180=33% 不应算高刀势）
     if (!isReactiveMode && lockedEnergy >= 60) this.highBladeSlashCount += 1;
     this.warriorDrawTimer = 0.2;
     this.warriorSheathTimer = 0;
     this.lastSlashAngle = this.angleFromWarrior(pos);
-    logEvent("slash_start", { levelId: this.level.id, energy: lockedEnergy, stage: stage.name });
+    // V0723014-Final.1 P0-2: Reactive 模式 slash_start 日志用 lockedMomentum.current
+    logEvent("slash_start", { levelId: this.level.id, energy: isReactiveMode && lockedMomentum ? lockedMomentum.current : lockedEnergy, stage: stage.name });
     AudioService.slashDraw(tier);
     // P4.4A.2: Boss模式不显示强斩/破阵斩/低刀势提示
     if (this.gameMode !== "boss") {
@@ -2346,7 +2371,12 @@ export class Game {
       `bridgeTriggered: ${snap.bridgeTriggered}`,
       `playerHp: ${snap.playerHp.current}/${snap.playerHp.max}`,
       `slashActive: ${this.currentSlash?.active ?? false}`,
-      `slashEnergy: ${this.currentSlash?.lockedEnergy ?? "-"}`,
+      // V0723014-Final.1 P0-2: Debug 面板显示 lockedMomentum 而非 lockedEnergy
+      (() => {
+        const m = this.currentSlash?.lockedMomentum;
+        if (!m) return `slashMomentum: -`;
+        return `slashMomentum: ${m.current}/${m.max} | ratio: ${(m.ratio * 100).toFixed(0)}% | band: ${m.band}`;
+      })(),
       // P0: 使用 Controller 返回的 primaryResult/Source 和拆分字段
       `lastResult: ${resolve?.primaryResult ?? "-"}`,
       `lastSource: ${resolve?.primarySource ?? "-"}`,
@@ -2385,8 +2415,9 @@ export class Game {
     const rc = this.reactiveController;
     if (!rc) return;
 
-    // P0-C: 使用起刀快照能量，而非实时 energy
-    const slashEnergy = trail.lockedMomentum?.current ?? trail.lockedEnergy ?? this.energy;
+    // V0723014-Final.1 P0-2: 删除 lockedEnergy fallback 链，Reactive 路径必须使用 lockedMomentum。
+    if (!trail.lockedMomentum) throw new Error("Reactive trail missing lockedMomentum");
+    const slashEnergy = trail.lockedMomentum.current;
 
     // 设置当前刀势能量（供 finishSlash 使用）
     rc.currentSlashEnergy = slashEnergy;
@@ -4530,7 +4561,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   // P0: Reactive Boss模式收刀 — 使用 Controller API（禁止 Game 二次推导结果）
   if (this.reactiveController) {
     const rc = this.reactiveController;
-    const slashEnergy = trail.lockedMomentum?.current ?? trail.lockedEnergy ?? this.energy;
+    // V0723014-Final.1 P0-2: 删除 lockedEnergy fallback 链，Reactive 路径必须使用 lockedMomentum。
+    if (!trail.lockedMomentum) throw new Error("Reactive trail missing lockedMomentum");
+    const slashEnergy = trail.lockedMomentum.current;
     rc.currentSlashEnergy = slashEnergy;
     // P0: finishSlash 返回完整结算结果（Controller 直接计算 primaryResult/Source）
     // P0-4: 传 trail.lockedMomentum（起刀快照）和 reactiveBladeRunModifiers
