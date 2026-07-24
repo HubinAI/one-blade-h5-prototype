@@ -74,8 +74,8 @@ describe("resolveBladeMomentumRatio", () => {
     expect(resolveBladeMomentumRatio(NaN, 100)).toBe(0);
   });
 
-  it("Infinity max → safe 1", () => {
-    expect(resolveBladeMomentumRatio(50, Infinity)).toBe(1);
+  it("Infinity max → safe 0 (non-finite max → 0)", () => {
+    expect(resolveBladeMomentumRatio(50, Infinity)).toBe(0);
   });
 
   it("NaN max → 0", () => {
@@ -114,8 +114,8 @@ describe("resolveBladeMomentumBand", () => {
     expect(resolveBladeMomentumBand(NaN)).toBe("base");
   });
 
-  it("Infinity → burst (safe clamp)", () => {
-    expect(resolveBladeMomentumBand(Infinity)).toBe("burst");
+  it("Infinity → base (non-finite ratio → safe base)", () => {
+    expect(resolveBladeMomentumBand(Infinity)).toBe("base");
   });
 
   it("negative → base (safe clamp)", () => {
