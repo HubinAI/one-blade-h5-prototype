@@ -383,17 +383,31 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
   });
 
   // ================================================================
-  // V0723015-Final: 新增 4 条真实 Pointer E2E
+  // V0723015-Final: 4 条真实 Pointer E2E（修正 getTargets 契约 + 完整进入游戏流程）
   // ================================================================
 
-  test.skip("V0723015 armor_closed — threat阶段划过关闭护甲不造成伤害", async ({ page }) => {
+  // 共享 setup：进入 Reactive Boss 游戏
+  async function setupReactive(page: import("@playwright/test").Page) {
+    await page.goto("/?bossFlow=reactive");
+    await page.waitForLoadState("networkidle");
+    await page.evaluate(() => {
+      const key = "one_blade_v04_progression";
+      const data = JSON.parse(localStorage.getItem(key) || "{}");
+      data.highestFloor = 6;
+      localStorage.setItem(key, JSON.stringify(data));
+    });
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    await page.getByRole("button", { name: /练气突破/ }).click();
+    await expect(page.locator("canvas")).toBeVisible();
+    await expect.poll(() => page.evaluate(() => typeof window.__ONE_BLADE_E2E__ !== "undefined"), { timeout: 15000 }).toBe(true);
+  }
+
+  test("V0723015 armor_closed — threat阶段划过关闭护甲不造成伤害", async ({ page }) => {
     const pageErrors: string[] = [];
     page.on("pageerror", (err) => pageErrors.push(err.message));
+    await setupReactive(page);
 
-    await page.goto("http://localhost:4173/?bossFlow=reactive&debug=1");
-    await expect.poll(() => page.evaluate(() => typeof window.__ONE_BLADE_E2E__ !== "undefined"), { timeout: 15000 }).toBe(true);
-
-    // 等待进入 threat 阶段
     await expect.poll(async () => {
       const s = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
       return s.phase;
@@ -402,16 +416,14 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
     const stateBefore = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
     const durabilityBefore = stateBefore.armorDurability?.[0] ?? 100;
 
-    // 获取护甲位置
     const targets = await page.evaluate(() => window.__ONE_BLADE_E2E__.getTargets());
-    expect(targets.length).toBeGreaterThan(0);
-    const armor = targets[0];
+    const armor = targets.armorTargets?.[0];
+    expect(armor).toBeDefined();
 
     const canvasBox = await page.locator("canvas").boundingBox();
     const cScaleX = canvasBox!.width / 390;
     const cScaleY = canvasBox!.height / 844;
 
-    // 拖拽经过护甲位置
     const sx = canvasBox!.x + (armor.cx - armor.rx) * cScaleX;
     const sy = canvasBox!.y + armor.cy * cScaleY;
     const ex = canvasBox!.x + (armor.cx + armor.rx) * cScaleX;
@@ -421,25 +433,19 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
     await page.mouse.down();
     await page.mouse.move(ex, ey, { steps: 5 });
     await page.mouse.up();
-
     await page.waitForTimeout(500);
 
     const stateAfter = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
     const durabilityAfter = stateAfter.armorDurability?.[0] ?? 100;
-
-    // 护甲耐久不变（armor_closed 不造成伤害）
     expect(durabilityAfter).toBe(durabilityBefore);
     expect(pageErrors).toEqual([]);
   });
 
-  test.skip("V0723015 有目标打空扣1 — opportunity阶段偏离护甲挥刀", async ({ page }) => {
+  test("V0723015 有目标打空扣1 — opportunity阶段偏离护甲挥刀", async ({ page }) => {
     const pageErrors: string[] = [];
     page.on("pageerror", (err) => pageErrors.push(err.message));
+    await setupReactive(page);
 
-    await page.goto("http://localhost:4173/?bossFlow=reactive&debug=1");
-    await expect.poll(() => page.evaluate(() => typeof window.__ONE_BLADE_E2E__ !== "undefined"), { timeout: 15000 }).toBe(true);
-
-    // 等待进入 opportunity 阶段
     await expect.poll(async () => {
       const s = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
       return s.phase;
@@ -452,7 +458,6 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
     const cScaleX = canvasBox!.width / 390;
     const cScaleY = canvasBox!.height / 844;
 
-    // 在屏幕底部远离护甲的位置拖拽（有目标但打空）
     const sx = canvasBox!.x + 50 * cScaleX;
     const sy = canvasBox!.y + 700 * cScaleY;
     const ex = canvasBox!.x + 100 * cScaleX;
@@ -462,25 +467,24 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
     await page.mouse.down();
     await page.mouse.move(ex, ey, { steps: 5 });
     await page.mouse.up();
-
     await page.waitForTimeout(500);
 
     const stateAfter = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
     const energyAfter = stateAfter.bladeMomentum?.current ?? 0;
-
-    // 有目标打空：energyAfter 应低于 energyBefore（扣了 baseCost + emptySwingPenalty=1）
     expect(energyAfter).toBeLessThan(energyBefore);
     expect(pageErrors).toEqual([]);
   });
 
-  test.skip("V0723015 无目标打空不扣 — prepare阶段挥刀无额外惩罚", async ({ page }) => {
+  test("V0723015 无目标打空不扣 — threat阶段无弹幕时挥刀无额外惩罚", async ({ page }) => {
     const pageErrors: string[] = [];
     page.on("pageerror", (err) => pageErrors.push(err.message));
+    await setupReactive(page);
 
-    await page.goto("http://localhost:4173/?bossFlow=reactive&debug=1");
-    await expect.poll(() => page.evaluate(() => typeof window.__ONE_BLADE_E2E__ !== "undefined"), { timeout: 15000 }).toBe(true);
+    await expect.poll(async () => {
+      const s = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
+      return s.phase;
+    }, { timeout: 15000 }).toBe("armor_threat");
 
-    // 在 prepare 阶段（无目标）拖拽
     const stateBefore = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
     const energyBefore = stateBefore.bladeMomentum?.current ?? 0;
 
@@ -488,7 +492,6 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
     const cScaleX = canvasBox!.width / 390;
     const cScaleY = canvasBox!.height / 844;
 
-    // 在屏幕底部拖拽
     const sx = canvasBox!.x + 50 * cScaleX;
     const sy = canvasBox!.y + 700 * cScaleY;
     const ex = canvasBox!.x + 100 * cScaleX;
@@ -498,26 +501,19 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
     await page.mouse.down();
     await page.mouse.move(ex, ey, { steps: 5 });
     await page.mouse.up();
-
     await page.waitForTimeout(500);
 
     const stateAfter = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
     const energyAfter = stateAfter.bladeMomentum?.current ?? 0;
-
-    // 无目标打空：只扣 baseCost，不扣 emptySwingPenalty
-    // energyAfter <= energyBefore（扣了 baseCost 但没有额外惩罚）
     expect(energyAfter).toBeLessThanOrEqual(energyBefore);
     expect(pageErrors).toEqual([]);
   });
 
-  test.skip("V0723015 0刀势仍可挥刀 — 刀势不足不禁止PointerDown", async ({ page }) => {
+  test("V0723015 0刀势仍可挥刀 — 刀势不足不禁止PointerDown", async ({ page }) => {
     const pageErrors: string[] = [];
     page.on("pageerror", (err) => pageErrors.push(err.message));
+    await setupReactive(page);
 
-    await page.goto("http://localhost:4173/?bossFlow=reactive&debug=1");
-    await expect.poll(() => page.evaluate(() => typeof window.__ONE_BLADE_E2E__ !== "undefined"), { timeout: 15000 }).toBe(true);
-
-    // 等待进入 threat 或 opportunity 阶段（可挥刀阶段）
     await expect.poll(async () => {
       const s = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
       return s.phase === "armor_threat" || s.phase === "armor_opportunity";
@@ -527,7 +523,6 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
     const cScaleX = canvasBox!.width / 390;
     const cScaleY = canvasBox!.height / 844;
 
-    // 多次挥刀消耗刀势到接近 0
     for (let i = 0; i < 10; i++) {
       const sx = canvasBox!.x + 50 * cScaleX;
       const sy = canvasBox!.y + 700 * cScaleY;
@@ -540,11 +535,6 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
       await page.waitForTimeout(200);
     }
 
-    // 检查刀势已经很低
-    const stateLow = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
-    const lowEnergy = stateLow.bladeMomentum?.current ?? 100;
-
-    // 即使刀势很低，仍可挥刀（不报错）
     const sx = canvasBox!.x + 50 * cScaleX;
     const sy = canvasBox!.y + 700 * cScaleY;
     const ex = canvasBox!.x + 200 * cScaleX;
@@ -553,10 +543,8 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
     await page.mouse.down();
     await page.mouse.move(ex, ey, { steps: 3 });
     await page.mouse.up();
-
     await page.waitForTimeout(300);
 
-    // 没有页面错误 = 挥刀成功（没有被拒绝）
     expect(pageErrors).toEqual([]);
   });
 });
