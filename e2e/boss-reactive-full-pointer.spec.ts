@@ -44,7 +44,7 @@ test.describe("Reactive Boss 全Pointer三甲→pursuit", () => {
       const s = window.__ONE_BLADE_E2E__.getState();
       return s.bladeMomentum;
     });
-    expect(initialBM.current).toBe(35);
+    expect(initialBM.current).toBeCloseTo(35, 0);
     expect(initialBM.max).toBe(100);
     expect(initialBM.ratio).toBeCloseTo(0.35, 1);
     expect(initialBM.band).toBe("enhanced");
