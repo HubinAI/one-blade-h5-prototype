@@ -59,6 +59,7 @@ import type {
   BattlefieldPressureLayer,
   BossPhaseState,
   ExecutionResolveResult,
+  ReactiveMomentumTelemetry,
 } from "./types";
 import { choose, clamp, distance, distanceToSegment, randomRange } from "../utils/math";
 
@@ -1197,6 +1198,17 @@ export class Game {
     lastSegmentEventCount: number;
     /** P0-C: 最后 segment 事件种类 */
     lastSegmentKinds: string;
+    // ---- V0723015: 经济遥测扩展 ----
+    rawBaseCost: number;
+    costMultiplier: number;
+    rawActiveGain: number;
+    gainMultiplier: number;
+    modifiedActiveGain: number;
+    floorEnergy: number;
+    hadActionableTarget: boolean;
+    hitClosedArmor: boolean;
+    emptyPenaltyEligible: boolean;
+    armorClosedEventCount: number;
   } | null = null;
 
   /** P0-4: 当前 segment 的 resolveGeometry 事件（用于同帧粒子反馈） */
@@ -1212,6 +1224,29 @@ export class Game {
     bridgeTriggered: boolean;
     gameMode: "bossReactive" | "boss";
   } | null = null;
+
+  /** V0723015: Boss 局内刀势经济遥测（累计统计） */
+  private _reactiveTelemetry: ReactiveMomentumTelemetry = {
+    passiveGain: 0,
+    activeGain: 0,
+    baseCost: 0,
+    emptyPenalty: 0,
+    dangerousPenalty: 0,
+    bodyPenalty: 0,
+    slashCount: 0,
+    effectiveSlashCount: 0,
+    eligibleEmptySwingCount: 0,
+    noTargetSwingCount: 0,
+    armorClosedCount: 0,
+    baseBandSeconds: 0,
+    enhancedBandSeconds: 0,
+    burstBandSeconds: 0,
+  };
+
+  /** V0723015: 获取只读遥测快照（供 Debug/E2E 使用） */
+  getReactiveTelemetry(): ReactiveMomentumTelemetry {
+    return { ...this._reactiveTelemetry };
+  }
 
   /** P4.4A.2: Boss模式渲染白名单 */
   private renderBossMode(ctx: CanvasRenderingContext2D): void {
@@ -1419,12 +1454,22 @@ export class Game {
       return;
     }
 
-    // 能量恢复（被动1.5/s兜底）
+    // V0723015: 能量恢复（从配置读取 passiveRegenPerSecond=1.0，不再用 recoverEnergy 硬编码1.5）
     this.regenDelayTimer = Math.max(0, this.regenDelayTimer - scaledDt);
     if (!this.currentSlash?.active && !this.pendingSlash && this.regenDelayTimer <= 0) {
       // P0-5: Reactive 模式传 reactiveBladeMax，避免被动恢复封顶 100
-      this.energy = recoverEnergy(this.energy, scaledDt, 0, true, this.reactiveBladeMax);
+      const passiveRate = REACTIVE_BOSS_CONFIG.bladeEnergy.passiveRegenPerSecond;
+      const energyBeforeRegen = this.energy;
+      this.energy = clamp(this.energy + passiveRate * scaledDt, 0, this.reactiveBladeMax);
+      // V0723015: 只累加实际恢复量（到达max后不虚增passiveGain）
+      this._reactiveTelemetry.passiveGain += this.energy - energyBeforeRegen;
     }
+
+    // V0723015: 累计档位时间
+    const bandMomentum = this.getReactiveBladeMomentum();
+    if (bandMomentum.band === "base") this._reactiveTelemetry.baseBandSeconds += scaledDt;
+    else if (bandMomentum.band === "enhanced") this._reactiveTelemetry.enhancedBandSeconds += scaledDt;
+    else this._reactiveTelemetry.burstBandSeconds += scaledDt;
 
     this.screenShake = Math.max(0, this.screenShake - scaledDt * 2.7);
     this.flash = Math.max(0, this.flash - scaledDt * 2.2);
@@ -2397,6 +2442,13 @@ export class Game {
       `armorEvents: ${resolve?.armorEventCount ?? "-"}`,
       `lastSegmentEvents: ${resolve?.lastSegmentEventCount ?? "-"}`,
       `lastSegmentKinds: ${resolve?.lastSegmentKinds ?? "-"}`,
+      // V0723015: 经济遥测
+      `[Economy] gain A/P: ${this._reactiveTelemetry.activeGain.toFixed(1)}/${this._reactiveTelemetry.passiveGain.toFixed(1)}`,
+      `[Economy] cost B/E/D/Body: ${this._reactiveTelemetry.baseCost.toFixed(1)}/${this._reactiveTelemetry.emptyPenalty}/${this._reactiveTelemetry.dangerousPenalty}/${this._reactiveTelemetry.bodyPenalty}`,
+      `[Economy] slash eff/total: ${this._reactiveTelemetry.effectiveSlashCount}/${this._reactiveTelemetry.slashCount}`,
+      `[Economy] empty elig/noTgt: ${this._reactiveTelemetry.eligibleEmptySwingCount}/${this._reactiveTelemetry.noTargetSwingCount}`,
+      `[Economy] armorClosed: ${this._reactiveTelemetry.armorClosedCount}`,
+      `[Economy] bandTime B/E/Burst: ${this._reactiveTelemetry.baseBandSeconds.toFixed(1)}/${this._reactiveTelemetry.enhancedBandSeconds.toFixed(1)}/${this._reactiveTelemetry.burstBandSeconds.toFixed(1)}`,
     ];
     ctx.save();
     ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
@@ -4582,8 +4634,13 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         this.particles.push(...sparkBurst(ev.hitPos, 10, "#ffd700"));
         this.addText(ev.hitPos.x, ev.hitPos.y - 12, `+${cfg.reflectReward}`, "#ffd700", 14);
       } else if (ev.kind === "projectile_dangerous") {
+        // V0723015: 使用 dangerousWrongCutPenalty=9（不再用 wrongHitPenalty）
         this.particles.push(...sparkBurst(ev.hitPos, 12, "#c0392b"));
-        this.addText(ev.hitPos.x, ev.hitPos.y - 16, `-${cfg.wrongHitPenalty}`, "#ff4444", 14);
+        this.addText(ev.hitPos.x, ev.hitPos.y - 16, `-${cfg.dangerousWrongCutPenalty}`, "#ff4444", 14);
+      } else if (ev.kind === "armor_closed") {
+        // V0723015: armor_closed 中性反馈（破绽未开）
+        this.addText(ev.hitPos.x, ev.hitPos.y - 20, "破绽未开", "#8e44ad", 13, 0.6);
+        this.particles.push(...sparkBurst(ev.hitPos, 4, "#6c3483"));
       } else if (ev.kind === "armor") {
         // 护甲反馈使用 result.armorHitPos（Controller 返回的世界坐标）
         const ap = result.armorHitPos;
@@ -4607,36 +4664,25 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
           this.screenShake = Math.max(this.screenShake, 0.15);
         }
       } else if (ev.kind === "body") {
+        // V0723015: 使用 bodyWrongHitPenalty=7（不再硬编码 -10）
         this.particles.push(...sparkBurst(ev.hitPos, 6, "#6c3483"));
-        this.addText(ev.hitPos.x, ev.hitPos.y - 20, "偏斩 -10", "#ff6a33", 14, 0.6);
+        this.addText(ev.hitPos.x, ev.hitPos.y - 20, `偏斩 -${result.bodyWrongHitPenalty}`, "#ff6a33", 14, 0.6);
       }
     }
-
-    // P0: 未命中护甲时检查 threat 阶段"破绽未开"提示
-    if (!result.armorHit && !result.bodyWrongHit) {
-      if (rc.phase === "armor_threat") {
-        const armorPos = rc.getActiveArmorWorldPos();
-        if (armorPos) {
-          const tipX = trail.points[trail.points.length - 1].x;
-          const tipY = trail.points[trail.points.length - 1].y;
-          const dist = Math.hypot(tipX - armorPos.cx, tipY - armorPos.cy);
-          if (dist < armorPos.rx + 40) {
-            this.addText(armorPos.cx, armorPos.cy - 20, "破绽未开", "#8e44ad", 13, 0.6);
-            this.particles.push(...sparkBurst({ x: armorPos.cx, y: armorPos.cy }, 4, "#6c3483"));
-          }
-        }
-      }
-    }
+    // V0723015: armor_closed 已由 result.events 中的 armor_closed 事件正式处理，
+    // 删除旧的 heuristic "破绽未开" 检查（基于刀尖距离护甲中心的近似判断）。
 
     // P0: 记录 Debug 遥测 — 直接存储 result 的 primaryResult/Source 和拆分字段
     const resolvedEvents = result.events;
     const eventCount = resolvedEvents.length;
     let armorEventCount = 0;
     let bodyEventCount = 0;
+    let armorClosedEventCount = 0;
     const eventKindSet: Set<string> = new Set();
     for (const e of resolvedEvents) {
       if (e.kind === "armor") armorEventCount++;
       else if (e.kind === "body") bodyEventCount++;
+      else if (e.kind === "armor_closed") armorClosedEventCount++;
       eventKindSet.add(e.kind);
     }
     const eventKinds = [...eventKindSet].sort().join(",") || "-";
@@ -4646,6 +4692,26 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const segKindSet = new Set(segEvents.map(e => e.kind));
     const currentSegmentKinds = [...segKindSet].sort().join(",") || "-";
 
+    // V0723015: 累计刀势经济遥测
+    this._reactiveTelemetry.slashCount++;
+    this._reactiveTelemetry.activeGain += result.modifiedActiveGain;
+    this._reactiveTelemetry.baseCost += result.baseCost;
+    this._reactiveTelemetry.emptyPenalty += result.emptySwingPenalty;
+    this._reactiveTelemetry.dangerousPenalty += result.dangerousWrongCutPenalty;
+    this._reactiveTelemetry.bodyPenalty += result.bodyWrongHitPenalty;
+    if (result.projectileCutCount > 0 || result.projectileReflectCount > 0 || result.armorHit) {
+      this._reactiveTelemetry.effectiveSlashCount++;
+    }
+    if (result.emptyPenaltyEligible) {
+      this._reactiveTelemetry.eligibleEmptySwingCount++;
+    }
+    if (!result.hadActionableTarget && result.primaryResult === "empty_swing") {
+      this._reactiveTelemetry.noTargetSwingCount++;
+    }
+    if (result.hitClosedArmor) {
+      this._reactiveTelemetry.armorClosedCount++;
+    }
+
     this._lastReactiveResolve = {
       slashId: trail.id,
       primaryResult: result.primaryResult,
@@ -4653,8 +4719,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       primarySource: result.primarySource as string,
       energyBefore: result.energyBefore,
       baseCost: result.baseCost,
-      cutReward: result.projectileCutReward,
-      reflectReward: result.projectileReflectReward,
+      cutReward: result.rawProjectileCutReward,
+      reflectReward: result.rawProjectileReflectReward,
       armorReward: result.armorReward,
       dangerousWrongCutPenalty: result.dangerousWrongCutPenalty,
       bodyWrongHitPenalty: result.bodyWrongHitPenalty,
@@ -4675,6 +4741,17 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       eventKinds,
       lastSegmentEventCount: currentSegmentEventCount,
       lastSegmentKinds: currentSegmentKinds,
+      // V0723015: 经济遥测扩展
+      rawBaseCost: result.rawBaseCost,
+      costMultiplier: result.costMultiplier,
+      rawActiveGain: result.rawActiveGain,
+      gainMultiplier: result.gainMultiplier,
+      modifiedActiveGain: result.modifiedActiveGain,
+      floorEnergy: result.floorEnergy,
+      hadActionableTarget: result.hadActionableTarget,
+      hitClosedArmor: result.hitClosedArmor,
+      emptyPenaltyEligible: result.emptyPenaltyEligible,
+      armorClosedEventCount,
     };
     this._lastResolvedReactiveEvents = result.events;
 
@@ -8070,6 +8147,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (this.gameMode === "bossReactive") {
       // P0: 创建 Reactive Controller
       this.reactiveController = new BossReactiveController();
+      // V0723015: 重置刀势经济遥测（Reset/重新开始清零）
+      this._reactiveTelemetry = {
+        passiveGain: 0, activeGain: 0, baseCost: 0,
+        emptyPenalty: 0, dangerousPenalty: 0, bodyPenalty: 0,
+        slashCount: 0, effectiveSlashCount: 0,
+        eligibleEmptySwingCount: 0, noTargetSwingCount: 0, armorClosedCount: 0,
+        baseBandSeconds: 0, enhancedBandSeconds: 0, burstBandSeconds: 0,
+      };
       this.bossController = new BossController("thunderGeneral");
       // 进入等待状态，由reactiveController完成后桥接
     } else {

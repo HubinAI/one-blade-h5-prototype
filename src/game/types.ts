@@ -525,6 +525,42 @@ export type BladeContinuousEffect = {
   glowColor: string;
 };
 
+// ---- V0723015: 刀势经济遥测 ----
+
+/** Boss 局内刀势经济累计统计（只读） */
+export type ReactiveMomentumTelemetry = {
+  /** 被动恢复累计（实际恢复量，到达max后不虚增） */
+  passiveGain: number;
+  /** 主动收益累计（modifiedActiveGain，只含有效奖励） */
+  activeGain: number;
+  /** 基础消耗累计（modifiedBaseCost） */
+  baseCost: number;
+  /** 空挥惩罚累计 */
+  emptyPenalty: number;
+  /** 危险误砍惩罚累计 */
+  dangerousPenalty: number;
+  /** 身体误砍惩罚累计 */
+  bodyPenalty: number;
+
+  /** 总挥刀数 */
+  slashCount: number;
+  /** 有效挥刀数（命中弹幕/反射/护甲） */
+  effectiveSlashCount: number;
+  /** 符合空挥惩罚条件的挥刀数 */
+  eligibleEmptySwingCount: number;
+  /** 无可交互目标的挥刀数 */
+  noTargetSwingCount: number;
+  /** armor_closed 计数 */
+  armorClosedCount: number;
+
+  /** base 档累计时间（秒） */
+  baseBandSeconds: number;
+  /** enhanced 档累计时间（秒） */
+  enhancedBandSeconds: number;
+  /** burst 档累计时间（秒） */
+  burstBandSeconds: number;
+};
+
 // ---- P4.4B-R3 P0-A: 玩家战斗层显示策略 ----
 // 将"是否显示"与"是否造成伤害"解耦，让 Reactive/Boss 模式可以
 // 保留玩家主体+主刀气场+副刀视觉，但冻结副刀锁敌与伤害。

@@ -421,7 +421,7 @@ describe("BossReactiveController", () => {
     controller.resolveGeometry(geom(v(refl.x - 20, refl.y - 40), v(refl.x + 20, refl.y + 20), "s_refl1", 100));
     const result = fs(controller, "s_refl1", 100);
     expect(result.projectileReflectCount).toBe(1);
-    expect(result.projectileReflectReward).toBe(REACTIVE_BOSS_CONFIG.bladeEnergy.reflectReward);
+    expect(result.rawProjectileReflectReward).toBe(REACTIVE_BOSS_CONFIG.bladeEnergy.reflectReward);
   });
 
   it("D2 二次反射阻止 — 同 reflective 弹幕被两刀挥过仅第一次触发", () => {
@@ -442,7 +442,7 @@ describe("BossReactiveController", () => {
     controller.resolveGeometry(geom(v(refl.x - 20, refl.y - 40), v(refl.x + 20, refl.y + 20), "s_refl_b", 100));
     const r2 = fs(controller, "s_refl_b", 100);
     expect(r2.projectileReflectCount).toBe(0);
-    expect(r2.primaryResult).toBe("empty_swing");
+    expect(r2.primaryResult).toBe("armor_closed");
   });
 
   it("D3 反射弹 reflected=true 后 resolveGeometry 跳过命中", () => {
@@ -629,7 +629,7 @@ describe("BossReactiveController", () => {
 
   it("G1 被动回能 — 验证配置值存在且合理", () => {
     expect.assertions(5);
-    expect(REACTIVE_BOSS_CONFIG.bladeEnergy.passiveRegenPerSecond).toBe(1.5);
+    expect(REACTIVE_BOSS_CONFIG.bladeEnergy.passiveRegenPerSecond).toBe(1.0);
     expect(BLADE_MOMENTUM_CONFIG.baseMax).toBe(100);
     expect(BLADE_MOMENTUM_CONFIG.initialRatio).toBe(0.35);
     expect(controller.currentSlashEnergy).toBe(0);
@@ -717,7 +717,7 @@ describe("BossReactiveController", () => {
     controller.setProgrammaticSlashEnergy(80);
     controller.resolveGeometry(geom(v(p.x - 20, p.y - 40), v(p.x + 20, p.y + 20), "s_reward", 80));
     const result = controller.finishSlash("s_reward", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
-    expect(result.projectileCutReward).toBeGreaterThan(0);
+    expect(result.rawProjectileCutReward).toBeGreaterThan(0);
   });
 
   it("H4 finishSlash dangerous 惩罚 < 0", () => {
@@ -767,7 +767,7 @@ describe("BossReactiveController", () => {
     const c = new BossReactiveController();
     advanceToOpportunity(c);
     const f = hitCurrentArmor(c, "s_unclamped", 100);
-    const expected = 100 - f.baseCost + f.projectileCutReward + f.projectileReflectReward + f.armorReward - f.dangerousWrongCutPenalty - f.bodyWrongHitPenalty - f.emptySwingPenalty;
+    const expected = 100 - f.baseCost + f.rawProjectileCutReward + f.rawProjectileReflectReward + f.armorReward - f.dangerousWrongCutPenalty - f.bodyWrongHitPenalty - f.emptySwingPenalty;
     expect(f.unclampedAfter).toBeCloseTo(expected, 0);
   });
 
@@ -1674,7 +1674,7 @@ describe("BossReactiveController", () => {
       // 模拟中途 max 变化：传入带 maxBonus=40 的 modifiers（理论上 max 应从 100→140）
       const modifiersWithGrowth: BladeRunModifiers = {
         maxBonus: 40,
-        floorBonus: 0,
+        floorRatioBonus: 0,
         gainMultiplier: 1,
         costMultiplier: 1,
         nodeThresholdShift: {},

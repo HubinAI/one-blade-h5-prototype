@@ -129,7 +129,7 @@ describe("resolveBladeMomentumBand", () => {
 describe("resolveEffectiveNodeThresholds", () => {
   const defaultModifiers: BladeRunModifiers = {
     maxBonus: 0,
-    floorBonus: 0,
+    floorRatioBonus: 0,
     gainMultiplier: 1,
     costMultiplier: 1,
     nodeThresholdShift: {},
@@ -485,7 +485,7 @@ describe("applyBladeRunMaxModifier", () => {
     const state = createBladeMomentumState(35, 100);
     const mods: BladeRunModifiers = {
       maxBonus: 40,
-      floorBonus: 0,
+      floorRatioBonus: 0,
       gainMultiplier: 1,
       costMultiplier: 1,
       nodeThresholdShift: {},
@@ -594,7 +594,7 @@ describe("P1-2 applyBladeRunMaxModifier NaN/Infinity maxBonus 安全", () => {
     const state = createBladeMomentumState(35, 100);
     const mods: BladeRunModifiers = {
       maxBonus: NaN,
-      floorBonus: 0,
+      floorRatioBonus: 0,
       gainMultiplier: 1,
       costMultiplier: 1,
       nodeThresholdShift: {},
@@ -609,7 +609,7 @@ describe("P1-2 applyBladeRunMaxModifier NaN/Infinity maxBonus 安全", () => {
     const state = createBladeMomentumState(35, 100);
     const mods: BladeRunModifiers = {
       maxBonus: Infinity,
-      floorBonus: 0,
+      floorRatioBonus: 0,
       gainMultiplier: 1,
       costMultiplier: 1,
       nodeThresholdShift: {},
@@ -624,7 +624,7 @@ describe("P1-2 applyBladeRunMaxModifier NaN/Infinity maxBonus 安全", () => {
     const state = createBladeMomentumState(35, 100);
     const mods: BladeRunModifiers = {
       maxBonus: -Infinity,
-      floorBonus: 0,
+      floorRatioBonus: 0,
       gainMultiplier: 1,
       costMultiplier: 1,
       nodeThresholdShift: {},
@@ -639,7 +639,7 @@ describe("P1-2 applyBladeRunMaxModifier NaN/Infinity maxBonus 安全", () => {
     const state = createBladeMomentumState(35, 100);
     const mods: BladeRunModifiers = {
       maxBonus: 40,
-      floorBonus: 0,
+      floorRatioBonus: 0,
       gainMultiplier: 1,
       costMultiplier: 1,
       nodeThresholdShift: {},

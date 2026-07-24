@@ -30,7 +30,7 @@ const BODY_PARTS = [
 
 /** 完整碰撞事件（弹幕/护甲/身体统一） */
 export interface ReactiveCollisionEvent {
-  kind: "projectile_cut" | "projectile_reflect" | "projectile_dangerous" | "armor" | "body";
+  kind: "projectile_cut" | "projectile_reflect" | "projectile_dangerous" | "armor" | "armor_closed" | "body";
   hitPos: Vec2;
   collisionSource: CapsuleSource;
   /** 仅 projectile_* 时有值 */
@@ -47,6 +47,12 @@ interface ReactiveSlashSession {
   hitProjectileIds: Set<string>;
   /** P1-B: 护甲提交后关闭碰撞写入，后续 segment 不再追加事件 */
   closedForCollision: boolean;
+  /** V0723015: 起刀时记录的阶段 */
+  startedPhase: BossPhaseState;
+  /** V0723015: 挥刀期间是否曾存在可交互目标 */
+  hadActionableTarget: boolean;
+  /** V0723015: 是否命中了关闭护甲 */
+  hitClosedArmor: boolean;
 }
 
 /** P4.4B-R5.7: 命中后立即提交的护甲结算快照（二级生命周期） */
@@ -67,7 +73,7 @@ interface PendingReactiveSlashResult {
 /** P0-D: 单一结算结果 — Controller 一次性返回完整结算 */
 export interface ReactiveSlashResolveResult {
   slashId: string;
-  /** 最终能量（已 clamp [0, max]） */
+  /** 最终能量（已 clamp [floorEnergy, max]） */
   energyAfter: number;
   /** 结算前能量 */
   energyBefore: number;
@@ -75,18 +81,47 @@ export interface ReactiveSlashResolveResult {
   momentumBefore: BladeMomentumState;
   /** V0723014: 结算后刀势快照 */
   momentumAfter: BladeMomentumState;
-  /** 挥刀基础消耗 */
+
+  // ---- V0723015: 基础消耗遥测 ----
+  /** 原始基础消耗（未应用 costMultiplier） */
+  rawBaseCost: number;
+  /** 消耗倍率 */
+  costMultiplier: number;
+  /** 修正后基础消耗（已 clamp [0, maxCost]） */
   baseCost: number;
+
   /** 拆分明细 */
   projectileCutCount: number;
   projectileReflectCount: number;
   dangerousWrongCutCount: number;
-  projectileCutReward: number;
-  projectileReflectReward: number;
+
+  // ---- V0723015: 主动收益遥测 ----
+  /** 原始弹幕斩击奖励 */
+  rawProjectileCutReward: number;
+  /** 原始反射奖励 */
+  rawProjectileReflectReward: number;
+  /** 原始护甲奖励 */
+  rawArmorReward: number;
+  /** 原始主动收益合计（三项之和） */
+  rawActiveGain: number;
+  /** 收益倍率 */
+  gainMultiplier: number;
+  /** 修正后主动收益（rawActiveGain * gainMultiplier） */
+  modifiedActiveGain: number;
+
+  /** 危险弹幕误砍惩罚（合计） */
   dangerousWrongCutPenalty: number;
+  /** 原始护甲奖励（兼容字段，= rawArmorReward） */
   armorReward: number;
+  /** 身体误砍惩罚 */
   bodyWrongHitPenalty: number;
+  /** 空挥惩罚 */
   emptySwingPenalty: number;
+
+  // ---- V0723015: 刀势下限遥测 ----
+  /** floorEnergy = momentumBefore.max * clamp(floorRatioBonus, 0, 0.5) */
+  floorEnergy: number;
+
   /** 是否命中护甲 */
   armorHit: boolean;
   armorDurabilityDamage: number;
@@ -102,6 +137,14 @@ export interface ReactiveSlashResolveResult {
   /** 完整碰撞事件列表（跨 segment 累积） */
   events: ReactiveCollisionEvent[];
   unclampedAfter: number;
+
+  // ---- V0723015: 空挥判定遥测 ----
+  /** 挥刀期间是否曾存在可交互目标 */
+  hadActionableTarget: boolean;
+  /** 是否命中了关闭护甲 */
+  hitClosedArmor: boolean;
+  /** 空挥惩罚是否生效（isFullMiss && hadActionableTarget） */
+  emptyPenaltyEligible: boolean;
 }
 
 export class BossReactiveController {
@@ -175,7 +218,7 @@ export class BossReactiveController {
   private _pendingSlashResult: PendingReactiveSlashResult | null = null;
   // P4.4B-R5.2 P0-3: session 级别弹幕去重集合，同一弹幕跨多个 segment 只命中一次。
   // 旧实现每次 resolveGeometry 调用新建本地 hitProjectileSet，同一刀多次调用会重复命中。
-  private _session: ReactiveSlashSession = { slashId: "", events: [], bodyContact: false, hitProjectileIds: new Set(), closedForCollision: false };
+  private _session: ReactiveSlashSession = { slashId: "", events: [], bodyContact: false, hitProjectileIds: new Set(), closedForCollision: false, startedPhase: "armor_prepare", hadActionableTarget: false, hitClosedArmor: false };
   /** 当前挥刀的刀势能量（由外部设置） */
   currentSlashEnergy: number = 0;
 
@@ -238,7 +281,7 @@ export class BossReactiveController {
       flashTimer: 0,
     };
     this._resolvedSlashId = "";
-    this._session = { slashId: "", events: [], bodyContact: false, hitProjectileIds: new Set(), closedForCollision: false };
+    this._session = { slashId: "", events: [], bodyContact: false, hitProjectileIds: new Set(), closedForCollision: false, startedPhase: "armor_prepare", hadActionableTarget: false, hitClosedArmor: false };
     this._pendingSlashResult = null; // P4.4B-R5.7: 清理 pending
     this._lastArmorCollisionSource = null; // P4.4B-R5.7: 清理碰撞来源
     this._lastBodyCollisionSource = null;
@@ -617,7 +660,14 @@ export class BossReactiveController {
 
     // 初始化 Session
     if (this._session.slashId !== geometry.slashId) {
-      this._session = { slashId: geometry.slashId, events: [], bodyContact: false, hitProjectileIds: new Set(), closedForCollision: false };
+      this._session = { slashId: geometry.slashId, events: [], bodyContact: false, hitProjectileIds: new Set(), closedForCollision: false, startedPhase: this._phase, hadActionableTarget: false, hitClosedArmor: false };
+    }
+
+    // V0723015: 每个 segment 处理前更新 hadActionableTarget
+    // 可交互目标包括：处于可处理状态的弹幕（normal/reflective/dangerous）或 armor_opportunity 中的当前护甲
+    const hasActionableProjectile = this.projectiles.some(p => p.active && !p.resolved && !p.reflected);
+    if (hasActionableProjectile || this._phase === "armor_opportunity") {
+      this._session.hadActionableTarget = true;
     }
 
     const newEvents: ReactiveCollisionEvent[] = [];
@@ -676,7 +726,32 @@ export class BossReactiveController {
       }
     }
 
-    // 2. 护甲命中检测 — P4.4B-R5.7: 首次碰撞立即提交伤害
+    // 2a. V0723015: armor_threat 阶段命中关闭护甲 → armor_closed 事件
+    //    threat 阶段护甲未开放，命中只返回中性反馈，不造成伤害、不进入 resolve、不算身体误击。
+    //    一刀内最多记录一次 armor_closed。
+    if (this._phase === "armor_threat" && !this._session.hitClosedArmor) {
+      const armor = this.getCurrentArmor();
+      if (armor && !armor.broken) {
+        const armorGeom = this.getArmorWorldGeometry(this.activeArmorIndex);
+        if (armorGeom && geometryHitsArmor(geometry, armorGeom.center, armorGeom.rx, armorGeom.ry)) {
+          this._session.hitClosedArmor = true;
+          const hitCap = geometry.capsules.find(cap =>
+            capsuleHitsEllipse(cap.a, cap.b, cap.radius, armorGeom.center, armorGeom.rx, armorGeom.ry)
+          );
+          const source = hitCap?.source ?? null;
+          const hitPos = this.computeArmorContactPoint(hitCap, armorGeom.center, armorGeom.rx, armorGeom.ry);
+          const ev: ReactiveCollisionEvent = {
+            kind: "armor_closed",
+            hitPos,
+            collisionSource: source ?? "visibleBlade",
+          };
+          newEvents.push(ev);
+          this._session.events.push(ev);
+        }
+      }
+    }
+
+    // 2b. 护甲命中检测 — P4.4B-R5.7: 首次碰撞立即提交伤害（仅 armor_opportunity）
     if (this.canResolveArmorForSlash(geometry.slashId)) {
       const armor = this.getCurrentArmor();
       if (armor && !armor.broken) {
@@ -697,7 +772,8 @@ export class BossReactiveController {
       }
 
       // 3. 身体碰撞 — P1-3: 使用 getBodyWorldGeometry 统一世界变换
-      if (!this._resolvedSlashId) {
+      //    V0723015: hitClosedArmor 时不继续把同一位置判定为 bodyContact
+      if (!this._resolvedSlashId && !this._session.hitClosedArmor) {
         const bodyParts = this.getBodyWorldGeometry();
         for (const cap of geometry.capsules) {
           const bodyHit = bodyParts.some(bp =>
@@ -833,14 +909,25 @@ export class BossReactiveController {
   ): ReactiveSlashResolveResult {
     // P4.4B-R5.6 P0-B: 使用 reactiveSlash 单一配置
     const rcfg = REACTIVE_BOSS_CONFIG.reactiveSlash;
-    const rawCost = rcfg.baseCost + Math.floor(pathLen / 100) * rcfg.costPer100Px;
-    const baseCost = Math.min(rawCost, rcfg.maxCost);
+    const cfg = REACTIVE_BOSS_CONFIG.bladeEnergy;
+
+    // V0723015: 有效修正器（提供默认值）
+    const effectiveModifiers = modifiers ?? DEFAULT_BLADE_RUN_MODIFIERS;
+
+    // ---- V0723015: 基础消耗（costMultiplier 只作用基础消耗） ----
+    const rawBaseCost = rcfg.baseCost + Math.floor(pathLen / 100) * rcfg.costPer100Px;
+    const costMultiplier = Number.isFinite(effectiveModifiers.costMultiplier) ? effectiveModifiers.costMultiplier : 1;
+    const modifiedBaseCost = clamp(rawBaseCost * costMultiplier, 0, rcfg.maxCost);
 
     // energyBefore 从 momentumBefore 派生
     const energyBefore = momentumBefore.current;
 
     // ---- 从 session.events 统计（不扫描 projectiles） ----
-    const events = this._session.slashId === slashId ? [...this._session.events] : [];
+    const sessionMatch = this._session.slashId === slashId;
+    const events = sessionMatch ? [...this._session.events] : [];
+    const hadActionableTarget = sessionMatch ? this._session.hadActionableTarget : false;
+    const hitClosedArmor = sessionMatch ? this._session.hitClosedArmor : false;
+
     let projectileCutCount = 0;
     let projectileReflectCount = 0;
     let dangerousWrongCutCount = 0;
@@ -856,7 +943,6 @@ export class BossReactiveController {
     let armorBroken = false;
     let allArmorBroken = false;
     let armorReward = 0;
-    const cfg = REACTIVE_BOSS_CONFIG.bladeEnergy;
     let armorCollisionSource: CapsuleSource | null = null;
     let armorHitPos: Vec2 | null = null;
 
@@ -870,19 +956,16 @@ export class BossReactiveController {
       armorHitPos = pending.armorHitPos ? { ...pending.armorHitPos } : null;
       armorReward = pending.armorBroken ? cfg.armorBreakReward : cfg.armorCrackReward;
       pending.consumed = true;
-
-      // P0-3: 不再 push armorEv 到 events（已在 commitArmorDamage 时加入 _session.events，
-      // events 从 _session.events 拷贝已包含唯一 armor event，此处 push 会导致重复）
     }
 
-    // ---- 身体误击 ----
+    // ---- 身体误击（V0723015: 使用 bodyWrongHitPenalty=7） ----
     let bodyWrongHit = false;
     let bodyWrongHitPenalty = 0;
     const bodyCollisionSource = this._lastBodyCollisionSource;
     const hasArmorResolve = this._pendingSlashResult?.slashId === slashId;
-    if (this._session.slashId === slashId && this._session.bodyContact && !hasArmorResolve) {
+    if (sessionMatch && this._session.bodyContact && !hasArmorResolve) {
       bodyWrongHit = true;
-      bodyWrongHitPenalty = cfg.wrongHitPenalty;
+      bodyWrongHitPenalty = cfg.bodyWrongHitPenalty;
       events.push({
         kind: "body",
         hitPos: this._session.lastBodyHitPos ?? { x: BOSS_CX, y: this.renderY },
@@ -890,34 +973,45 @@ export class BossReactiveController {
       });
     }
 
-    // ---- 空挥惩罚（仅 opportunity 阶段） ----
-    const isFullMiss = !armorHit && !bodyWrongHit && projectileCutCount === 0 && projectileReflectCount === 0 && dangerousWrongCutCount === 0;
-    const emptySwingPenalty = isFullMiss ? rcfg.emptySwingPenalty : 0;
+    // ---- V0723015: 空挥判定（isFullMiss && hadActionableTarget 才罚） ----
+    const isFullMiss = !armorHit && !bodyWrongHit
+      && projectileCutCount === 0
+      && projectileReflectCount === 0
+      && dangerousWrongCutCount === 0
+      && !hitClosedArmor;
+    const emptyPenaltyEligible = isFullMiss && hadActionableTarget;
+    const emptySwingPenalty = emptyPenaltyEligible ? rcfg.emptySwingPenalty : 0;
+
+    // ---- V0723015: 主动收益（gainMultiplier 只作用正向收益） ----
+    const rawProjectileCutReward = projectileCutCount * cfg.normalBulletReward;
+    const rawProjectileReflectReward = projectileReflectCount * cfg.reflectReward;
+    const rawArmorReward = armorReward;
+    const rawActiveGain = rawProjectileCutReward + rawProjectileReflectReward + rawArmorReward;
+    const gainMultiplier = Number.isFinite(effectiveModifiers.gainMultiplier) ? effectiveModifiers.gainMultiplier : 1;
+    const modifiedActiveGain = rawActiveGain * gainMultiplier;
+
+    // ---- V0723015: 惩罚（不受 gain/cost 倍率影响） ----
+    const dangerousWrongCutPenaltyTotal = dangerousWrongCutCount * cfg.dangerousWrongCutPenalty;
+
+    // ---- V0723015: 刀势下限（floorRatioBonus 作为 energyAfter 下限） ----
+    const floorRatioBonus = Number.isFinite(effectiveModifiers.floorRatioBonus) ? effectiveModifiers.floorRatioBonus : 0;
+    const floorEnergy = momentumBefore.max * clamp(floorRatioBonus, 0, 0.5);
 
     // ---- 能量结算 ----
-    const projectileCutReward = projectileCutCount * cfg.normalBulletReward;
-    const projectileReflectReward = projectileReflectCount * cfg.reflectReward;
-    const dangerousWrongCutPenaltyTotal = dangerousWrongCutCount * cfg.wrongHitPenalty;
-
-    // V0723014: 构建 momentumBefore（使用传入的 momentumBefore，max 来自起刀快照）
-    // P0-4: 不再硬编码 BLADE_MOMENTUM_CONFIG.baseMax
-
     const unclampedEnergy = energyBefore
-      - baseCost
-      + projectileCutReward
-      + projectileReflectReward
-      + armorReward
+      - modifiedBaseCost
+      + modifiedActiveGain
       - dangerousWrongCutPenaltyTotal
       - bodyWrongHitPenalty
       - emptySwingPenalty;
-    const energyAfter = clamp(unclampedEnergy, 0, momentumBefore.max);
+    const energyAfter = clamp(unclampedEnergy, floorEnergy, momentumBefore.max);
 
     // V0723014: 构建 momentumAfter（使用 momentumBefore.max 保持上限一致）
-    const effectiveModifiers = modifiers ?? DEFAULT_BLADE_RUN_MODIFIERS;
     const momentumAfter = createBladeMomentumState(energyAfter, momentumBefore.max, effectiveModifiers);
 
-    // ---- primaryResult（P4.4B-R5.7: 优先级调整） ----
-    // 优先级: armor_broken > armor_hit > dangerous_wrong_cut > body_wrong_hit > projectile_reflect > projectile_cut > empty_swing
+    // ---- primaryResult（V0723015: 新增 armor_closed 优先级） ----
+    // 优先级: armor_broken > armor_hit > dangerous_wrong_cut > body_wrong_hit
+    //       > projectile_reflect > projectile_cut > armor_closed > empty_swing
     let primaryResult: string;
     let primarySource: CapsuleSource | "-";
     if (armorBroken) {
@@ -941,6 +1035,10 @@ export class BossReactiveController {
       primaryResult = "projectile_cut";
       const cutEv = events.find(e => e.kind === "projectile_cut");
       primarySource = cutEv?.collisionSource ?? "-";
+    } else if (hitClosedArmor) {
+      primaryResult = "armor_closed";
+      const closedEv = events.find(e => e.kind === "armor_closed");
+      primarySource = closedEv?.collisionSource ?? "-";
     } else {
       primaryResult = "empty_swing";
       primarySource = "-";
@@ -955,6 +1053,7 @@ export class BossReactiveController {
       body_wrong_hit: "body",
       projectile_reflect: "projectile_reflect",
       projectile_cut: "projectile_cut",
+      armor_closed: "armor_closed",
       empty_swing: "",
     };
     const primaryEventKind = primaryKindMap[primaryResult] ?? "";
@@ -970,6 +1069,8 @@ export class BossReactiveController {
         secondaryResults.push("projectile_reflect");
       } else if (ek === "projectile_cut" && !secondaryResults.includes("projectile_cut")) {
         secondaryResults.push("projectile_cut");
+      } else if (ek === "armor_closed" && !secondaryResults.includes("armor_closed")) {
+        secondaryResults.push("armor_closed");
       } else if (ek === "armor" && !secondaryResults.includes("armor_hit")) {
         secondaryResults.push("armor_hit");
       }
@@ -977,7 +1078,7 @@ export class BossReactiveController {
 
     // ---- 清理（在结果构建完成之后） ----
     if (this._session.slashId === slashId) {
-      this._session = { slashId: "", events: [], bodyContact: false, hitProjectileIds: new Set(), closedForCollision: false };
+      this._session = { slashId: "", events: [], bodyContact: false, hitProjectileIds: new Set(), closedForCollision: false, startedPhase: "armor_prepare", hadActionableTarget: false, hitClosedArmor: false };
     }
     if (this._pendingSlashResult && this._pendingSlashResult.slashId === slashId) {
       this._pendingSlashResult = null;
@@ -995,27 +1096,45 @@ export class BossReactiveController {
       energyBefore,
       momentumBefore,
       momentumAfter,
-      baseCost,
+      // V0723015: 基础消耗遥测
+      rawBaseCost,
+      costMultiplier,
+      baseCost: modifiedBaseCost,
+      // 拆分明细
       projectileCutCount,
       projectileReflectCount,
       dangerousWrongCutCount,
-      projectileCutReward,
-      projectileReflectReward,
+      // V0723015: 主动收益遥测
+      rawProjectileCutReward,
+      rawProjectileReflectReward,
+      rawArmorReward,
+      rawActiveGain,
+      gainMultiplier,
+      modifiedActiveGain,
+      // 惩罚
       dangerousWrongCutPenalty: dangerousWrongCutPenaltyTotal,
       armorReward,
       bodyWrongHitPenalty,
       emptySwingPenalty,
+      // V0723015: 刀势下限遥测
+      floorEnergy,
+      // 护甲/身体
       armorHit,
       armorDurabilityDamage,
       armorBroken,
       allArmorBroken,
       bodyWrongHit,
+      // 结果
       primaryResult,
       secondaryResults,
       primarySource,
       armorHitPos,
       events,
       unclampedAfter: unclampedEnergy,
+      // V0723015: 空挥判定遥测
+      hadActionableTarget,
+      hitClosedArmor,
+      emptyPenaltyEligible,
     };
   }
 

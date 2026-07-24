@@ -16,8 +16,15 @@ export const REACTIVE_BOSS_CONFIG = {
     recoveryDuration: 0.2,
   },
   bladeEnergy: {
-    passiveRegenPerSecond: 1.5,
+    // V0723015: 1.5 → 1.0（主动收益必须高于被动等待）
+    passiveRegenPerSecond: 1.0,
+    /** @deprecated V0723015: 统一 wrongHitPenalty 已拆分为 dangerousWrongCutPenalty 和 bodyWrongHitPenalty。
+     *  生产代码不再读取此字段。保留一轮用于迁移，V0723015 结束前删除。 */
     wrongHitPenalty: 10,
+    // V0723015: 危险弹幕误砍惩罚（新增，初始9）
+    dangerousWrongCutPenalty: 9,
+    // V0723015: 身体误砍惩罚（新增，初始7）
+    bodyWrongHitPenalty: 7,
     normalBulletReward: 8,
     reflectReward: 16,
     armorCrackReward: 5,
@@ -44,7 +51,7 @@ export const REACTIVE_BOSS_CONFIG = {
     lowEnergyCrack: 25,
     midEnergyDamage: 55,
     highEnergyOneShot: 100,
-    damageFormula: "20 + energy * 0.8",
+    // V0723015: 删除未使用的 damageFormula（技术债收口）
   },
   projectiles: {
     normal: {
@@ -102,7 +109,7 @@ export const REACTIVE_BOSS_CONFIG = {
     costPer100Px: 1,
     /** 单次最大消耗 */
     maxCost: 8,
-    /** 空挥惩罚（验证期暂关闭，基础消耗已足够抑制无脑挥刀） */
-    emptySwingPenalty: 0,
+    /** V0723015: 空挥惩罚（0→1，小额错误成本，不打断连续操作） */
+    emptySwingPenalty: 1,
   },
 } as const;

@@ -1,5 +1,5 @@
 // ========================================================================
-// V0723014: 三档刀势模型配置 + 类型定义
+// V0723015: 三档刀势模型配置 + 类型定义
 // ========================================================================
 
 // ---- 类型定义 ----
@@ -30,24 +30,27 @@ export interface BladeMomentumState {
 export interface BladeRunModifiers {
   /** 刀势上限加成 */
   maxBonus: number;
+
   /**
-   * 刀势下限加成
-   * @reserved V0723014未接入运行时，具体语义在下一轮肉鸽专项确认。
-   *           当前不生效，不应在配置中投放。
+   * V0723015: 比例下限加成（0～1），默认0。
+   * floorEnergy = momentumBefore.max * clamp(floorRatioBonus, 0, 0.5)
+   * 作为 energyAfter 的下限，不影响 momentumBefore。
    */
-  floorBonus: number;
+  floorRatioBonus: number;
+
   /**
-   * 获取倍率
-   * @reserved V0723014未接入运行时，具体语义在下一轮肉鸽专项确认。
-   *           当前不生效，不应在配置中投放。
+   * V0723015: 获取倍率，只作用于正向主动收益（弹幕/反射/护甲奖励），默认1。
+   * 不作用于：被动恢复、危险误砍、身体误砍、空挥、HP伤害。
    */
   gainMultiplier: number;
+
   /**
-   * 消耗倍率
-   * @reserved V0723014未接入运行时，具体语义在下一轮肉鸽专项确认。
-   *           当前不生效，不应在配置中投放。
+   * V0723015: 消耗倍率，只作用于基础挥刀消耗，默认1。
+   * 不作用于：空挥惩罚、危险误砍惩罚、身体误砍惩罚。
+   * modifiedBaseCost = rawBaseCost * costMultiplier，clamp [0, maxCost]
    */
   costMultiplier: number;
+
   /** 节点阈值偏移（负值 = 提前解锁） */
   nodeThresholdShift: Partial<Record<BladeAbilityNodeId, number>>;
 }
@@ -81,7 +84,7 @@ export const BLADE_MOMENTUM_CONFIG = {
 
 export const DEFAULT_BLADE_RUN_MODIFIERS: BladeRunModifiers = {
   maxBonus: 0,
-  floorBonus: 0,
+  floorRatioBonus: 0,
   gainMultiplier: 1,
   costMultiplier: 1,
   nodeThresholdShift: {},

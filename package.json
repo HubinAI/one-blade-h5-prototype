@@ -1,7 +1,7 @@
 {
   "name": "one-blade-h5-prototype",
   "private": true,
-  "version": "0723.014",
+  "version": "0723.015",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
@@ -13,7 +13,8 @@
     "test:boss": "vitest run src/game/systems/BossController.test.ts",
     "test:e2e": "playwright test",
     "check:version": "node -e \"const fs=require('fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf-8'));const lock=JSON.parse(fs.readFileSync('package-lock.json','utf-8'));const html=fs.readFileSync('index.html','utf-8');const readme=fs.readFileSync('README.md','utf-8');const vts=fs.readFileSync('src/version.ts','utf-8');const appMatch=vts.match(/APP_VERSION\\s*=\\s*\\\"([^\\\"]+)\\\"/);const buildMatch=vts.match(/BUILD_VERSION\\s*=\\s*\\\"([^\\\"]+)\\\"/);const appV=appMatch?appMatch[1]:'';const buildV=buildMatch?buildMatch[1]:'';let ok=true;if(pkg.version!==buildV){console.error('FAIL: package.json='+pkg.version+' expected='+buildV);ok=false;}if(lock.version!==buildV||lock.packages[''].version!==buildV){console.error('FAIL: package-lock version mismatch');ok=false;}if(!html.includes(appV)){console.error('FAIL: index.html missing '+appV);ok=false;}if(!readme.includes(appV)){console.error('FAIL: README.md missing '+appV);ok=false;}if(ok){console.log('APP_VERSION='+appV);console.log('package='+buildV);console.log('lock='+buildV);console.log('html='+appV);console.log('README='+appV);console.log('Version OK');}else{process.exit(1);}\"",
-    "check:prod-no-e2e": "npx vite build --outDir dist_prod_check && node check-prod-e2e.cjs"
+    "check:prod-no-e2e": "npx vite build --outDir dist_prod_check && node check-prod-e2e.cjs",
+    "verify:all": "node verify-all.cjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
