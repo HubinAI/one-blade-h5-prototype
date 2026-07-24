@@ -76,10 +76,21 @@
 
 ## 6. 测试覆盖
 
-- **Vitest**: 250+（Final.1 后实际数字，含 P0-4/P0-5/P1-1/P1-2 新增测试）
-- **E2E**: 5+（Playwright 真实 Pointer 输入测试）
+- **Vitest**: 256/256（BossController 58 + bladeMomentum 83 + BossReactiveController 113 + MainMenu 2）
+- **E2E**: 5/5（Playwright 真实 Pointer：real-input 4 + full-pointer 1）
 
-## 7. 兼容性保证
+## 7. CI 门禁说明
+
+| Job | 门禁级别 | 说明 |
+|-----|---------|------|
+| `test` | **强制门禁** | check:version + vitest + build + check:prod-no-e2e + test:e2e，全绿才允许合并 |
+| `test-e2e-dpr3` | **advisory** | 高 DPR 渲染兼容性参考，`continue-on-error: true`，不阻塞合并 |
+| `test-e2e-touch` | **advisory** | Touch 事件兼容性参考，`continue-on-error: true`，不阻塞合并 |
+| `Pages` | **部署** | GitHub Pages 自动部署，依赖 test job 通过 |
+
+> DPR3/Touch 作为 advisory 而非强制门禁：CI 环境（ubuntu-latest）的高 DPR 渲染和 touch 事件模拟存在环境敏感性，偶发失败不阻塞主线开发。正式门禁由 `test` job 保证（含 E2E real-input + full-pointer）。
+
+## 8. 兼容性保证
 
 - 默认 max=100、initial=35 下，所有战斗结果（伤害值、反射行为、破甲次数、颜色）与 V0723013 完全一致
 - 普通关卡完全不接入新模型

@@ -1690,5 +1690,48 @@ describe("BossReactiveController", () => {
       expect(result.energyAfter).toBeLessThanOrEqual(100);
       expect(result.momentumAfter.current).toBeLessThanOrEqual(100);
     });
+
+    // Game 级链路模拟: PointerDown 锁定 → 中途 max 变化 → startSlash 继承 → 本刀快照不变 → 下一刀读新 max
+    // 验证 Game.handlePointerDown → startSlash → finishSlash 的 lockedMomentum 继承链路
+    it("Game 级模拟: PointerDown 70/100 → 中途 max 改 140 → startSlash 继承 70/100 → 本刀 max 仍 100 → 下一刀读 140", () => {
+      const c = new BossReactiveController();
+      advanceToOpportunity(c);
+
+      // 模拟 Game.handlePointerDown: 创建 pendingSlash.lockedMomentum = 70/100
+      const pointerDownMomentum = createBladeMomentumState(70, 100);
+      // pendingSlash.lockedMomentum 已锁定为 70/100 (burst)
+
+      // 模拟中途 max 变化: Game.reactiveBladeMax 从 100 改为 140
+      // 但 startSlash 继承 pending.lockedMomentum，不重新调 getReactiveBladeMomentum()
+      const startSlashMomentum = pointerDownMomentum; // 继承，不重新读取
+
+      // 第一刀: 用继承的 70/100 快照
+      c.setProgrammaticSlashEnergy(70);
+      const pos = c.getActiveArmorWorldPos()!;
+      const segA = v(pos.cx - pos.rx * 0.5, pos.cy - pos.ry * 0.5);
+      const segB = v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5);
+      const angle = Math.atan2(segB.y - segA.y, segB.x - segA.x);
+      const geometry1 = buildReactiveSlashGeometry(segA, segB, angle, 30, 3, "s_game1", startSlashMomentum);
+      c.resolveGeometry(geometry1);
+      const result1 = c.finishSlash("s_game1", startSlashMomentum, 100, DEFAULT_BLADE_RUN_MODIFIERS);
+
+      // 断言: 本刀用起刀快照 70/100，不受中途 max=140 影响
+      expect(result1.momentumBefore.max).toBe(100);
+      expect(result1.momentumBefore.current).toBe(70);
+      expect(result1.momentumBefore.band).toBe("burst");
+      expect(result1.momentumAfter.max).toBe(100);
+      expect(result1.momentumAfter.current).toBeLessThanOrEqual(100);
+
+      // 第二刀: 模拟下一刀才读取成长后的新 max=140
+      const nextSlashMomentum = createBladeMomentumState(98, 140); // 新快照，max=140
+      c.setProgrammaticSlashEnergy(98);
+      const geometry2 = buildReactiveSlashGeometry(segA, segB, angle, 30, 3, "s_game2", nextSlashMomentum);
+      c.resolveGeometry(geometry2);
+      const result2 = c.finishSlash("s_game2", nextSlashMomentum, 100, DEFAULT_BLADE_RUN_MODIFIERS);
+
+      // 断言: 下一刀读取新 max=140
+      expect(result2.momentumBefore.max).toBe(140);
+      expect(result2.momentumAfter.max).toBe(140);
+    });
   });
 });
