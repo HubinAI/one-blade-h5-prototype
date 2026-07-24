@@ -108,6 +108,8 @@ export interface ReactiveSlashResolveResult {
   gainMultiplier: number;
   /** 修正后主动收益（rawActiveGain * gainMultiplier） */
   modifiedActiveGain: number;
+  /** V0723015-Final: 实际进入刀势条的收益（clamp 后，排除被 max 截断的部分） */
+  appliedActiveGain: number;
 
   /** 危险弹幕误砍惩罚（合计） */
   dangerousWrongCutPenalty: number;
@@ -916,7 +918,7 @@ export class BossReactiveController {
 
     // ---- V0723015: 基础消耗（costMultiplier 只作用基础消耗） ----
     const rawBaseCost = rcfg.baseCost + Math.floor(pathLen / 100) * rcfg.costPer100Px;
-    const costMultiplier = Number.isFinite(effectiveModifiers.costMultiplier) ? effectiveModifiers.costMultiplier : 1;
+    const costMultiplier = Math.max(0, Number.isFinite(effectiveModifiers.costMultiplier) ? effectiveModifiers.costMultiplier : 1);
     const modifiedBaseCost = clamp(rawBaseCost * costMultiplier, 0, rcfg.maxCost);
 
     // energyBefore 从 momentumBefore 派生
@@ -987,7 +989,7 @@ export class BossReactiveController {
     const rawProjectileReflectReward = projectileReflectCount * cfg.reflectReward;
     const rawArmorReward = armorReward;
     const rawActiveGain = rawProjectileCutReward + rawProjectileReflectReward + rawArmorReward;
-    const gainMultiplier = Number.isFinite(effectiveModifiers.gainMultiplier) ? effectiveModifiers.gainMultiplier : 1;
+    const gainMultiplier = Math.max(0, Number.isFinite(effectiveModifiers.gainMultiplier) ? effectiveModifiers.gainMultiplier : 1);
     const modifiedActiveGain = rawActiveGain * gainMultiplier;
 
     // ---- V0723015: 惩罚（不受 gain/cost 倍率影响） ----
@@ -1005,6 +1007,10 @@ export class BossReactiveController {
       - bodyWrongHitPenalty
       - emptySwingPenalty;
     const energyAfter = clamp(unclampedEnergy, floorEnergy, momentumBefore.max);
+
+    // V0723015-Final: appliedActiveGain = 实际进入刀势条的收益（排除被 max 截断的部分）
+    const energyAfterWithoutGain = clamp(energyBefore - modifiedBaseCost - dangerousWrongCutPenaltyTotal - bodyWrongHitPenalty - emptySwingPenalty, floorEnergy, momentumBefore.max);
+    const appliedActiveGain = Math.max(0, energyAfter - energyAfterWithoutGain);
 
     // V0723014: 构建 momentumAfter（使用 momentumBefore.max 保持上限一致）
     const momentumAfter = createBladeMomentumState(energyAfter, momentumBefore.max, effectiveModifiers);
@@ -1111,6 +1117,7 @@ export class BossReactiveController {
       rawActiveGain,
       gainMultiplier,
       modifiedActiveGain,
+      appliedActiveGain,
       // 惩罚
       dangerousWrongCutPenalty: dangerousWrongCutPenaltyTotal,
       armorReward,

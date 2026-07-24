@@ -18,9 +18,7 @@ export const REACTIVE_BOSS_CONFIG = {
   bladeEnergy: {
     // V0723015: 1.5 → 1.0（主动收益必须高于被动等待）
     passiveRegenPerSecond: 1.0,
-    /** @deprecated V0723015: 统一 wrongHitPenalty 已拆分为 dangerousWrongCutPenalty 和 bodyWrongHitPenalty。
-     *  生产代码不再读取此字段。保留一轮用于迁移，V0723015 结束前删除。 */
-    wrongHitPenalty: 10,
+    // V0723015-Final: 删除 wrongHitPenalty（已拆分为 dangerousWrongCutPenalty 和 bodyWrongHitPenalty）
     // V0723015: 危险弹幕误砍惩罚（新增，初始9）
     dangerousWrongCutPenalty: 9,
     // V0723015: 身体误砍惩罚（新增，初始7）

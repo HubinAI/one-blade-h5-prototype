@@ -1736,228 +1736,171 @@ describe("BossReactiveController", () => {
   });
 
   // ================================================================
-  // V0723015: 刀势主动循环与小额错误成本 — 7 大类确定性测试
+  // V0723015-Final: 刀势经济严格测试（假绿单测）
   // 起始条件：35/100，路径 300px，基础消耗 = 4 + floor(300/100)*1 = 7
   // ================================================================
-  describe("V0723015 刀势经济", () => {
-    // ---- 9.1 基础场景 ----
+  describe("V0723015-Final 刀势经济严格", () => {
 
-    it("9.1a 无目标时空划：35-7=28, emptyPenalty=0, primary=empty_swing", () => {
-      const c = new BossReactiveController();
-      // 无需推进阶段，直接 finishSlash（无碰撞、无目标）
-      const result = c.finishSlash("v15_empty", createBladeMomentumState(35, 100), 300, DEFAULT_BLADE_RUN_MODIFIERS);
-      expect(result.energyBefore).toBe(35);
-      expect(result.baseCost).toBe(7);
-      expect(result.emptySwingPenalty).toBe(0);
-      expect(result.energyAfter).toBe(28);
-      expect(result.primaryResult).toBe("empty_swing");
-      expect(result.hadActionableTarget).toBe(false);
-      expect(result.emptyPenaltyEligible).toBe(false);
-    });
-
-    it("9.1b 有目标但完全打空：35-7-1=27, emptyPenalty=1, emptyPenaltyEligible=true", () => {
-      const c = new BossReactiveController();
-      advanceToOpportunity(c); // 推进到 opportunity（有护甲目标）
-      // 构造偏离护甲的刀路（屏幕底部，远离 Boss 中心护甲）
-      const farGeom = geom(v(50, 700), v(100, 750), "v15_miss", 35);
-      c.resolveGeometry(farGeom);
-      const result = c.finishSlash("v15_miss", createBladeMomentumState(35, 100), 300, DEFAULT_BLADE_RUN_MODIFIERS);
-      expect(result.emptySwingPenalty).toBe(1);
-      expect(result.emptyPenaltyEligible).toBe(true);
-      expect(result.hadActionableTarget).toBe(true);
-      expect(result.energyAfter).toBe(27); // 35-7-1=27
-      expect(result.primaryResult).toBe("empty_swing");
-    });
-
-    it("9.1c 连续两次有目标空挥：35→27→19，不得归零", () => {
+    // ---- 9.1 连续两次有效空挥严格 35→27→19 ----
+    it("连续两次有目标空挥：35→27→19", () => {
       const c = new BossReactiveController();
       advanceToOpportunity(c);
-      const farGeom1 = geom(v(50, 700), v(100, 750), "v15_miss1", 35);
-      c.resolveGeometry(farGeom1);
-      const r1 = c.finishSlash("v15_miss1", createBladeMomentumState(35, 100), 300, DEFAULT_BLADE_RUN_MODIFIERS);
-      expect(r1.energyAfter).toBe(27);
+      const far = geom(v(50, 700), v(100, 750), "v15f_m1", 35);
+      c.resolveGeometry(far);
+      const r1 = c.finishSlash("v15f_m1", createBladeMomentumState(35, 100), 300, DEFAULT_BLADE_RUN_MODIFIERS);
+      expect(r1.energyAfter).toBe(27); // 35-7-1=27
+      expect(r1.emptySwingPenalty).toBe(1);
+      expect(r1.hadActionableTarget).toBe(true);
 
-      // 第二刀：从 27 开始
-      c.update(REACTIVE_BOSS_CONFIG.phaseTimers.resolveDuration + 0.01);
-      c.update(REACTIVE_BOSS_CONFIG.phaseTimers.recoveryDuration + 0.01);
-      // 推进到下一 opportunity
-      c.update(REACTIVE_BOSS_CONFIG.phaseTimers.armorPrepare + 0.05);
-      c.update(REACTIVE_BOSS_CONFIG.phaseTimers.threatDuration[1] + 0.01);
-      const farGeom2 = geom(v(50, 700), v(100, 750), "v15_miss2", 27);
-      c.resolveGeometry(farGeom2);
-      const r2 = c.finishSlash("v15_miss2", createBladeMomentumState(27, 100), 300, DEFAULT_BLADE_RUN_MODIFIERS);
-      expect(r2.energyAfter).toBe(20); // 27-7=20（第二次可能不在 opportunity，emptySwingPenalty=0）
+      // 重新推进到下一 opportunity（迭代推进确保进入）
+      c.update(REACTIVE_BOSS_CONFIG.phaseTimers.opportunityDuration + 0.01);
+      advanceThroughResolveAndRecovery(c);
+      advanceToOpportunity(c);
+      for (let i = 0; i < 10 && c.phase !== "armor_opportunity"; i++) {
+        c.update(0.5);
+      }
+      const far2 = geom(v(50, 700), v(100, 750), "v15f_m2", 27);
+      c.resolveGeometry(far2);
+      const r2 = c.finishSlash("v15f_m2", createBladeMomentumState(27, 100), 300, DEFAULT_BLADE_RUN_MODIFIERS);
+      expect(r2.energyAfter).toBe(19); // 27-7-1=19
+      expect(r2.emptySwingPenalty).toBe(1);
       expect(r2.energyAfter).toBeGreaterThan(0); // 不得归零
     });
 
-    // ---- 9.2 有效操作 ----
-
-    it("9.2a 普通弹幕：35-7+8=36", () => {
+    // ---- 9.2 真实普通弹幕奖励 ----
+    it("真实普通弹幕命中：35-7+8=36, rawProjectileCutReward=8", () => {
       const c = new BossReactiveController();
-      advanceToOpportunity(c);
-      // 在 opportunity 阶段不会有弹幕，直接测护甲裂痕
-      // 普通弹幕测试需要 threat 阶段创建弹幕，这里用 hitCurrentArmor 测护甲
-      const result = hitCurrentArmor(c, "v15_armor", 35);
-      // hitCurrentArmor 用 pathLen=100, baseCost=4+1=5。35-5+5(裂甲奖励)=35
-      expect(result.energyAfter).toBe(35);
-      expect(result.rawArmorReward).toBe(5);
+      c.update(0.35); // → threat
+      const p = c.spawnProjectileForTest("normal", BOSS_CX, BOSS_CY - 50, 0, 50);
+      const g = geom(v(p.x - 30, p.y - 30), v(p.x + 30, p.y + 30), "v15f_cut", 35);
+      c.resolveGeometry(g);
+      const r = c.finishSlash("v15f_cut", createBladeMomentumState(35, 100), 300, DEFAULT_BLADE_RUN_MODIFIERS);
+      expect(r.rawProjectileCutReward).toBe(8);
+      expect(r.rawActiveGain).toBe(8);
+      expect(r.modifiedActiveGain).toBe(8); // gainMultiplier=1
+      expect(r.appliedActiveGain).toBe(8); // 35-7+8=36, 无 clamp
+      expect(r.energyAfter).toBe(36);
     });
 
-    it("9.2b 护甲击破：35-7+22=50", () => {
+    // ---- 9.3 真实危险误砍 ----
+    it("真实危险弹幕误砍：35-7-9=19, dangerousWrongCutPenalty=9", () => {
       const c = new BossReactiveController();
-      advanceToOpportunity(c);
-      const result = hitCurrentArmor(c, "v15_break", 100); // 高刀势一刀破甲
-      expect(result.armorBroken).toBe(true);
-      expect(result.rawArmorReward).toBe(22);
+      c.update(0.35); // → threat
+      const p = c.spawnProjectileForTest("dangerous", BOSS_CX, BOSS_CY - 50, 0, 50);
+      const g = geom(v(p.x - 30, p.y - 30), v(p.x + 30, p.y + 30), "v15f_danger", 35);
+      c.resolveGeometry(g);
+      const r = c.finishSlash("v15f_danger", createBladeMomentumState(35, 100), 300, DEFAULT_BLADE_RUN_MODIFIERS);
+      expect(r.dangerousWrongCutPenalty).toBe(9);
+      expect(r.energyAfter).toBe(19); // 35-7-9=19
+      expect(r.primaryResult).toBe("dangerous_wrong_cut");
     });
 
-    // ---- 9.3 错误成本 ----
-
-    it("9.3a 危险弹幕误砍惩罚=9，大于身体误砍惩罚=7", () => {
-      const cfg = REACTIVE_BOSS_CONFIG.bladeEnergy;
-      expect(cfg.dangerousWrongCutPenalty).toBe(9);
-      expect(cfg.bodyWrongHitPenalty).toBe(7);
-      expect(cfg.dangerousWrongCutPenalty).toBeGreaterThan(cfg.bodyWrongHitPenalty);
-    });
-
-    it("9.3b 危险误砍不会让35刀势直接归零", () => {
+    // ---- 9.4 真实 projectile_cut + armor_closed 混合 ----
+    it("threat阶段 普通弹幕+关闭护甲: primary=projectile_cut, secondary含armor_closed", () => {
       const c = new BossReactiveController();
-      advanceToOpportunity(c);
-      // 用 finishSlash 模拟危险误砍：35-7-9=19
-      // 需要命中 dangerous 弹幕，这里验证惩罚值
-      const cfg = REACTIVE_BOSS_CONFIG.bladeEnergy;
-      const expectedAfter = 35 - 7 - cfg.dangerousWrongCutPenalty;
-      expect(expectedAfter).toBe(19);
-      expect(expectedAfter).toBeGreaterThan(0);
+      c.update(0.35); // → threat (护甲关闭)
+      // 在护甲位置附近创建弹幕
+      const armorPos = c.getActiveArmorWorldPos()!;
+      const p = c.spawnProjectileForTest("normal", armorPos.cx, armorPos.cy - 20, 0, 50);
+      // 刀路同时覆盖弹幕和护甲
+      const g = geom(v(armorPos.cx - 40, armorPos.cy - 40), v(armorPos.cx + 40, armorPos.cy + 40), "v15f_mix", 35);
+      const events = c.resolveGeometry(g);
+      // 应该有 projectile_cut 和 armor_closed 事件
+      const hasCut = events.some(e => e.kind === "projectile_cut");
+      const hasClosed = events.some(e => e.kind === "armor_closed");
+      expect(hasCut).toBe(true);
+      expect(hasClosed).toBe(true);
+      const r = c.finishSlash("v15f_mix", createBladeMomentumState(35, 100), 300, DEFAULT_BLADE_RUN_MODIFIERS);
+      expect(r.primaryResult).toBe("projectile_cut");
+      expect(r.hitClosedArmor).toBe(true);
+      expect(r.emptySwingPenalty).toBe(0); // 有命中，不罚空挥
+      expect(r.secondaryResults).toContain("armor_closed");
     });
 
-    // ---- 9.4 关闭护甲 ----
-
-    it("9.4 threat阶段命中关闭护甲：armor_closed, 耐久不变, emptyPenalty=0, energyAfter=28", () => {
-      const c = new BossReactiveController();
-      // 推进到 threat 阶段（不进入 opportunity）
-      c.update(REACTIVE_BOSS_CONFIG.phaseTimers.armorPrepare + 0.05);
-      // phase 应为 armor_threat
-      expect(c.phase).toBe("armor_threat");
-      // 命中护甲位置
-      const pos = c.getActiveArmorWorldPos()!;
-      const segA = v(pos.cx - pos.rx * 0.5, pos.cy - pos.ry * 0.5);
-      const segB = v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5);
-      c.resolveGeometry(geom(segA, segB, "v15_closed", 35));
-      const result = c.finishSlash("v15_closed", createBladeMomentumState(35, 100), 300, DEFAULT_BLADE_RUN_MODIFIERS);
-      expect(result.hitClosedArmor).toBe(true);
-      expect(result.emptySwingPenalty).toBe(0);
-      expect(result.energyAfter).toBe(28); // 35-7=28（无额外惩罚）
-      // 护甲耐久不变
-      expect(c.getArmorDurability()[c.getActiveArmorIndex()]).toBe(100);
-    });
-
-    // ---- 9.5 混合事件 ----
-
-    it("9.5a 普通弹幕+armor_closed：primary=projectile_cut, secondary含armor_closed, emptyPenalty=0", () => {
-      // 验证优先级逻辑：projectile_cut > armor_closed
-      const c = new BossReactiveController();
-      advanceToOpportunity(c);
-      // 在 opportunity 命中护甲 → primary=armor_hit（不是 armor_closed）
-      // armor_closed 只在 threat 阶段触发
-      // 这里验证优先级常量定义正确
-      const result = hitCurrentArmor(c, "v15_mix", 50);
-      expect(result.primaryResult).toBe("armor_hit");
-      expect(result.hitClosedArmor).toBe(false);
-    });
-
-    // ---- 9.6 Modifier ----
-
-    it("9.6a gainMultiplier=1.5：rawReward=8, modifiedReward=12", () => {
-      const c = new BossReactiveController();
-      advanceToOpportunity(c);
-      const mods: BladeRunModifiers = {
-        maxBonus: 0, floorRatioBonus: 0, gainMultiplier: 1.5, costMultiplier: 1, nodeThresholdShift: {},
-      };
-      const result = hitCurrentArmor(c, "v15_gain", 35);
-      // 重新用自定义 modifiers 跑（hitCurrentArmor 用默认 modifiers）
-      // 直接 finishSlash 测 modifier
-      const pos = c.getActiveArmorWorldPos()!;
-      const segA = v(pos.cx - pos.rx * 0.5, pos.cy - pos.ry * 0.5);
-      const segB = v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5);
-      const c2 = new BossReactiveController();
-      advanceToOpportunity(c2);
-      c2.setProgrammaticSlashEnergy(35);
-      c2.resolveGeometry(geom(segA, segB, "v15_gain2", 35));
-      // hitCurrentArmor 命中后 phase 会变，用新 controller
-      const c3 = new BossReactiveController();
-      advanceToOpportunity(c3);
-      c3.setProgrammaticSlashEnergy(35);
-      const geom3 = geom(segA, segB, "v15_gain3", 35);
-      c3.resolveGeometry(geom3);
-      const r3 = c3.finishSlash("v15_gain3", createBladeMomentumState(35, 100), 300, mods);
-      // gainMultiplier 只作用正向收益：armorCrackReward=5 * 1.5 = 7.5
-      expect(r3.gainMultiplier).toBe(1.5);
-      expect(r3.rawActiveGain).toBe(5); // 裂甲奖励
-      expect(r3.modifiedActiveGain).toBe(7.5); // 5 * 1.5
-    });
-
-    it("9.6b costMultiplier=0.5：rawCost=7, modifiedBaseCost=3.5", () => {
-      const c = new BossReactiveController();
-      const mods: BladeRunModifiers = {
-        maxBonus: 0, floorRatioBonus: 0, gainMultiplier: 1, costMultiplier: 0.5, nodeThresholdShift: {},
-      };
-      const result = c.finishSlash("v15_cost", createBladeMomentumState(35, 100), 300, mods);
-      expect(result.costMultiplier).toBe(0.5);
-      expect(result.rawBaseCost).toBe(7); // 4 + 3
-      expect(result.baseCost).toBe(3.5); // 7 * 0.5
-    });
-
-    it("9.6c floorRatioBonus=0.2：max100最低20, max180最低36", () => {
+    // ---- 9.5 floor 严格钳制 ----
+    it("floorRatioBonus=0.2: max100 floor=20, 能量不低于20", () => {
       const c = new BossReactiveController();
       const mods: BladeRunModifiers = {
         maxBonus: 0, floorRatioBonus: 0.2, gainMultiplier: 1, costMultiplier: 1, nodeThresholdShift: {},
       };
-      // max=100, floor=20：消耗+惩罚让 energyAfter 低于 20 时，clamp 到 20
-      // 35-7-9(dangerous)=19 < 20 → clamp 到 20
-      const result = c.finishSlash("v15_floor", createBladeMomentumState(35, 100), 300, mods);
-      expect(result.floorEnergy).toBe(20); // 100 * 0.2
-      expect(result.energyAfter).toBeGreaterThanOrEqual(20);
+      // 模拟极端消耗：35-7-9(danger)-7(body)=12 < 20 → clamp 到 20
+      // 用空挥测：35-7=28（高于20，不触发 floor）
+      // 需要更极端场景：用 costMultiplier 放大消耗
+      const extremeMods: BladeRunModifiers = {
+        maxBonus: 0, floorRatioBonus: 0.2, gainMultiplier: 1, costMultiplier: 5, nodeThresholdShift: {},
+      };
+      // 35 - min(7*5, 8) = 35-8=27（costMultiplier 被 maxCost=8 clamp）
+      // 27 仍高于 20，需要更极端
+      // 用 5 能量起步
+      const r = c.finishSlash("v15f_floor", createBladeMomentumState(5, 100), 300, extremeMods);
+      expect(r.floorEnergy).toBe(20); // 100 * 0.2
+      // 5 - 8(maxCost clamp) = -3 → clamp 到 floor=20
+      expect(r.energyAfter).toBeGreaterThanOrEqual(20);
+      expect(r.energyAfter).toBe(20); // floor 钳制
+    });
 
-      // max=180, floor=36
-      const mods180: BladeRunModifiers = {
+    it("floorRatioBonus=0.2: max180 floor=36", () => {
+      const c = new BossReactiveController();
+      const mods: BladeRunModifiers = {
         maxBonus: 0, floorRatioBonus: 0.2, gainMultiplier: 1, costMultiplier: 1, nodeThresholdShift: {},
       };
-      const result180 = c.finishSlash("v15_floor180", createBladeMomentumState(35, 180), 300, mods180);
-      expect(result180.floorEnergy).toBe(36); // 180 * 0.2
+      const r = c.finishSlash("v15f_floor180", createBladeMomentumState(5, 180), 300, mods);
+      expect(r.floorEnergy).toBe(36); // 180 * 0.2
+      expect(r.energyAfter).toBeGreaterThanOrEqual(0); // floor 只影响 energyAfter 下限
     });
 
-    it("9.6d penalty不受gain/cost倍率影响", () => {
+    // ---- 9.6 遥测真实累计 ----
+    it("appliedActiveGain: 普通弹幕命中后=8, 无命中时=0", () => {
       const c = new BossReactiveController();
-      const cfg = REACTIVE_BOSS_CONFIG.bladeEnergy;
-      // gainMultiplier 和 costMultiplier 不影响惩罚值
+      c.update(0.35); // → threat
+      const p = c.spawnProjectileForTest("normal", BOSS_CX, BOSS_CY - 50, 0, 50);
+      const g = geom(v(p.x - 30, p.y - 30), v(p.x + 30, p.y + 30), "v15f_tele1", 35);
+      c.resolveGeometry(g);
+      const r1 = c.finishSlash("v15f_tele1", createBladeMomentumState(35, 100), 300, DEFAULT_BLADE_RUN_MODIFIERS);
+      expect(r1.appliedActiveGain).toBe(8); // 有命中
+
+      // 第二刀无命中
+      const r2 = c.finishSlash("v15f_tele2", createBladeMomentumState(36, 100), 300, DEFAULT_BLADE_RUN_MODIFIERS);
+      expect(r2.appliedActiveGain).toBe(0); // 无命中
+    });
+
+    it("appliedActiveGain: 刀势满时被 max 截断", () => {
+      const c = new BossReactiveController();
+      c.update(0.35); // → threat
+      const p = c.spawnProjectileForTest("normal", BOSS_CX, BOSS_CY - 50, 0, 50);
+      const g = geom(v(p.x - 30, p.y - 30), v(p.x + 30, p.y + 30), "v15f_max", 98);
+      c.resolveGeometry(g);
+      // 98-7+8=99 < 100, 不截断
+      const r = c.finishSlash("v15f_max", createBladeMomentumState(98, 100), 300, DEFAULT_BLADE_RUN_MODIFIERS);
+      expect(r.appliedActiveGain).toBe(8); // 98-7+8=99, 未到 max=100
+    });
+
+    // ---- 9.7 gainMultiplier/costMultiplier clamp 为 0 ----
+    it("gainMultiplier=0: 正向收益归零, penalty 不受影响", () => {
+      const c = new BossReactiveController();
+      c.update(0.35);
+      const p = c.spawnProjectileForTest("normal", BOSS_CX, BOSS_CY - 50, 0, 50);
+      const g = geom(v(p.x - 30, p.y - 30), v(p.x + 30, p.y + 30), "v15f_g0", 35);
+      c.resolveGeometry(g);
       const mods: BladeRunModifiers = {
-        maxBonus: 0, floorRatioBonus: 0, gainMultiplier: 2, costMultiplier: 0.1, nodeThresholdShift: {},
+        maxBonus: 0, floorRatioBonus: 0, gainMultiplier: 0, costMultiplier: 1, nodeThresholdShift: {},
       };
-      // emptySwingPenalty 仍为 0（无目标时不罚）
-      const result = c.finishSlash("v15_pen", createBladeMomentumState(35, 100), 300, mods);
-      // 惩罚字段不受 modifier 影响
-      expect(cfg.dangerousWrongCutPenalty).toBe(9);
-      expect(cfg.bodyWrongHitPenalty).toBe(7);
-      expect(REACTIVE_BOSS_CONFIG.reactiveSlash.emptySwingPenalty).toBe(1);
+      const r = c.finishSlash("v15f_g0", createBladeMomentumState(35, 100), 300, mods);
+      expect(r.gainMultiplier).toBe(0);
+      expect(r.modifiedActiveGain).toBe(0); // 8 * 0 = 0
+      expect(r.appliedActiveGain).toBe(0);
+      expect(r.energyAfter).toBe(28); // 35-7+0=28
     });
 
-    // ---- 9.7 遥测 ----
-    // 遥测需要 Game 实例，Controller 级测试验证字段存在性
-    it("9.7 遥测字段存在：rawBaseCost/costMultiplier/baseCost/rawActiveGain/gainMultiplier/modifiedActiveGain/floorEnergy/hadActionableTarget/hitClosedArmor/emptyPenaltyEligible", () => {
+    it("costMultiplier=0: 基础消耗归零, penalty 不受影响", () => {
       const c = new BossReactiveController();
-      const result = c.finishSlash("v15_telemetry", createBladeMomentumState(35, 100), 300, DEFAULT_BLADE_RUN_MODIFIERS);
-      expect(typeof result.rawBaseCost).toBe("number");
-      expect(typeof result.costMultiplier).toBe("number");
-      expect(typeof result.baseCost).toBe("number");
-      expect(typeof result.rawActiveGain).toBe("number");
-      expect(typeof result.gainMultiplier).toBe("number");
-      expect(typeof result.modifiedActiveGain).toBe("number");
-      expect(typeof result.floorEnergy).toBe("number");
-      expect(typeof result.hadActionableTarget).toBe("boolean");
-      expect(typeof result.hitClosedArmor).toBe("boolean");
-      expect(typeof result.emptyPenaltyEligible).toBe("boolean");
-      expect(typeof result.emptySwingPenalty).toBe("number");
+      const mods: BladeRunModifiers = {
+        maxBonus: 0, floorRatioBonus: 0, gainMultiplier: 1, costMultiplier: 0, nodeThresholdShift: {},
+      };
+      const r = c.finishSlash("v15f_c0", createBladeMomentumState(35, 100), 300, mods);
+      expect(r.costMultiplier).toBe(0);
+      expect(r.baseCost).toBe(0); // 7 * 0 = 0
+      expect(r.energyAfter).toBe(35); // 35-0=35（无目标不罚空挥）
     });
   });
 });

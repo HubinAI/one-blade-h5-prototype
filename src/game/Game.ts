@@ -4654,13 +4654,16 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
           this.flash = Math.max(this.flash, 0.5);
           this.particles.push(...sparkBurst({ x: fx, y: fy }, 16, "#f0e130"));
           this.addText(fx, fy - 24, "破甲！", "#f0e130", 22, 1.0);
+          if (result.appliedActiveGain > 0) this.addText(fx, fy - 44, `+${Math.round(result.appliedActiveGain)} 刀势`, "#ffd35a", 13, 0.7);
           AudioService.defenseHit();
         } else {
-          if (slashEnergy < 30) {
+          // V0723015-Final: 护甲文字按 lockedMomentum.band 判断（不再用 slashEnergy < 30 绝对值）
+          if (result.momentumBefore.band === "base") {
             this.addText(fx, fy - 20, `裂痕 ${result.armorDurabilityDamage}`, "#d9b45b", 14, 0.7);
           } else {
             this.addText(fx, fy - 20, `护甲 -${result.armorDurabilityDamage}`, "#f0e130", 16, 0.7);
           }
+          if (result.appliedActiveGain > 0) this.addText(fx, fy - 38, `+${Math.round(result.appliedActiveGain)} 刀势`, "#ffd35a", 13, 0.6);
           this.screenShake = Math.max(this.screenShake, 0.15);
         }
       } else if (ev.kind === "body") {
