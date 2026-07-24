@@ -16,8 +16,6 @@ export const REACTIVE_BOSS_CONFIG = {
     recoveryDuration: 0.2,
   },
   bladeEnergy: {
-    max: 100,
-    initial: 35,
     passiveRegenPerSecond: 1.5,
     wrongHitPenalty: 10,
     normalBulletReward: 8,

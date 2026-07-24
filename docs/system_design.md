@@ -1,801 +1,513 @@
-# 《我只要一刀》增量系统架构设计 — 破甲阶段重构（reactive flow）
+# 《我只要一刀》V0723014 — 系统架构设计与任务分解
 
-> 架构师：高见远 | 版本：V0722008 → V0722009 | 日期：2025-07-22
-
----
-
-## 1. 实现方案 + 框架选型
-
-### 1.1 整体技术方案（增量改造策略）
-
-**原则：只重构破甲阶段，不碰追击/终结/天雷劫。**
-
-现有 BossController 管理完整的 armor → pursuit → execution → tribulation 全流程。本次在旁新增 `BossReactiveController`，专门处理新破甲阶段。当 3 块护甲全部击破后，**桥接回现有 BossController 的 pursuit 阶段**，复用后续全流程。
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  BossController (现有)                                              │
-│  armor → armor_break_show → armor_complete_hold → pursuit → ...    │
-│              ↑                          ↓                          │
-│              │                    [保持不变]                        │
-│              │                                                      │
-│  BossReactiveController (新增)                                       │
-│  armor_prepare → threat → opportunity → resolve → recovery × 3    │
-│        ↓                                                           │
-│  (桥接回 BossController.pursuit)                                    │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-### 1.2 核心技术挑战
-
-| 挑战 | 解决方案 |
-|------|----------|
-| 弹幕系统与刀光碰撞检测 | 复用现有 `segmentHitCircle` / `segmentHitEllipse`，新增弹幕类型定义 |
-| 新旧版本并存 | `?bossFlow=legacy/reactive` URL 参数 + Game 内部路由 |
-| 刀势经济重做 | 修改 `bladeEnergySystem.ts`：`canSlash` 永远返回 true，正向行为回能 |
-| 玩家生命系统 | Game 类新增 `playerHp` / `playerMaxHp`，与现有 `hp` 系统隔离 |
-| 刀势连续视觉效果 | 刀芒长度/宽度基于 `energy/100` 连续缩放，不再依赖刀势段位阶梯 |
-
-### 1.3 框架与库
-
-| 用途 | 选择 | 理由 |
-|------|------|------|
-| UI 框架 | React 19 + TypeScript | 现有技术栈，不变 |
-| 构建工具 | Vite 6 | 现有技术栈，不变 |
-| 测试 | Vitest + Playwright | 现有技术栈，不变 |
-| Canvas 渲染 | 原生 Canvas 2D | 现有技术栈，不变 |
-| 新增依赖 | 无 | 全部使用现有能力实现 |
-
-### 1.4 新旧版本并存策略（`?bossFlow=legacy/reactive`）
-
-```
-?bossFlow=legacy     → 使用现有 BossController 完整流程（不变）
-?bossFlow=reactive   → 使用 BossReactiveController 处理破甲阶段
-无参数               → 默认 legacy（向后兼容）
-```
-
-**实现方式：**
-- `App.tsx` 从 URL 读取 `bossFlow` 参数，通过 `GameCanvas` 的 props 传入
-- `GameCanvas` 将参数传给 `Game` 构造函数
-- `Game` 在 `initializeThunderGeneralBoss` 时根据参数选择控制器
-- 两个控制器共享同一个 `BossPhaseState` 类型，但 reactive 阶段使用新状态名
+> 架构师：高见远 (Bob)  
+> 版本：V0723014  
+> 日期：2025-07-23
 
 ---
 
-## 2. 文件列表
+## Part A: System Design
 
-### 2.1 新建文件
+### 1. Implementation Approach
 
-| 文件路径 | 用途 |
-|----------|------|
-| `src/game/config/bossReactiveFlow.ts` | **配置中心**：新破甲阶段全部数值常量、弹幕配置、刀势经济参数 |
-| `src/game/systems/BossReactiveController.ts` | **核心控制器**：新 5 状态机 + 弹幕生成 + 护甲判定 + 渲染 |
-| `src/game/systems/projectileSystem.ts` | **弹幕系统**：弹幕运动更新、碰撞检测、生命周期管理 |
-| `src/game/systems/bossReactiveHUD.ts` | **HUD 渲染**：刀势条、生命条、护甲状态指示器 |
-| `src/game/systems/BossReactiveController.test.ts` | **单元测试**：新控制器的全部测试用例 |
+#### 1.1 核心技术挑战
 
-### 2.2 修改文件
+| 挑战 | 描述 | 架构对策 |
+|---|---|---|
+| **绝对值→比例制迁移** | 将硬编码的 `energy>=30/70` 和 `energy/100` 全部替换为 `ratio=current/max → band`，但默认 max=100 时行为必须完全不变 | 新增纯函数层 `bladeMomentum.ts` 做 ratio/band/activeNodes 推导；Controller 和 HUD 逐一切换 |
+| **上限成长不掉档** | max 从 100→140 时，current 等比例缩放（80→112），band 不变 | `applyBladeMaxChangePreserveRatio()` 在同一事务中原子更新 current 和 max |
+| **档位与能力节点解耦** | burst 档=70%+，但 precision_reflect 节点=90%+，两者独立 | 分别建模：`bandThresholds` 和 `abilityNodes` 两套配置，`activeNodes` 独立推导 |
+| **current 单源原则** | 禁止同时存在 `energy` 和 `reactiveBladeCurrent` 双源 | `Game.energy` 保持唯一权威值；新增 `getReactiveBladeMomentum()` 只读快照方法 |
+| **锁定快照升级** | `lockedEnergy: number` → `lockedMomentum: BladeMomentumState` | Geometry/pendingSlash 结构升级；过渡期用 `@deprecated` 标记旧字段 |
 
-| 文件路径 | 修改内容 |
-|----------|----------|
-| `src/game/types.ts` | 新增 `BossPhaseState` 枚举值（reactive 子状态）、`Projectile` 类型、`ProjectileKind`、`PlayerHpState` |
-| `src/game/Game.ts` | 双入口路由、HP 系统、能量经济重构、渲染适配、BossReactiveController 集成 |
-| `src/game/systems/bladeEnergySystem.ts` | `canSlash` 永远返回 true、新增正向回能函数、被动回能降为 1.5/s |
-| `src/game/config/balance.ts` | 新增 `playerHp`、`reactiveBladeEnergy` 等配置段 |
-| `src/game/systems/BossController.ts` | 新增 `bridgeToPursuit()` 方法供 reactive 控制器桥接调用 |
-| `src/game/GameCanvas.tsx` | 传递 `bossFlow` prop 到 Game |
-| `src/App.tsx` | 从 URL 解析 `bossFlow` 参数并传入 GameCanvas |
-| `src/game/systems/BossController.test.ts` | 新增桥接测试（保持现有测试不变） |
+#### 1.2 技术栈确认（无新增依赖）
+
+沿用现有技术栈，本轮不引入任何新依赖：
+
+- **运行时**: React 19 + TypeScript 5.7
+- **Canvas 渲染**: 原生 Canvas 2D API（无第三方渲染库）
+- **构建**: Vite 6
+- **测试**: Vitest 4 + Playwright 1.61
+- **类型系统**: TypeScript strict mode
+
+#### 1.3 架构模式
+
+- **纯函数 + 配置驱动**: `bladeMomentum.ts` (systems) 作为纯函数层，不持有状态，所有函数可独立单元测试
+- **单一权威源**: `Game.energy` 是 current 唯一读写入口；`Game.reactiveBladeMax` + `Game.reactiveBladeRunModifiers` 提供 max 和 modifiers
+- **快照模式**: 起刀时调用 `getReactiveBladeMomentum()` 锁定完整 `BladeMomentumState`，整刀使用快照判定
+- **Controller 集中结算**: `BossReactiveController` 负责所有 ratio→band→damage/reflect 判定，Game 只调接口
 
 ---
 
-## 3. 数据结构与接口
+### 2. File List
 
-### 3.1 关键 TypeScript 类型定义
+#### 2.1 新增文件
 
-```typescript
-// ---- 新增弹幕类型 ----
-export type ProjectileKind = "normal" | "reflective" | "dangerous";
+| 相对路径 | 内容 | 改动量 |
+|---|---|---|
+| `src/game/config/bladeMomentum.ts` | 三档刀势配置：BLADE_MOMENTUM_CONFIG（baseMax/initialRatio/bandThresholds/abilityNodes/thresholdClamp） | ~30 行 |
+| `src/game/systems/bladeMomentum.ts` | 纯函数：createBladeMomentumState, resolveRatio, resolveBand, resolveActiveNodes, applyBladeMaxChangePreserveRatio, resolveEffectiveNodeThresholds, applyBladeRunMaxModifier | ~120 行 |
+| `src/game/systems/bladeMomentum.test.ts` | 单元测试：ratio 边界、band 判定、非法输入、能力节点、上限成长保持 ratio、默认等价矩阵 | ~300 行 |
+| `docs/incremental-design-V0723014.md` | 增量设计记录 | ~50 行 |
 
-export type Projectile = {
-  id: string;
-  kind: ProjectileKind;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  radius: number;
-  active: boolean;
-  /** 生成时间（用于生命周期判断） */
-  spawnTime: number;
-  /** 最大存活时间 */
-  maxLife: number;
-  /** 旋转角度（用于 reflective 视觉效果） */
-  rotation: number;
-  /** 旋转速度 */
-  rotationSpeed: number;
-  /** 颜色主色 */
-  color: string;
-  /** 发光颜色 */
-  glowColor: string;
-  /** 已反射标记 */
-  reflected: boolean;
-};
+#### 2.2 修改文件
 
-// ---- 新破甲阶段状态机 ----
-// 扩展 BossPhaseState 新增值:
-// "armor_prepare" | "armor_threat" | "armor_opportunity" | "armor_resolve" | "armor_recovery"
+| 相对路径 | 改动内容 | 改动量 |
+|---|---|---|
+| `src/version.ts` | `APP_VERSION` → `"V0723014"`，`BUILD_VERSION` → `"0723.014"` | 2 行 |
+| `package.json` | `version` → `"0723.014"` | 1 行 |
+| `package-lock.json` | 同步 version | 自动生成 |
+| `index.html` | title 含版本号更新 | 1 行 |
+| `README.md` | 版本号更新 | 1 行 |
+| `src/App.tsx` | 无实质性改动（版本号引用自动更新） | 0~1 行 |
+| `src/game/config/bossReactiveFlow.ts` | 删除 `bladeEnergy.max` 和 `bladeEnergy.initial`（迁移到 bladeMomentum.ts）；保留 rewards/penalty | ~4 行删除 |
+| `src/game/Game.ts` | 新增 `reactiveBladeMax`、`reactiveBladeRunModifiers` 字段；新增 `getReactiveBladeMomentum()` 方法；`energy` 初始化改用 `BLADE_MOMENTUM_CONFIG`；`startSlash` 中 lockedMomentum 快照；`finalizeBossSlashCommon` 中 energy clamp 改用 momentumBefore.max；`drawReactiveDebugOverlay` 新增 momentum 面板；`getState()` 新增 bladeMomentum 只读字段 | ~80 行 |
+| `src/game/systems/BossReactiveController.ts` | `resolveGeometry`: `slashEnergy>=70` → `lockedMomentum.band==="burst"`；`calculateArmorDamage`: 改用 band switch；`getBladeEffect`: 改用 ratio+band；`finishSlash`: 新增 `momentumBefore/momentumAfter` 到结果；energy clamp 从 `cfg.max` → `momentumBefore.max` | ~40 行 |
+| `src/game/systems/BossReactiveController.test.ts` | 新增 band 判定测试、旧行为兼容矩阵、momentum 不变量测试 | ~80 行 |
+| `src/game/systems/reactiveSlashGeometry.ts` | `lockedEnergy` → `lockedMomentum: BladeMomentumState`；`lockedEnergy` 标记 `@deprecated`，由 `lockedMomentum.current` 派生 | ~15 行 |
+| `src/game/systems/reactiveSlashGeometry.test.ts` | 适配 lockedMomentum 类型变更 | ~10 行 |
+| `src/game/systems/bossReactiveHUD.ts` | `drawEnergyBar`: 改用 momentum 参数（接受 max 非 100）；颜色按 band 读取而非 ratio 硬编码阈值 | ~15 行 |
+| `src/game/types.ts` | 新增 `BladeMomentumBand`、`BladeAbilityNodeId`、`BladeMomentumState`、`BladeRunModifiers` 类型导入（或 re-export） | ~5 行 |
+| `e2e/boss-reactive-real-input.spec.ts` | `getState()` 新增 `bladeMomentum` 只读断言（current/max/ratio/band） | ~15 行 |
+| `e2e/boss-reactive-full-pointer.spec.ts` | 同上新增只读断言 | ~15 行 |
+| `src/game/systems/bladeEnergySystem.ts` | `recoverEnergy` 和 `gainEnergyByAction` 中硬编码 `100` → 接受 `maxEnergy` 参数（默认 100） | ~5 行 |
 
-// ---- 新护甲目标 ----
-export type ReactiveArmorTarget = {
-  id: number;
-  name: string;
-  relX: number;
-  relY: number;
-  radiusX: number;
-  radiusY: number;
-  /** 当前是否激活（可被攻击） */
-  active: boolean;
-  /** 是否已破碎 */
-  broken: boolean;
-  /** 当前耐久 */
-  durability: number;
-  /** 最大耐久 */
-  maxDurability: number;
-  /** 累积裂痕值（低刀势累积） */
-  crackProgress: number;
-  /** 动画计时器 */
-  animTimer: number;
-  /** 绑定的弹幕类型 */
-  projectileKind: ProjectileKind;
-  /** Boss 动作（绑定到该护甲） */
-  bossAction: "sweep" | "reflect" | "mixed";
-};
+---
 
-// ---- 玩家生命状态 ----
-export type PlayerHpState = {
-  current: number;
-  max: number;
-  /** 受伤无敌计时 */
-  invincibleTimer: number;
-  /** 受伤闪白计时 */
-  flashTimer: number;
-};
-
-// ---- 刀势连续效果参数 ----
-export type BladeContinuousEffect = {
-  /** 刀芒长度 (30~130) */
-  visualLength: number;
-  /** 刀芒宽度 (3~20) */
-  width: number;
-  /** 亮度 (0.3~1.2) */
-  brightness: number;
-  /** 颜色（渐变插值） */
-  color: string;
-  /** 发光颜色 */
-  glowColor: string;
-};
-```
-
-### 3.2 Mermaid 类图
+### 3. Data Structures and Interfaces
 
 ```mermaid
 classDiagram
+    %% ── 配置层 ──
+    class BLADE_MOMENTUM_CONFIG {
+        +baseMax: 100
+        +initialRatio: 0.35
+        +bandThresholds: ~enhanced: 0.30, burst: 0.70~
+        +abilityNodes: ~blade_reach: 0.30, armor_break: 0.60, precision_reflect: 0.90~
+        +thresholdClamp: ~min: 0.05, max: 1.00~
+    }
+
+    %% ── 领域类型 ──
+    class BladeMomentumBand {
+        <<enumeration>>
+        base
+        enhanced
+        burst
+    }
+
+    class BladeAbilityNodeId {
+        <<enumeration>>
+        blade_reach
+        armor_break
+        precision_reflect
+    }
+
+    class BladeMomentumState {
+        +current: number
+        +max: number
+        +ratio: number
+        +band: BladeMomentumBand
+        +activeNodes: BladeAbilityNodeId[]
+        +effectiveNodeThresholds: Record~BladeAbilityNodeId, number~
+    }
+
+    class BladeRunModifiers {
+        +maxBonus: number = 0
+        +floorBonus: number = 0
+        +gainMultiplier: number = 1
+        +costMultiplier: number = 1
+        +nodeThresholdShift: Partial~Record~BladeAbilityNodeId, number~~
+    }
+
+    class DEFAULT_BLADE_RUN_MODIFIERS {
+        +maxBonus: 0
+        +floorBonus: 0
+        +gainMultiplier: 1
+        +costMultiplier: 1
+        +nodeThresholdShift: ~
+    }
+
+    %% ── 纯函数 ──
+    class BladeMomentumPureFunctions {
+        +createBladeMomentumState(current, max, modifiers?) BladeMomentumState
+        +resolveBladeMomentumRatio(current, max) number
+        +resolveBladeMomentumBand(ratio) BladeMomentumBand
+        +resolveEffectiveNodeThresholds(modifiers) Record
+        +resolveActiveBladeNodes(ratio, thresholds) BladeAbilityNodeId[]
+        +applyBladeMaxChangePreserveRatio(current, oldMax, newMax) ~current, max, ratio~
+        +applyBladeRunMaxModifier(state, modifiers) BladeMomentumState
+    }
+
+    %% ── Geometry ──
+    class ReactiveSlashGeometry {
+        +slashId: string
+        +baseA: Vec2
+        +baseB: Vec2
+        +tipB: Vec2
+        +tipA: Vec2
+        +width: number
+        +visualLength: number
+        +lockedMomentum: BladeMomentumState
+        +lockedEnergy: number @deprecated
+        +effectiveSegA: Vec2
+        +effectiveSegB: Vec2
+        +effectiveRadius: number
+        +capsules: Capsule[]
+    }
+
+    %% ── 结算结果 ──
+    class ReactiveSlashResolveResult {
+        +slashId: string
+        +energyAfter: number
+        +energyBefore: number
+        +momentumBefore: BladeMomentumState
+        +momentumAfter: BladeMomentumState
+        +baseCost: number
+        +projectileCutCount: number
+        +projectileReflectCount: number
+        +armorHit: boolean
+        +armorDurabilityDamage: number
+        +armorBroken: boolean
+        +allArmorBroken: boolean
+        +primaryResult: string
+        +primarySource: CapsuleSource | "-"
+        +events: ReactiveCollisionEvent[]
+        +unclampedAfter: number
+    }
+
+    %% ── 核心类 ──
+    class Game {
+        -energy: number
+        -reactiveBladeMax: number
+        -reactiveBladeRunModifiers: BladeRunModifiers
+        +getReactiveBladeMomentum() BladeMomentumState
+        -applyReactiveBladeMaxBonus(maxBonusDelta) void
+        -startSlash(pos, pending?) void
+        -finalizeBossSlashCommon(trail) void
+    }
+
     class BossReactiveController {
         -_phase: BossPhaseState
-        -_armorCycle: number
-        -_activeArmorIndex: number
-        -_armorTargets: ReactiveArmorTarget[]
-        -_projectiles: Projectile[]
-        -_threatTimer: number
-        -_opportunityTimer: number
-        -_recoveryTimer: number
-        -_prepareTimer: number
-        -_elapsed: number
-        -_session: SlashSession
-        -_resolvedSlashId: string
-        -_playerHp: PlayerHpState
-        -_bladeEffect: BladeContinuousEffect
-        +bossId: BossId
-        +renderY: number
-        +bossRenderScale: number
-        +screenShake: number
-        +flash: number
-        
-        +constructor(bossId: BossId)
-        +enterLoading(): void
-        +update(dt: number): void
-        +resolveSegment(segA: Vec2, segB: Vec2, slashId: string): ReactiveArmorResolveResult | null
-        +finishSlash(slashId: string): ReactiveArmorResolveResult | null
-        +getPlayerHp(): PlayerHpState
-        +takeDamage(amount: number, source: string): void
-        +getBladeEffect(energy: number): BladeContinuousEffect
-        +renderWorld(ctx: any): void
-        +renderOverlay(ctx: any): void
-        +bridgeToPursuit(): void
-        +getArmorBrokenFlags(): boolean[]
-        
-        -updateArmorPrepare(dt): void
-        -updateThreatPhase(dt): void
-        -updateOpportunityPhase(dt): void
-        -updateResolvePhase(dt): void
-        -updateRecoveryPhase(dt): void
-        -spawnProjectile(kind: ProjectileKind): void
-        -updateProjectiles(dt): void
-        -drawBoss(ctx): void
-        -drawProjectiles(ctx): void
-        -drawArmorHUD(ctx): void
-        -drawPlayerHUD(ctx): void
-        -drawEnergyBar(ctx): void
+        +resolveGeometry(geometry: ReactiveSlashGeometry) ReactiveCollisionEvent[]
+        +finishSlash(slashId, energyBefore, pathLen) ReactiveSlashResolveResult
+        -calculateArmorDamage(momentum: BladeMomentumState, armor) number
+        +getBladeEffect(momentum: BladeMomentumState) BladeContinuousEffect
+        +updateBladeEffect(momentum: BladeMomentumState) void
     }
 
-    class ProjectileSystem {
-        +createProjectile(kind: ProjectileKind, x: number, y: number, targetX: number, targetY: number): Projectile
-        +updateProjectiles(projectiles: Projectile[], dt: number): Projectile[]
-        +checkSlashHit(projectile: Projectile, segA: Vec2, segB: Vec2, bladeReach: number): boolean
-        +checkPlayerHit(projectile: Projectile, playerX: number, playerY: number, playerRadius: number): boolean
-        +getProjectileConfig(kind: ProjectileKind): ProjectileConfig
+    class BladeContinuousEffect {
+        +visualLength: number
+        +width: number
+        +brightness: number
+        +color: string
+        +glowColor: string
     }
 
-    class BossReactiveHUD {
-        +drawEnergyBar(ctx, x, y, energy, maxEnergy): void
-        +drawHpBar(ctx, x, y, hp, maxHp, flash): void
-        +drawArmorIndicators(ctx, armors: ReactiveArmorTarget[], activeIndex: number): void
-        +drawFloatText(ctx, texts: FloatingText[]): void
-        +drawProjectileWarning(ctx, projectiles: Projectile[]): void
-    }
-
-    class BossController {
-        <<existing>>
-        +bridgeToPursuit(): void
-        +enterPursuitDirectly(): void
-    }
-
-    class Game {
-        <<modified>>
-        -bossFlow: "legacy" | "reactive"
-        -reactiveController: BossReactiveController | null
-        -playerHp: PlayerHpState
-        +handlePointerDown(pos): void
-        +handlePointerUp(): void
-        -updateBossMode(dt): void
-        -renderBossMode(ctx): void
-    }
-
-    BossReactiveController --> ProjectileSystem : uses
-    BossReactiveController --> BossReactiveHUD : uses
-    BossReactiveController --> BossController : bridges to pursuit
-    Game --> BossReactiveController : owns
-    Game --> BossController : owns (legacy)
+    %% ── 关系 ──
+    BLADE_MOMENTUM_CONFIG ..> BladeMomentumState : configures
+    BLADE_MOMENTUM_CONFIG ..> BladeMomentumBand : defines thresholds
+    BLADE_MOMENTUM_CONFIG ..> BladeAbilityNodeId : defines nodes
+    BladeRunModifiers ..> BladeAbilityNodeId : shifts thresholds
+    DEFAULT_BLADE_RUN_MODIFIERS ..|> BladeRunModifiers : implements
+    BladeMomentumState --> BladeMomentumBand : band
+    BladeMomentumState --> BladeAbilityNodeId : activeNodes
+    BladeMomentumState --> BladeRunModifiers : computed from
+    BladeMomentumPureFunctions ..> BladeMomentumState : creates
+    BladeMomentumPureFunctions ..> BladeRunModifiers : consumes
+    ReactiveSlashGeometry --> BladeMomentumState : lockedMomentum
+    ReactiveSlashResolveResult --> BladeMomentumState : momentumBefore, momentumAfter
+    Game --> BladeMomentumState : getReactiveBladeMomentum()
+    Game --> BladeRunModifiers : reactiveBladeRunModifiers
+    Game --> BossReactiveController : reactiveController
+    Game --> ReactiveSlashGeometry : builds via buildReactiveSlashGeometry
+    BossReactiveController --> ReactiveSlashGeometry : resolveGeometry input
+    BossReactiveController --> ReactiveSlashResolveResult : finishSlash output
+    BossReactiveController --> BladeContinuousEffect : getBladeEffect output
+    ReactiveSlashGeometry --> BladeContinuousEffect : derived from (via momentum)
 ```
 
 ---
 
-## 4. 程序调用流程
-
-### 4.1 新破甲状态机时序
+### 4. Program Call Flow
 
 ```mermaid
 sequenceDiagram
-    participant Player as 玩家
-    participant Game as Game
-    participant BRC as BossReactiveController
-    participant PS as ProjectileSystem
-    participant BC as BossController(现有)
+    actor Player
+    participant Game
+    participant RGeometry as buildReactiveSlashGeometry
+    participant RC as BossReactiveController
+    participant BMF as bladeMomentum.ts
+    participant HUD as bossReactiveHUD
 
-    Note over BRC: === 第1块护甲循环 ===
-    BRC->>BRC: armor_prepare (0.3s)
-    Note right of BRC: Boss 抬手预告
-    
-    BRC->>BRC: armor_threat (2~3s)
-    BRC->>PS: spawnProjectile("normal")
-    PS-->>BRC: 弹幕列表
-    BRC->>PS: spawnProjectile("reflective")
-    PS-->>BRC: 弹幕列表
-    
-    loop 每帧更新弹幕
-        BRC->>PS: updateProjectiles(dt)
-        PS-->>BRC: 更新后弹幕列表
-    end
-    
-    BRC->>BRC: armor_opportunity (1.5s)
-    Note right of BRC: 护甲发光，可攻击
-    
-    Player->>Game: handlePointerDown → handlePointerMove
-    Game->>Game: startSlash → extendSlash
-    Game->>BRC: resolveSegment(segA, segB, slashId)
-    alt 命中护甲
-        BRC-->>Game: armor_hit {damage, completed}
-        Game->>Game: applyReactiveArmorResult()
-    else 命中Boss身体
-        BRC-->>Game: wrong_hit
-    else 挥空
-        BRC-->>Game: miss
-    end
-    
-    Player->>Game: handlePointerUp
-    Game->>BRC: finishSlash(slashId)
-    BRC-->>Game: 最终结算结果
-    
-    BRC->>BRC: armor_recovery (0.2s)
-    
-    Note over BRC: === 第2块护甲循环 ===
-    BRC->>BRC: armor_prepare → threat → opportunity → resolve → recovery
-    
-    Note over BRC: === 第3块护甲循环 ===
-    BRC->>BRC: armor_prepare → threat → opportunity → resolve → recovery
-    
-    alt 三块护甲全部击破
-        BRC->>BC: bridgeToPursuit()
-        BC->>BC: enterPursuitDirectly()
-        Note over BC: 进入现有 pursuit 流程
-        Note over BC: 追击→终结→天雷劫(保持不变)
-    end
-```
+    Note over Player,HUD: ── 起刀阶段 ──
 
-### 4.2 弹幕碰撞处理流程
+    Player->>Game: handlePointerDown(pos)
+    Game->>Game: lockedEnergy = clamp(energy, 0, reactiveBladeMax)
+    Game->>BMF: createBladeMomentumState(lockedEnergy, reactiveBladeMax, modifiers)
+    BMF-->>Game: lockedMomentum: BladeMomentumState
+    Note over Game: pendingSlash = { startPos, lockedMomentum, ... }
 
-```mermaid
-sequenceDiagram
-    participant Slash as 刀光
-    participant Game as Game
-    participant BRC as BossReactiveController
-    
-    Slash->>Game: checkSegmentHits(a, b, trail)
-    Game->>BRC: 路由到 reactive 弹幕检测
-    BRC->>BRC: 遍历 projectiles
-    
-    loop 每个弹幕
-        alt 普通弹幕(亮紫/浅蓝)
-            BRC->>BRC: 任何刀势可斩
-            Note over BRC: 弹幕销毁 + 玩家+8刀势
-        else 强化弹幕(金紫+旋转环)
-            alt 玩家刀势 < 30
-                BRC->>BRC: 削弱（弹幕方向改变但继续存在）
-            else 30 ≤ 刀势 ≤ 69
-                BRC->>BRC: 斩碎（弹幕销毁）
-            else 刀势 ≥ 70
-                BRC->>BRC: 反射（弹幕反向飞向Boss）
-                Note over BRC: 命中Boss造成护甲伤害
-            end
-        else 危险雷球(红黑+尖刺)
-            BRC->>BRC: 误砍惩罚
-            Note over BRC: 玩家-10刀势 + 5伤害
-        end
+    Player->>Game: handlePointerMove → commitPendingSlash → startSlash
+    Game->>RC: getBladeEffect(lockedMomentum)
+    RC-->>Game: BladeContinuousEffect (visual snapshot)
+    Game->>Game: currentSlash.reactiveBladeEffect = effect
+    Note over Game: SlashTrail 创建完成，lockedMomentum 已锁定
+
+    Note over Player,HUD: ── 刀路延伸阶段（每帧） ──
+
+    Player->>Game: extendSlash(nextPos)
+    Game->>RGeometry: buildReactiveSlashGeometry(baseA,baseB,angle,visualLength,width,slashId,**lockedMomentum**)
+    RGeometry-->>Game: ReactiveSlashGeometry (3 capsules)
+    Game->>RC: resolveGeometry(geometry)
+
+    alt band === "burst" (≥70%)
+        RC->>RC: reflective 弹幕 → reflect
+    else band === "enhanced" (30-69%) or "base" (<30%)
+        RC->>RC: reflective 弹幕 → cut
     end
+
+    RC-->>Game: ReactiveCollisionEvent[] (per-segment)
+
+    Note over Player,HUD: ── 收刀结算 ──
+
+    Player->>Game: handlePointerUp → endSlash → finalizeBossSlashCommon
+    Game->>RC: finishSlash(slashId, energyBefore, pathLen)
+
+    RC->>BMF: createBladeMomentumState(energyBefore, max, modifiers)
+    BMF-->>RC: momentumBefore
+
+    alt momentumBefore.band === "burst"
+        RC->>RC: armorDamage = remainingDurability (一刀破甲)
+    else momentumBefore.band === "enhanced"
+        RC->>RC: armorDamage = 55
+    else momentumBefore.band === "base"
+        RC->>RC: armorDamage = 25
+    end
+
+    RC->>RC: unclampedEnergy = energyBefore - baseCost + rewards - penalties
+    RC->>RC: energyAfter = clamp(unclampedEnergy, floor, momentumBefore.max)
+    RC->>BMF: createBladeMomentumState(energyAfter, max, modifiers)
+    BMF-->>RC: momentumAfter
+
+    RC-->>Game: ReactiveSlashResolveResult { momentumBefore, momentumAfter, energyAfter, ... }
+
+    Game->>Game: this.energy = result.energyAfter
+    Note over Game: 验证: energyAfter == momentumAfter.current
+
+    Note over Player,HUD: ── HUD 更新 ──
+
+    Game->>BMF: getReactiveBladeMomentum() → BladeMomentumState
+    Game->>HUD: drawEnergyBar(momentum.current, momentum.max, ...)
+    HUD->>HUD: ratio = current/max; color by band
+    Game->>Game: drawReactiveDebugOverlay (momentum ratio/band/activeNodes)
 ```
 
 ---
 
-## 5. Anything UNCLEAR — 待明确事项
+### 5. Anything UNCLEAR
 
-1. **Boss 动作空间变化**（P2）：PRD 提到"Boss 动作空间变化"，但未明确是视觉位移还是判定区域变化。假设为：Threat 阶段 Boss 在 X 轴 ±30px 范围内缓慢平移，增加弹幕落点变化。
-2. **弹幕生成频率与数量**：PRD 未给出具体数值。假设：每块护甲的 threat 阶段持续 2~3 秒，生成 2~4 枚弹幕，其中普通弹幕占 60%、强化 30%、危险 10%。
-3. **刀势飘字具体样式**（P2）：PRD 未指定字体大小/颜色/动画。假设：+8 绿字、-10 红字、+16 金字，浮动 0.6 秒后淡出。
-4. **数据采集埋点维度**（P1）：PRD 未指定具体事件。假设：记录弹幕命中次数、反射次数、误砍次数、单块护甲完成时间、总破甲时间。
-5. **护甲裂痕（crack）累计机制**：低刀势(0~29)每次命中累积 25 裂痕，多次累加可破甲，但需要明确裂痕阈值。假设：每块护甲耐久 100，裂痕满 100 时自动转为 1 次有效攻击。
+| # | 问题 | 架构层面的回答 / 假设 |
+|---|---|---|
+| 1 | **lockedEnergy 删除时机** | V0723014 结束前（即本版本）删除，过渡期间标记 `@deprecated`，值从 `lockedMomentum.current` 派生，不得独立设置 |
+| 2 | **bossReactiveFlow.bladeEnergy.max/initial 删除后，旧引用处理** | 所有旧 `REACTIVE_BOSS_CONFIG.bladeEnergy.max` 引用改为 `BLADE_MOMENTUM_CONFIG.baseMax + modifiers.maxBonus`；`initial` 改为 `baseMax * initialRatio` |
+| 3 | **bladeEnergySystem.ts 中 recoverEnergy/gainEnergyByAction 硬编码 100** | 新增可选 `maxEnergy` 参数，默认值 100（保持普通关卡不变）；Reactive 模式传入 `reactiveBladeMax` |
+| 4 | **ReactiveSlashGeometry.lockedEnergy 过渡期兼容** | 类型定义中 `lockedEnergy` 标记 `@deprecated`；`buildReactiveSlashGeometry` 内部从 `lockedMomentum.current` 自动填充；V0723014 结束时物理删除字段 |
+| 5 | **ratio 浮点精度** | 内部保留原生浮点不做额外 round；仅在 HUD/Debug 显示时格式化为整数百分比；避免累计误差 |
+| 6 | **energyBefore/energyAfter 与 momentumBefore.current/momentumAfter.current 一致性** | 新增 Vitest 不变量测试，强制 `result.energyBefore === result.momentumBefore.current` 和 `result.energyAfter === result.momentumAfter.current` |
 
 ---
 
-## 6. 任务列表
+## Part B: Task Decomposition
 
-### 6.1 所需包
+### 6. Required Packages
 
-无新增 npm 包。所有能力使用现有技术栈实现。
+无新增依赖。沿用现有技术栈：
+```
+- react@^19.0.0: UI framework
+- react-dom@^19.0.0: DOM renderer
+- typescript@^5.7.2: Type checker
+- vite@^6.0.7: Build tool
+- @vitejs/plugin-react@^4.3.4: React plugin for Vite
+- vitest@^4.1.10: Unit test runner
+- @playwright/test@^1.61.1: E2E test runner
+- @testing-library/react@^16.3.2: React test utilities
+- @testing-library/jest-dom@^7.0.0: DOM matchers
+- jsdom@^29.1.1: DOM environment for vitest
+```
 
-### 6.2 任务列表（按依赖顺序）
+---
 
-| 任务 ID | 任务名称 | 源文件 | 依赖 | 优先级 |
-|---------|---------|--------|------|--------|
-| T01 | 项目基础设施：配置中心 + 类型定义 + 双入口路由 | `bossReactiveFlow.ts`, `types.ts`, `balance.ts`, `App.tsx`, `GameCanvas.tsx`, `vite.config.ts` | 无 | P0 |
-| T02 | BossReactiveController：5状态机 + 弹幕系统 + 护甲判定 + 渲染 | `BossReactiveController.ts`, `projectileSystem.ts`, `bossReactiveHUD.ts`, `BossController.ts` | T01 | P0 |
-| T03 | Game 集成：能量经济重构 + 玩家生命系统 + 刀势连续效果 + 流路由 | `Game.ts`, `bladeEnergySystem.ts` | T02 | P0 |
-| T04 | 视觉反馈：HUD 渲染 + 飘字 + 数据采集埋点 + 护甲状态指示 | `bossReactiveHUD.ts`（补充）、`Game.ts`（渲染集成） | T03 | P1 |
-| T05 | 测试：15项单元测试 + 6项E2E测试 + E2E桥接适配 | `BossReactiveController.test.ts`, `BossController.test.ts`, `boss-smoke.spec.ts` | T03 | P1 |
+### 7. Task List (ordered by dependency)
 
-### 6.3 任务依赖图
+#### T01: 项目基础设施 + 数据模型层（P0）
+
+**描述**: 建立 V0723014 版本基线，创建三档刀势配置、类型定义和纯函数层。
+
+**Source Files**:
+- `src/version.ts` — 版本号更新至 V0723014/0723.014
+- `package.json` — version 同步
+- `package-lock.json` — lock 同步
+- `index.html` — title 版本号
+- `README.md` — 版本号
+- `src/game/config/bladeMomentum.ts` — **新增**: BLADE_MOMENTUM_CONFIG + BladeRunModifiers + DEFAULT_BLADE_RUN_MODIFIERS
+- `src/game/types.ts` — 新增 BladeMomentumBand / BladeAbilityNodeId / BladeMomentumState / BladeRunModifiers 类型定义
+- `src/game/systems/bladeMomentum.ts` — **新增**: 全部纯函数（createBladeMomentumState / resolveRatio / resolveBand / resolveActiveNodes / applyBladeMaxChangePreserveRatio / resolveEffectiveNodeThresholds / applyBladeRunMaxModifier）
+- `src/game/systems/bladeMomentum.test.ts` — **新增**: 全部单元测试（ratio 边界/band 判定/非法输入/能力节点/上限成长保持 ratio/默认等价矩阵）
+- `src/game/config/bossReactiveFlow.ts` — 删除 `bladeEnergy.max` 和 `bladeEnergy.initial` 字段
+
+**Dependencies**: 无（基线任务）
+
+**Priority**: P0
+
+---
+
+#### T02: Reactive 生产链迁移（Controller + Geometry + bladeEnergySystem）（P0）
+
+**描述**: 将 BossReactiveController 的反射判定、护甲伤害、刀势效果、能量结算 clamp 全部从绝对值迁移为 band/ratio 判定。同时迁移 ReactiveSlashGeometry 的 lockedEnergy → lockedMomentum。
+
+**Source Files**:
+- `src/game/systems/BossReactiveController.ts` — resolveGeometry: `slashEnergy>=70` → band==="burst"; calculateArmorDamage: switch(band); getBladeEffect: ratio+band 替代 energy/100 和 energy<30/70; finishSlash: 新增 momentumBefore/momentumAfter 字段，clamp 上限从 cfg.max → momentumBefore.max; updateBladeEffect 接受 BladeMomentumState
+- `src/game/systems/BossReactiveController.test.ts` — 新增 band 判定兼容矩阵测试、momentum 不变量测试
+- `src/game/systems/reactiveSlashGeometry.ts` — `lockedEnergy` → `lockedMomentum: BladeMomentumState`; 旧 `lockedEnergy` 标记 `@deprecated` 并从 `lockedMomentum.current` 派生
+- `src/game/systems/reactiveSlashGeometry.test.ts` — 适配 lockedMomentum 类型变更
+- `src/game/systems/bladeEnergySystem.ts` — `recoverEnergy` / `gainEnergyByAction` 新增可选 `maxEnergy` 参数（默认 100）
+
+**Dependencies**: T01（需要 bladeMomentum 类型和配置）
+
+**Priority**: P0
+
+---
+
+#### T03: Game 状态接入 + 刀芒视觉迁移（P0）
+
+**描述**: Game.ts 中新增 `reactiveBladeMax` 和 `reactiveBladeRunModifiers` 字段；实现 `getReactiveBladeMomentum()` 统一快照方法；`startSlash` 改用 lockedMomentum；`finalizeBossSlashCommon` 适配新结果字段。bossReactiveHUD 的 drawEnergyBar 迁移为接受 momentum 参数（max 非 100，颜色按 band 读取）。
+
+**Source Files**:
+- `src/game/Game.ts` — 新增 reactiveBladeMax / reactiveBladeRunModifiers 字���；构造函数中 energy 初始化改用 BLADE_MOMENTUM_CONFIG；新增 getReactiveBladeMomentum() 方法；startSlash 构建 lockedMomentum 快照存入 pendingSlash；finalizeBossSlashCommon 适配 momentumBefore/momentumAfter；drawReactiveDebugOverlay 新增 momentum 面板（ratio/band/activeNodes/nodeThresholds/runModifiers）；getState() 新增 bladeMomentum 只读字段
+- `src/game/systems/bossReactiveHUD.ts` — drawEnergyBar 参数从 `(energy, maxEnergy)` 改为接受 `momentum: BladeMomentumState`；颜色切换改用 `momentum.band`；文字显示改为 `current/max` 格式
+
+**Dependencies**: T02（需要 Controller 和 Geometry 已完成迁移）
+
+**Priority**: P0
+
+---
+
+#### T04: E2E + Debug 状态接入（P0）
+
+**描述**: E2E 测试新增 bladeMomentum 只读断言（开局 current=35/max=100/ratio=0.35/band=enhanced，全程 0≤current≤max）；Debug 面板展示完整 momentum 遥测数据。运行 CI 验证全绿。
+
+**Source Files**:
+- `e2e/boss-reactive-real-input.spec.ts` — getState() 新增 bladeMomentum 只读断言；开局快照验证
+- `e2e/boss-reactive-full-pointer.spec.ts` — 同上新增只读断言；全流程 ratio 一致性验证
+- `src/App.tsx` — 无实质改动（引用版本号可能自动更新）
+
+**Dependencies**: T03（需要 Game 的 getState() 已返回 bladeMomentum）
+
+**Priority**: P0
+
+---
+
+#### T05: 肉鸽修正接口 + max=140 测试环境 + 增量设计文档（P1）
+
+**描述**: BladeRunModifiers 正式接入 Game 构造流程（默认值为空）；applyBladeRunMaxModifier 和 applyBladeMaxChangePreserveRatio 通过 Vitest 验证 max=140/180 场景；创建增量设计文档。
+
+**Source Files**:
+- `src/game/Game.ts` — applyReactiveBladeMaxBonus 方法（本轮仅测试用，不接入真实流程）
+- `src/game/systems/bladeMomentum.test.ts` — 扩展测试：max=140（42/140→enhanced, 98/140→burst, 126/140→precision_reflect 激活）；max=180（54/180→enhanced, 126/180→burst）；modifiers.nodeThresholdShift 测试；thresholdClamp 边界测试
+- `docs/incremental-design-V0723014.md` — **新增**: 增量设计记录
+
+**Dependencies**: T01-T04 全部完成
+
+**Priority**: P1
+
+---
+
+### 8. Shared Knowledge
+
+跨文件约定，工程师实现时必须遵守：
+
+```text
+【ratio 范围】
+- 内部计算: 0.0 ~ 1.0（浮点，不做额外 round）
+- HUD/Debug 显示: 整数百分比（如 "35%"）
+- current/max 显示: 最多 1 位小数
+
+【band 三档语义】
+- "base":      ratio < 0.30  — 基础处理（护甲伤害 25，不能反射）
+- "enhanced":  0.30 ≤ ratio < 0.70 — 强化处理（护甲伤害 55，不能反射）
+- "burst":     ratio ≥ 0.70 — 爆发处理（直接破甲，可以反射）
+
+【activeNodes 排序规则】
+固定顺序: blade_reach → armor_break → precision_reflect
+（按阈值从低到高排列，确保 Debug 输出稳定可读）
+
+【energy 单源原则】
+- Game.energy 是 current 唯一权威值
+- 禁止创建 reactiveBladeCurrent 或任何第二份 current 副本
+- getReactiveBladeMomentum() 只是只读快照，写入必须走 Game.energy
+
+【旧字段删除时机】
+- lockedEnergy: V0723014 结束前删除，过渡期标记 @deprecated，值从 lockedMomentum.current 派生
+- bossReactiveFlow.bladeEnergy.max/initial: T01 中删除，所有引用迁移到 BLADE_MOMENTUM_CONFIG
+
+【energyBefore/energyAfter 不变量】
+- result.energyBefore === result.momentumBefore.current（强制，有 Vitest 测试保护）
+- result.energyAfter === result.momentumAfter.current（强制，有 Vitest 测试保护）
+- 0 ≤ momentumAfter.current ≤ momentumAfter.max
+
+【默认等价性】
+- max=100, initial=35 下，所有战斗结果（伤害值、反射行为、破甲次数、颜色）必须与 V0723013 完全一致
+- 任何偏离都是 bug，不是特性
+
+【禁止改动边界】
+- 普通关卡完全不动（energy 初始化、recoverEnergy、canSlash 均保持不变）
+- Boss 弹幕/护甲/Boss时长/玩家HP 等数值完全不调
+- precision_reflect 90% 节点只建数据不应用行为
+```
+
+---
+
+### 9. Task Dependency Graph
 
 ```mermaid
 graph TD
-    T01["T01: 基础设施+npm"] --> T02["T02: ReactiveController+弹幕"]
-    T02 --> T03["T03: Game集成+能量+HP"]
-    T03 --> T04["T04: HUD+视觉反馈+埋点"]
-    T03 --> T05["T05: 测试+E2E"]
+    T01["T01: 项目基础设施 + 数据模型层<br/>(P0)"] --> T02["T02: Reactive 生产链迁移<br/>(P0)"]
+    T01 --> T03["T03: Game 状态接入 + 刀芒视觉迁移<br/>(P0)"]
+    T02 --> T03
+    T03 --> T04["T04: E2E + Debug 状态接入<br/>(P0)"]
+    T01 --> T05["T05: 肉鸽修正接口 + max=140 测试 + 增量文档<br/>(P1)"]
+    T02 --> T05
+    T03 --> T05
+    T04 --> T05
+
+    style T01 fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style T02 fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style T03 fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style T04 fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style T05 fill:#f0a030,stroke:#b87820,color:#fff
 ```
+
+**说明**: T01→T02→T03→T04 构成 P0 关键路径；T05 为 P1，依赖全部 P0 完成后执行。
 
 ---
 
-## 7. 任务详情
+## 附录: 架构决策记录 (ADR)
 
-### T01: 项目基础设施 — 配置中心 + 类型定义 + 双入口路由
+### ADR-001: 为什么不是新建 `BladeMomentumService` 类？
 
-**说明：** 创建新破甲阶段的集中配置中心，定义所有新类型，建立 `?bossFlow=legacy/reactive` 双入口路由。
+**决策**: 纯函数模块而非服务类。
 
-**新建文件：**
-- `src/game/config/bossReactiveFlow.ts` — 全部数值常量（弹幕速度/半径/颜色、刀势经济参数、HP 参数、状态机计时器）
-- `src/game/types.ts` — 追加新增类型定义（见第 3 节）
+**理由**: 
+- 刀势状态推导是纯计算（input → output），无副作用、无异步、无外部依赖
+- 纯函数可被 Game/Controller/HUD/Test 任意位置调用，无需依赖注入
+- Vitest 测试零 mock 开销
+- 避免引入"刀势服务"与"Controller"的职责边界模糊
 
-**修改文件：**
-- `src/game/config/balance.ts` — 新增 `playerHp`、`reactiveBladeEnergy` 配置段
-- `src/App.tsx` — 从 `window.location.search` 解析 `bossFlow` 参数，通过 props 传入 `GameCanvas`
-- `src/game/GameCanvas.tsx` — 接收 `bossFlow` prop，传递给 Game 构造函数
-- `src/game/Game.ts` — 构造函数接收 `bossFlow` 参数，存储为 `this.bossFlow`
-- `vite.config.ts` — 新增 `__BOSS_FLOW__` 编译常量（可选，用于 tree-shaking）
+### ADR-002: 为什么 lockedMomentum 存在 Geometry 中而非单独传递？
 
-**关键产出：** `bossReactiveFlow.ts` 配置内容示例：
+**决策**: lockedMomentum 作为 ReactiveSlashGeometry 的一级字段。
 
-```typescript
-export const REACTIVE_BOSS_CONFIG = {
-  // 状态机计时
-  phaseTimers: {
-    armorPrepare: 0.3,
-    threatDuration: [2.0, 3.0],  // 随机范围
-    opportunityDuration: 1.5,
-    recoveryDuration: 0.2,
-  },
-  // 刀势经济
-  bladeEnergy: {
-    max: 100,
-    initial: 35,
-    passiveRegenPerSecond: 1.5,
-    shortSlashCost: 7,
-    longSlashBonus: 3,      // 长刀 +3
-    emptySwingPenalty: 4,   // 空挥惩罚 +4
-    wrongHitPenalty: 10,    // 误砍 -10
-    normalBulletReward: 8,  // 普弹 +8
-    reflectReward: 16,      // 反射 +16
-    armorCrackReward: 5,    // 护甲裂痕 +5
-    armorBreakReward: 22,   // 破甲 +22
-  },
-  // 玩家生命
-  playerHp: {
-    max: 100,
-    normalBulletDamage: 6,
-    reflectiveBulletDamage: 12,
-    bossHeavyDamage: 20,
-    mistakenCutDamage: 5,
-    invincibleDuration: 0.3,
-  },
-  // 护甲
-  armor: {
-    durabilityPerPiece: 100,
-    lowEnergyCrack: 25,      // 0~29 刀势
-    midEnergyDamage: 55,     // 30~69 刀势
-    highEnergyOneShot: 100,  // 70~100 刀势
-    damageFormula: "20 + energy * 0.8",
-  },
-  // 弹幕
-  projectiles: {
-    normal: { speed: 120, radius: 10, color: "#9b59b6", glowColor: "rgba(155,89,182,0.6)", maxLife: 4 },
-    reflective: { speed: 90, radius: 14, color: "#d4a0ff", glowColor: "rgba(212,160,255,0.7)", maxLife: 5, rotationSpeed: 3 },
-    dangerous: { speed: 160, radius: 16, color: "#c0392b", glowColor: "rgba(192,57,43,0.8)", maxLife: 3.5 },
-  },
-  // 刀势连续效果阈值
-  bladeEffect: {
-    minLength: 30,
-    maxLength: 130,
-    minWidth: 3,
-    maxWidth: 20,
-    minBrightness: 0.3,
-    maxBrightness: 1.2,
-    lowEnergyColor: "#666666",
-    midEnergyColor: "#5bc0ff",
-    highEnergyColor: "#fff4a0",
-  },
-};
-```
-
----
-
-### T02: BossReactiveController — 5状态机 + 弹幕系统 + 护甲判定 + 渲染
-
-**说明：** 实现新破甲阶段的核心控制器，包含完整的 5 状态机、弹幕生成与更新、护甲判定逻辑、渲染方法。
-
-**类结构：**
-
-```
-BossReactiveController
-├── 状态管理
-│   ├── _phase: BossPhaseState (armor_prepare → armor_threat → armor_opportunity → armor_resolve → armor_recovery)
-│   ├── _armorCycle: 0..2 (当前第几块护甲)
-│   ├── _activeArmorIndex: ARMOR_L | ARMOR_R | ARMOR_C
-│   └── _armorTargets: ReactiveArmorTarget[]
-├── 弹幕系统
-│   ├── _projectiles: Projectile[]
-│   ├── spawnProjectile(kind): void
-│   └── updateProjectiles(dt): void
-├── 护甲判定
-│   ├── resolveSegment(segA, segB, slashId): ArmorResolveResult
-│   └── finishSlash(slashId): ArmorResolveResult
-├── 玩家状态
-│   ├── _playerHp: PlayerHpState
-│   ├── takeDamage(amount, source): void
-│   └── getPlayerHp(): PlayerHpState
-├── 刀势效果
-│   └── getBladeEffect(energy): BladeContinuousEffect
-├── 渲染
-│   ├── renderWorld(ctx): void (Boss/弹幕/粒子)
-│   └── renderOverlay(ctx): void (HUD/文字/Boss覆盖层)
-└── 桥接
-    └── bridgeToPursuit(): void → 调用 BossController.enterPursuitDirectly()
-```
-
-**新建文件：**
-- `src/game/systems/BossReactiveController.ts` — 核心控制器
-- `src/game/systems/projectileSystem.ts` — 弹幕系统工具函数
-- `src/game/systems/bossReactiveHUD.ts` — HUD 渲染
-
-**修改文件：**
-- `src/game/systems/BossController.ts` — 新增 `enterPursuitDirectly()` 方法：
-  ```typescript
-  /** 被 reactive 控制器桥接调用：跳过 armor 直接进入 pursuit */
-  enterPursuitDirectly(): void {
-    this._phase = "pursuit_intro";
-    this.pursuitIntroTimer = 0;
-    this.objectiveText = "趁弱点显现时追击";
-    this.objectiveAlpha = 1;
-    this._objectiveTimer = 0;
-    this._pursuitProgress = 0;
-    // 标记所有护甲为已破碎
-    this.armorProgress = 3;
-    for (const armor of this.armorTargets) {
-      armor.active = false;
-      armor.broken = true;
-    }
-  }
-  ```
-
-**护甲三块绑定：**
-
-| 护甲 | 弹幕类型 | Boss 动作 |
-|------|---------|-----------|
-| 左肩 (ARMOR_L) | 普通弹幕 + 横扫 | 普弹从左侧射出，Boss 向右横扫 |
-| 右肩 (ARMOR_R) | 强化弹幕 + 反射 | 强化弹幕从右侧射出，Boss 身上出现反射环 |
-| 胸甲 (ARMOR_C) | 混合 + 雷球 | 普通弹幕 + 危险雷球混合 |
-
-**5 状态机详细逻辑：**
-
-```
-armor_prepare (0.3s)
-  → Boss 抬手动画，护甲发光预告
-  → 不生成弹幕，玩家可观察
-  → 计时结束 → armor_threat
-
-armor_threat (2~3s 随机)
-  → 根据护甲类型生成对应弹幕
-  → 每 0.6~0.8s 生成一枚新弹幕
-  → Boss 做绑定动作（横扫/反射/混合）
-  → 弹幕运动方向：从 Boss 位置向玩家区域
-  → 计时结束 → armor_opportunity
-
-armor_opportunity (1.5s)
-  → 停止生成新弹幕
-  → 护甲高亮发光，提示可攻击
-  → 玩家挥刀可命中护甲
-  → 残留弹幕继续存在
-  → 计时结束 → armor_recovery 或 提前命中护甲即进入 resolve
-
-armor_resolve (瞬时，由玩家挥刀触发)
-  → 判定命中结果
-  → 计算伤害（基于刀势）
-  → 更新护甲耐久
-  → 直接进入 armor_recovery
-
-armor_recovery (0.2s)
-  → Boss 后退复位
-  → 清理残留弹幕
-  → 如果还有下一块护甲 → armor_prepare
-  → 如果三块全部击破 → bridgeToPursuit()
-```
-
----
-
-### T03: Game 集成 — 能量经济重构 + 玩家生命系统 + 刀势连续效果 + 流路由
-
-**说明：** 将 BossReactiveController 集成到 Game 主循环中，重构能量系统，新增玩家生命系统。
-
-**修改文件：**
-- `src/game/Game.ts` — 主要集成点
-
-**Game.ts 修改要点：**
-
-1. **构造函数新增参数：** `bossFlow: "legacy" | "reactive" = "legacy"`
-
-2. **initializeThunderGeneralBoss 分支：**
-   ```typescript
-   if (this.bossFlow === "reactive") {
-     this.reactiveController = new BossReactiveController("thunderGeneral");
-     this.reactiveController.enterLoading();
-   } else {
-     this.bossController = new BossController("thunderGeneral");
-     this.bossController.enterLoading();
-   }
-   ```
-
-3. **updateBossMode 分支：**
-   ```typescript
-   if (this.bossFlow === "reactive" && this.reactiveController) {
-     this.updateReactiveBossMode(scaledDt, frameDt);
-     return;
-   }
-   ```
-
-4. **updateReactiveBossMode 方法：** 类似 updateBossMode 但使用 reactiveController
-
-5. **checkSegmentHits 新增路由：**
-   ```typescript
-   if (this.gameMode === "boss" && this.bossFlow === "reactive" && this.reactiveController) {
-     // 路由到 reactive 弹幕检测 + 护甲判定
-     this.reactiveController.resolveSegment(a, b, trail.id);
-     // 同时检测弹幕碰撞
-     this.checkReactiveProjectileHits(a, b, trail);
-     return;
-   }
-   ```
-
-6. **endSlash 方法：** reactive 模式下路由到 `reactiveController.finishSlash`
-
-7. **handlePointerDown 修改：** reactive 模式下移除 `canSlash` 检查（永远可挥刀）
-
-8. **能量系统改造：**
-   - `recoverEnergy` 被动回能降为 1.5/s
-   - 新增 `gainEnergyByAction(amount)` 方法
-   - 每次挥刀根据刀路长度消耗/奖励
-
-9. **玩家生命系统：**
-   ```typescript
-   private playerHp: PlayerHpState = { current: 100, max: 100, invincibleTimer: 0, flashTimer: 0 };
-   ```
-   - 弹幕命中玩家时调用 `playerHp.takeDamage`
-   - 误砍时调用 `playerHp.takeDamage(5, "mistaken_cut")`
-   - HP 归零 → 游戏结束
-
-10. **刀势连续效果渲染：**
-    - 在 `startSlash` 时根据 `energy/100` 计算连续效果
-    - 刀芒长度 = lerp(30, 130, energy/100)
-    - 刀芒宽度 = lerp(3, 20, energy/100)
-    - 亮度 = lerp(0.3, 1.2, energy/100)
-    - 颜色渐变：灰→蓝→金
-
-**修改文件：**
-- `src/game/systems/bladeEnergySystem.ts`:
-  - `canSlash()` 在 reactive 模式下永远返回 true
-  - 新增 `gainEnergy(energy, amount)` 辅助函数
-  - `recoverEnergy` 新增 `reactiveMode` 参数，开启时使用 1.5/s
-
----
-
-### T04: 视觉反馈 — HUD 渲染 + 飘字 + 数据采集埋点 + 护甲状态指示
-
-**说明：** 实现新破甲阶段的完整 HUD 视觉反馈，包括刀势条、生命条、护甲状态指示、飘字反馈、数据采集。
-
-**文件：**
-- `src/game/systems/bossReactiveHUD.ts` — 补充完整 HUD 渲染方法
-
-**HUD 布局（从上到下）：**
-
-```
-┌─────────────────────────────────────┐
-│  ❤ 100/100      ⚡ 35/100          │  ← 生命条 + 刀势条
-│  ████████░░░░░░░  ███████░░░░░░░░  │
-│                                     │
-│  护甲状态: [●] [◉] [○]              │  ← 三块护甲（◉=当前激活）
-│  左肩(普弹)  右肩(强化)  胸甲(混合)  │
-│                                     │
-│  提示: "切发亮护甲"                  │  ← 目标提示
-└─────────────────────────────────────┘
-```
-
-**飘字系统：**
-- 普通弹幕斩碎: `+8 刀势` (绿色, 16px, 0.6s)
-- 强化弹幕反射: `+16 刀势` (金色, 20px, 0.8s)
-- 危险雷球误砍: `-10 刀势 -5HP` (红色, 18px, 0.8s)
-- 护甲命中: `破甲! +22` (金色, 22px, 0.8s)
-- 护甲裂痕: `裂痕 +25` (紫色, 16px, 0.5s)
-
-**数据采集埋点（P1）：**
-```typescript
-logEvent("reactive_armor_hit", { armorId, energy, damage, cycleIndex });
-logEvent("reactive_projectile_cut", { projectileKind, energy });
-logEvent("reactive_projectile_reflect", { energy });
-logEvent("reactive_mistaken_cut", { energy, hpLoss });
-logEvent("reactive_armor_complete", { totalTime, totalSlashCount });
-logEvent("reactive_player_hp_loss", { amount, source, remainingHp });
-```
-
----
-
-### T05: 测试 — 15项单元测试 + 6项E2E测试 + E2E桥接适配
-
-**说明：** 为 BossReactiveController 编写完整的单元测试套件，补充 E2E 测试，更新 E2E 桥接。
-
-**单元测试（15项）：**
-
-| # | 测试名称 | 描述 |
-|---|---------|------|
-| 1 | 初始状态为 armor_prepare | 验证 skipIntro 后进入 armor_prepare |
-| 2 | 5 状态机完整流转 | 单块护甲经历全部 5 状态 |
-| 3 | 三块护甲循环 | 3 次循环后进入 bridgeToPursuit |
-| 4 | 普通弹幕可被任何刀势斩碎 | 任意能量挥刀命中普通弹幕 → 销毁 |
-| 5 | 强化弹幕三档处理 | <30 削弱 / 30~69 斩碎 / ≥70 反射 |
-| 6 | 危险雷球误砍惩罚 | 命中雷球 → -10 刀势 + 5 伤害 |
-| 7 | 护甲伤害公式验证 | 高刀势(70+) 一刀破甲，中刀势(30~69) 55 伤害 |
-| 8 | 护甲裂痕累积 | 低刀势(0~29)多次命中累积裂痕满 100 破甲 |
-| 9 | 刀势经济正反馈 | 斩碎弹幕 +8，反射 +16，破甲 +22 |
-| 10 | 被动回能 1.5/s | 空闲时每秒恢复 1.5 |
-| 11 | 玩家生命系统 | 受伤扣血，无敌计时，归零检查 |
-| 12 | 刀势连续效果插值 | energy=0→min, energy=100→max |
-| 13 | 弹幕生命周期 | 弹幕超出 maxLife 自动销毁 |
-| 14 | 桥接到 pursuit | 三块护甲破碎后调用 bridgeToPursuit |
-| 15 | 空挥惩罚 | 什么都没命中时 +4 刀势消耗 |
-
-**E2E 测试（6项）：**
-1. 完整 reactive 破甲流程（三块护甲依次击破）
-2. 弹幕斩碎反馈验证
-3. 强化弹幕反射验证
-4. 危险雷球误砍惩罚验证
-5. 桥接到 pursuit 阶段验证
-6. legacy 模式不变验证
-
-**E2E 桥接更新：**
-- `__ONE_BLADE_E2E__` 新增 `reactiveController` 暴露
-- 新增 `forceReactiveArmorHit` 方法
-- 新增 `getReactiveProjectiles` 方法
-
----
-
-## 8. 共享知识
-
-### 8.1 全局常量/枚举位置
-
-| 常量 | 文件 | 导出名 |
-|------|------|--------|
-| 新破甲阶段全部数值 | `src/game/config/bossReactiveFlow.ts` | `REACTIVE_BOSS_CONFIG` |
-| 弹幕类型枚举 | `src/game/types.ts` | `ProjectileKind` |
-| 弹幕接口 | `src/game/types.ts` | `Projectile` |
-| 新护甲目标接口 | `src/game/types.ts` | `ReactiveArmorTarget` |
-| 玩家生命接口 | `src/game/types.ts` | `PlayerHpState` |
-| 刀势连续效果接口 | `src/game/types.ts` | `BladeContinuousEffect` |
-| 现有通用配置 | `src/game/config/balance.ts` | `BALANCE` |
-| 现有游戏常量 | `src/game/config/constants.ts` | `DESIGN_WIDTH`, `DESIGN_HEIGHT` 等 |
-
-### 8.2 命名约定
-
-- **新文件前缀：** `bossReactive*` 标识属于新破甲阶段
-- **状态机阶段前缀：** `armor_*` 标识属于破甲阶段（与现有 `BossPhaseState` 风格一致）
-- **弹幕类型：** `ProjectileKind` 枚举值使用小写 `"normal" | "reflective" | "dangerous"`
-- **方法命名：** 与现有 BossController 风格一致（camelCase, 动词+名词）
-
-### 8.3 渲染规则
-
-- **渲染层序：** 背景 → 弹幕(世界层) → 刀光 → Boss → 粒子 → HUD(覆盖层)
-- **弹幕渲染：** 在 `renderWorld` 中绘制（刀光下方）
-- **HUD 渲染：** 在 `renderOverlay` 中绘制（最上层）
-- **坐标系统：** 使用 `DESIGN_WIDTH=390, DESIGN_HEIGHT=844` 设计分辨率，GameCanvas 中 DPR 缩放
-
-### 8.4 E2E 桥接约定
-
-- `__E2E_BRIDGE__` 由 vite define 注入，仅 e2e 构建模式开启
-- 生产构建下 `if(__E2E_BRIDGE__)` 整段被静态消除
-- 新增 `window.__ONE_BLADE_E2E__.reactiveController` 暴露
-- 新增 `window.__ONE_BLADE_E2E__.forceReactiveArmorHit()` 和 `getReactiveProjectiles()` 方法
-
-### 8.5 跨文件约定
-
-- 所有 API 响应格式：`{ code, data, message }`（服务端交互，本次不涉及）
-- 所有时间以秒为单位（float）
-- 所有坐标以设计分辨率（390×844）为基准
-- 弹幕 y 方向向下为正（从 Boss 位置向玩家区域）
-- 刀势值范围：0~100，整数
-- HP 范围：0~100，整数
-
----
-
-## 9. 待明确事项
-
-1. **弹幕碰撞检测精度**：使用现有 `segmentHitCircle` 还是需要更精确的判定？当前假设复用现有函数。
-2. **Boss 动作空间变化的具体实现**：PRD 提到"Boss 动作空间变化"（P2），假设为 Threat 阶段 Boss 在 X 轴 ±30px 范围内缓慢平移。
-3. **强化弹幕"反射"的视觉效果**：反射后弹幕反向飞向 Boss，命中 Boss 时触发什么视觉效果？假设为金紫爆炸粒子。
-4. **危险雷球"尖刺"视觉**：红黑渐变 + 旋转尖刺，使用 Canvas 多边形绘制。
-5. **数据埋点具体维度**：PRD 未指定具体事件名和维度，以上为合理假设，待产品确认。
-6. **护甲裂痕累计的 UI 表现**：护甲表面出现裂纹线条，随裂痕值增加而增多。
+**理由**:
+- 一刀的完整上下文 = 空间几何 + 刀势状态，两者不可分割
+- Controller.resolveGeometry 和 finishSlash 都需要 momentum 做判定，统一入口避免参数漂移
+- 未来扩展（如 band 影响碰撞半径）无需修改调用链签名

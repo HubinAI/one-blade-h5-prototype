@@ -33,6 +33,23 @@ test.describe("Reactive Boss 全Pointer三甲→pursuit", () => {
       page.evaluate(() => typeof window.__ONE_BLADE_E2E__ !== "undefined")
     , { timeout: 10000 }).toBe(true);
 
+    // V0723014: 开局刀势只读断言
+    await expect.poll(async () => {
+      const s = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
+      const bm = s.bladeMomentum;
+      return bm != null && typeof bm.current === "number" && typeof bm.max === "number";
+    }, { timeout: 5000 }).toBe(true);
+
+    const initialBM = await page.evaluate(() => {
+      const s = window.__ONE_BLADE_E2E__.getState();
+      return s.bladeMomentum;
+    });
+    expect(initialBM.current).toBe(35);
+    expect(initialBM.max).toBe(100);
+    expect(initialBM.ratio).toBeCloseTo(0.35, 1);
+    expect(initialBM.band).toBe("enhanced");
+    expect(initialBM.activeNodes).toContain("blade_reach");
+
     // 辅助：读取当前状态
     async function getState() {
       return await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());

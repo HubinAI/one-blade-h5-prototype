@@ -4,6 +4,8 @@
 // ----------------------------------------------------------------------------
 import { describe, it, expect, beforeEach } from "vitest";
 import { BossReactiveController } from "./BossReactiveController";
+import { BLADE_MOMENTUM_CONFIG } from "../config/bladeMomentum";
+import { createBladeMomentumState } from "./bladeMomentum";
 import { REACTIVE_BOSS_CONFIG } from "../config/bossReactiveFlow";
 import { resetProjectileIdCounter } from "./projectileSystem";
 import { buildReactiveSlashGeometry, capsuleHitsEllipse, type ReactiveSlashGeometry, type CapsuleSource } from "./reactiveSlashGeometry";
@@ -50,6 +52,7 @@ function buildCapsuleTestGeometry(
   return {
     slashId,
     lockedEnergy: energy,
+    lockedMomentum: createBladeMomentumState(energy, BLADE_MOMENTUM_CONFIG.baseMax),
     baseA,
     baseB,
     tipB,
@@ -619,8 +622,8 @@ describe("BossReactiveController", () => {
   it("G1 被动回能 — 验证配置值存在且合理", () => {
     expect.assertions(5);
     expect(REACTIVE_BOSS_CONFIG.bladeEnergy.passiveRegenPerSecond).toBe(1.5);
-    expect(REACTIVE_BOSS_CONFIG.bladeEnergy.max).toBe(100);
-    expect(REACTIVE_BOSS_CONFIG.bladeEnergy.initial).toBe(35);
+    expect(BLADE_MOMENTUM_CONFIG.baseMax).toBe(100);
+    expect(BLADE_MOMENTUM_CONFIG.initialRatio).toBe(0.35);
     expect(controller.currentSlashEnergy).toBe(0);
     controller.setProgrammaticSlashEnergy(50);
     expect(controller.currentSlashEnergy).toBe(50);
@@ -764,7 +767,7 @@ describe("BossReactiveController", () => {
     expect.assertions(2);
     const result = controller.finishSlash("test_clamp", 100, 100);
     expect(result.energyAfter).toBeGreaterThanOrEqual(0);
-    expect(result.energyAfter).toBeLessThanOrEqual(REACTIVE_BOSS_CONFIG.bladeEnergy.max);
+    expect(result.energyAfter).toBeLessThanOrEqual(BLADE_MOMENTUM_CONFIG.baseMax);
   });
 
   it("H10 finishSlash events 完整记录所有碰撞 — cut+armor 严格验证", () => {

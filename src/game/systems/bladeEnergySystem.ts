@@ -111,10 +111,10 @@ export function getSubBladeCDReduction(kills: number): { seconds: number; ratio:
 /**
  * 自然恢复（保留原有逻辑但提高基础值）
  */
-export function recoverEnergy(current: number, dt: number, drumTimer: number, reactiveMode?: boolean) {
+export function recoverEnergy(current: number, dt: number, drumTimer: number, reactiveMode?: boolean, maxEnergy: number = 100) {
   if (reactiveMode) {
     // P0: reactive模式使用1.5/s被动兜底
-    return clamp(current + 1.5 * dt, 0, 100);
+    return clamp(current + 1.5 * dt, 0, maxEnergy);
   }
   const multiplier = drumTimer > 0 ? 1.8 : 1;
   return clamp(current + BALANCE.swordEnergy.passiveRegenPerSecond * multiplier * dt, 0, BALANCE.swordEnergy.max);

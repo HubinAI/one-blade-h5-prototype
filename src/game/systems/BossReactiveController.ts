@@ -5,6 +5,8 @@
 // ========================================================================
 import type { BossPhaseState, Vec2, Projectile, ProjectileKind, ReactiveArmorTarget, PlayerHpState, BladeContinuousEffect } from "../types";
 import { DESIGN_WIDTH, DESIGN_HEIGHT } from "../config/constants";
+import { BLADE_MOMENTUM_CONFIG, type BladeMomentumState } from "../config/bladeMomentum";
+import { createBladeMomentumState } from "./bladeMomentum";
 import { REACTIVE_BOSS_CONFIG } from "../config/bossReactiveFlow";
 import { clamp } from "../../utils/math";
 import { createProjectile, updateProjectiles, checkSlashHit, cleanInactiveProjectiles, cleanResolvedProjectiles, resetProjectileIdCounter } from "./projectileSystem";
@@ -65,10 +67,14 @@ interface PendingReactiveSlashResult {
 /** P0-D: 单一结算结果 — Controller 一次性返回完整结算 */
 export interface ReactiveSlashResolveResult {
   slashId: string;
-  /** 最终能量（已 clamp [0,100]） */
+  /** 最终能量（已 clamp [0, max]） */
   energyAfter: number;
   /** 结算前能量 */
   energyBefore: number;
+  /** V0723014: 结算前刀势快照 */
+  momentumBefore: BladeMomentumState;
+  /** V0723014: 结算后刀势快照 */
+  momentumAfter: BladeMomentumState;
   /** 挥刀基础消耗 */
   baseCost: number;
   /** 拆分明细 */
@@ -616,6 +622,8 @@ export class BossReactiveController {
 
     const newEvents: ReactiveCollisionEvent[] = [];
     const slashEnergy = geometry.lockedEnergy;
+    // V0723014: 使用 lockedMomentum.band 判定反射（替代 slashEnergy >= 70）
+    const isBurst = geometry.lockedMomentum?.band === "burst";
 
     // 1. 弹幕判定
     for (const cap of geometry.capsules) {
@@ -640,7 +648,7 @@ export class BossReactiveController {
           newEvents.push(ev);
           this._session.events.push(ev);
         } else if (p.kind === "reflective") {
-          if (slashEnergy >= 70) {
+          if (isBurst) {
             // reflect: 反向继续，不设 resolved（避免被清理），不伤害玩家
             p.resolution = "reflect";
             p.reflected = true;
@@ -683,7 +691,7 @@ export class BossReactiveController {
           this._lastArmorCollisionSource = source;
           this._lastArmorHitPos = hitPos;
           // P4.4B-R5.7: 立即提交伤害，写入 pendingSlashResult
-          this.commitArmorDamage(slashEnergy, this.activeArmorIndex, source, hitPos);
+          this.commitArmorDamage(geometry.lockedMomentum, this.activeArmorIndex, source, hitPos);
           this._resolvedSlashId = geometry.slashId;
           this.transitionToResolve();
         }
@@ -710,26 +718,21 @@ export class BossReactiveController {
   }
 
   /**
-   * P4.4B-R5 P0-A: 计算护甲固定绝对值伤害。
-   * 审计 §2/§3 指出：旧公式 armor.durability*0.25/0.55 按剩余耐久百分比递减，
-   * 导致"越打伤害越低"，左肩需 12-14 次低刀势命中，形成负反馈死循环。
-   *
-   * 新规则（固定绝对值，不超过剩余耐久）：
-   * - 高刀势(≥70)：直接破甲（剩余耐久全扣）
-   * - 中刀势(30-69)：固定 55 点
-   * - 低刀势(<30)：固定 25 点
-   *
-   * 验收：低4刀(100→75→50→25→0)、中2刀(100→45→0)、高1刀(100→0)。
+   * V0723014: 根据 band 计算护甲伤害。
+   * - base:     固定 25
+   * - enhanced: 固定 55
+   * - burst:    直接破甲（剩余耐久全扣）
    */
-  private calculateArmorDamage(energy: number, armor: ReactiveArmorTarget): number {
+  private calculateArmorDamage(momentum: BladeMomentumState, armor: ReactiveArmorTarget): number {
     const cfg = REACTIVE_BOSS_CONFIG.armor;
-    if (energy >= 70) {
-      return armor.durability; // 高刀势直接破甲
+    switch (momentum.band) {
+      case "burst":
+        return armor.durability; // 直接破甲
+      case "enhanced":
+        return Math.min(armor.durability, cfg.midEnergyDamage); // 固定55
+      default:
+        return Math.min(armor.durability, cfg.lowEnergyCrack); // 固定25
     }
-    if (energy >= 30) {
-      return Math.min(armor.durability, cfg.midEnergyDamage); // 固定55
-    }
-    return Math.min(armor.durability, cfg.lowEnergyCrack); // 固定25
   }
 
   /**
@@ -761,13 +764,13 @@ export class BossReactiveController {
    * 扣减耐久、设置 broken/allArmorBroken、写入 _pendingSlashResult。
    */
   private commitArmorDamage(
-    energy: number,
+    momentum: BladeMomentumState,
     armorIndex: number,
     source: CapsuleSource | null,
     hitPos: Vec2 | null,
   ): PendingReactiveSlashResult {
     const armor = this.armorTargets[armorIndex];
-    const damage = this.calculateArmorDamage(energy, armor);
+    const damage = this.calculateArmorDamage(momentum, armor);
     armor.durability = Math.max(0, armor.durability - damage);
     armor.crackProgress = 1 - armor.durability / armor.maxDurability;
     armor.animTimer = 0.4;
@@ -885,6 +888,10 @@ export class BossReactiveController {
     const projectileReflectReward = projectileReflectCount * cfg.reflectReward;
     const dangerousWrongCutPenaltyTotal = dangerousWrongCutCount * cfg.wrongHitPenalty;
 
+    // V0723014: 构建 momentumBefore（使用 energyBefore 和当前 max）
+    const maxEnergy = BLADE_MOMENTUM_CONFIG.baseMax;
+    const momentumBefore = createBladeMomentumState(energyBefore, maxEnergy);
+
     const unclampedEnergy = energyBefore
       - baseCost
       + projectileCutReward
@@ -893,7 +900,10 @@ export class BossReactiveController {
       - dangerousWrongCutPenaltyTotal
       - bodyWrongHitPenalty
       - emptySwingPenalty;
-    const energyAfter = clamp(unclampedEnergy, 0, cfg.max);
+    const energyAfter = clamp(unclampedEnergy, 0, momentumBefore.max);
+
+    // V0723014: 构建 momentumAfter
+    const momentumAfter = createBladeMomentumState(energyAfter, maxEnergy);
 
     // ---- primaryResult（P4.4B-R5.7: 优先级调整） ----
     // 优先级: armor_broken > armor_hit > dangerous_wrong_cut > body_wrong_hit > projectile_reflect > projectile_cut > empty_swing
@@ -972,6 +982,8 @@ export class BossReactiveController {
       slashId,
       energyAfter,
       energyBefore,
+      momentumBefore,
+      momentumAfter,
       baseCost,
       projectileCutCount,
       projectileReflectCount,
@@ -1000,9 +1012,22 @@ export class BossReactiveController {
   // 刀势连续效果计算
   // ================================================================
 
-  /** 根据当前刀势能量计算连续效果 */
-  getBladeEffect(energy: number): BladeContinuousEffect {
-    const ratio = clamp(energy / 100, 0, 1);
+  /**
+   * V0723014: 根据刀势状态计算连续效果（使用 ratio + band 替代 energy 绝对值）。
+   * 保持旧签名兼容（接受 number），内部转换为 ratio/band 判定。
+   */
+  getBladeEffect(energyOrMomentum: number | BladeMomentumState): BladeContinuousEffect {
+    // V0723014: 支持直接传入 BladeMomentumState
+    let ratio: number;
+    let band: string;
+    if (typeof energyOrMomentum === "number") {
+      const energy = energyOrMomentum;
+      ratio = clamp(energy / 100, 0, 1);
+      band = energy < 30 ? "base" : energy < 70 ? "enhanced" : "burst";
+    } else {
+      ratio = energyOrMomentum.ratio;
+      band = energyOrMomentum.band;
+    }
     const cfg = REACTIVE_BOSS_CONFIG.bladeEffect;
     const length = cfg.minLength + (cfg.maxLength - cfg.minLength) * ratio;
     const width = cfg.minWidth + (cfg.maxWidth - cfg.minWidth) * ratio;
@@ -1010,10 +1035,10 @@ export class BossReactiveController {
 
     let color: string;
     let glowColor: string;
-    if (energy < 30) {
+    if (band === "base") {
       color = cfg.lowEnergyColor;
       glowColor = "rgba(102,102,102,0.25)";
-    } else if (energy < 70) {
+    } else if (band === "enhanced") {
       color = cfg.midEnergyColor;
       glowColor = "rgba(91,192,255,0.6)";
     } else {
@@ -1025,8 +1050,8 @@ export class BossReactiveController {
   }
 
   /** 更新连续效果（外部调用） */
-  updateBladeEffect(energy: number): void {
-    this.bladeEffect = this.getBladeEffect(energy);
+  updateBladeEffect(energyOrMomentum: number | BladeMomentumState): void {
+    this.bladeEffect = this.getBladeEffect(energyOrMomentum);
   }
 
   get currentBladeEffect(): BladeContinuousEffect {

@@ -17,6 +17,8 @@ import { paperBurst, ringParticle, sparkBurst, glowParticle, explosionBurst, cor
 import { BossController } from "./systems/BossController";
 import { BossReactiveController, type ReactiveCollisionEvent } from "./systems/BossReactiveController";
 import { drawEnergyBar, drawHpBar, drawArmorIndicators } from "./systems/bossReactiveHUD";
+import { BLADE_MOMENTUM_CONFIG, DEFAULT_BLADE_RUN_MODIFIERS, type BladeMomentumState, type BladeRunModifiers } from "./config/bladeMomentum";
+import { createBladeMomentumState, applyBladeMaxChangePreserveRatio } from "./systems/bladeMomentum";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
@@ -129,6 +131,10 @@ export class Game {
   private maxHp: number;
   private score = 0;
   private energy: number;
+  /** V0723014: Reactive 模式刀势上限（可成长，默认 100） */
+  private reactiveBladeMax: number = BLADE_MOMENTUM_CONFIG.baseMax;
+  /** V0723014: Reactive 模式肉鸽修正器 */
+  private reactiveBladeRunModifiers: BladeRunModifiers = { ...DEFAULT_BLADE_RUN_MODIFIERS };
   private regenDelayTimer = 0;
   private drumTimer = 0;
   /** 三次修正：chest_first_clear 持续刀势回涌的 flag（独立于 drumTimer，避免显示"鼓"图标） */
@@ -416,7 +422,8 @@ export class Game {
     this.hp = this.maxHp;
     // P0: reactive模式使用独立能量初始值
     if (this.gameMode === "bossReactive") {
-      this.energy = REACTIVE_BOSS_CONFIG.bladeEnergy.initial;
+      this.reactiveBladeMax = BLADE_MOMENTUM_CONFIG.baseMax + this.reactiveBladeRunModifiers.maxBonus;
+      this.energy = Math.round(this.reactiveBladeMax * BLADE_MOMENTUM_CONFIG.initialRatio);
     } else {
       this.energy = clamp(this.runContext.mode === "freeBurst" ? BALANCE.swordEnergy.max : level.initialEnergy + this.progressionModifiers.initialEnergyBonus, 0, BALANCE.swordEnergy.max);
     }
@@ -499,6 +506,8 @@ export class Game {
         getState: () => {
           if (self.gameMode === "bossReactive" && self.reactiveController) {
             const snap = self.reactiveController.getReactiveSnapshot();
+            // V0723014: bladeMomentum 只读快照
+            const bm = self.getReactiveBladeMomentum();
             return {
               phase: snap.phase,
               armorProgress: snap.armorProgress,
@@ -518,6 +527,14 @@ export class Game {
               bridgeTriggered: snap.bridgeTriggered,
               // P4.4B-R5.7: reactiveController 置空前捕获的最终快照
               lastReactiveExitSnapshot: self._lastReactiveExitSnapshot ?? undefined,
+              // V0723014: 刀势只读快照
+              bladeMomentum: {
+                current: bm.current,
+                max: bm.max,
+                ratio: bm.ratio,
+                band: bm.band,
+                activeNodes: bm.activeNodes,
+              },
             };
           }
           // 旧 Boss / 普通模式：读 bossController
@@ -1236,7 +1253,8 @@ export class Game {
       const activeIndex = rc.getActiveArmorIndex();
       drawArmorIndicators(ctx, armors, DESIGN_WIDTH / 2 - 80, 28, activeIndex);
       //    底部：刀势条（靠近玩家操作区）
-      drawEnergyBar(ctx, this.energy, REACTIVE_BOSS_CONFIG.bladeEnergy.max, DESIGN_WIDTH / 2 - 90, DESIGN_HEIGHT - 60, 180, 18);
+      const bm = this.getReactiveBladeMomentum();
+      drawEnergyBar(ctx, this.energy, this.reactiveBladeMax, DESIGN_WIDTH / 2 - 90, DESIGN_HEIGHT - 60, 180, 18, bm.band);
       // P4.4B-R5 P1-A: Reactive 模式禁止旧 drawDebugPanel（审计 §10.1 "两套Debug面板同时显示且矛盾"）。
       // Debug 信息已由 drawReactiveDebugOverlay 在上方绘制（紧凑 Reactive 专用面板）。
       // 旧面板显示 "Boss State: loading / Input Locked: true" 等旧 bossController 状态，与 Reactive 实际矛盾。
@@ -1505,6 +1523,24 @@ export class Game {
     if (this.currentSlash?.active) this.extendSlash(firstMovePos);
   }
 
+  /** V0723014: 获取 Reactive 模式刀势只读快照 */
+  private getReactiveBladeMomentum(): BladeMomentumState {
+    return createBladeMomentumState(
+      this.energy,
+      this.reactiveBladeMax,
+      this.reactiveBladeRunModifiers,
+    );
+  }
+
+  /** V0723014: 应用刀势上限成长（等比例缩放 current，保持 ratio）。
+   *  本轮仅用于测试验证，不接入正式流程。 */
+  private applyReactiveBladeMaxBonus(maxBonusDelta: number): void {
+    const old = { current: this.energy, max: this.reactiveBladeMax };
+    const preserved = applyBladeMaxChangePreserveRatio(old.current, old.max, old.max + maxBonusDelta);
+    this.energy = preserved.current;
+    this.reactiveBladeMax = preserved.max;
+  }
+
   private startSlash(pos: Vec2, pending?: NonNullable<typeof this.pendingSlash>) {
     const lockedEnergy = pending ? pending.lockedEnergy : clamp(this.energy, 0, BALANCE.swordEnergy.max);
     const tier = (pending ? pending.tier : getBladeTier(lockedEnergy)) as "weak" | "normal" | "strong" | "burst";
@@ -1559,8 +1595,9 @@ export class Game {
       // P4.4B-R3 P1-A: Reactive 模式起刀时锁定连续刀势视觉快照。
       // 整刀使用此快照（visualLength/width/brightness/color/glowColor），
       // 不随实时刀势跳变（"一刀一象"）。drawSlash 在 reactive 模式读此字段。
+      // V0723014: 使用 getReactiveBladeMomentum() 替代 lockedEnergy 绝对值。
       reactiveBladeEffect: isReactiveMode && this.reactiveController
-        ? this.reactiveController.getBladeEffect(lockedEnergy)
+        ? this.reactiveController.getBladeEffect(this.getReactiveBladeMomentum())
         : undefined,
     };
 
@@ -2287,12 +2324,17 @@ export class Game {
     // 3. 文字信息面板（右上角）— P4.4B-R5.1 P1-2: 补全遥测字段
     const snap = rc.getReactiveSnapshot();
     const resolve = this._lastReactiveResolve;
+    // V0723014: 刀势快照遥测
+    const momentum = this.getReactiveBladeMomentum();
     const lines = [
       `phase: ${snap.phase}`,
       `armorProgress: ${snap.armorProgress}`,
       `activeArmorIdx: ${snap.activeArmorIndex}`,
       `armorDurability: [${snap.armorDurability.join(", ")}]`,
       `energy: ${Math.round(this.energy)}`,
+      `[Momentum] ratio:${(momentum.ratio * 100).toFixed(0)}% band:${momentum.band}`,
+      `[Momentum] cur:${momentum.current} max:${momentum.max}`,
+      `[Momentum] nodes: ${momentum.activeNodes.join(",") || "-"}`,
       `inputLocked: ${snap.inputLocked}`,
       `projectileCount: ${snap.projectileCount}`,
       `bridgeTriggered: ${snap.bridgeTriggered}`,
@@ -2354,6 +2396,7 @@ export class Game {
       this.lastSlashAngle,
       visualLength, width,
       trail.id, trail.lockedEnergy,
+      this.getReactiveBladeMomentum(),
     );
     // 有效碰撞半径 = 刀身宽度/2 + 移动端容差(10px)
     const bladeReach = geometry.effectiveRadius;

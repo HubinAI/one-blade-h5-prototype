@@ -3,6 +3,7 @@
 // ========================================================================
 import { DESIGN_WIDTH, DESIGN_HEIGHT } from "../config/constants";
 import { clamp } from "../../utils/math";
+import type { BladeMomentumBand } from "../config/bladeMomentum";
 
 /** 绘制刀势条 */
 export function drawEnergyBar(
@@ -12,7 +13,8 @@ export function drawEnergyBar(
   x: number,
   y: number,
   width: number,
-  height: number
+  height: number,
+  band?: BladeMomentumBand,
 ): void {
   const ratio = clamp(energy / Math.max(1, maxEnergy), 0, 1);
   ctx.save();
@@ -21,10 +23,19 @@ export function drawEnergyBar(
   ctx.beginPath();
   ctx.roundRect(x, y, width, height, 4);
   ctx.fill();
-  // 填充
+  // 填充 — V0723014: 颜色按 band 读取，fallback 到 ratio 硬编码
   let barColor: string;
   let glowColor: string;
-  if (ratio < 0.3) {
+  if (band === "base") {
+    barColor = "#666666";
+    glowColor = "rgba(102,102,102,0.4)";
+  } else if (band === "enhanced") {
+    barColor = "#5bc0ff";
+    glowColor = "rgba(91,192,255,0.6)";
+  } else if (band === "burst") {
+    barColor = "#fff4a0";
+    glowColor = "rgba(255,244,160,0.8)";
+  } else if (ratio < 0.3) {
     barColor = "#666666";
     glowColor = "rgba(102,102,102,0.4)";
   } else if (ratio < 0.7) {
@@ -47,12 +58,12 @@ export function drawEnergyBar(
   ctx.beginPath();
   ctx.roundRect(x, y, width, height, 4);
   ctx.stroke();
-  // 文字
+  // 文字 — V0723014: current/max 格式
   ctx.fillStyle = "#d7bde2";
   ctx.font = 'bold 10px "Microsoft YaHei", sans-serif';
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(`刀势 ${Math.round(energy)}%`, x + width / 2, y + height / 2);
+  ctx.fillText(`刀势 ${Math.round(energy)}/${maxEnergy}`, x + width / 2, y + height / 2);
   ctx.restore();
 }
 
