@@ -53,7 +53,9 @@ export function resolveEffectiveNodeThresholds(
   const { min, max } = BLADE_MOMENTUM_CONFIG.thresholdClamp;
   for (const nodeId of NODE_ORDER) {
     const base = BLADE_MOMENTUM_CONFIG.abilityNodes[nodeId];
-    const shift = modifiers.nodeThresholdShift[nodeId] ?? 0;
+    const rawShift = modifiers.nodeThresholdShift[nodeId] ?? 0;
+    // P0-8: 过滤 NaN/Infinity，禁止生成 NaN 节点阈值
+    const shift = Number.isFinite(rawShift) ? rawShift : 0;
     result[nodeId] = clamp(base + shift, min, max);
   }
   return result as Record<BladeAbilityNodeId, number>;
@@ -81,20 +83,13 @@ export function createBladeMomentumState(
   max: number,
   modifiers?: BladeRunModifiers,
 ): BladeMomentumState {
-  const safeCurrent = clamp(Number.isFinite(current) ? current : 0, 0, Math.max(1, max));
+  // P0-8: 先 sanitize max，再 sanitize current（避免 max=NaN 时 clamp 上限 NaN）
   const safeMax = Math.max(1, Number.isFinite(max) ? max : 1);
+  const safeCurrent = clamp(Number.isFinite(current) ? current : 0, 0, safeMax);
   const ratio = resolveBladeMomentumRatio(safeCurrent, safeMax);
   const band = resolveBladeMomentumBand(ratio);
 
-  const defaultModifiers: BladeRunModifiers = {
-    maxBonus: 0,
-    floorBonus: 0,
-    gainMultiplier: 1,
-    costMultiplier: 1,
-    nodeThresholdShift: {},
-  };
-
-  const effectiveModifiers = modifiers ?? defaultModifiers;
+  const effectiveModifiers = modifiers ?? DEFAULT_BLADE_RUN_MODIFIERS;
   const effectiveThresholds = resolveEffectiveNodeThresholds(effectiveModifiers);
   const activeNodes = resolveActiveBladeNodes(ratio, effectiveThresholds);
 
@@ -122,7 +117,7 @@ export function applyBladeMaxChangePreserveRatio(
   const safeOldMax = Math.max(1, oldMax);
   const safeNewMax = Math.max(1, newMax);
   const ratio = resolveBladeMomentumRatio(current, safeOldMax);
-  const newCurrent = Math.round(ratio * safeNewMax);
+  const newCurrent = ratio * safeNewMax; // P0-7: 删除 Math.round，内部保留浮点避免比例漂移
   return {
     current: clamp(newCurrent, 0, safeNewMax),
     max: safeNewMax,
@@ -132,12 +127,15 @@ export function applyBladeMaxChangePreserveRatio(
 
 /**
  * 应用肉鸽修正器重新计算刀势快照。
- * 使用 state.current 和 (state.max + modifiers.maxBonus) 作为新的 (current, max)。
+ * P0-6: 使用 applyBladeMaxChangePreserveRatio 保持比例，避免成长掉档。
+ * maxBonus 以 baseMax 为基准，不是在当前 max 上重复叠加。
+ * 例：35/100 + maxBonus40 = 49/140（ratio 35% 不变，仍 enhanced）
  */
 export function applyBladeRunMaxModifier(
   state: BladeMomentumState,
   modifiers: BladeRunModifiers,
 ): BladeMomentumState {
-  const newMax = state.max + (modifiers.maxBonus ?? 0);
-  return createBladeMomentumState(state.current, newMax, modifiers);
+  const targetMax = BLADE_MOMENTUM_CONFIG.baseMax + (modifiers.maxBonus ?? 0);
+  const preserved = applyBladeMaxChangePreserveRatio(state.current, state.max, targetMax);
+  return createBladeMomentumState(preserved.current, preserved.max, modifiers);
 }

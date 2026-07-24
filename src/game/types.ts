@@ -1,3 +1,5 @@
+import type { BladeMomentumState } from "./config/bladeMomentum";
+
 export type Vec2 = {
   x: number;
   y: number;
@@ -285,6 +287,8 @@ export type SlashTrail = {
   id: string;
   tier: BladeTier;
   lockedEnergy: number;
+  /** V0723014: 起刀锁定的刀势快照（替代 lockedEnergy 绝对值判定） */
+  lockedMomentum?: BladeMomentumState;
   maxPower: number;
   remainingPower: number;
   maxDuration: number;

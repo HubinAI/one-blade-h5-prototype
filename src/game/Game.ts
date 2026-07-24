@@ -489,11 +489,12 @@ export class Game {
         const segA = { x: t.cx - Math.max(2, t.rx * 0.5), y: t.cy - Math.max(2, t.ry * 0.5) };
         const segB = { x: t.cx + Math.max(2, t.rx * 0.5), y: t.cy + Math.max(2, t.ry * 0.5) };
         const angle = Math.atan2(segB.y - segA.y, segB.x - segA.x);
-        const geometry = buildReactiveSlashGeometry(segA, segB, angle, 30, 3, slashId, 100);
+        const e2eMomentum = createBladeMomentumState(self.reactiveBladeMax, self.reactiveBladeMax);
+        const geometry = buildReactiveSlashGeometry(segA, segB, angle, 30, 3, slashId, e2eMomentum);
         // 高能量一刀碎（与玩家真实高刀势命中一致）
-        rc.setProgrammaticSlashEnergy(100);
+        rc.setProgrammaticSlashEnergy(self.reactiveBladeMax);
         rc.resolveGeometry(geometry);
-        const result = rc.finishSlash(slashId, 100, 100);
+        const result = rc.finishSlash(slashId, e2eMomentum, 100, self.reactiveBladeRunModifiers);
         return result.armorHit;
       };
 
@@ -1373,7 +1374,7 @@ export class Game {
 
     // P4.4B-R3 P1-A: 每帧更新连续刀势效果（基于实时 energy）。
     // 刀光绘制时读 trail.reactiveBladeEffect（起刀快照），本帧更新只供气场/HUD 读 currentBladeEffect。
-    rc.updateBladeEffect(this.energy);
+    rc.updateBladeEffect(this.getReactiveBladeMomentum());
 
     // P0-B: 弹幕漏过玩家受击线 — 使用 Controller API
     const REACTIVE_PLAYER_Y = REACTIVE_BOSS_CONFIG.playerHp.playerLineY;
@@ -1417,7 +1418,8 @@ export class Game {
     // 能量恢复（被动1.5/s兜底）
     this.regenDelayTimer = Math.max(0, this.regenDelayTimer - scaledDt);
     if (!this.currentSlash?.active && !this.pendingSlash && this.regenDelayTimer <= 0) {
-      this.energy = recoverEnergy(this.energy, scaledDt, 0, true);
+      // P0-5: Reactive 模式传 reactiveBladeMax，避免被动恢复封顶 100
+      this.energy = recoverEnergy(this.energy, scaledDt, 0, true, this.reactiveBladeMax);
     }
 
     this.screenShake = Math.max(0, this.screenShake - scaledDt * 2.7);
@@ -1543,12 +1545,14 @@ export class Game {
 
   private startSlash(pos: Vec2, pending?: NonNullable<typeof this.pendingSlash>) {
     const lockedEnergy = pending ? pending.lockedEnergy : clamp(this.energy, 0, BALANCE.swordEnergy.max);
+    // V0723014: Reactive 模式起刀时锁定 momentum 快照（整刀不变）
+    const isReactiveMode = this.gameMode === "bossReactive";
+    const lockedMomentum = isReactiveMode ? this.getReactiveBladeMomentum() : undefined;
     const tier = (pending ? pending.tier : getBladeTier(lockedEnergy)) as "weak" | "normal" | "strong" | "burst";
     const stage = SWORD_STAGE_BY_ID[tier];
     const pathMultiplier = (pending && pending.hasSoul ? PICKUP_BALANCE.soul.pathLengthMultiplier ?? 1 : (this.nextSoul ? PICKUP_BALANCE.soul.pathLengthMultiplier ?? 1 : 1)) * this.getPathLengthMultiplier();
     const widthMultiplier = pending && pending.hasSoul ? PICKUP_BALANCE.soul.widthMultiplier ?? 1 : (this.nextSoul ? PICKUP_BALANCE.soul.widthMultiplier ?? 1 : 1);
     // P1-A: reactive 模式用独立刀路配置（0.9s/360px），不读旧段位；刀势不影响能否完成基础刀路
-    const isReactiveMode = this.gameMode === "bossReactive";
     const reactiveSlashCfg = REACTIVE_BOSS_CONFIG.reactiveSlash;
     const maxPathLength = isReactiveMode ? reactiveSlashCfg.maxPathLength : stage.maxPathLength * pathMultiplier;
     const point = { x: pos.x, y: pos.y, t: this.elapsed, energyRatio: 1 };
@@ -1571,6 +1575,7 @@ export class Game {
       id: this.nextId("slash"),
       tier,
       lockedEnergy,
+      lockedMomentum,
       maxPower: maxPathLength,
       remainingPower: maxPathLength,
       maxDuration: isReactiveMode ? reactiveSlashCfg.maxDuration : stage.duration,
@@ -1595,9 +1600,9 @@ export class Game {
       // P4.4B-R3 P1-A: Reactive 模式起刀时锁定连续刀势视觉快照。
       // 整刀使用此快照（visualLength/width/brightness/color/glowColor），
       // 不随实时刀势跳变（"一刀一象"）。drawSlash 在 reactive 模式读此字段。
-      // V0723014: 使用 getReactiveBladeMomentum() 替代 lockedEnergy 绝对值。
+      // V0723014: 使用起刀锁定的 lockedMomentum 快照（P0-3: 整刀统一用 trail.lockedMomentum）
       reactiveBladeEffect: isReactiveMode && this.reactiveController
-        ? this.reactiveController.getBladeEffect(this.getReactiveBladeMomentum())
+        ? this.reactiveController.getBladeEffect(lockedMomentum!)
         : undefined,
     };
 
@@ -1621,7 +1626,8 @@ export class Game {
     this.nextOil = false;
     this.stats.slashes += 1;
     this.totalSlashEnergy += lockedEnergy;
-    if (lockedEnergy >= 60) this.highBladeSlashCount += 1;
+    // P1-2: Reactive 模式不写入普通关卡绝对阈值统计（max=180 时 60/180=33% 不应算高刀势）
+    if (!isReactiveMode && lockedEnergy >= 60) this.highBladeSlashCount += 1;
     this.warriorDrawTimer = 0.2;
     this.warriorSheathTimer = 0;
     this.lastSlashAngle = this.angleFromWarrior(pos);
@@ -2380,7 +2386,7 @@ export class Game {
     if (!rc) return;
 
     // P0-C: 使用起刀快照能量，而非实时 energy
-    const slashEnergy = trail.lockedEnergy ?? this.energy;
+    const slashEnergy = trail.lockedMomentum?.current ?? trail.lockedEnergy ?? this.energy;
 
     // 设置当前刀势能量（供 finishSlash 使用）
     rc.currentSlashEnergy = slashEnergy;
@@ -2395,8 +2401,7 @@ export class Game {
       a, b,
       this.lastSlashAngle,
       visualLength, width,
-      trail.id, trail.lockedEnergy,
-      this.getReactiveBladeMomentum(),
+      trail.id, trail.lockedMomentum!,
     );
     // 有效碰撞半径 = 刀身宽度/2 + 移动端容差(10px)
     const bladeReach = geometry.effectiveRadius;
@@ -4525,11 +4530,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   // P0: Reactive Boss模式收刀 — 使用 Controller API（禁止 Game 二次推导结果）
   if (this.reactiveController) {
     const rc = this.reactiveController;
-    const slashEnergy = trail.lockedEnergy ?? this.energy;
+    const slashEnergy = trail.lockedMomentum?.current ?? trail.lockedEnergy ?? this.energy;
     rc.currentSlashEnergy = slashEnergy;
-    const energyBefore = this.energy;
     // P0: finishSlash 返回完整结算结果（Controller 直接计算 primaryResult/Source）
-    const result = rc.finishSlash(trail.id, energyBefore, trail.pathUsed ?? 0);
+    // P0-4: 传 trail.lockedMomentum（起刀快照）和 reactiveBladeRunModifiers
+    const result = rc.finishSlash(trail.id, trail.lockedMomentum!, trail.pathUsed ?? 0, this.reactiveBladeRunModifiers);
 
     // P0: 唯一能量写入点 — 使用 Controller 结算后的能量值
     this.energy = result.energyAfter;

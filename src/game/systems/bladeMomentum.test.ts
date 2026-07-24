@@ -58,7 +58,7 @@ describe("resolveBladeMomentumRatio", () => {
   });
 
   // 非法输入
-  it("max=0 → min 1 (ratio=0)", () => {
+  it("max=0 → min 1 (current clamp to max=1, ratio=1)", () => {
     expect(resolveBladeMomentumRatio(50, 0)).toBe(1);
   });
 
@@ -327,10 +327,160 @@ describe("applyBladeMaxChangePreserveRatio", () => {
   });
 });
 
+// ---- P0-7: 多次 max 变化后 ratio 与 band 稳定 ----
+
+describe("P0-7 多次 max 变化比例漂移", () => {
+  it("29.99% → 经 100→137→181→140 后 ratio 仍 ~29.99%，band 仍 base", () => {
+    const r1 = applyBladeMaxChangePreserveRatio(29.99, 100, 137);
+    expect(r1.ratio).toBeCloseTo(0.2999, 3);
+    expect(resolveBladeMomentumBand(r1.ratio)).toBe("base");
+    const r2 = applyBladeMaxChangePreserveRatio(r1.current, 137, 181);
+    expect(r2.ratio).toBeCloseTo(0.2999, 3);
+    expect(resolveBladeMomentumBand(r2.ratio)).toBe("base");
+    const r3 = applyBladeMaxChangePreserveRatio(r2.current, 181, 140);
+    expect(r3.ratio).toBeCloseTo(0.2999, 3);
+    expect(resolveBladeMomentumBand(r3.ratio)).toBe("base");
+  });
+
+  it("30.00% → 经 100→137→181→140 后 ratio 仍 30.00%，band 仍 enhanced", () => {
+    const r1 = applyBladeMaxChangePreserveRatio(30.00, 100, 137);
+    expect(r1.ratio).toBeCloseTo(0.30, 2);
+    expect(resolveBladeMomentumBand(r1.ratio)).toBe("enhanced");
+    const r2 = applyBladeMaxChangePreserveRatio(r1.current, 137, 181);
+    expect(r2.ratio).toBeCloseTo(0.30, 2);
+    expect(resolveBladeMomentumBand(r2.ratio)).toBe("enhanced");
+    const r3 = applyBladeMaxChangePreserveRatio(r2.current, 181, 140);
+    expect(r3.ratio).toBeCloseTo(0.30, 2);
+    expect(resolveBladeMomentumBand(r3.ratio)).toBe("enhanced");
+  });
+
+  it("69.99% → 经 100→137→181→140 后 ratio 仍 ~69.99%，band 仍 enhanced", () => {
+    const r1 = applyBladeMaxChangePreserveRatio(69.99, 100, 137);
+    expect(r1.ratio).toBeCloseTo(0.6999, 3);
+    expect(resolveBladeMomentumBand(r1.ratio)).toBe("enhanced");
+    const r2 = applyBladeMaxChangePreserveRatio(r1.current, 137, 181);
+    expect(r2.ratio).toBeCloseTo(0.6999, 3);
+    expect(resolveBladeMomentumBand(r2.ratio)).toBe("enhanced");
+    const r3 = applyBladeMaxChangePreserveRatio(r2.current, 181, 140);
+    expect(r3.ratio).toBeCloseTo(0.6999, 3);
+    expect(resolveBladeMomentumBand(r3.ratio)).toBe("enhanced");
+  });
+
+  it("70.00% → 经 100→137→181→140 后 ratio 仍 70.00%，band 仍 burst", () => {
+    const r1 = applyBladeMaxChangePreserveRatio(70.00, 100, 137);
+    expect(r1.ratio).toBeCloseTo(0.70, 2);
+    expect(resolveBladeMomentumBand(r1.ratio)).toBe("burst");
+    const r2 = applyBladeMaxChangePreserveRatio(r1.current, 137, 181);
+    expect(r2.ratio).toBeCloseTo(0.70, 2);
+    expect(resolveBladeMomentumBand(r2.ratio)).toBe("burst");
+    const r3 = applyBladeMaxChangePreserveRatio(r2.current, 181, 140);
+    expect(r3.ratio).toBeCloseTo(0.70, 2);
+    expect(resolveBladeMomentumBand(r3.ratio)).toBe("burst");
+  });
+
+  it("89.99% → 经 100→137→181→140 后 ratio 仍 ~89.99%，band 仍 burst", () => {
+    const r1 = applyBladeMaxChangePreserveRatio(89.99, 100, 137);
+    expect(r1.ratio).toBeCloseTo(0.8999, 3);
+    expect(resolveBladeMomentumBand(r1.ratio)).toBe("burst");
+    const r2 = applyBladeMaxChangePreserveRatio(r1.current, 137, 181);
+    expect(r2.ratio).toBeCloseTo(0.8999, 3);
+    expect(resolveBladeMomentumBand(r2.ratio)).toBe("burst");
+    const r3 = applyBladeMaxChangePreserveRatio(r2.current, 181, 140);
+    expect(r3.ratio).toBeCloseTo(0.8999, 3);
+    expect(resolveBladeMomentumBand(r3.ratio)).toBe("burst");
+  });
+
+  it("90.00% → 经 100→137→181→140 后 ratio 仍 90.00%，band 仍 burst", () => {
+    const r1 = applyBladeMaxChangePreserveRatio(90.00, 100, 137);
+    expect(r1.ratio).toBeCloseTo(0.90, 2);
+    expect(resolveBladeMomentumBand(r1.ratio)).toBe("burst");
+    const r2 = applyBladeMaxChangePreserveRatio(r1.current, 137, 181);
+    expect(r2.ratio).toBeCloseTo(0.90, 2);
+    expect(resolveBladeMomentumBand(r2.ratio)).toBe("burst");
+    const r3 = applyBladeMaxChangePreserveRatio(r2.current, 181, 140);
+    expect(r3.ratio).toBeCloseTo(0.90, 2);
+    expect(resolveBladeMomentumBand(r3.ratio)).toBe("burst");
+  });
+});
+
+// ---- P0-8: NaN/Infinity 输入测试 ----
+
+describe("P0-8 createBladeMomentumState NaN/Infinity 安全", () => {
+  it("NaN current → safe 0, band=base", () => {
+    const s = createBladeMomentumState(NaN, 100);
+    expect(Number.isFinite(s.current)).toBe(true);
+    expect(s.current).toBe(0);
+    expect(Number.isFinite(s.max)).toBe(true);
+    expect(Number.isFinite(s.ratio)).toBe(true);
+    expect(s.band).toBe("base");
+  });
+
+  it("NaN max → safe 1, current clamp to 1 (50 clamp to max=1)", () => {
+    const s = createBladeMomentumState(50, NaN);
+    expect(Number.isFinite(s.current)).toBe(true);
+    expect(Number.isFinite(s.max)).toBe(true);
+    expect(s.max).toBe(1);
+    expect(s.current).toBe(1); // 50 clamp to safeMax=1
+    expect(Number.isFinite(s.ratio)).toBe(true);
+    expect(s.band).toBe("burst"); // 1/1 = ratio 1 >= 70%
+  });
+
+  it("Infinity max → safe 1, current clamp to 1 (50 clamp to max=1)", () => {
+    const s = createBladeMomentumState(50, Infinity);
+    expect(Number.isFinite(s.current)).toBe(true);
+    expect(Number.isFinite(s.max)).toBe(true);
+    expect(s.max).toBe(1);
+    expect(s.current).toBe(1); // 50 clamp to safeMax=1
+    expect(Number.isFinite(s.ratio)).toBe(true);
+    expect(s.band).toBe("burst"); // 1/1 = ratio 1 >= 70%
+  });
+
+  it("Infinity current → safe 0 (non-finite fallback to 0)", () => {
+    const s = createBladeMomentumState(Infinity, 100);
+    expect(Number.isFinite(s.current)).toBe(true);
+    expect(s.current).toBe(0); // Infinity non-finite → fallback 0
+    expect(Number.isFinite(s.max)).toBe(true);
+    expect(Number.isFinite(s.ratio)).toBe(true);
+    expect(s.band).toBe("base"); // 0/100 = ratio 0
+  });
+
+  it("-Infinity current → 0", () => {
+    const s = createBladeMomentumState(-Infinity, 100);
+    expect(Number.isFinite(s.current)).toBe(true);
+    expect(s.current).toBe(0);
+    expect(Number.isFinite(s.ratio)).toBe(true);
+    expect(s.band).toBe("base");
+  });
+
+  it("max <= 0 → safe 1", () => {
+    const s = createBladeMomentumState(5, 0);
+    expect(s.max).toBe(1);
+    expect(Number.isFinite(s.current)).toBe(true);
+    expect(Number.isFinite(s.ratio)).toBe(true);
+    expect(s.band).toBe("burst"); // 5/1 → ratio 1
+  });
+
+  it("max negative → safe 1, current clamp to 1 (5 clamp to max=1)", () => {
+    const s = createBladeMomentumState(5, -10);
+    expect(s.max).toBe(1);
+    expect(s.current).toBe(1); // 5 clamp to safeMax=1
+    expect(Number.isFinite(s.ratio)).toBe(true);
+    expect(s.band).toBe("burst"); // 1/1 = ratio 1 >= 70%
+  });
+
+  it("NaN + Infinity combined → all finite", () => {
+    const s = createBladeMomentumState(NaN, Infinity);
+    expect(Number.isFinite(s.current)).toBe(true);
+    expect(Number.isFinite(s.max)).toBe(true);
+    expect(Number.isFinite(s.ratio)).toBe(true);
+    expect(s.band).toBe("base");
+  });
+});
+
 // ---- 肉鸽修正器应用测试 ----
 
 describe("applyBladeRunMaxModifier", () => {
-  it("maxBonus=40 → max 从 100 升到 140", () => {
+  it("maxBonus=40 → 35/100 升到 49/140，ratio 仍 35%，仍 enhanced", () => {
     const state = createBladeMomentumState(35, 100);
     const mods: BladeRunModifiers = {
       maxBonus: 40,
@@ -341,9 +491,9 @@ describe("applyBladeRunMaxModifier", () => {
     };
     const newState = applyBladeRunMaxModifier(state, mods);
     expect(newState.max).toBe(140);
-    expect(newState.current).toBe(35);
-    expect(newState.ratio).toBeCloseTo(0.25, 2); // 35/140
-    expect(newState.band).toBe("base");
+    expect(newState.current).toBe(49);
+    expect(newState.ratio).toBeCloseTo(0.35, 2);
+    expect(newState.band).toBe("enhanced");
   });
 });
 

@@ -4,7 +4,7 @@
 // ----------------------------------------------------------------------------
 import { describe, it, expect, beforeEach } from "vitest";
 import { BossReactiveController } from "./BossReactiveController";
-import { BLADE_MOMENTUM_CONFIG } from "../config/bladeMomentum";
+import { BLADE_MOMENTUM_CONFIG, DEFAULT_BLADE_RUN_MODIFIERS, type BladeRunModifiers } from "../config/bladeMomentum";
 import { createBladeMomentumState } from "./bladeMomentum";
 import { REACTIVE_BOSS_CONFIG } from "../config/bossReactiveFlow";
 import { resetProjectileIdCounter } from "./projectileSystem";
@@ -51,7 +51,6 @@ function buildCapsuleTestGeometry(
 
   return {
     slashId,
-    lockedEnergy: energy,
     lockedMomentum: createBladeMomentumState(energy, BLADE_MOMENTUM_CONFIG.baseMax),
     baseA,
     baseB,
@@ -76,7 +75,7 @@ function buildCapsuleTestGeometry(
  */
 function geom(segA: { x: number; y: number }, segB: { x: number; y: number }, slashId: string, energy: number, visualLength: number = 30, width: number = 3): ReactiveSlashGeometry {
   const angle = Math.atan2(segB.y - segA.y, segB.x - segA.x);
-  return buildReactiveSlashGeometry(segA, segB, angle, visualLength, width, slashId, energy);
+  return buildReactiveSlashGeometry(segA, segB, angle, visualLength, width, slashId, createBladeMomentumState(energy, BLADE_MOMENTUM_CONFIG.baseMax));
 }
 
 /**
@@ -97,6 +96,7 @@ function advanceThroughResolveAndRecovery(c: BossReactiveController): void {
 
 /**
  * 辅助：使用 resolveGeometry 命中当前护甲（高能量一刀碎）。
+ * P0-4: 传 createBladeMomentumState 作为 momentumBefore
  */
 function hitCurrentArmor(c: BossReactiveController, slashId: string, energy: number = 100): ReturnType<BossReactiveController["finishSlash"]> {
   c.setProgrammaticSlashEnergy(energy);
@@ -104,7 +104,15 @@ function hitCurrentArmor(c: BossReactiveController, slashId: string, energy: num
   const segA = v(pos.cx - pos.rx * 0.5, pos.cy - pos.ry * 0.5);
   const segB = v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5);
   c.resolveGeometry(geom(segA, segB, slashId, energy));
-  return c.finishSlash(slashId, energy, 100);
+  return c.finishSlash(slashId, createBladeMomentumState(energy, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
+}
+
+/**
+ * P0-4: 测试辅助 — 简化 finishSlash 调用（energy → momentumBefore 自动转换）。
+ * 默认 pathLen=100，modifiers=DEFAULT_BLADE_RUN_MODIFIERS。
+ */
+function fs(c: BossReactiveController, slashId: string, energy: number, pathLen: number = 100): ReturnType<BossReactiveController["finishSlash"]> {
+  return c.finishSlash(slashId, createBladeMomentumState(energy, BLADE_MOMENTUM_CONFIG.baseMax), pathLen, DEFAULT_BLADE_RUN_MODIFIERS);
 }
 
 describe("BossReactiveController", () => {
@@ -411,7 +419,7 @@ describe("BossReactiveController", () => {
     const refl = controller.spawnProjectileForTest("reflective", BOSS_CX + 30, BOSS_CY - 20, 0, 60);
     controller.setProgrammaticSlashEnergy(100);
     controller.resolveGeometry(geom(v(refl.x - 20, refl.y - 40), v(refl.x + 20, refl.y + 20), "s_refl1", 100));
-    const result = controller.finishSlash("s_refl1", 100, 100);
+    const result = fs(controller, "s_refl1", 100);
     expect(result.projectileReflectCount).toBe(1);
     expect(result.projectileReflectReward).toBe(REACTIVE_BOSS_CONFIG.bladeEnergy.reflectReward);
   });
@@ -427,12 +435,12 @@ describe("BossReactiveController", () => {
     const refl = controller.spawnProjectileForTest("reflective", BOSS_CX + 30, BOSS_CY - 20, 0, 60);
     controller.setProgrammaticSlashEnergy(100);
     controller.resolveGeometry(geom(v(refl.x - 20, refl.y - 40), v(refl.x + 20, refl.y + 20), "s_refl_a", 100));
-    const r1 = controller.finishSlash("s_refl_a", 100, 100);
+    const r1 = fs(controller, "s_refl_a", 100);
     expect(r1.projectileReflectCount).toBe(1);
 
     controller.setProgrammaticSlashEnergy(100);
     controller.resolveGeometry(geom(v(refl.x - 20, refl.y - 40), v(refl.x + 20, refl.y + 20), "s_refl_b", 100));
-    const r2 = controller.finishSlash("s_refl_b", 100, 100);
+    const r2 = fs(controller, "s_refl_b", 100);
     expect(r2.projectileReflectCount).toBe(0);
     expect(r2.primaryResult).toBe("empty_swing");
   });
@@ -505,7 +513,7 @@ describe("BossReactiveController", () => {
     const refl = controller.spawnProjectileForTest("reflective", BOSS_CX + 30, BOSS_CY - 20, 0, 60);
     controller.setProgrammaticSlashEnergy(30);
     controller.resolveGeometry(geom(v(refl.x - 20, refl.y - 40), v(refl.x + 20, refl.y + 20), "s_low", 30));
-    const result = controller.finishSlash("s_low", 100, 100);
+    const result = fs(controller, "s_low", 100);
     expect(result.projectileReflectCount).toBe(0);
     expect(result.projectileCutCount).toBe(1);
     const cutEvents = result.events.filter(e => e.kind === "projectile_cut");
@@ -522,7 +530,7 @@ describe("BossReactiveController", () => {
     controller.resolveGeometry(geom(v(50, 700), v(100, 750), "slash_miss", 50));
     controller.update(3.0);
     controller.resolveGeometry(geom(v(50, 700), v(100, 750), "slash_miss2", 50));
-    const finish = controller.finishSlash("slash_miss2", 100, 100);
+    const finish = fs(controller, "slash_miss2", 100);
     expect(finish.armorHit).toBe(false);
     expect(finish.armorDurabilityDamage).toBe(0);
     expect(finish.armorBroken).toBe(false);
@@ -534,7 +542,7 @@ describe("BossReactiveController", () => {
     const hpBefore = controller.getPlayerHp().current;
     controller.update(0.35);
     controller.resolveGeometry(geom(v(50, 700), v(100, 750), "empty_swing", 50));
-    const result = controller.finishSlash("empty_swing", 100, 100);
+    const result = controller.finishSlash("empty_swing", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.armorHit).toBe(false);
     expect(result.bodyWrongHit).toBe(false);
     expect(controller.getPlayerHp().current).toBe(hpBefore);
@@ -544,7 +552,7 @@ describe("BossReactiveController", () => {
     expect.assertions(3);
     controller.update(0.35);
     controller.resolveGeometry(geom(v(50, 700), v(100, 750), "empty_cost", 50));
-    const result = controller.finishSlash("empty_cost", 100, 100);
+    const result = controller.finishSlash("empty_cost", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.emptySwingPenalty).toBe(0);
     expect(result.baseCost).toBeGreaterThan(0);
     expect(result.energyAfter).toBeLessThan(100);
@@ -554,7 +562,7 @@ describe("BossReactiveController", () => {
     expect.assertions(2);
     controller.update(0.35);
     controller.resolveGeometry(geom(v(50, 700), v(100, 750), "empty_prim", 50));
-    const result = controller.finishSlash("empty_prim", 100, 100);
+    const result = controller.finishSlash("empty_prim", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.primaryResult).toBe("empty_swing");
     expect(result.armorHit).toBe(false);
   });
@@ -563,7 +571,7 @@ describe("BossReactiveController", () => {
     expect.assertions(1);
     controller.update(0.35);
     controller.resolveGeometry(geom(v(50, 700), v(100, 750), "empty_sec", 50));
-    const result = controller.finishSlash("empty_sec", 100, 100);
+    const result = controller.finishSlash("empty_sec", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.secondaryResults).toEqual([]);
   });
 
@@ -629,17 +637,17 @@ describe("BossReactiveController", () => {
     expect(controller.currentSlashEnergy).toBe(50);
   });
 
-  it("G2 刀势连续效果插值 — getBladeEffect(0) 低能量", () => {
+  it("G2 刀势连续效果插值 — getBladeEffect(createBladeMomentumState(0, BLADE_MOMENTUM_CONFIG.baseMax)) 低能量", () => {
     expect.assertions(3);
-    const e = controller.getBladeEffect(0);
+    const e = controller.getBladeEffect(createBladeMomentumState(0, BLADE_MOMENTUM_CONFIG.baseMax));
     expect(e.color).toBe(REACTIVE_BOSS_CONFIG.bladeEffect.lowEnergyColor);
     expect(e.visualLength).toBe(REACTIVE_BOSS_CONFIG.bladeEffect.minLength);
     expect(e.width).toBe(REACTIVE_BOSS_CONFIG.bladeEffect.minWidth);
   });
 
-  it("G3 刀势连续效果插值 — getBladeEffect(100) 高能量", () => {
+  it("G3 刀势连续效果插值 — getBladeEffect(createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax)) 高能量", () => {
     expect.assertions(3);
-    const e = controller.getBladeEffect(100);
+    const e = controller.getBladeEffect(createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax));
     expect(e.color).toBe(REACTIVE_BOSS_CONFIG.bladeEffect.highEnergyColor);
     expect(e.visualLength).toBe(REACTIVE_BOSS_CONFIG.bladeEffect.maxLength);
     expect(e.width).toBe(REACTIVE_BOSS_CONFIG.bladeEffect.maxWidth);
@@ -647,9 +655,9 @@ describe("BossReactiveController", () => {
 
   it("G4 刀势连续效果插值 — 单调递增", () => {
     expect.assertions(4);
-    const e0 = controller.getBladeEffect(0);
-    const e50 = controller.getBladeEffect(50);
-    const e100 = controller.getBladeEffect(100);
+    const e0 = controller.getBladeEffect(createBladeMomentumState(0, BLADE_MOMENTUM_CONFIG.baseMax));
+    const e50 = controller.getBladeEffect(createBladeMomentumState(50, BLADE_MOMENTUM_CONFIG.baseMax));
+    const e100 = controller.getBladeEffect(createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax));
     expect(e50.visualLength).toBeGreaterThan(e0.visualLength);
     expect(e50.visualLength).toBeLessThan(e100.visualLength);
     expect(e50.width).toBeGreaterThan(e0.width);
@@ -658,7 +666,7 @@ describe("BossReactiveController", () => {
 
   it("G5 updateBladeEffect 更新 currentBladeEffect", () => {
     expect.assertions(1);
-    controller.updateBladeEffect(80);
+    controller.updateBladeEffect(createBladeMomentumState(80, BLADE_MOMENTUM_CONFIG.baseMax));
     const current = controller.currentBladeEffect;
     expect(current.color).toBe(REACTIVE_BOSS_CONFIG.bladeEffect.highEnergyColor);
   });
@@ -671,7 +679,7 @@ describe("BossReactiveController", () => {
     expect.assertions(8);
     controller.update(0.35);
     controller.resolveGeometry(geom(v(50, 700), v(100, 750), "test_fields", 50));
-    const result = controller.finishSlash("test_fields", 100, 100);
+    const result = controller.finishSlash("test_fields", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.slashId).toBe("test_fields");
     expect(typeof result.energyAfter).toBe("number");
     expect(typeof result.energyBefore).toBe("number");
@@ -697,7 +705,7 @@ describe("BossReactiveController", () => {
     expect(p2.kind).toBe("dangerous");
     controller.setProgrammaticSlashEnergy(80);
     controller.resolveGeometry(geom(v(p1.x - 40, p1.y - 60), v(p2.x + 40, p2.y + 60), "s_mix", 80));
-    const result = controller.finishSlash("s_mix", 100, 100);
+    const result = controller.finishSlash("s_mix", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.dangerousWrongCutCount).toBeGreaterThan(0);
     expect(result.secondaryResults.length).toBeGreaterThanOrEqual(0);
   });
@@ -708,7 +716,7 @@ describe("BossReactiveController", () => {
     const p = controller.spawnProjectileForTest("normal", BOSS_CX, BOSS_CY - 50, 0, 50);
     controller.setProgrammaticSlashEnergy(80);
     controller.resolveGeometry(geom(v(p.x - 20, p.y - 40), v(p.x + 20, p.y + 20), "s_reward", 80));
-    const result = controller.finishSlash("s_reward", 100, 100);
+    const result = controller.finishSlash("s_reward", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.projectileCutReward).toBeGreaterThan(0);
   });
 
@@ -723,7 +731,7 @@ describe("BossReactiveController", () => {
     const dang = controller.spawnProjectileForTest("dangerous", BOSS_CX, BOSS_CY + 6, 0, 30);
     controller.setProgrammaticSlashEnergy(80);
     controller.resolveGeometry(geom(v(dang.x - 20, dang.y - 40), v(dang.x + 20, dang.y + 20), "s_danger", 80));
-    const result = controller.finishSlash("s_danger", 100, 100);
+    const result = controller.finishSlash("s_danger", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.dangerousWrongCutPenalty).toBeGreaterThan(0);
   });
 
@@ -765,7 +773,7 @@ describe("BossReactiveController", () => {
 
   it("H9 finishSlash energyAfter 被 clamp 在 [0, max]", () => {
     expect.assertions(2);
-    const result = controller.finishSlash("test_clamp", 100, 100);
+    const result = controller.finishSlash("test_clamp", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.energyAfter).toBeGreaterThanOrEqual(0);
     expect(result.energyAfter).toBeLessThanOrEqual(BLADE_MOMENTUM_CONFIG.baseMax);
   });
@@ -785,7 +793,7 @@ describe("BossReactiveController", () => {
     // 在护甲中心确定性注入 normal 弹幕，确保 resolveGeometry 同时命中弹幕和护甲
     c.spawnProjectileForTest("normal", pos.cx, pos.cy + 5, 0, 0);
     c.resolveGeometry(geom(v(pos.cx - pos.rx, pos.cy - pos.ry), v(pos.cx + pos.rx, pos.cy + pos.ry), "s_h10", 100));
-    const result = c.finishSlash("s_h10", 100, 100);
+    const result = c.finishSlash("s_h10", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     // P0-D: H10 严格断言 events.length=2，kind 为 projectile_cut 和 armor
     expect(result.armorHit).toBe(true);
     expect(result.events.length).toBe(2);
@@ -819,7 +827,7 @@ describe("BossReactiveController", () => {
     c.resolveGeometry(geom(v(pos.cx - pos.rx * 0.5, pos.cy - pos.ry * 0.5), v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5), "s_hold", 50));
     c.update(REACTIVE_BOSS_CONFIG.phaseTimers.resolveDuration + 0.01);
     expect(c.phase).toBe("armor_recovery");
-    const result = c.finishSlash("s_hold", 100, 100);
+    const result = c.finishSlash("s_hold", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.armorHit).toBe(true);
     expect(result.armorDurabilityDamage).toBe(55);
   });
@@ -833,7 +841,7 @@ describe("BossReactiveController", () => {
     c.resolveGeometry(geom(v(pos.cx - pos.rx * 0.5, pos.cy - pos.ry * 0.5), v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5), "s_session", 50));
     c.update(REACTIVE_BOSS_CONFIG.phaseTimers.resolveDuration + 0.01);
     expect(c.phase).toBe("armor_recovery");
-    const result = c.finishSlash("s_session", 100, 100);
+    const result = c.finishSlash("s_session", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.armorHit).toBe(true);
     expect(result.events.length).toBeGreaterThan(0);
   });
@@ -846,7 +854,7 @@ describe("BossReactiveController", () => {
     const pos = c.getActiveArmorWorldPos()!;
     c.resolveGeometry(geom(v(pos.cx - pos.rx * 0.5, pos.cy - pos.ry * 0.5), v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5), "s_sess3", 20));
     c.update(REACTIVE_BOSS_CONFIG.phaseTimers.resolveDuration + 0.01);
-    const result = c.finishSlash("s_sess3", 100, 100);
+    const result = c.finishSlash("s_sess3", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.armorDurabilityDamage).toBe(25);
   });
 
@@ -858,7 +866,7 @@ describe("BossReactiveController", () => {
     const pos = c.getActiveArmorWorldPos()!;
     c.resolveGeometry(geom(v(pos.cx - pos.rx * 0.5, pos.cy - pos.ry * 0.5), v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5), "s_hold2", 100));
     c.update(REACTIVE_BOSS_CONFIG.phaseTimers.resolveDuration + 0.01);
-    const result = c.finishSlash("s_hold2", 100, 100);
+    const result = c.finishSlash("s_hold2", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.primaryResult).toBe("armor_broken");
     expect(result.armorBroken).toBe(true);
   });
@@ -895,7 +903,7 @@ describe("BossReactiveController", () => {
     controller.setProgrammaticSlashEnergy(80);
     // 命中 dangerous 弹幕且线段也经过身体区域
     controller.resolveGeometry(geom(v(dang.x - 20, dang.y - 40), v(dang.x + 20, dang.y + 20), "s_pri3", 80));
-    const result = controller.finishSlash("s_pri3", 100, 100);
+    const result = controller.finishSlash("s_pri3", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.dangerousWrongCutCount).toBeGreaterThan(0);
     expect(result.primaryResult).toBe("dangerous_wrong_cut");
   });
@@ -915,7 +923,7 @@ describe("BossReactiveController", () => {
     controller.setProgrammaticSlashEnergy(100);
     // 几何穿过身体中心，远离右肩护甲（x=252.5, y≈185.5）
     controller.resolveGeometry(geom(v(BOSS_CX - 50, BOSS_CY - 50), v(BOSS_CX + 50, BOSS_CY + 50), "s_j4", 100));
-    const result = controller.finishSlash("s_j4", 100, 100);
+    const result = controller.finishSlash("s_j4", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
 
     // P0-D: 严格断言 body 为 primary，reflect 在 secondary
     expect(result.bodyWrongHit).toBe(true);
@@ -933,7 +941,7 @@ describe("BossReactiveController", () => {
     const refl = controller.spawnProjectileForTest("reflective", BOSS_CX + 30, BOSS_CY - 20, 0, 60);
     controller.setProgrammaticSlashEnergy(100);
     controller.resolveGeometry(geom(v(refl.x - 20, refl.y - 40), v(refl.x + 20, refl.y + 20), "s_pri5", 100));
-    const result = controller.finishSlash("s_pri5", 100, 100);
+    const result = controller.finishSlash("s_pri5", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.projectileReflectCount).toBe(1);
     expect(result.primaryResult).toBe("projectile_reflect");
   });
@@ -944,7 +952,7 @@ describe("BossReactiveController", () => {
     const normal = controller.spawnProjectileForTest("normal", BOSS_CX, BOSS_CY - 50, 0, 50);
     controller.setProgrammaticSlashEnergy(80);
     controller.resolveGeometry(geom(v(normal.x - 20, normal.y - 40), v(normal.x + 20, normal.y + 20), "s_pri6", 80));
-    const result = controller.finishSlash("s_pri6", 100, 100);
+    const result = controller.finishSlash("s_pri6", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.projectileCutCount).toBe(1);
     expect(result.primaryResult).toBe("projectile_cut");
   });
@@ -967,7 +975,7 @@ describe("BossReactiveController", () => {
     expect(d.kind).toBe("dangerous");
     controller.setProgrammaticSlashEnergy(80);
     controller.resolveGeometry(geom(v(60, 200), v(400, 300), "s_mixed_k1", 80));
-    const result = controller.finishSlash("s_mixed_k1", 100, 100);
+    const result = controller.finishSlash("s_mixed_k1", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.dangerousWrongCutCount).toBeGreaterThan(0);
     expect(result.projectileCutCount).toBeGreaterThan(0);
     expect(result.primaryResult).toBe("dangerous_wrong_cut");
@@ -991,7 +999,7 @@ describe("BossReactiveController", () => {
 
     // 几何穿过两弹幕中心（BOSS下方，不碰护甲）
     controller.resolveGeometry(geom(v(BOSS_CX - 50, BOSS_CY + 140), v(BOSS_CX + 50, BOSS_CY + 160), "s_k2", 80));
-    const result = controller.finishSlash("s_k2", 100, 100);
+    const result = controller.finishSlash("s_k2", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
 
     // P0-D: 严格断言 dangerous 为 primary，projectile_cut 在 secondary
     expect(result.dangerousWrongCutCount).toBe(1);
@@ -1018,7 +1026,7 @@ describe("BossReactiveController", () => {
 
     // 几何穿过两弹幕中心（BOSS下方，不碰护甲）
     controller.resolveGeometry(geom(v(BOSS_CX - 50, BOSS_CY + 140), v(BOSS_CX + 50, BOSS_CY + 160), "s_k3", 80));
-    const result = controller.finishSlash("s_k3", 100, 100);
+    const result = controller.finishSlash("s_k3", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
 
     // P0-D: dangerous > reflect 优先级，dangerous 为 primary，reflect 在 secondary
     expect(result.dangerousWrongCutCount).toBe(1);
@@ -1036,7 +1044,7 @@ describe("BossReactiveController", () => {
     advanceToOpportunity(controller);
     hitCurrentArmor(controller, "s_retry", 100);
     controller.reset();
-    const result = controller.finishSlash("s_retry", 100, 100);
+    const result = controller.finishSlash("s_retry", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.armorHit).toBe(false);
     expect(result.events).toEqual([]);
   });
@@ -1046,7 +1054,7 @@ describe("BossReactiveController", () => {
     advanceToOpportunity(controller);
     hitCurrentArmor(controller, "s_pending", 100);
     controller.reset();
-    const result = controller.finishSlash("s_pending", 100, 100);
+    const result = controller.finishSlash("s_pending", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.armorHit).toBe(false);
   });
 
@@ -1198,7 +1206,7 @@ describe("BossReactiveController", () => {
     c.registerReactiveSlashStart("s_empty");
     expect(c.getGraceSlashId()).toBe("s_empty");
     c.resolveGeometry(geom(v(50, 700), v(100, 750), "s_empty", 50));
-    c.finishSlash("s_empty", 100, 100);
+    c.finishSlash("s_empty", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(c.getGraceSlashId()).toBe(null);
   });
 
@@ -1288,7 +1296,7 @@ describe("BossReactiveController", () => {
     c.setProgrammaticSlashEnergy(100);
     const pos = c.getActiveArmorWorldPos()!;
     c.resolveGeometry(geom(v(pos.cx - pos.rx * 0.5, pos.cy - pos.ry * 0.5), v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5), "s_armor_only", 100));
-    const result = c.finishSlash("s_armor_only", 100, 100);
+    const result = c.finishSlash("s_armor_only", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.armorHit).toBe(true);
     // P0-3: armor-only 时 events 中仅包含 1 个 armor event（来自 commitArmorDamage），
     // finishSlash 不再重复 push
@@ -1311,7 +1319,7 @@ describe("BossReactiveController", () => {
     // 在护甲中心附近确定性注入 normal 弹幕（vx=0, vy=0 静止），确保 resolveGeometry 同时命中弹幕和护甲
     const proj = c.spawnProjectileForTest("normal", pos.cx, pos.cy + 5, 0, 0);
     c.resolveGeometry(geom(v(pos.cx - pos.rx, pos.cy - pos.ry), v(pos.cx + pos.rx, pos.cy + pos.ry), "s_cut_armor", 100));
-    const result = c.finishSlash("s_cut_armor", 100, 100);
+    const result = c.finishSlash("s_cut_armor", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.armorHit).toBe(true);
     // P0-3: cut+armor 时 events 包含 1 个 armor event + 1 个 cut event
     expect(result.events.length).toBe(2);
@@ -1333,7 +1341,7 @@ describe("BossReactiveController", () => {
     // 用 buildCapsuleTestGeometry 构造仅 visibleBlade 命中护甲的几何
     const geo = buildCapsuleTestGeometry("visibleBlade", { x: pos.cx, y: pos.cy }, 0, "s_visblade", 100);
     c.resolveGeometry(geo);
-    const result = c.finishSlash("s_visblade", 100, 100);
+    const result = c.finishSlash("s_visblade", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.armorHit).toBe(true);
     expect(result.primarySource).toBe("visibleBlade");
   });
@@ -1346,7 +1354,7 @@ describe("BossReactiveController", () => {
     const pos = c.getActiveArmorWorldPos()!;
     const geo = buildCapsuleTestGeometry("tipSweep", { x: pos.cx, y: pos.cy }, 0, "s_tipsweep", 100);
     c.resolveGeometry(geo);
-    const result = c.finishSlash("s_tipsweep", 100, 100);
+    const result = c.finishSlash("s_tipsweep", createBladeMomentumState(100, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.armorHit).toBe(true);
     expect(result.primarySource).toBe("tipSweep");
   });
@@ -1359,7 +1367,7 @@ describe("BossReactiveController", () => {
     // 使用远离所有护甲的几何
     const geo = buildCapsuleTestGeometry("visibleBlade", { x: 50, y: 700 }, 0, "s_all_miss", 50);
     c.resolveGeometry(geo);
-    const result = c.finishSlash("s_all_miss", 50, 100);
+    const result = c.finishSlash("s_all_miss", createBladeMomentumState(50, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.armorHit).toBe(false);
     expect(result.primaryResult).toBe("empty_swing");
   });
@@ -1408,7 +1416,7 @@ describe("BossReactiveController", () => {
       expect(segEvents).toEqual([]);
     }
 
-    const result = c.finishSlash("s_close", 20, 100);
+    const result = c.finishSlash("s_close", createBladeMomentumState(20, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.armorHit).toBe(true);
     // P1-B: 护甲只扣一次，events 不增加（仅 1 个 armor event）
     expect(result.events.length).toBe(1);
@@ -1432,7 +1440,7 @@ describe("BossReactiveController", () => {
     const segEvents2 = c.resolveGeometry(geom(v(pos.cx - pos.rx, pos.cy - pos.ry), v(pos.cx + pos.rx, pos.cy + pos.ry), "s_close2", 50));
     expect(segEvents2).toEqual([]);
 
-    const result = c.finishSlash("s_close2", 50, 100);
+    const result = c.finishSlash("s_close2", createBladeMomentumState(50, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.armorHit).toBe(true);
     // armor-only: 只有 1 个 event（护甲），弹幕只命中一个且仅在第一次 resolveGeometry
     expect(result.events.length).toBe(2); // 1 armor + 1 projectile_cut from first resolve
@@ -1479,7 +1487,7 @@ describe("BossReactiveController", () => {
       30,               // visualLength（默认值）
       3,                // width（默认值）
       "s_tipsweep_int",
-      80                // lockedEnergy
+      createBladeMomentumState(80, BLADE_MOMENTUM_CONFIG.baseMax),  // lockedMomentum
     );
 
     // 分别检查每个胶囊对护甲椭圆的命中状态
@@ -1508,9 +1516,105 @@ describe("BossReactiveController", () => {
 
     // 验证完整 Game 生产链路：resolveGeometry → finishSlash → primarySource
     c.resolveGeometry(geometry);
-    const result = c.finishSlash("s_tipsweep_int", 80, 200);
+    const result = c.finishSlash("s_tipsweep_int", createBladeMomentumState(80, BLADE_MOMENTUM_CONFIG.baseMax), 200, DEFAULT_BLADE_RUN_MODIFIERS);
     expect(result.armorHit).toBe(true);
     expect(result.primarySource).toBe("tipSweep");
     expect(result.primaryResult).toBe("armor_broken");
+  });
+
+  // ================================================================
+  // P0-10: V0723014-Final 生产集成测试（max=140/180 真实 Controller 结算）
+  // 复审指令文档要求：max=140/180 必须验证真实生产结算，不能只测纯函数
+  // ================================================================
+
+  /** P0-10 辅助：用指定 max 构造 momentum 并命中当前护甲 */
+  function hitWithMax(
+    c: BossReactiveController,
+    slashId: string,
+    energy: number,
+    max: number,
+  ): ReturnType<BossReactiveController["finishSlash"]> {
+    c.setProgrammaticSlashEnergy(energy);
+    const pos = c.getActiveArmorWorldPos()!;
+    const segA = v(pos.cx - pos.rx * 0.5, pos.cy - pos.ry * 0.5);
+    const segB = v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5);
+    const momentum = createBladeMomentumState(energy, max);
+    const angle = Math.atan2(segB.y - segA.y, segB.x - segA.x);
+    const geometry = buildReactiveSlashGeometry(segA, segB, angle, 30, 3, slashId, momentum);
+    c.resolveGeometry(geometry);
+    return c.finishSlash(slashId, momentum, 100, DEFAULT_BLADE_RUN_MODIFIERS);
+  }
+
+  describe("P0-10: max=140/180 生产集成测试", () => {
+    it("max=140 enhanced (42/140) → 护甲伤害严格 55 → finishSlash 后 max 仍 140", () => {
+      const c = new BossReactiveController();
+      advanceToOpportunity(c);
+      const result = hitWithMax(c, "s_max140_enh", 42, 140);
+      expect(result.armorHit).toBe(true);
+      expect(result.armorDurabilityDamage).toBe(55);
+      expect(result.momentumBefore.max).toBe(140);
+      expect(result.momentumAfter.max).toBe(140);
+      expect(result.momentumBefore.band).toBe("enhanced");
+    });
+
+    it("max=140 burst (98/140) → 直接破甲 → 可反射", () => {
+      const c = new BossReactiveController();
+      advanceToOpportunity(c);
+      const result = hitWithMax(c, "s_max140_burst", 98, 140);
+      expect(result.armorBroken).toBe(true);
+      expect(result.momentumBefore.band).toBe("burst");
+      expect(result.momentumBefore.max).toBe(140);
+      expect(result.momentumAfter.max).toBe(140);
+    });
+
+    it("max=140 奖励后 energyAfter 不超过 140（封顶用 momentumBefore.max）", () => {
+      const c = new BossReactiveController();
+      advanceToOpportunity(c);
+      // 98/140 burst 破甲，破甲奖励 22 → energyAfter 应 ≤ 140
+      const result = hitWithMax(c, "s_max140_cap", 98, 140);
+      expect(result.energyAfter).toBeLessThanOrEqual(140);
+      expect(result.momentumAfter.current).toBeLessThanOrEqual(140);
+      expect(result.momentumAfter.max).toBe(140);
+    });
+
+    it("结果不变量: energyBefore === momentumBefore.current, energyAfter === momentumAfter.current", () => {
+      const c = new BossReactiveController();
+      advanceToOpportunity(c);
+      const result = hitWithMax(c, "s_invariant", 50, 100);
+      expect(result.energyBefore).toBe(result.momentumBefore.current);
+      expect(result.energyAfter).toBe(result.momentumAfter.current);
+      expect(result.momentumBefore.max).toBe(result.momentumAfter.max);
+    });
+
+    it("中途成长锁定: 起刀 70/100 burst → finishSlash 仍用起刀快照 max=100", () => {
+      const c = new BossReactiveController();
+      advanceToOpportunity(c);
+      // 模拟：起刀时 lockedMomentum=70/100，即使中途 Game 的 reactiveBladeMax 改成 140，
+      // finishSlash 用的还是起刀快照 momentumBefore
+      const momentumBefore = createBladeMomentumState(70, 100);
+      c.setProgrammaticSlashEnergy(70);
+      const pos = c.getActiveArmorWorldPos()!;
+      const segA = v(pos.cx - pos.rx * 0.5, pos.cy - pos.ry * 0.5);
+      const segB = v(pos.cx + pos.rx * 0.5, pos.cy + pos.ry * 0.5);
+      const angle = Math.atan2(segB.y - segA.y, segB.x - segA.x);
+      const geometry = buildReactiveSlashGeometry(segA, segB, angle, 30, 3, "s_lock", momentumBefore);
+      c.resolveGeometry(geometry);
+      const result = c.finishSlash("s_lock", momentumBefore, 100, DEFAULT_BLADE_RUN_MODIFIERS);
+      // 本刀仍用起刀快照
+      expect(result.momentumBefore.max).toBe(100);
+      expect(result.momentumBefore.band).toBe("burst");
+      expect(result.momentumAfter.max).toBe(100);
+    });
+
+    it("max=180 节点推导: 126/180 → burst + blade_reach + armor_break", () => {
+      const c = new BossReactiveController();
+      advanceToOpportunity(c);
+      const result = hitWithMax(c, "s_max180", 126, 180);
+      expect(result.momentumBefore.max).toBe(180);
+      expect(result.momentumBefore.band).toBe("burst");
+      expect(result.momentumBefore.activeNodes).toContain("blade_reach");
+      expect(result.momentumBefore.activeNodes).toContain("armor_break");
+      expect(result.momentumAfter.max).toBe(180);
+    });
   });
 });

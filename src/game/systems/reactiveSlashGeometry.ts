@@ -39,10 +39,8 @@ export type ReactiveSlashGeometry = {
   width: number;
   /** 可见刀身长度（来自 reactiveBladeEffect.visualLength） */
   visualLength: number;
-  /** 起刀锁定的刀势状态快照 (V0723014: 替代 lockedEnergy) */
+  /** 起刀锁定的刀势状态快照 */
   lockedMomentum: BladeMomentumState;
-  /** @deprecated 起刀锁定的刀势能量，从 lockedMomentum.current 派生 */
-  lockedEnergy: number;
   /** 有效碰撞线段：从 baseA 到 tipB（手指轨迹 + 可见刀身合并） */
   effectiveSegA: Vec2;
   effectiveSegB: Vec2;
@@ -60,7 +58,7 @@ export type ReactiveSlashGeometry = {
  * @param visualLength 可见刀身长度（reactiveBladeEffect.visualLength）
  * @param width 刀身宽度（reactiveBladeEffect.width）
  * @param slashId 挥刀 ID
- * @param lockedEnergy 起刀锁定的刀势能量
+ * @param lockedMomentum 起刀锁定的刀势快照
  */
 export function buildReactiveSlashGeometry(
   baseA: Vec2,
@@ -69,8 +67,7 @@ export function buildReactiveSlashGeometry(
   visualLength: number,
   width: number,
   slashId: string,
-  lockedEnergy: number,
-  lockedMomentum?: BladeMomentumState,
+  lockedMomentum: BladeMomentumState,
 ): ReactiveSlashGeometry {
   const dx = Math.cos(directionAngle);
   const dy = Math.sin(directionAngle);
@@ -88,16 +85,6 @@ export function buildReactiveSlashGeometry(
   const touchTolerance = 10;
   const capsuleRadius = width / 2 + touchTolerance;
 
-  // 构建或派生 lockedMomentum
-  const momentum: BladeMomentumState = lockedMomentum ?? {
-    current: lockedEnergy,
-    max: 100,
-    ratio: lockedEnergy / 100,
-    band: lockedEnergy >= 70 ? "burst" : lockedEnergy >= 30 ? "enhanced" : "base",
-    activeNodes: [],
-    effectiveNodeThresholds: { blade_reach: 0.30, armor_break: 0.60, precision_reflect: 0.90 },
-  };
-
   return {
     slashId,
     baseA,
@@ -106,8 +93,7 @@ export function buildReactiveSlashGeometry(
     tipA,
     width,
     visualLength,
-    lockedMomentum: momentum,
-    lockedEnergy,
+    lockedMomentum,
     // 有效碰撞线段：从上一手指点到当前刀尖（覆盖手指轨迹 + 可见刀身）
     effectiveSegA: baseA,
     effectiveSegB: tipB,

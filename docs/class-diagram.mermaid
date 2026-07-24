@@ -1,147 +1,124 @@
 classDiagram
-    %% ── 配置层 ──
-    class BLADE_MOMENTUM_CONFIG {
-        +baseMax: 100
-        +initialRatio: 0.35
-        +bandThresholds: ~enhanced: 0.30, burst: 0.70~
-        +abilityNodes: ~blade_reach: 0.30, armor_break: 0.60, precision_reflect: 0.90~
-        +thresholdClamp: ~min: 0.05, max: 1.00~
-    }
-
-    %% ── 领域类型 ──
-    class BladeMomentumBand {
-        &lt;&lt;enumeration&gt;&gt;
-        base
-        enhanced
-        burst
-    }
-
-    class BladeAbilityNodeId {
-        &lt;&lt;enumeration&gt;&gt;
-        blade_reach
-        armor_break
-        precision_reflect
-    }
-
-    class BladeMomentumState {
-        +current: number
-        +max: number
-        +ratio: number
-        +band: BladeMomentumBand
-        +activeNodes: BladeAbilityNodeId[]
-        +effectiveNodeThresholds: Record~BladeAbilityNodeId, number~
-    }
-
-    class BladeRunModifiers {
-        +maxBonus: number = 0
-        +floorBonus: number = 0
-        +gainMultiplier: number = 1
-        +costMultiplier: number = 1
-        +nodeThresholdShift: Partial~Record~BladeAbilityNodeId, number~~
-    }
-
-    class DEFAULT_BLADE_RUN_MODIFIERS {
-        +maxBonus: 0
-        +floorBonus: 0
-        +gainMultiplier: 1
-        +costMultiplier: 1
-        +nodeThresholdShift: ~
-    }
-
-    %% ── 纯函数 ──
-    class BladeMomentumPureFunctions {
-        +createBladeMomentumState(current, max, modifiers?) BladeMomentumState
-        +resolveBladeMomentumRatio(current, max) number
-        +resolveBladeMomentumBand(ratio) BladeMomentumBand
-        +resolveEffectiveNodeThresholds(modifiers) Record
-        +resolveActiveBladeNodes(ratio, thresholds) BladeAbilityNodeId[]
-        +applyBladeMaxChangePreserveRatio(current, oldMax, newMax) ~current, max, ratio~
-        +applyBladeRunMaxModifier(state, modifiers) BladeMomentumState
-    }
-
-    %% ── Geometry ──
-    class ReactiveSlashGeometry {
-        +slashId: string
-        +baseA: Vec2
-        +baseB: Vec2
-        +tipB: Vec2
-        +tipA: Vec2
-        +width: number
-        +visualLength: number
-        +lockedMomentum: BladeMomentumState
-        +lockedEnergy: number @deprecated
-        +effectiveSegA: Vec2
-        +effectiveSegB: Vec2
-        +effectiveRadius: number
-        +capsules: Capsule[]
-    }
-
-    %% ── 结算结果 ──
-    class ReactiveSlashResolveResult {
-        +slashId: string
-        +energyAfter: number
-        +energyBefore: number
-        +momentumBefore: BladeMomentumState
-        +momentumAfter: BladeMomentumState
-        +baseCost: number
-        +projectileCutCount: number
-        +projectileReflectCount: number
-        +armorHit: boolean
-        +armorDurabilityDamage: number
-        +armorBroken: boolean
-        +allArmorBroken: boolean
-        +primaryResult: string
-        +primarySource: CapsuleSource | "-"
-        +events: ReactiveCollisionEvent[]
-        +unclampedAfter: number
-    }
-
-    %% ── 核心类 ──
     class Game {
-        -energy: number
-        -reactiveBladeMax: number
-        -reactiveBladeRunModifiers: BladeRunModifiers
-        +getReactiveBladeMomentum() BladeMomentumState
-        -applyReactiveBladeMaxBonus(maxBonusDelta) void
-        -startSlash(pos, pending?) void
-        -finalizeBossSlashCommon(trail) void
+        -_lastReactiveResolve: object
+        -_currentReactiveSegmentEvents: ReactiveCollisionEvent[]
+        -_lastResolvedReactiveEvents: ReactiveCollisionEvent[]
+        -_lastReactiveExitSnapshot: object
+        -_lastReactiveSlashGeometry: ReactiveSlashGeometry
+        +getState() : object
+        -checkReactiveProjectileHits(a, b, trail)
+        -finalizeBossSlashCommon(trail)
+        -drawReactiveDebugOverlay(ctx, rc)
     }
 
     class BossReactiveController {
         -_phase: BossPhaseState
-        +resolveGeometry(geometry: ReactiveSlashGeometry) ReactiveCollisionEvent[]
-        +finishSlash(slashId, energyBefore, pathLen) ReactiveSlashResolveResult
-        -calculateArmorDamage(momentum: BladeMomentumState, armor) number
-        +getBladeEffect(momentum: BladeMomentumState) BladeContinuousEffect
-        +updateBladeEffect(momentum: BladeMomentumState) void
+        -_session: ReactiveSlashSession
+        -_pendingSlashResult: PendingReactiveSlashResult
+        -_resolvedSlashId: string
+        -_graceSlashId: string
+        -armorTargets: ReactiveArmorTarget[]
+        -activeArmorIndex: number
+        -projectiles: Projectile[]
+        -playerHp: PlayerHpState
+        -_lastArmorCollisionSource: CapsuleSource
+        -_lastArmorHitPos: Vec2
+        +currentSlashEnergy: number
+        +phase: BossPhaseState
+        +inputLocked: boolean
+        +bossModeActive: boolean
+        +reset()
+        +update(dt)
+        +registerReactiveSlashStart(slashId)
+        +resolveGeometry(geometry): ReactiveCollisionEvent[]
+        +finishSlash(slashId, energyBefore, pathLen): ReactiveSlashResolveResult
+        +getReactiveSnapshot()
+        +getProjectiles(): Projectile[]
+        +markProjectilePlayerHit(id): ProjectileKind
+        +getActiveArmorWorldPos()
+        +getArmorDurability()
+        +takeDamage(amount)
+        +spawnProjectileForTest(kind, x, y, vx?, vy?): Projectile
+        +getBodyWorldGeometry(): BodyPartGeometry[]
+        -commitArmorDamage(energy, index, source, hitPos): PendingReactiveSlashResult
+        -buildResolveResult(slashId, energyBefore, baseCost, pending): ReactiveSlashResolveResult
+        -transitionToResolve()
+        -transitionToRecovery()
+        ~~resolveSegment(segA, segB, slashId, bladeReach)~~
+        ~~segmentHitEllipse(segA, segB, cx, cy, rx, ry)~~
     }
 
-    class BladeContinuousEffect {
-        +visualLength: number
-        +width: number
-        +brightness: number
-        +color: string
-        +glowColor: string
+    class ReactiveSlashSession {
+        +slashId: string
+        +events: ReactiveCollisionEvent[]
+        +bodyContact: boolean
+        +lastBodyHitPos: Vec2
+        +hitProjectileIds: Set~string~
     }
 
-    %% ── 关系 ──
-    BLADE_MOMENTUM_CONFIG ..> BladeMomentumState : configures
-    BLADE_MOMENTUM_CONFIG ..> BladeMomentumBand : defines thresholds
-    BLADE_MOMENTUM_CONFIG ..> BladeAbilityNodeId : defines nodes
-    BladeRunModifiers ..> BladeAbilityNodeId : shifts thresholds
-    DEFAULT_BLADE_RUN_MODIFIERS ..|> BladeRunModifiers : implements
-    BladeMomentumState --> BladeMomentumBand : band
-    BladeMomentumState --> BladeAbilityNodeId : activeNodes
-    BladeMomentumState --> BladeRunModifiers : computed from
-    BladeMomentumPureFunctions ..> BladeMomentumState : creates
-    BladeMomentumPureFunctions ..> BladeRunModifiers : consumes
-    ReactiveSlashGeometry --> BladeMomentumState : lockedMomentum
-    ReactiveSlashResolveResult --> BladeMomentumState : momentumBefore, momentumAfter
-    Game --> BladeMomentumState : getReactiveBladeMomentum()
-    Game --> BladeRunModifiers : reactiveBladeRunModifiers
-    Game --> BossReactiveController : reactiveController
-    Game --> ReactiveSlashGeometry : builds via buildReactiveSlashGeometry
-    BossReactiveController --> ReactiveSlashGeometry : resolveGeometry input
-    BossReactiveController --> ReactiveSlashResolveResult : finishSlash output
-    BossReactiveController --> BladeContinuousEffect : getBladeEffect output
-    ReactiveSlashGeometry --> BladeContinuousEffect : derived from ~via momentum~
+    class PendingReactiveSlashResult {
+        +slashId: string
+        +resolved: boolean
+        +consumed: boolean
+        +armorIndex: number
+        +armorDamage: number
+        +armorBroken: boolean
+        +allArmorBroken: boolean
+        +armorCollisionSource: CapsuleSource
+        +armorHitPos: Vec2
+        +events: ReactiveCollisionEvent[]
+        +bodyContact: boolean
+    }
+
+    class ReactiveSlashResolveResult {
+        +slashId: string
+        +energyAfter: number
+        +energyBefore: number
+        +baseCost: number
+        +projectileCutCount: number
+        +projectileReflectCount: number
+        +dangerousWrongCutCount: number
+        +projectileCutReward: number
+        +projectileReflectReward: number
+        +dangerousWrongCutPenalty: number
+        +armorReward: number
+        +bodyWrongHitPenalty: number
+        +emptySwingPenalty: number
+        +armorHit: boolean
+        +armorDurabilityDamage: number
+        +armorBroken: boolean
+        +allArmorBroken: boolean
+        +bodyWrongHit: boolean
+        +primaryResult: string
+        +secondaryResults: string[]
+        +primarySource: CapsuleSource
+        +armorHitPos: Vec2
+        +events: ReactiveCollisionEvent[]
+        +unclampedAfter: number
+    }
+
+    class Projectile {
+        +id: string
+        +kind: ProjectileKind
+        +x, y, vx, vy: number
+        +active: boolean
+        +reflected: boolean
+        +resolved: boolean
+        +resolution: string
+        +hitBySlashId: string
+    }
+
+    class ReactiveCollisionEvent {
+        +kind: string
+        +hitPos: Vec2
+        +collisionSource: CapsuleSource
+        +projectileId: string
+        +projectileKind: ProjectileKind
+    }
+
+    BossReactiveController --> ReactiveSlashSession : holds
+    BossReactiveController --> PendingReactiveSlashResult : holds
+    BossReactiveController --> ReactiveSlashResolveResult : produces
+    BossReactiveController --> Projectile : manages
+    BossReactiveController --> ReactiveCollisionEvent : produces
+    Game --> BossReactiveController : owns

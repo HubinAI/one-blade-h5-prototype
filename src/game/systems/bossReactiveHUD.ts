@@ -14,7 +14,7 @@ export function drawEnergyBar(
   y: number,
   width: number,
   height: number,
-  band?: BladeMomentumBand,
+  band: BladeMomentumBand,
 ): void {
   const ratio = clamp(energy / Math.max(1, maxEnergy), 0, 1);
   ctx.save();
@@ -23,22 +23,13 @@ export function drawEnergyBar(
   ctx.beginPath();
   ctx.roundRect(x, y, width, height, 4);
   ctx.fill();
-  // 填充 — V0723014: 颜色按 band 读取，fallback 到 ratio 硬编码
+  // P0-9: 颜色按 band 读取，band 必传，删除 ratio fallback（避免第三套判档源）
   let barColor: string;
   let glowColor: string;
   if (band === "base") {
     barColor = "#666666";
     glowColor = "rgba(102,102,102,0.4)";
   } else if (band === "enhanced") {
-    barColor = "#5bc0ff";
-    glowColor = "rgba(91,192,255,0.6)";
-  } else if (band === "burst") {
-    barColor = "#fff4a0";
-    glowColor = "rgba(255,244,160,0.8)";
-  } else if (ratio < 0.3) {
-    barColor = "#666666";
-    glowColor = "rgba(102,102,102,0.4)";
-  } else if (ratio < 0.7) {
     barColor = "#5bc0ff";
     glowColor = "rgba(91,192,255,0.6)";
   } else {

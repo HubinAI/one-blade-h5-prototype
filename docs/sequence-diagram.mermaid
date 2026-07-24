@@ -1,69 +1,57 @@
 sequenceDiagram
-    actor Player
-    participant Game
-    participant RGeometry as buildReactiveSlashGeometry
+    participant E2E as E2E Test
+    participant Game as Game.getState
     participant RC as BossReactiveController
-    participant BMF as bladeMomentum.ts
-    participant HUD as bossReactiveHUD
 
-    Note over Player,HUD: ── 起刀阶段 ──
+    Note over E2E,RC: 场景1: bridgeTriggered 前（bossReactive 模式）
+    E2E->>Game: getState()
+    Game->>Game: gameMode === "bossReactive" && reactiveController
+    Game-->>E2E: { ..., lastReactiveExitSnapshot: undefined }
 
-    Player->>Game: handlePointerDown(pos)
-    Game->>Game: lockedEnergy = clamp(energy, 0, reactiveBladeMax)
-    Game->>BMF: createBladeMomentumState(lockedEnergy, reactiveBladeMax, modifiers)
-    BMF-->>Game: lockedMomentum: BladeMomentumState
-    Note over Game: pendingSlash = { startPos, lockedMomentum, ... }
+    Note over E2E,RC: bridgeTriggered → 捕获 snapshot
+    RC->>RC: bridgeTriggered = true
+    Game->>Game: _lastReactiveExitSnapshot = snap
+    Game->>Game: reactiveController = null, gameMode = "boss"
 
-    Player->>Game: handlePointerMove → commitPendingSlash → startSlash
-    Game->>RC: getBladeEffect(lockedMomentum)
-    RC-->>Game: BladeContinuousEffect (visual snapshot)
-    Game->>Game: currentSlash.reactiveBladeEffect = effect
-    Note over Game: SlashTrail 创建完成，lockedMomentum 已锁定
+    Note over E2E,RC: 场景2: 切到 boss 模式后
+    E2E->>Game: getState()
+    Game->>Game: gameMode === "boss"
+    Game-->>E2E: { ..., lastReactiveExitSnapshot: { armorProgress: "3/3", ... } }
 
-    Note over Player,HUD: ── 刀路延伸阶段（每帧） ──
+sequenceDiagram
+    participant Game as Game
+    participant RC as BossReactiveController
 
-    Player->>Game: extendSlash(nextPos)
-    Game->>RGeometry: buildReactiveSlashGeometry(baseA,baseB,angle,visualLength,width,slashId,**lockedMomentum**)
-    RGeometry-->>Game: ReactiveSlashGeometry (3 capsules)
     Game->>RC: resolveGeometry(geometry)
+    RC->>RC: commitArmorDamage(energy, index, source, hitPos)
+    RC->>RC: _session.events.push(armorEv)  // 第1次 push
+    RC-->>Game: [armorEv]  // newEvents 包含 armorEv
 
-    alt band === "burst" (≥70%)
-        RC->>RC: reflective 弹幕 → reflect
-    else band === "enhanced" (30-69%) or "base" (<30%)
-        RC->>RC: reflective 弹幕 → cut
-    end
-
-    RC-->>Game: ReactiveCollisionEvent[] (per-segment)
-
-    Note over Player,HUD: ── 收刀结算 ──
-
-    Player->>Game: handlePointerUp → endSlash → finalizeBossSlashCommon
     Game->>RC: finishSlash(slashId, energyBefore, pathLen)
+    RC->>RC: events = [...this._session.events]  // 已含 armorEv
+    Note over RC: 不再 push armorEv 到 events
+    RC-->>Game: { events: [armorEv], ... }  // 仅1次
 
-    RC->>BMF: createBladeMomentumState(energyBefore, max, modifiers)
-    BMF-->>RC: momentumBefore
+sequenceDiagram
+    participant Game as Game
+    participant RC as BossReactiveController
 
-    alt momentumBefore.band === "burst"
-        RC->>RC: armorDamage = remainingDurability (一刀破甲)
-    else momentumBefore.band === "enhanced"
-        RC->>RC: armorDamage = 55
-    else momentumBefore.band === "base"
-        RC->>RC: armorDamage = 25
+    Note over Game,RC: 起刀
+    Game->>Game: _currentReactiveSegmentEvents = []
+
+    loop 每帧 pointerMove
+        Game->>RC: resolveGeometry(geometry)
+        RC-->>Game: newEvents
+        Game->>Game: _currentReactiveSegmentEvents = newEvents
+        Game->>Game: 粒子反馈（从 _currentReactiveSegmentEvents 读）
     end
 
-    RC->>RC: unclampedEnergy = energyBefore - baseCost + rewards - penalties
-    RC->>RC: energyAfter = clamp(unclampedEnergy, floor, momentumBefore.max)
-    RC->>BMF: createBladeMomentumState(energyAfter, max, modifiers)
-    BMF-->>RC: momentumAfter
+    Note over Game,RC: 收刀
+    Game->>RC: finishSlash(slashId, ...)
+    RC-->>Game: result
+    Game->>Game: _lastReactiveResolve = result
+    Game->>Game: _lastResolvedReactiveEvents = result.events
 
-    RC-->>Game: ReactiveSlashResolveResult { momentumBefore, momentumAfter, energyAfter, ... }
-
-    Game->>Game: this.energy = result.energyAfter
-    Note over Game: 验证: energyAfter == momentumAfter.current
-
-    Note over Player,HUD: ── HUD 更新 ──
-
-    Game->>BMF: getReactiveBladeMomentum() → BladeMomentumState
-    Game->>HUD: drawEnergyBar(momentum.current, momentum.max, ...)
-    HUD->>HUD: ratio = current/max; color by band
-    Game->>Game: drawReactiveDebugOverlay (momentum ratio/band/activeNodes)
+    Note over Game,RC: Debug 绘制（全部来自同一时间点）
+    Game->>Game: drawReactiveDebugOverlay
+    Note over Game: lastResult ← _lastReactiveResolve.primaryResult<br/>eventsSummary ← _lastReactiveResolve.eventsSummary<br/>counts ← _lastReactiveResolve.cutCount/etc.
