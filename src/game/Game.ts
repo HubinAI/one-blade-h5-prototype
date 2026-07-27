@@ -1726,6 +1726,12 @@ export class Game {
     this.updateTexts(scaledDt);
     this.updateSubBlades(scaledDt);
 
+    // V0727012修复: 更新策略切片弹幕位移（此前漏掉，供能弹停在原地）
+    for (const p of ssc.getProjectiles()) {
+      p.x += p.vx * scaledDt;
+      p.y += p.vy * scaledDt;
+    }
+
     // 更新控制器（已包含弹幕位置更新）
     ssc.update(scaledDt);
 
