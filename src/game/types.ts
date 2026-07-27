@@ -1,0 +1,633 @@
+import type { BladeMomentumState } from "./config/bladeMomentum";
+
+export type Vec2 = {
+  x: number;
+  y: number;
+};
+
+export type BladeTier = "weak" | "normal" | "strong" | "burst";
+export type EnemyKind = "infantry" | "shield" | "powder" | "core" | "elite" | "boss" | "splitter" | "tractor";
+export type EliteKind = "fireRing" | "heal" | "aura";
+export type BossId = "yaoWang" | "moXiu" | "huaYao" | "thunderGeneral";
+/** P4.4A: Boss状态机阶段 */
+export type BossPhaseState = "loading" | "intro" | "armor" | "armor_break_show" | "armor_complete_hold" | "pursuit_intro" | "pursuit" | "core_break" | "execution_intro" | "execution" | "execution_success" | "execution_fail" | "victory_show" | "tribulation_intro" | "tribulation" | "breakthrough_show" | "result" | "fail" | "exit"
+  | "armor_prepare" | "armor_threat" | "armor_opportunity" | "armor_resolve" | "armor_recovery";
+export type PickupKind = "drum" | "soul" | "oil";
+export type GamePhase = "playing" | "buffChoice" | "revive" | "won" | "lost" | "chestOpen" | "paused_for_chest";
+export type RatingGrade = "C" | "B" | "A" | "S" | "SS" | "神之一刀";
+
+// ---- P4.4A.4: 终结一刀结果类型 ----
+export type ExecutionResolveResult =
+  | { kind: "execution_hit"; hitPos: Vec2; coreCenter: Vec2; slashId: string }
+  | { kind: "execution_miss"; slashId: string };
+
+// ---- P4.4A.3: 追击结果类型 ----
+export type PursuitResolveResult =
+  | {
+      kind: "pursuit_hit";
+      hitPos: Vec2;
+      coreCenter: Vec2;
+      progress: number;
+      maxProgress: number;
+      completed: boolean;
+      slashId: string;
+    }
+  | {
+      kind: "pursuit_body_hit";
+      hitPos: Vec2;
+      slashId: string;
+    }
+  | {
+      kind: "pursuit_miss";
+      slashId: string;
+    };
+
+// ---- P4.3A: 战场三层流动压力 ----
+export type BattlefieldPressureLayer = "rear" | "mid" | "front";
+export type EnemyFlowRole = "vanguard" | "main" | "reserve";
+export type EnemyFlowState = {
+  role: EnemyFlowRole;
+  currentLayer: BattlefieldPressureLayer;
+  targetSpeedMultiplier: number;
+  currentSpeedMultiplier: number;
+  spacingMultiplier: number;
+  spawnGroupId: string;
+  spawnOrder: number;
+  depthSeed: number;
+};
+
+// ---- P4.2: 统一播报调度 ----
+export type BattleNoticePriority = "S" | "A" | "B";
+export type BattleNoticeCategory = "victory" | "defeat" | "boss" | "elite" | "mechanic" | "milestone" | "system";
+export type BattleNoticeStyle = "gold" | "danger" | "purple" | "blue" | "neutral";
+export type BattleNotice = {
+  id: string;
+  text: string;
+  subtext?: string;
+  priority: BattleNoticePriority;
+  category: BattleNoticeCategory;
+  style: BattleNoticeStyle;
+  duration: number;
+  elapsed: number;
+  dedupeKey: string;
+  cooldown: number;
+  interrupt: boolean;
+  createdAt: number;
+  /** P4.2A.3: 自定义Y坐标 */
+  anchorY?: number;
+  /** P4.2A.3: 布局类型 */
+  layout?: "default" | "boss-intro" | "boss-phase" | "elite";
+};
+
+export type CombatFloatCategory = "damage" | "mechanic" | "pickup" | "energy" | "status" | "tutorial" | "blade-tier";
+export type CombatFloatPriority = "A" | "B" | "C";
+
+// ---- 战术指令路线系统 ----
+export type TacticalRoute = "scorch" | "pierce" | "ironWall";
+
+export type BuffId =
+  | "oilSoak"       // 燎原1：火油浸润
+  | "chainFuse"     // 燎原2：连锁引信
+  | "scorch"        // 燎原3：燎原
+  | "pierceShield"  // 贯阵1：穿盾
+  | "shatterCore"   // 贯阵2：碎阵
+  | "shatterArmy"   // 贯阵3：破军
+  | "fortress"      // 鐵壁1：堅城
+  | "warDrum"       // 鐵壁2：鼓阵
+  | "soulReturn"    // 鐵壁3：魂返
+  | "chest_first_clear"; // 第一关宝箱固定Buff（V0715008）
+
+// ---- 技能雷达四维 ----
+export type SkillDimension = "momentum" | "precision" | "shatter" | "guard";
+export type SkillScores = {
+  momentum: number;   // 势：蓄势能力
+  precision: number;  // 斩：精准能力
+  shatter: number;    // 破：破阵能力
+  guard: number;      // 守：御守能力
+};
+
+export type SkillMilestone = {
+  id: string;
+  dimension: SkillDimension;
+  title: string;
+  achieved: boolean;
+  progress: number;
+  target: number;
+};
+
+export type EnemySpawn = {
+  kind: EnemyKind;
+  x: number;
+  yOffset?: number;
+  count?: number;  // 数量，1 表示单只
+};
+
+export type PickupSpawn = {
+  kind: PickupKind;
+  x: number;
+  yOffset?: number;
+};
+
+export type MidfieldEventType = 'none' | 'gather' | 'charge_pause';
+
+export type WaveConfig = {
+  name: string;
+  delay: number;
+  spawnAt?: number;
+  speedMultiplier?: number;
+  enemies: EnemySpawn[];
+  pickups?: PickupSpawn[];
+  midfieldEventType?: MidfieldEventType;
+  eventTitle?: string;
+};
+
+// ---- 战术简报数据 ----
+export type BriefingData = {
+  highlightEnemies: Array<{ kind: EnemyKind; label: string; icon: string }>;
+  tacticalHint: string;
+  initialBladeTier: string;
+};
+
+export type LevelConfig = {
+  id: number;
+  title: string;
+  subtitle: string;
+  initialEnergy: number;
+  hp: number;
+  enemySpeed: number;
+  pickupChance: number;
+  durationSeconds: number;
+  buffTimes: number[];
+  waves: WaveConfig[];
+  briefing?: BriefingData;
+  /** 精英怪出现时间（秒），0=无 */
+  eliteSpawnAt?: number;
+  /** 精英怪子类型 */
+  eliteKind?: EliteKind;
+  /** Boss ID，undefined=无Boss */
+  bossId?: BossId;
+  /** 阵眼阵法ID */
+  formationId?: string;
+  /** 宝箱后爆发怪潮（V0715008 新增，二次打磨改用 edictBurstRounds） */
+  postChestWaves?: WaveConfig[];
+  /** 第一关固定宝箱Buff ID（V0715008 新增） */
+  chestBuffId?: string;
+  /** entryPhase 前5关覆写（V0715008 新增） */
+  entryOverride?: { multiplier: number; endY: number; maxDuration: number; spawnY: number };
+};
+
+/** 军令爆发阶段类型（二次打磨新增） */
+export type BattlePhase = 'main_waves' | 'elite' | 'chest' | 'edict_burst' | 'result';
+
+export type Enemy = {
+  id: string;
+  kind: EnemyKind;
+  x: number;
+  y: number;
+  radius: number;
+  hp: number;
+  maxHp: number;
+  speed: number;
+  hpDamage: number;
+  score: number;
+  energyGain: number;
+  alive: boolean;
+  ignited: boolean;
+  marked: boolean;
+  shieldCrack: number;
+  flash: number;
+  wobble: number;
+  /** 鐵壁堅城buff：触线后减速 */
+  slowedTimer: number;
+  /** 精英怪子类型 */
+  eliteKind?: EliteKind;
+  /** Boss ID */
+  bossId?: BossId;
+  /** Boss当前阶段 (0=phase1, 1=phase2, 2=phase3) */
+  bossPhase?: number;
+  /** 技能计时器 */
+  skillTimer?: number;
+  /** Boss技能冷却 */
+  skillCooldown?: number;
+  /** 阵眼阵法ID */
+  formationId?: string;
+  /** 当前亮字索引 */
+  formationLitIndex?: number;
+  /** 亮字切换计时器 */
+  formationLitTimer?: number;
+  /** 切错字次数 */
+  formationWrongHits?: number;
+  /** 中场聚阵：原始x坐标（归位用） */
+  homeX?: number;
+  /** 蓄冲倒计时器：>0表示正在蓄力，-1表示已冲刺完毕 */
+  chargeTimer?: number;
+  /** 中场事件波及标记（只有本波敌人受影响） */
+  spawnedWithEvent?: 'gather' | 'charge_pause';
+  /** 急冲兵：出生后0.8s速度×2.2，之后×0.8 */
+  rushTimer?: number;
+  /** 蛇形兵初始y（用于 sin 摆动） */
+  snakeSwayOriginY?: number;
+  /** 蛇形兵已经过时间（秒） */
+  snakeSwayT?: number;
+  /** 快速入场阶段：从顶端到中场 y=240 的加速段 */
+  entryPhase?: {
+    active: boolean;
+    endY: number;
+    speedMultiplier: number;
+    maxDuration: number;
+    elapsed: number;
+    completed: boolean;
+  };
+  /** 中场特性是否已激活（y>=260后激活一次） */
+  midfieldActivated?: boolean;
+  /** 中场视觉/行为状态 */
+  visualState?: 'normal' | 'powder_armed' | 'core_revealed' | 'shield_ready' | 'charging_warning' | 'elite_warning';
+  /** P2：精英受击文字冷却 */
+  lastHitTextAt?: number;
+  /** P2：精英濒死提示已触发标记 */
+  eliteLowHpWarned?: boolean;
+  /** P2：精英护盾破裂闪光计时 */
+  shieldBrokenFlash?: number;
+  /** P3：分裂兵状态 */
+  splitState?: "idle" | "warning" | "splitting" | "done";
+  splitTimer?: number;
+  splitCount?: number;
+  isSplitChild?: boolean;
+  isTutorialSplitter?: boolean;
+  mechanicProtectedTimer?: number;
+  /** P3：牵引兵状态 */
+  tractorState?: "idle" | "charging" | "pulling" | "cooldown" | "done";
+  tractorTimer?: number;
+  tractorPullCount?: number;
+  tractorTargetRefs?: Enemy[];
+  /** P4.3A.3: 敌人来源 */
+  spawnSource?: "normal" | "edict" | "split" | "elite" | "direct" | "daily" | "boss_supply";
+  /** P4.3A: 战场流动状态 */
+  flow?: EnemyFlowState;
+};
+
+export type Pickup = {
+  id: string;
+  kind: PickupKind;
+  x: number;
+  y: number;
+  radius: number;
+  active: boolean;
+  pulse: number;
+  life: number;
+  maxLife: number;
+};
+
+export type SlashPoint = Vec2 & {
+  t: number;
+  energyRatio: number;
+};
+
+export type SlashTrail = {
+  id: string;
+  tier: BladeTier;
+  lockedEnergy: number;
+  /** V0723014: 起刀锁定的刀势快照（替代 lockedEnergy 绝对值判定） */
+  lockedMomentum?: BladeMomentumState;
+  maxPower: number;
+  remainingPower: number;
+  maxDuration: number;
+  remainingDuration: number;
+  maxPathLength: number;
+  remainingPathLength: number;
+  pathUsed: number;
+  widthMultiplier: number;
+  energyBank: number;
+  explosionCount: number;
+  coreCollapseCount: number;
+  points: SlashPoint[];
+  hitEnemyIds: Set<string>;
+  hitPickupIds: Set<string>;
+  pendingExplosionIds: Set<string>;
+  pendingCoreIds: Set<string>;
+  oilTriggeredIds: Set<string>;
+  hasOil: boolean;
+  kills: number;
+  chain: number;
+  active: boolean;
+  /** P4.4B-R3 P1-A: Reactive 模式起刀时的连续刀势视觉快照。
+   *  起刀瞬间用 rc.getBladeEffect(lockedEnergy) 计算，整刀使用此快照，
+   *  不随实时刀势跳变（"一刀一象"）。 */
+  reactiveBladeEffect?: BladeContinuousEffect;
+};
+
+export type ParticleKind = "paper" | "spark" | "ring" | "rune" | "smoke" | "slash";
+
+export type Particle = Vec2 & {
+  id: string;
+  kind: ParticleKind;
+  vx: number;
+  vy: number;
+  life: number;
+  maxLife: number;
+  size: number;
+  color: string;
+  rotation: number;
+  spin: number;
+};
+
+export type FloatingText = Vec2 & {
+  id: string;
+  text: string;
+  life: number;
+  maxLife: number;
+  color: string;
+  size: number;
+  // P4.2: 信息降噪字段
+  category?: CombatFloatCategory;
+  priority?: CombatFloatPriority;
+  mergeKey?: string;
+  targetId?: string;
+  lane?: number;
+};
+
+export type BattleStats = {
+  kills: number;
+  maxSingleBlade: number;
+  maxChain: number;
+  oneBladeBreaks: number;
+  coreHits: number;
+  coreCollapses: number;
+  explosions: number;
+  usedReviveAd: boolean;
+  slashes: number;
+  pickups: number;
+  score: number;
+  /** 技能雷达原始数据（供SkillTracker计算） */
+  highBladeSlashCount: number;
+  totalSlashEnergy: number;
+  slashCount: number;
+  sharpTurnCount: number;
+  totalKillPerSlash: number;
+  chainKillTotal: number;
+  defenseLineHits: number;
+  remainingHp: number;
+  pickupCollectRate: number;
+  /** 本局击杀的精英/Boss（供图鉴追踪） */
+  killedElites: EliteKind[];
+  killedBoss: BossId | null;
+};
+
+export type RunRewards = {
+  coins: number;
+  battlePass: number;
+  shardName: string;
+  shardCount: number;
+  doubled: boolean;
+  chestOpened: boolean;
+  adChestOpened: boolean;
+  dailyBonusApplied?: boolean;
+  highYieldBonusApplied?: boolean;
+};
+
+export type RunProgress = {
+  runIndex: number;
+  chestProgress: number;
+  chestTarget: number;
+  codexFound: number;
+  codexTotal: number;
+  oneBladeChallenge: number;
+  oneBladeChallengeTarget: number;
+  fragmentName: string;
+  fragmentCount: number;
+  fragmentTarget: number;
+};
+
+export type BattleResult = {
+  win: boolean;
+  levelId: number;
+  levelTitle: string;
+  duration: number;
+  completedGoal: boolean;
+  score: number;
+  kills: number;
+  maxSingleBlade: number;
+  maxChain: number;
+  oneBladeBreaks: number;
+  triggeredOneBlade: boolean;
+  hitCore: boolean;
+  coreCollapseCount: number;
+  explosiveCount: number;
+  usedReviveAd: boolean;
+  canReviveAd: boolean;
+  canDoubleReward: boolean;
+  slashes: number;
+  rating: RatingGrade;
+  nextRatingHint: string;
+  nearMisses: string[];
+  rewards: RunRewards;
+  progress: RunProgress;
+  /** 技能雷达四维分数 */
+  skillScores: SkillScores;
+  /** 本局选择的路线（用于归因） */
+  selectedRoutes: TacticalRoute[];
+  /** 本局击杀的精英/Boss（图鉴追踪） */
+  killedElites: EliteKind[];
+  killedBoss: BossId | null;
+  /** V0723016-S1.2: 策略切片实验模式标志+总结数据 */
+  strategySlice?: boolean;
+  strategySliceSummary?: {
+    cleanClears: number;
+    chargedReflects: number;
+    overloads: number;
+    windowAttacks: number;
+    windowSkips: number;
+    dangerWrongCuts: number;
+    totalTime: number;
+    cycleOutcomes: ("safe_clear" | "charged_reflect" | "overloaded")[];
+    totalArmorDamage?: number;
+    remainingArmor?: number;
+    windowSmallCount?: number;
+    windowLargeCount?: number;
+  };
+};
+
+/** 图鉴条目 */
+export type CodexEntry = {
+  name: string;
+  description: string;
+  unlocked: boolean;
+};
+
+// ---- P4.4A.5: 共享阶段判断函数 ----
+
+/** 所有演出阶段（含新增天雷劫/破境） */
+export function isBossCinematicPhase(phase: BossPhaseState): boolean {
+  return ["victory_show", "tribulation_intro", "tribulation", "breakthrough_show", "result"].includes(phase);
+}
+
+/** 所有输入锁定阶段 */
+export function isBossInputLockedPhase(phase: BossPhaseState): boolean {
+  return [
+    "loading", "intro",
+    "armor_break_show", "armor_complete_hold",
+    "pursuit_intro", "core_break",
+    "execution_intro", "execution_success", "execution_fail",
+    "fail", "victory_show",
+    "tribulation_intro", "tribulation", "breakthrough_show",
+    "result",
+  ].includes(phase);
+}
+
+/** 终结流程阶段（含新增演出阶段，用于 freezeCombatResources） */
+export function isExecutionFlowPhase(phase: BossPhaseState): boolean {
+  return [
+    "execution_intro", "execution", "execution_success", "execution_fail",
+    "fail", "victory_show",
+    "tribulation_intro", "tribulation", "breakthrough_show",
+    "result",
+  ].includes(phase);
+}
+
+// ---- P0 Reactive Boss 新增类型 ----
+
+export type ProjectileKind = "normal" | "reflective" | "dangerous";
+
+export type Projectile = {
+  id: string;
+  kind: ProjectileKind;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  active: boolean;
+  spawnTime: number;
+  maxLife: number;
+  rotation: number;
+  rotationSpeed: number;
+  color: string;
+  glowColor: string;
+  reflected: boolean;
+  hitBySlashId?: string;
+  resolved: boolean;
+  resolution?: "cut" | "destroy" | "reflect" | "wrong_cut" | "player_hit" | "expired";
+};
+
+export type ReactiveArmorTarget = {
+  id: number;
+  name: string;
+  relX: number;
+  relY: number;
+  radiusX: number;
+  radiusY: number;
+  active: boolean;
+  broken: boolean;
+  durability: number;
+  maxDurability: number;
+  crackProgress: number;
+  animTimer: number;
+  projectileKind: ProjectileKind;
+  bossAction: "sweep" | "reflect" | "mixed";
+};
+
+export type PlayerHpState = {
+  current: number;
+  max: number;
+  invincibleTimer: number;
+  flashTimer: number;
+};
+
+export type BladeContinuousEffect = {
+  visualLength: number;
+  width: number;
+  brightness: number;
+  color: string;
+  glowColor: string;
+};
+
+// ---- V0723016: 三甲目标系统新增类型 ----
+
+/** 三甲目标类型 */
+export type ObjectiveType = "cut_normal" | "reflect" | "mixed_round";
+
+/** 三甲目标配置（左肩/右肩共用，V0723016复审：右肩改 points 制 + minWavesRequired） */
+export interface ArmorObjectiveConfig {
+  normalCutsRequired: number;     // 左肩：斩弹需求数
+  reflectPointsRequired: number;  // 右肩：反射总点数需求
+  normalReflectPoints: number;    // 右肩：普通反射得分(1)
+  perfectReflectPoints: number;   // 右肩：精准反射得分(2)
+  perfectReflectRatio: number;    // 右肩：精准反射阈值(0.9)
+  minWavesRequired: number;       // 最少活跃波次数(2)
+  timeout: number;                 // 超时兜底秒数
+}
+
+/** 三甲目标集合 */
+export interface ArmorObjectivesConfig {
+  left: ArmorObjectiveConfig;
+  right: ArmorObjectiveConfig;
+  chest: { mixedRoundsRequired: number; timeout: number };
+}
+
+/** armorObjectives 配置键 */
+export type ArmorKey = "left" | "right" | "chest";
+
+// ---- V0723015: 刀势经济遥测 ----
+
+/** Boss 局内刀势经济累计统计（只读） */
+export type ReactiveMomentumTelemetry = {
+  /** 被动恢复累计（实际恢复量，到达max后不虚增） */
+  passiveGain: number;
+  /** 主动收益累计（modifiedActiveGain，只含有效奖励） */
+  activeGain: number;
+  /** 基础消耗累计（modifiedBaseCost） */
+  baseCost: number;
+  /** 空挥惩罚累计 */
+  emptyPenalty: number;
+  /** 危险误砍惩罚累计 */
+  dangerousPenalty: number;
+  /** 身体误砍惩罚累计 */
+  bodyPenalty: number;
+
+  /** 总挥刀数 */
+  slashCount: number;
+  /** 有效挥刀数（命中弹幕/反射/护甲） */
+  effectiveSlashCount: number;
+  /** 符合空挥惩罚条件的挥刀数 */
+  eligibleEmptySwingCount: number;
+  /** 无可交互目标的挥刀数 */
+  noTargetSwingCount: number;
+  /** armor_closed 计数 */
+  armorClosedCount: number;
+
+  /** base 档累计时间（秒） */
+  baseBandSeconds: number;
+  /** enhanced 档累计时间（秒） */
+  enhancedBandSeconds: number;
+  /** burst 档累计时间（秒） */
+  burstBandSeconds: number;
+};
+
+// ---- P4.4B-R3 P0-A: 玩家战斗层显示策略 ----
+// 将"是否显示"与"是否造成伤害"解耦，让 Reactive/Boss 模式可以
+// 保留玩家主体+主刀气场+副刀视觉，但冻结副刀锁敌与伤害。
+// 来源：审计文档"显示与战斗解耦"共识 A/B/C。
+// P4.4B-R4 P0-D: 新增 showLegacyHpHearts/showLegacyEnergyBar，
+// 让 Boss 模式隐藏旧三心 HP + 旧刀势条，避免与 Reactive HUD 双源重复显示。
+export type PlayerCombatLayerPolicy = {
+  /** 城墙（普通关卡底部防御线，Boss 模式不画） */
+  showDefenseWall: boolean;
+  /** 玩家主体（小人纸片+心形HP） */
+  showWarrior: boolean;
+  /** 主刀气场（绕玩家的圆弧/装饰弧线，随刀势变化） */
+  showMainBladeAura: boolean;
+  /** 副刀视觉（左右悬浮+Ready发光+连接线） */
+  showSubBlades: boolean;
+  /** 副刀槽位图标（屏幕底部两个槽） */
+  showSubBladeSlots: boolean;
+  /** 副刀待机动画更新（呼吸/横向悬浮）。即使为 false 也仍绘制当前位置 */
+  updateSubBladeIdle: boolean;
+  /** 副刀自动锁敌（找高价值目标/密集群） */
+  enableSubBladeTargeting: boolean;
+  /** 副刀造成伤害（命中敌人/弹幕/护甲） */
+  enableSubBladeDamage: boolean;
+  /** P4.4B-R4 P0-D: 旧三心 HP（玩家头顶心形生命），Boss 模式隐藏避免与左上 HP 条双源重复 */
+  showLegacyHpHearts: boolean;
+  /** P4.4B-R4 P0-D: 旧三段刀势条（底部能量条+段位刻度+段位名），Boss 模式隐藏避免与底部 Reactive 刀势条重复 */
+  showLegacyEnergyBar: boolean;
+};

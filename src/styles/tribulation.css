@@ -1,0 +1,5 @@
+.tribulation-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
+.tribulation-clouds { position: absolute; top: 0; left: 0; right: 0; height: 60%; pointer-events: none; background: linear-gradient(to bottom, rgba(40,10,40,0.9), rgba(20,5,30,0.6), transparent); opacity: 0; transition: opacity 0.5s; }
+.tribulation-clouds.active { opacity: 1; }
+.breakthrough-text { position: absolute; top: 40%; left: 50%; transform: translate(-50%,-50%); font-size: 36px; font-weight: 900; color: #f0e130; text-shadow: 0 0 20px rgba(240,225,48,0.6); pointer-events: none; opacity: 0; transition: opacity 0.3s; }
+.breakthrough-text.show { opacity: 1; }

@@ -1,0 +1,66 @@
+name: CI
+on:
+  push:
+    branches: [r5-recovery, main]
+  pull_request:
+    branches: [r5-recovery, main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm ci
+      - run: npm run check:version
+      - run: npm run test
+      - run: npm run build
+      - run: npm run check:prod-no-e2e
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 7
+
+  test-e2e-dpr3:
+    runs-on: ubuntu-latest
+    # advisory only — 高DPR渲染在CI环境有敏感性，不阻塞合并。正式门禁由 test job 保证。
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test --config=playwright.dpr3.config.ts
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-dpr3
+          path: playwright-report
+          retention-days: 7
+
+  test-e2e-touch:
+    runs-on: ubuntu-latest
+    # advisory only — touch事件在CI环境有敏感性，不阻塞合并。正式门禁由 test job 保证。
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test --config=playwright.touch.config.ts
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-touch
+          path: playwright-report
+          retention-days: 7
