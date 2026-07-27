@@ -483,6 +483,7 @@ export default function App() {
             retryExecutionRequested={retryExecutionRequested}
             onRetryExecutionConsumed={handleRetryExecutionConsumed}
             onBossPhaseChange={handleBossPhaseChange}
+            bossFlow={bossFlow}
             runIndex={runIndex}
           />
           {(() => {

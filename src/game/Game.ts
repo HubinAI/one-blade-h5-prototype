@@ -17,7 +17,7 @@ import { paperBurst, ringParticle, sparkBurst, glowParticle, explosionBurst, cor
 import { BossController } from "./systems/BossController";
 import { BossReactiveController, type ReactiveCollisionEvent } from "./systems/BossReactiveController";
 import { BossStrategySliceController, type SliceCollisionEvent } from "./systems/BossStrategySliceController";
-import { drawEnergyBar, drawHpBar, drawArmorIndicators } from "./systems/bossReactiveHUD";
+import { drawEnergyBar, drawHpBar, drawArmorIndicators, drawArmorObjectiveProgress, drawPerfectReflectText } from "./systems/bossReactiveHUD";
 import { drawBossBody, drawFeederProjectile, drawCoreProjectile, drawDangerProjectile, drawWindowIndicator, drawAbsorbZone, drawFeederTrajectories } from "./systems/bossStrategySliceHUD";
 import { BLADE_MOMENTUM_CONFIG, DEFAULT_BLADE_RUN_MODIFIERS, type BladeMomentumState, type BladeRunModifiers } from "./config/bladeMomentum";
 import { createBladeMomentumState, applyBladeMaxChangePreserveRatio } from "./systems/bladeMomentum";
@@ -522,8 +522,7 @@ export class Game {
       const forceCompleteObjective = (): boolean => {
         const rc = self.reactiveController;
         if (!rc || rc.phase !== "armor_threat") return false;
-        // E2E bridge: force armor break (call left as no-op on main branch)
-        return false;
+        rc.forceCompleteObjectiveForTest();
         return true;
       };
 
@@ -616,6 +615,10 @@ export class Game {
               },
               // V0723016复审P0-3: 时间轴遥测 + gameInstanceId（供 E2E 断言）
               gameInstanceId: instanceId,
+              bossStartTs: snap.bossStartTs,
+              leftBreakTs: snap.leftBreakTs,
+              rightBreakTs: snap.rightBreakTs,
+              chestBreakTs: snap.chestBreakTs,
               breakthroughSuccessTs: self._breakthroughSuccessTs,
             };
           }
@@ -1442,10 +1445,12 @@ export class Game {
       const armors = rc.getArmorBrokenFlags();
       const activeIndex = rc.getActiveArmorIndex();
       drawArmorIndicators(ctx, armors, DESIGN_WIDTH / 2 - 80, 28, activeIndex);
-      // (V0723016 objective progress — not in main, removed)
-      // drawArmorObjectiveProgress(ctx, rc.objectiveType, rc.objectiveCurrent, rc.objectiveTarget, rc.perfectReflectCount, DESIGN_WIDTH / 2, 52);
-      // V0723016: 精准反射（已移除）
-      // (perfectReflect visualization removed for main compatibility)
+      // V0723016: 三甲目标进度（威胁阶段显示在护甲状态条下方）
+      drawArmorObjectiveProgress(ctx, rc.objectiveType, rc.objectiveCurrent, rc.objectiveTarget, rc.perfectReflectCount, DESIGN_WIDTH / 2, 52);
+      // V0723016: 精准反射"回锋！"屏幕中央飘字（2秒淡出）
+      if (rc.perfectReflectFlash > 0) {
+        drawPerfectReflectText(ctx, rc.perfectReflectFlash / 2);
+      }
       //    底部：刀势条（靠近玩家操作区）
       const bm = this.getReactiveBladeMomentum();
       drawEnergyBar(ctx, this.energy, this.reactiveBladeMax, DESIGN_WIDTH / 2 - 90, DESIGN_HEIGHT - 60, 180, 18, bm.band);
@@ -1770,27 +1775,22 @@ export class Game {
       return;
     }
     if (this.phase !== "playing") return;
-    // P4.4A.4: execution阶段允许一刀（绕过刀势不足检查）
+    // V0727012: strategySlice 与 bossReactive 共用 Momentum 刀势规则
+    const isMomentumBossMode = this.gameMode === "bossReactive" || this.gameMode === "strategySlice";
     const isExecutionPhase = this.bossController?.phase === "execution";
-    const isReactive = this.gameMode === "bossReactive";
-    if (!isExecutionPhase && !isReactive) {
-      // 蓄势阶段（0-9%）不可挥刀
+    if (!isExecutionPhase && !isMomentumBossMode) {
       if (!canSlash(this.energy)) {
         this.showHint("蓄势中", "刀势不足", DESIGN_WIDTH / 2, 200, 0.6);
         return;
       }
-    } else {
-      // execution阶段或reactive模式确保有足够的能量挥刀
     }
     this.pointerDown = true;
     const start = this.clampPointer(pos);
     this.pointerPos = start;
     if (this.currentSlash?.active) this.endSlash("收刀");
-    // P4.1A.7：按下只锁定Pending，不消耗刀势
     const lockedEnergy = clamp(this.energy, 0, BALANCE.swordEnergy.max);
-    // V0723014-Final.1 P0-1: Reactive 模式在 PointerDown 时锁定完整 Momentum 快照。
-    // startSlash 继承此快照，禁止重新调用 getReactiveBladeMomentum()。
-    const lockedMomentum = isReactive ? this.getReactiveBladeMomentum() : undefined;
+    // V0723014-Final.1 P0-1: Momentum模式在PointerDown时锁定完整快照
+    const lockedMomentum = isMomentumBossMode ? this.getReactiveBladeMomentum() : undefined;
     this.pendingSlash = {
       startPos: start,
       lockedEnergy,
@@ -1943,14 +1943,12 @@ export class Game {
     if (slashHasSoul) this.nextSoul = false;
     if (slashHasOil) this.nextOil = false;
 
-    // P0: Reactive模式起刀时锁定刀势快照，不执行旧版消耗
+    // V0727012: Reactive/StrategySlice使用Momentum锁快照，不执行旧版消耗
     if (this.gameMode === "bossReactive") {
-      // V0723014-Final.1 P0-1: 起刀快照已锁定在 lockedMomentum 中（PointerDown 时生成），整刀使用
-      // 不执行 consumeEnergyByTier — 由 endSlash/finalizeBossSlashCommon 统一结算
-      // P4.4B-R5.2 P0-6: 注册 Reactive 挥刀起始，供机会窗口按 slashId 宽限
       this.reactiveController?.registerReactiveSlashStart(this.currentSlash!.id);
-      // P0: 每次起刀重置碰撞事件列表
       this._currentReactiveSegmentEvents = [];
+    } else if (this.gameMode === "strategySlice") {
+      // 策略实验切片：整刀使用PointerDown锁定的lockedMomentum，不消耗energy
     } else {
       this.energy = consumeEnergyByTier(this.energy, tier);
     }
