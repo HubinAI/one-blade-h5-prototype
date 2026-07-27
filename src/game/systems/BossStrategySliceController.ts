@@ -163,6 +163,8 @@ export class BossStrategySliceController {
   private _reflectedTargetVy = 0;
   // S2.2: 过载命中标志
   private _overloadedHitPlayer = false;
+  // S2.3: charged发射延迟
+  private _chargedLaunchTimer = 0;
   // S2.2: 本轮已斩供能弹计数（用于首次斩弹触发危险弹）
   private _cycleFeederCutCount = 0;
   get overloadedHitPlayer(): boolean { return this._overloadedHitPlayer; }
@@ -234,6 +236,18 @@ export class BossStrategySliceController {
     // 检查核心弹 charged→overloaded 超时
     if (this._coreState === "charged" && this._coreProjectile) {
       this._coreChargedTimer += dt;
+      // S2.3: 发射延迟—短暂停顿后赋予速度
+      if (this._chargedLaunchTimer < (STRATEGY_SLICE_CONFIG.coreProjectile.chargedLaunchDelay || 0)) {
+        this._chargedLaunchTimer += dt;
+        if (this._chargedLaunchTimer >= (STRATEGY_SLICE_CONFIG.coreProjectile.chargedLaunchDelay || 0)) {
+          const playerY = 700;
+          const dy2 = playerY - this._coreProjectile.y;
+          const dist2 = Math.max(1, Math.abs(dy2));
+          const speed2 = STRATEGY_SLICE_CONFIG.coreProjectile.chargedIncomingSpeed;
+          this._coreProjectile.vx = 0;
+          this._coreProjectile.vy = (dy2 / dist2) * speed2;
+        }
+      }
       // S2: 最后0.8秒提示"即将过载"
       const remain = STRATEGY_SLICE_CONFIG.coreProjectile.chargedDuration - this._coreChargedTimer;
       if (remain <= 0.8 && remain > 0 && !this._pendingHint) {
@@ -391,19 +405,21 @@ export class BossStrategySliceController {
     this._coreState = "seed";
     this._coreCharge = 0;
 
-    // S2: 危险弹横切玩家刀路——横向穿越画面中部决策区
+    // S2.3: 初始危险弹横切两条供能弹之间的双斩路径
     const totalDanger = STRATEGY_SLICE_CONFIG.danger.basePerCycle + this._carryOverDangerCount;
     const ds = STRATEGY_SLICE_CONFIG.danger.speed;
     for (let i = 0; i < totalDanger; i++) {
-      // 从画面左侧或右侧出生，水平穿过中部 y=480–600（玩家刀路与供能弹之间）
+      // 横切两枚供能弹之间的中线
+      const f1 = this._feeders[0], f2 = this._feeders[1];
+      const mx2 = (f1.x + f2.x) / 2, my2 = (f1.y + f2.y) / 2;
+      const pdx = f2.x - f1.x, pdy = f2.y - f1.y;
+      const plen = Math.hypot(pdx, pdy) || 1;
+      const tx3 = -pdy / plen, ty3 = pdx / plen;
       const fromLeft = this._random() > 0.5;
-      const sx = fromLeft ? 20 : 390 - 20;
-      const sy = 480 + this._random() * 120;
-      const dirX = fromLeft ? 1 : -1;
-      // 略微倾斜模拟真实切割
-      const tilt = (this._random() - 0.5) * 0.3;
-      const len = Math.hypot(dirX, tilt);
-      const p = createProjectile("dangerous", sx, sy, (dirX / len) * ds, (tilt / len) * ds);
+      const sign = fromLeft ? 1 : -1;
+      const sx2 = mx2 + tx3 * sign * 90;
+      const sy2 = my2 + ty3 * sign * 90;
+      const p = createProjectile("dangerous", sx2, sy2, tx3 * (-sign) * ds, ty3 * (-sign) * ds);
       this._dangerProjectiles.push(p);
     }
 
@@ -475,10 +491,17 @@ export class BossStrategySliceController {
       const dy = playerY - spawnY;
       const dist = Math.max(1, Math.abs(dy));
       const speed = STRATEGY_SLICE_CONFIG.coreProjectile.chargedIncomingSpeed;
-      const p = createProjectile("reflective", spawnX, spawnY, (dx / dist) * speed, (dy / dist) * speed);
+      const delay = STRATEGY_SLICE_CONFIG.coreProjectile.chargedLaunchDelay || 0;
+      const p = createProjectile("reflective", spawnX, spawnY, 0, 0); // 初始悬停
       this._coreProjectile = p;
       this._coreState = "charged";
       this._coreChargedTimer = 0;
+      this._chargedLaunchTimer = 0;
+      // 短暂停顿后赋予速度
+      if (delay <= 0) {
+        p.vx = (dx / dist) * speed;
+        p.vy = (dy / dist) * speed;
+      }
       if (!this._hintChargedShown) {
         this._hintChargedShown = true;
         this._pendingHint = "可反射";
@@ -608,7 +631,7 @@ export class BossStrategySliceController {
 
     } else if (this._coreState === "charged") {
       // charged：先判断是否可以反射（burst刀势），否则直接斩
-      if (momentum.ratio >= 0.7) {
+      if (momentum.ratio >= STRATEGY_SLICE_CONFIG.bladeEconomy.reflectThreshold) {
         // S1最终: 反射轨迹指向右肩实际位置
         const sp = STRATEGY_SLICE_CONFIG.armor.shoulderPos;
         const dx = sp.cx - this._coreProjectile.x;
@@ -685,7 +708,7 @@ export class BossStrategySliceController {
     const ratio = momentum.ratio;
     let damage = 0;
 
-    if (ratio >= 0.7) {
+    if (ratio >= STRATEGY_SLICE_CONFIG.bladeEconomy.reflectThreshold) {
       damage = STRATEGY_SLICE_CONFIG.armor.highDamage;
     } else if (ratio >= 0.3) {
       damage = STRATEGY_SLICE_CONFIG.armor.midDamage;

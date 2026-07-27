@@ -79,7 +79,7 @@ export function drawAbsorptionChannels(
 // 🔹 Boss 身体（复用 Reactive 模式外观）
 // ================================================================
 
-export function drawBossBody(ctx: CanvasRenderingContext2D, t: number, armorDurability: number, windowType: string, isCharging: boolean, chargePct: number): void {
+export function drawBossBody(ctx: CanvasRenderingContext2D, t: number, armorDurability: number, windowType: string, isCharging: boolean): void {
   ctx.save();
   ctx.translate(BOSS_CX, BOSS_CY);
   ctx.scale(BOSS_SCALE, BOSS_SCALE);

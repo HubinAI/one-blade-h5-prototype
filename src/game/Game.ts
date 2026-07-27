@@ -1532,7 +1532,7 @@ export class Game {
     this.drawTopMist(ctx);
 
     // 2. Boss身体 + 吸收区（世界层）
-    drawBossBody(ctx, this.elapsed, snap.armorDurability, snap.windowType, snap.coreState !== "seed", snap.coreCharge);
+    drawBossBody(ctx, this.elapsed, snap.armorDurability, snap.windowType, snap.coreState !== "seed");
     // S2.2: 吸能通道（供能弹→核心 + 右肩→核心）
     drawAbsorptionChannels(ctx, this.elapsed, snap.coreState !== "seed", ssc.getFeeders());
     drawAbsorbZone(ctx, this.elapsed, snap.coreState === "charged", snap.coreCharge);
@@ -2875,7 +2875,7 @@ export class Game {
             }
             else if (ev.kind === "core_reflected") {
               this.particles.push(...sparkBurst(hitPos, 8, "#ffd700", 40));
-              // S2: 反射成功后刀势降至35%
+              // S2: 反射成功后刀势降至20%
               this.energy = Math.round(this.reactiveBladeMax * STRATEGY_SLICE_CONFIG.bladeEconomy.postReflectRatio);
             }
             else if (ev.kind === "core_charged_cut" || ev.kind === "core_seed_cut") this.particles.push(...sparkBurst(hitPos, 5, "#ffd35a", 30));
