@@ -71,6 +71,9 @@ export interface SliceSnapshot {
   dangerInheritedCycle2: number;
   cycle1Decision: SliceDecision | null;
   cycle2Decision: SliceDecision | null;
+  /** S2: 当前提示文本（null=无提示） */
+  currentHint: string | null;
+  hintTimer: number;
 }
 
 export class BossStrategySliceController {
@@ -149,7 +152,15 @@ export class BossStrategySliceController {
   get feederRemaining(): number { return this._feederRemaining; }
   get carryOverDangerCount(): number { return this._carryOverDangerCount; }
 
-  // S2 刀势经济接口
+  // S2: 提示系统
+  // S2: 提示系统
+  private _hintChargedShown = false;
+  private _pendingHint: string | null = null;
+  private _hintTimer = 0;
+  // S2: 反射停顿
+  private _reflectedPause = 0;
+  private _reflectedTargetVx = 0;
+  private _reflectedTargetVy = 0;
   get bladeEconomy() {
     return STRATEGY_SLICE_CONFIG.bladeEconomy;
   }
@@ -184,8 +195,29 @@ export class BossStrategySliceController {
     // 检查核心弹 charged→overloaded 超时
     if (this._coreState === "charged" && this._coreProjectile) {
       this._coreChargedTimer += dt;
+      // S2: 最后0.8秒提示"即将过载"
+      const remain = STRATEGY_SLICE_CONFIG.coreProjectile.chargedDuration - this._coreChargedTimer;
+      if (remain <= 0.8 && remain > 0 && !this._pendingHint) {
+        this._pendingHint = "即将过载";
+        this._hintTimer = 0.8;
+      }
       if (this._coreChargedTimer >= STRATEGY_SLICE_CONFIG.coreProjectile.chargedDuration) {
         this.transitionCoreToOverloaded("timeout");
+      }
+    }
+
+    // 更新提示计时
+    if (this._hintTimer > 0) {
+      this._hintTimer -= dt;
+      if (this._hintTimer <= 0) this._pendingHint = null;
+    }
+
+    // S2: 反射停顿释放
+    if (this._reflectedPause > 0 && this._coreProjectile) {
+      this._reflectedPause -= dt;
+      if (this._reflectedPause <= 0 && this._coreState === "reflected") {
+        this._coreProjectile.vx = this._reflectedTargetVx;
+        this._coreProjectile.vy = this._reflectedTargetVy;
       }
     }
 
@@ -314,16 +346,19 @@ export class BossStrategySliceController {
     this._coreState = "seed";
     this._coreCharge = 0;
 
-    // 生成危险弹
+    // S2: 危险弹横切玩家刀路——横向穿越画面中部决策区
     const totalDanger = STRATEGY_SLICE_CONFIG.danger.basePerCycle + this._carryOverDangerCount;
-    const dr = STRATEGY_SLICE_CONFIG.danger.spawnRadius;
     const ds = STRATEGY_SLICE_CONFIG.danger.speed;
     for (let i = 0; i < totalDanger; i++) {
-      const da = this._random() * Math.PI * 2;
-      const dx2 = cx + Math.cos(da) * dr;
-      const dy2 = cy + Math.sin(da) * dr;
-      const moveAngle = this._random() * Math.PI * 2;
-      const p = createProjectile("dangerous", dx2, dy2, Math.cos(moveAngle) * ds, Math.sin(moveAngle) * ds);
+      // 从画面左侧或右侧出生，水平穿过中部 y=480–600（玩家刀路与供能弹之间）
+      const fromLeft = this._random() > 0.5;
+      const sx = fromLeft ? 20 : 390 - 20;
+      const sy = 480 + this._random() * 120;
+      const dirX = fromLeft ? 1 : -1;
+      // 略微倾斜模拟真实切割
+      const tilt = (this._random() - 0.5) * 0.3;
+      const len = Math.hypot(dirX, tilt);
+      const p = createProjectile("dangerous", sx, sy, (dirX / len) * ds, (tilt / len) * ds);
       this._dangerProjectiles.push(p);
     }
 
@@ -385,13 +420,20 @@ export class BossStrategySliceController {
 
   private onFeederAbsorbed(): void {
     if (this._coreState === "seed" && this._coreCharge >= 1) {
-      // S1.4: 吸收第1枚 → 创建 charged 可交互核心弹（seed 阶段无可交互对象）
-      const cp = STRATEGY_SLICE_CONFIG.coreProjectile.spawnPos;
-      this._coreProjectile = createProjectile("reflective", cp.x, cp.y, 0, 0);
+      // S2: charged核心从吸收区脱离40px，悬停呼吸
+      const az = STRATEGY_SLICE_CONFIG.absorbZone;
+      const spawnX = az.cx;
+      const spawnY = az.cy - 42;
+      this._coreProjectile = createProjectile("reflective", spawnX, spawnY, 0, 0);
       this._coreState = "charged";
       this._coreChargedTimer = 0;
+      // S2: 首次出现charged提示"可反射"
+      if (!this._hintChargedShown) {
+        this._hintChargedShown = true;
+        this._pendingHint = "可反射";
+        this._hintTimer = 1.5;
+      }
     } else if (this._coreState === "charged" && this._coreCharge >= 2) {
-      // 第2枚被吸收 → overloaded
       this.transitionCoreToOverloaded("overcharge");
     }
   }
@@ -516,8 +558,13 @@ export class BossStrategySliceController {
         const dy = sp.cy - this._coreProjectile.y;
         const len = Math.hypot(dx, dy) || 1;
         const reflectSpeed = 120;
-        this._coreProjectile.vx = (dx / len) * reflectSpeed;
-        this._coreProjectile.vy = (dy / len) * reflectSpeed;
+        // S2: 反射前停顿0.15s，让玩家看到命中确认
+        this._coreProjectile.vx = 0;
+        this._coreProjectile.vy = 0;
+        this._reflectedPause = 0.15;
+        // 保存反射目标以便停顿结束后释放
+        this._reflectedTargetVx = (dx / len) * reflectSpeed;
+        this._reflectedTargetVy = (dy / len) * reflectSpeed;
         this._coreProjectile.reflected = true;
         this._coreState = "reflected";
         events.push({ kind: "core_reflected", projectileId: this._coreProjectile.id, description: "核心反射" });
@@ -706,6 +753,8 @@ export class BossStrategySliceController {
       dangerInheritedCycle2: this._dangerInheritedCycle2,
       cycle1Decision: this._cycle1Decision,
       cycle2Decision: this._cycle2Decision,
+      currentHint: this._pendingHint,
+      hintTimer: this._hintTimer,
     };
   }
 

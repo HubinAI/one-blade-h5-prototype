@@ -1560,6 +1560,21 @@ export class Game {
     // 9. 破绽窗口指示
     drawWindowIndicator(ctx, snap);
 
+    // S2: 提示文本（可反射/即将过载）
+    if (snap.currentHint) {
+      ctx.save();
+      const alpha = snap.hintTimer > 0.3 ? 1 : snap.hintTimer / 0.3;
+      ctx.globalAlpha = alpha;
+      ctx.font = 'bold 18px "PingFang SC", sans-serif';
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#ffd35a";
+      ctx.shadowColor = "#ffd35a";
+      ctx.shadowBlur = 8;
+      ctx.fillText(snap.currentHint, DESIGN_WIDTH / 2, 122);
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+
     // 10. Debug（缩小贴边）
     if (this.debugEnabled) this.drawStrategySliceDebug(ctx, snap);
 
@@ -1727,10 +1742,23 @@ export class Game {
     this.updateTexts(scaledDt);
     this.updateSubBlades(scaledDt);
 
-    // V0727012修复: 更新策略切片弹幕位移（此前漏掉，供能弹停在原地）
+    // S2: 弹幕位移 + 供能弹弧线吸附
+    const az = STRATEGY_SLICE_CONFIG.absorbZone;
     for (const p of ssc.getProjectiles()) {
-      p.x += p.vx * scaledDt;
-      p.y += p.vy * scaledDt;
+      // S2: 供能弹(normal类)沿弧线飞向吸收区
+      if (p.kind === "normal") {
+        const dx = az.cx - p.x;
+        const dy = az.cy - p.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const curveStr = 0.08 * Math.min(dist / 130, 1);
+        const tangent = { x: -dy / dist, y: dx / dist }; // 垂直于方向
+        const sign = (p.id.charCodeAt(0) % 2) === 0 ? 1 : -1;
+        p.x += (p.vx + tangent.x * curveStr * p.vx * 0.5 * sign) * scaledDt;
+        p.y += (p.vy + tangent.y * curveStr * p.vy * 0.5 * sign) * scaledDt;
+      } else {
+        p.x += p.vx * scaledDt;
+        p.y += p.vy * scaledDt;
+      }
     }
 
     // 更新控制器（已包含弹幕位置更新）
@@ -1739,9 +1767,9 @@ export class Game {
     // 检查核心弹反射后是否撞肩
     ssc.checkReflectHitShoulder();
 
-    // 能量恢复
+    // S2: 策略切片不执行旧版被动恢复（使用独立刀势经济）
     this.regenDelayTimer = Math.max(0, this.regenDelayTimer - scaledDt);
-    if (!this.currentSlash?.active && !this.pendingSlash && this.regenDelayTimer <= 0) {
+    if (this.gameMode !== "strategySlice" && !this.currentSlash?.active && !this.pendingSlash && this.regenDelayTimer <= 0) {
       this.energy = recoverEnergy(this.energy, scaledDt, this.drumTimer);
     }
     this.screenShake = Math.max(0, this.screenShake - scaledDt * 2.7);
