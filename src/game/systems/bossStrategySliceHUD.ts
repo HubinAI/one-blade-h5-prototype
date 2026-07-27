@@ -23,13 +23,70 @@ const BOSS_CY = 220;
 const BOSS_SCALE = 1.4; // 相比原版放大 40%
 
 // ================================================================
+// 吸能通道（S2.2新增）
+// ================================================================
+
+export function drawAbsorptionChannels(
+  ctx: CanvasRenderingContext2D,
+  t: number,
+  isCharging: boolean,
+  feeders: { x: number; y: number; active: boolean }[],
+): void {
+  if (!isCharging && feeders.every(f => !f.active)) return;
+  const { cx, cy } = STRATEGY_SLICE_CONFIG.absorbZone;
+  // Boss右肩世界位置（调整后）
+  const shoulderX = BOSS_CX + 50 * BOSS_SCALE * 0.7;
+  const shoulderY = BOSS_CY - 30 * BOSS_SCALE + (isCharging ? -3 : 0);
+
+  // 通道：从右肩→吸收区中心
+  ctx.save();
+  const channelLvl = isCharging ? 0.3 + 0.1 * Math.sin(t * 5) : 0.1;
+  // 左通道（左供能弹→核心）
+  if (feeders[0]?.active) {
+    ctx.beginPath();
+    ctx.moveTo(feeders[0].x, feeders[0].y);
+    ctx.lineTo(cx, cy);
+    ctx.strokeStyle = `rgba(130, 200, 255, ${channelLvl + 0.1})`;
+    ctx.lineWidth = 0.8;
+    ctx.setLineDash([4, 6]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // 右通道
+  if (feeders[1]?.active) {
+    ctx.beginPath();
+    ctx.moveTo(feeders[1].x, feeders[1].y);
+    ctx.lineTo(cx, cy);
+    ctx.strokeStyle = `rgba(130, 200, 255, ${channelLvl + 0.1})`;
+    ctx.lineWidth = 0.8;
+    ctx.setLineDash([4, 6]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // 主链路：右肩 → 吸收区
+  ctx.beginPath();
+  ctx.moveTo(shoulderX, shoulderY);
+  ctx.lineTo(cx, cy);
+  ctx.strokeStyle = `rgba(160, 120, 255, ${channelLvl + 0.05})`;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([6, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+// ================================================================
 // 🔹 Boss 身体（复用 Reactive 模式外观）
 // ================================================================
 
-export function drawBossBody(ctx: CanvasRenderingContext2D, t: number, armorDurability: number, windowType: string): void {
+export function drawBossBody(ctx: CanvasRenderingContext2D, t: number, armorDurability: number, windowType: string, isCharging: boolean, chargePct: number): void {
   ctx.save();
   ctx.translate(BOSS_CX, BOSS_CY);
   ctx.scale(BOSS_SCALE, BOSS_SCALE);
+
+  // S2.2: 吸能时右肩抬起（向上偏移3-5px）
+  const shoulderLift = isCharging ? 2 + Math.sin(t * 8) * 2 : 0;
+
 
   // 剪影
   ctx.save();
@@ -64,10 +121,10 @@ export function drawBossBody(ctx: CanvasRenderingContext2D, t: number, armorDura
 
   // 左肩甲（始终灰色，策略切片只关注右肩）
   drawShoulderPiece(ctx, "left", -50, -30);
-  // 右肩甲（活跃）
+  // S2.2: 右肩吸能时抬起
   const isWindow = windowType !== "none";
   const durPct = armorDurability / 100;
-  drawShoulderPiece(ctx, "right", 50, -30, durPct, isWindow);
+  drawShoulderPiece(ctx, "right", 50, -30 - shoulderLift, durPct, isWindow);
   // 胸甲（灰色）
   drawChestPiece(ctx);
 
@@ -341,47 +398,58 @@ function coreColor(state: SliceCoreState): string {
 export function drawWindowIndicator(ctx: CanvasRenderingContext2D, snap: SliceSnapshot): void {
   if (snap.windowType === "none") return;
 
-  const label = snap.windowType === "small" ? "小破绽" : "大破绽";
-  const color = snap.windowType === "small" ? "#5bc0ff" : "#ffd35a";
+  const isLarge = snap.windowType === "large";
+  const label = isLarge ? "大破绽" : "小破绽";
+  const color = isLarge ? "#ff6a33" : "#5bc0ff";
   const y = DESIGN_H - 145;
 
-  const maxDur = snap.windowType === "small"
-    ? STRATEGY_SLICE_CONFIG.phaseTimers.windowSmall
-    : STRATEGY_SLICE_CONFIG.phaseTimers.windowLarge;
-  const pct = Math.max(0, Math.min(1, snap.windowTimer / maxDur));
-  const barW = 150;
-  const barX = DESIGN_W / 2 - barW / 2;
-
+  // S2.2: 大破绽 = Boss后退震动 + 大裂纹；小破绽 = 细裂纹
+  const shake = isLarge ? Math.sin(snap.windowTimer * 12) * 3 : 0;
   ctx.save();
-  ctx.font = 'bold 15px "PingFang SC", sans-serif';
+  ctx.translate(shake, 0);
+
+  ctx.font = isLarge ? 'bold 20px "PingFang SC", sans-serif' : 'bold 14px "PingFang SC", sans-serif';
   ctx.textAlign = "center";
   ctx.fillStyle = color;
   ctx.shadowColor = color;
-  ctx.shadowBlur = 10;
+  ctx.shadowBlur = isLarge ? 16 : 6;
   ctx.fillText(label, DESIGN_W / 2, y);
   ctx.shadowBlur = 0;
 
-  // S2: 裂纹装饰（白金裂纹线）
-  ctx.save();
-  ctx.strokeStyle = `rgba(255, 255, 255, ${0.25 +0.15 * Math.sin(snap.windowTimer * 5)})`;
-  ctx.lineWidth = 1;
+  // S2.2: 裂纹
+  const crackColor = isLarge ? "rgba(255, 255, 255, 0.6)" : "rgba(200, 220, 255, 0.35)";
+  ctx.strokeStyle = crackColor;
+  ctx.lineWidth = isLarge ? 1.5 : 1;
   const cx = DESIGN_W / 2;
-  for (let i = 0; i < 3; i++) {
-    const ox = cx - 50 + i * 50;
+  const cracks = isLarge ? 5 : 3;
+  for (let i = 0; i < cracks; i++) {
+    const ox = cx - 60 + i * (120 / (cracks - 1 || 1));
     ctx.beginPath();
     ctx.moveTo(ox, y + 20);
-    ctx.lineTo(ox + (i - 1) * 15, y + 32);
-    ctx.lineTo(ox + (i - 1) * 8, y + 38);
+    ctx.lineTo(ox + (i - (cracks - 1) / 2) * 10, y + 32);
+    ctx.lineTo(ox + (i - (cracks - 1) / 2) * 6, y + 40);
     ctx.stroke();
   }
+
   ctx.restore();
 
-  // 进度条
+  // S2.2: 进度条（大破绽更宽）
+  const barW = isLarge ? 180 : 130;
+  const maxDur = STRATEGY_SLICE_CONFIG.phaseTimers[isLarge ? "windowLarge" : "windowSmall"];
+  const pct = Math.max(0, Math.min(1, snap.windowTimer / maxDur));
+  const barX = DESIGN_W / 2 - barW / 2;
   ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
-  ctx.fillRect(barX, y + 8, barW, 6);
+  ctx.fillRect(barX, y + 48, barW, 6);
   ctx.fillStyle = color;
-  ctx.fillRect(barX, y + 8, barW * (1 - pct), 6);
-  ctx.restore();
+  ctx.fillRect(barX, y + 48, barW * (1 - pct), 6);
+
+  // S2.2: 大破绽全屏震屏提示
+  if (isLarge && snap.windowTimer < 0.3) {
+    ctx.save();
+    ctx.fillStyle = `rgba(255, 106, 51, ${0.15 * (1 - snap.windowTimer / 0.3)})`;
+    ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
+    ctx.restore();
+  }
 }
 
 // ================================================================

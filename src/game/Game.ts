@@ -19,7 +19,7 @@ import { BossReactiveController, type ReactiveCollisionEvent } from "./systems/B
 import { BossStrategySliceController, type SliceCollisionEvent } from "./systems/BossStrategySliceController";
 import { STRATEGY_SLICE_CONFIG } from "./config/bossStrategySlice";
 import { drawEnergyBar, drawHpBar, drawArmorIndicators, drawArmorObjectiveProgress, drawPerfectReflectText } from "./systems/bossReactiveHUD";
-import { drawBossBody, drawFeederProjectile, drawCoreProjectile, drawDangerProjectile, drawWindowIndicator, drawAbsorbZone, drawFeederTrajectories } from "./systems/bossStrategySliceHUD";
+import { drawBossBody, drawFeederProjectile, drawCoreProjectile, drawDangerProjectile, drawWindowIndicator, drawAbsorbZone, drawFeederTrajectories, drawAbsorptionChannels } from "./systems/bossStrategySliceHUD";
 import { BLADE_MOMENTUM_CONFIG, DEFAULT_BLADE_RUN_MODIFIERS, type BladeMomentumState, type BladeRunModifiers } from "./config/bladeMomentum";
 import { createBladeMomentumState, applyBladeMaxChangePreserveRatio } from "./systems/bladeMomentum";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
@@ -1532,7 +1532,9 @@ export class Game {
     this.drawTopMist(ctx);
 
     // 2. Boss身体 + 吸收区（世界层）
-    drawBossBody(ctx, this.elapsed, snap.armorDurability, snap.windowType);
+    drawBossBody(ctx, this.elapsed, snap.armorDurability, snap.windowType, snap.coreState !== "seed", snap.coreCharge);
+    // S2.2: 吸能通道（供能弹→核心 + 右肩→核心）
+    drawAbsorptionChannels(ctx, this.elapsed, snap.coreState !== "seed", ssc.getFeeders());
     drawAbsorbZone(ctx, this.elapsed, snap.coreState === "charged", snap.coreCharge);
 
     // 3. 供能弹 + 轨迹
@@ -1766,6 +1768,16 @@ export class Game {
 
     // 检查核心弹反射后是否撞肩
     ssc.checkReflectHitShoulder();
+
+    // S2.2: 过载命中玩家 — 扣HP 15% + 刀势降至20%
+    if (ssc.consumeOverloadedHit()) {
+      const hpLoss = Math.round(this.maxHp * STRATEGY_SLICE_CONFIG.bladeEconomy.overloadHpDamage);
+      this.hp = Math.max(1, this.hp - hpLoss);
+      this.energy = Math.round(this.reactiveBladeMax * STRATEGY_SLICE_CONFIG.bladeEconomy.postOverloadRatio);
+      this.screenShake = 0.5;
+      this.flash = 0.4;
+      this.particles.push(...sparkBurst({ x: DESIGN_WIDTH / 2, y: 650 }, 10, "#ff2020", 50));
+    }
 
     // S2: 策略切片不执行旧版被动恢复（使用独立刀势经济）
     this.regenDelayTimer = Math.max(0, this.regenDelayTimer - scaledDt);

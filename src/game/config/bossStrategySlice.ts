@@ -21,13 +21,15 @@ export const STRATEGY_SLICE_CONFIG = {
     resolveTransition: 0.3,
   },
 
-  // ---- S2 实验刀势经济 ----
+  // ---- S2.2 刀势经济 ----
   bladeEconomy: {
-    initialRatio: 0.55,    // 初始刀势55%
-    feederCutGain: 0.15,   // 斩1枚供能弹+15%
-    normalSlashCost: 0.05,  // 普通挥刀消耗5%
-    reflectThreshold: 0.70,  // 反射要求70%
-    postReflectRatio: 0.35,  // 反射成功后降至35%
+    initialRatio: 0.55,      // 初始刀势55%
+    feederCutGain: 0.20,     // 斩1枚供能弹+20%
+    normalSlashCost: 0.05,   // 每刀消耗5%
+    reflectThreshold: 0.70,  // 反射门槛70%
+    postReflectRatio: 0.20,  // 反射成功后降至20%
+    postOverloadRatio: 0.20, // 过载受击后降至20%
+    overloadHpDamage: 0.15,  // 过载HP伤害15%
   },
 
   /** 核心弹吸收区 */

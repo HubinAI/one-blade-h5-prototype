@@ -161,6 +161,26 @@ export class BossStrategySliceController {
   private _reflectedPause = 0;
   private _reflectedTargetVx = 0;
   private _reflectedTargetVy = 0;
+  // S2.2: 过载命中标志
+  private _overloadedHitPlayer = false;
+  // S2.2: 本轮已斩供能弹计数（用于首次斩弹触发危险弹）
+  private _cycleFeederCutCount = 0;
+  get overloadedHitPlayer(): boolean { return this._overloadedHitPlayer; }
+  /** S2.2: 在首次斩供能弹时生成一枚横切反射路径的危险弹 */
+  private spawnDangerCrossing(): void {
+    const az = STRATEGY_SLICE_CONFIG.absorbZone;
+    const ds = STRATEGY_SLICE_CONFIG.danger.speed;
+    // 从右侧横切中部（玩家→core反射路径区域）
+    const sx = 390 - 30;
+    const sy = az.cy + 60 + this._random() * 80;
+    const p = createProjectile("dangerous", sx, sy, -ds * 0.9, (this._random() - 0.5) * 20);
+    this._dangerProjectiles.push(p);
+  }
+
+  consumeOverloadedHit(): boolean {
+    if (this._overloadedHitPlayer) { this._overloadedHitPlayer = false; return true; }
+    return false;
+  }
   get bladeEconomy() {
     return STRATEGY_SLICE_CONFIG.bladeEconomy;
   }
@@ -362,6 +382,7 @@ export class BossStrategySliceController {
       this._dangerProjectiles.push(p);
     }
 
+    this._cycleFeederCutCount = 0;
     // S1最终: 记录本轮继承的危险数
     if (index === 1) this._dangerInheritedCycle1 = this._carryOverDangerCount;
     else if (index === 2) this._dangerInheritedCycle2 = this._carryOverDangerCount;
@@ -467,10 +488,11 @@ export class BossStrategySliceController {
   }
 
   private checkOverloadedReached(): void {
-    // overloaded 核心弹到达玩家线 → 结束本轮
     if (this._coreState === "overloaded" && this._coreProjectile?.active) {
       if (this._coreProjectile.y >= 680) {
         this._coreProjectile.active = false;
+        // S2.2: 过载命中玩家，标记等待Game.ts处理HP+能量惩罚
+        this._overloadedHitPlayer = true;
         if (this._phase === "cycle_evolve") {
           this.enterResolve();
         }
@@ -526,6 +548,11 @@ export class BossStrategySliceController {
       projectile.resolved = true;
       this._feederRemaining--;
       events.push({ kind: "feeder_cut", projectileId: projectile.id, description: "供能弹被斩" });
+      // S2.2: 首次斩供能弹时生成一枚横切危险弹
+      if (this._cycleFeederCutCount === 0 && this._feeders.some(f => f.active)) {
+        this.spawnDangerCrossing();
+      }
+      this._cycleFeederCutCount++;
     } else if (isCore) {
       // 核心弹被处理
       return this.resolveCoreHit(momentum);
