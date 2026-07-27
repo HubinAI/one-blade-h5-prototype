@@ -40,15 +40,19 @@ export function drawAbsorptionChannels(
 
   // 通道：从右肩→吸收区中心
   ctx.save();
-  const channelLvl = isCharging ? 0.3 + 0.1 * Math.sin(t * 5) : 0.1;
+  const isOcCh = _variantGlobal === "overcorrect";
+  const channelLvl = isCharging ? (isOcCh ? 0.5 : 0.3) + 0.1 * Math.sin(t * 5) : (isOcCh ? 0.2 : 0.1);
+  const chWidth = isOcCh ? STRATEGY_SLICE_CONFIG.overcorrect.channelWidth : 0.8;
+  if (isOcCh) { ctx.shadowColor = "rgba(80, 150, 255, 0.6)"; ctx.shadowBlur = 24; }
+  const dashPat: number[] = isOcCh ? [] : [4, 6];
   // 左通道（左供能弹→核心）
   if (feeders[0]?.active) {
     ctx.beginPath();
     ctx.moveTo(feeders[0].x, feeders[0].y);
     ctx.lineTo(cx, cy);
-    ctx.strokeStyle = `rgba(130, 200, 255, ${channelLvl + 0.1})`;
-    ctx.lineWidth = 0.8;
-    ctx.setLineDash([4, 6]);
+    ctx.strokeStyle = `rgba(100, 180, 255, ${channelLvl})`;
+    ctx.lineWidth = chWidth;
+    ctx.setLineDash(dashPat);
     ctx.stroke();
     ctx.setLineDash([]);
   }
@@ -57,9 +61,9 @@ export function drawAbsorptionChannels(
     ctx.beginPath();
     ctx.moveTo(feeders[1].x, feeders[1].y);
     ctx.lineTo(cx, cy);
-    ctx.strokeStyle = `rgba(130, 200, 255, ${channelLvl + 0.1})`;
-    ctx.lineWidth = 0.8;
-    ctx.setLineDash([4, 6]);
+    ctx.strokeStyle = `rgba(100, 180, 255, ${channelLvl})`;
+    ctx.lineWidth = chWidth;
+    ctx.setLineDash(dashPat);
     ctx.stroke();
     ctx.setLineDash([]);
   }
@@ -67,11 +71,12 @@ export function drawAbsorptionChannels(
   ctx.beginPath();
   ctx.moveTo(shoulderX, shoulderY);
   ctx.lineTo(cx, cy);
-  ctx.strokeStyle = `rgba(160, 120, 255, ${channelLvl + 0.05})`;
-  ctx.lineWidth = 1;
-  ctx.setLineDash([6, 4]);
+  ctx.strokeStyle = `rgba(160, 120, 255, ${channelLvl * 0.6})`;
+  ctx.lineWidth = chWidth * 0.7;
+  ctx.setLineDash(dashPat);
   ctx.stroke();
   ctx.setLineDash([]);
+  ctx.shadowBlur = 0;
   ctx.restore();
 }
 
