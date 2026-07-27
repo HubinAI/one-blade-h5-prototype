@@ -226,9 +226,10 @@ export function drawFeederProjectile(ctx: CanvasRenderingContext2D, p: Projectil
     ctx.restore();
   }
 
-  // S2: 梭形弹体（菱形）
-  const len = 8 + proximity * 4;
-  const hw = 3 + proximity * 2;
+  // S2.4: 梭形弹体（菱形），overcorrect放大
+  const s = ocScale();
+  const len = (8 + proximity * 4) * s;
+  const hw = (3 + proximity * 2) * s;
   const angle = Math.atan2(dy, dx);
   ctx.save();
   ctx.translate(p.x, p.y);
@@ -260,16 +261,17 @@ export function drawCoreProjectile(ctx: CanvasRenderingContext2D, p: Projectile 
   if (state === "seed") {
     const { cx, cy } = STRATEGY_SLICE_CONFIG.absorbZone;
     ctx.save();
+    const s = ocScale();
     const breathe = 1 + 0.06 * Math.sin(t * 3);
     // 外环
     ctx.beginPath();
-    ctx.arc(cx, cy, 14 * breathe, 0, Math.PI * 2);
+    ctx.arc(cx, cy, 14 * breathe * s, 0, Math.PI * 2);
     ctx.strokeStyle = "rgba(120, 170, 220, 0.35)";
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.5 * s;
     ctx.stroke();
     // 圆核
     ctx.beginPath();
-    ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+    ctx.arc(cx, cy, 6 * s, 0, Math.PI * 2);
     ctx.fillStyle = "rgba(80, 140, 200, 0.7)";
     ctx.fill();
     ctx.restore();
@@ -283,20 +285,21 @@ export function drawCoreProjectile(ctx: CanvasRenderingContext2D, p: Projectile 
   ctx.translate(p.x, p.y);
 
   if (state === "charged") {
-    // S2: 金色呼吸核心 + 外圈膨胀
+    const s = ocScale();
+    // S2.4: 金色呼吸核心 + 外圈膨胀
     const outerBreathe = 1 + 0.15 * Math.sin(t * 5);
     // 呼吸外环
     ctx.beginPath();
-    ctx.arc(0, 0, 24 * outerBreathe, 0, Math.PI * 2);
+    ctx.arc(0, 0, 24 * outerBreathe * s, 0, Math.PI * 2);
     ctx.strokeStyle = `rgba(255, 211, 90, ${0.4 + 0.2 * Math.sin(t * 4)})`;
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 2.5 * s;
     ctx.stroke();
     // 核体
     ctx.shadowColor = "#ffd35a";
-    ctx.shadowBlur = 18 * pulse;
+    ctx.shadowBlur = 18 * pulse * s;
     ctx.beginPath();
-    ctx.arc(0, 0, 11 * pulse, 0, Math.PI * 2);
-    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 11 * pulse);
+    ctx.arc(0, 0, 11 * pulse * s, 0, Math.PI * 2);
+    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 11 * pulse * s);
     grad.addColorStop(0, "rgba(255, 255, 200, 0.95)");
     grad.addColorStop(0.6, "rgba(255, 200, 60, 0.8)");
     grad.addColorStop(1, "rgba(255, 160, 20, 0.3)");
@@ -320,20 +323,21 @@ export function drawCoreProjectile(ctx: CanvasRenderingContext2D, p: Projectile 
     ctx.fill();
     ctx.restore();
   } else if (state === "overloaded") {
+    const s = ocScale();
     // S2: 红橙脉冲核心 + 膨胀危险外环
     const flash = 0.5 + 0.5 * Math.sin(t * 12);
     const panic = 1 + 0.2 * Math.sin(t * 8);
     // 膨胀外环
     ctx.beginPath();
-    ctx.arc(0, 0, 28 * panic, 0, Math.PI * 2);
+    ctx.arc(0, 0, 28 * panic * s, 0, Math.PI * 2);
     ctx.strokeStyle = `rgba(255, 40, 20, ${0.5 * flash})`;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 3 * s;
     ctx.stroke();
     // 内核
     ctx.shadowColor = "#ff2020";
-    ctx.shadowBlur = 24 * pulse;
+    ctx.shadowBlur = 24 * pulse * s;
     ctx.beginPath();
-    ctx.arc(0, 0, 12 * panic, 0, Math.PI * 2);
+    ctx.arc(0, 0, 12 * panic * s, 0, Math.PI * 2);
     ctx.fillStyle = `rgba(255, 40, 20, ${0.8 * flash})`;
     ctx.fill();
     ctx.shadowBlur = 0;
@@ -376,22 +380,25 @@ export function drawDangerProjectile(ctx: CanvasRenderingContext2D, p: Projectil
   ctx.translate(p.x, p.y);
   const rot = t * 4;
 
-  // S2: 旋转尖刺裂片
+  // S2.4: 旋转尖刺裂片，overcorrect放大
+  const s = ocScale();
   ctx.strokeStyle = "rgba(255, 50, 40, 0.8)";
-  ctx.lineWidth = 1.6;
+  ctx.lineWidth = 1.6 * s;
   const spikes = 5;
+  const outerR = 11 * s;
+  const innerR = 3 * s;
   for (let i = 0; i < spikes; i++) {
     const a = rot + (i / spikes) * Math.PI * 2;
     ctx.beginPath();
-    ctx.moveTo(Math.cos(a) * 11, Math.sin(a) * 11);
-    ctx.lineTo(Math.cos(a + 0.4) * 3, Math.sin(a + 0.4) * 3);
-    ctx.lineTo(Math.cos(a - 0.4) * 3, Math.sin(a - 0.4) * 3);
+    ctx.moveTo(Math.cos(a) * outerR, Math.sin(a) * outerR);
+    ctx.lineTo(Math.cos(a + 0.4) * innerR, Math.sin(a + 0.4) * innerR);
+    ctx.lineTo(Math.cos(a - 0.4) * innerR, Math.sin(a - 0.4) * innerR);
     ctx.closePath();
     ctx.stroke();
   }
   // 红核
   ctx.beginPath();
-  ctx.arc(0, 0, 3, 0, Math.PI * 2);
+  ctx.arc(0, 0, 3 * s, 0, Math.PI * 2);
   ctx.fillStyle = "rgba(255, 55, 35, 0.85)";
   ctx.fill();
   ctx.restore();

@@ -8572,7 +8572,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       this.bossController = new BossController("thunderGeneral");
     } else if ((this.gameMode as string) === "strategySlice") {
       this.strategySliceController = new BossStrategySliceController();
-      // S2.4: 设置 HUD 变体（overcorrect 或 s23）
+      // S2.4: 设置变体
+      this.strategySliceController.setVariant(this.variant);
       setHUDVariant(this.variant);
       const urlSeed = new URLSearchParams(window.location.search).get("seed");
       if (urlSeed) this.strategySliceController.setSeed(parseInt(urlSeed, 10) || 1);

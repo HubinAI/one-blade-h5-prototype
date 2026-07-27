@@ -165,6 +165,9 @@ export class BossStrategySliceController {
   private _overloadedHitPlayer = false;
   // S2.3: charged发射延迟
   private _chargedLaunchTimer = 0;
+  // S2.4: overcorrect变体
+  private _variant = "s23";
+  setVariant(v: string) { this._variant = v; }
   // S2.2: 本轮已斩供能弹计数（用于首次斩弹触发危险弹）
   private _cycleFeederCutCount = 0;
   get overloadedHitPlayer(): boolean { return this._overloadedHitPlayer; }
@@ -385,7 +388,10 @@ export class BossStrategySliceController {
     this._feederRemaining = 0;
     const { cx, cy, radius: ar } = STRATEGY_SLICE_CONFIG.absorbZone;
     const sr = STRATEGY_SLICE_CONFIG.feeder.spawnRadius;
-    const speed = STRATEGY_SLICE_CONFIG.feeder.speed;
+    // S2.4: overcorrect 用到达时间算速度
+    const speed = this._variant === "overcorrect"
+      ? sr / STRATEGY_SLICE_CONFIG.overcorrect.feederArrivalTime
+      : STRATEGY_SLICE_CONFIG.feeder.speed;
 
     for (let i = 0; i < STRATEGY_SLICE_CONFIG.feeder.count; i++) {
       const angleOffset = (i === 0 ? -1 : 1) * (0.6 + this._random() * 0.4); // S1.6: 加宽角度避免一刀双斩
@@ -561,8 +567,11 @@ export class BossStrategySliceController {
   private respawnFeeders(): void {
     const { cx, cy } = STRATEGY_SLICE_CONFIG.absorbZone;
     const sr = STRATEGY_SLICE_CONFIG.feeder.spawnRadius;
-    const speed = STRATEGY_SLICE_CONFIG.feeder.speed;
+    const speed = this._variant === "overcorrect"
+      ? sr / STRATEGY_SLICE_CONFIG.overcorrect.feederArrivalTime
+      : STRATEGY_SLICE_CONFIG.feeder.speed;
 
+    // 补充2枚供能弹
     for (let i = 0; i < 2; i++) {
       const angleOffset = (i === 0 ? -1 : 1) * (0.7 + this._random() * 0.5);
       const spawnAngle = -Math.PI / 2 + angleOffset;
