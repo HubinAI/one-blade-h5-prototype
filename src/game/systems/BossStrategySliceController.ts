@@ -475,7 +475,7 @@ export class BossStrategySliceController {
       const dy = playerY - spawnY;
       const dist = Math.max(1, Math.abs(dy));
       const speed = STRATEGY_SLICE_CONFIG.coreProjectile.chargedIncomingSpeed;
-      const p = createProjectile("reflective", spawnX, spawnY, (dx / dist) * speed * 0.3, (dy / dist) * speed);
+      const p = createProjectile("reflective", spawnX, spawnY, (dx / dist) * speed, (dy / dist) * speed);
       this._coreProjectile = p;
       this._coreState = "charged";
       this._coreChargedTimer = 0;
