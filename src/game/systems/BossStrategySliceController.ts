@@ -166,14 +166,33 @@ export class BossStrategySliceController {
   // S2.2: 本轮已斩供能弹计数（用于首次斩弹触发危险弹）
   private _cycleFeederCutCount = 0;
   get overloadedHitPlayer(): boolean { return this._overloadedHitPlayer; }
-  /** S2.2: 在首次斩供能弹时生成一枚横切反射路径的危险弹 */
+  /** S2.3: 根据当前优先目标计算垂直横切线 */
   private spawnDangerCrossing(): void {
-    const az = STRATEGY_SLICE_CONFIG.absorbZone;
     const ds = STRATEGY_SLICE_CONFIG.danger.speed;
-    // 从右侧横切中部（玩家→core反射路径区域）
-    const sx = 390 - 30;
-    const sy = az.cy + 60 + this._random() * 80;
-    const p = createProjectile("dangerous", sx, sy, -ds * 0.9, (this._random() - 0.5) * 20);
+    // 玩家位置（下部中央）
+    const px = 195, py = 750;
+    // 确定优先目标
+    let tx = px, ty = py - 100;
+    // 查找剩余供能弹或charged核心
+    const remaining = this._feeders.find(f => f.active);
+    if (remaining) { tx = remaining.x; ty = remaining.y; }
+    else if (this._coreProjectile?.active && this._coreState === "charged") {
+      tx = this._coreProjectile.x; ty = this._coreProjectile.y;
+    }
+    // 横切中点
+    const mx = (px + tx) / 2;
+    const my = (py + ty) / 2;
+    // 垂直方向横切
+    const dx2 = tx - px;
+    const dy2 = ty - py;
+    const len = Math.hypot(dx2, dy2) || 1;
+    const tx2 = -dy2 / len; // 垂直单位向量
+    const ty2 = dx2 / len;
+    const fromLeft = this._random() > 0.5;
+    const sign = fromLeft ? -1 : 1;
+    const sx = mx + tx2 * sign * 100;
+    const sy = my + ty2 * sign * 100;
+    const p = createProjectile("dangerous", sx, sy, tx2 * sign * ds, ty2 * sign * ds);
     this._dangerProjectiles.push(p);
   }
 
@@ -240,6 +259,13 @@ export class BossStrategySliceController {
         this._coreProjectile.vy = this._reflectedTargetVy;
       }
     }
+
+    // S2.3: 清理离场危险弹
+    this._dangerProjectiles = this._dangerProjectiles.filter(d => {
+      if (!d.active) return false;
+      if (d.x < -50 || d.x > 440 || d.y < -50 || d.y > 900) { d.active = false; return false; }
+      return true;
+    });
 
     // 过载计时
     if (this._coreState === "overloaded") {
@@ -333,9 +359,8 @@ export class BossStrategySliceController {
     this._lastDecision = null;
     this._inputLocked = false;
 
-    // 清空上一轮弹幕
+    // S2.3: 不彻底清空——继承上一轮危险弹（已离场的会在update中清理）
     this._feeders = [];
-    this._dangerProjectiles = [];
     this._coreProjectile = null;
     this._coreState = null;
     this._coreCharge = 0;
@@ -441,18 +466,23 @@ export class BossStrategySliceController {
 
   private onFeederAbsorbed(): void {
     if (this._coreState === "seed" && this._coreCharge >= 1) {
-      // S2: charged核心从吸收区脱离40px，悬停呼吸
+      // S2.3: charged核心从吸收区生成后直接飞向玩家，不悬停
       const az = STRATEGY_SLICE_CONFIG.absorbZone;
       const spawnX = az.cx;
-      const spawnY = az.cy - 42;
-      this._coreProjectile = createProjectile("reflective", spawnX, spawnY, 0, 0);
+      const spawnY = az.cy - 20;
+      const playerY = 700;
+      const dx = 0;
+      const dy = playerY - spawnY;
+      const dist = Math.max(1, Math.abs(dy));
+      const speed = STRATEGY_SLICE_CONFIG.coreProjectile.chargedIncomingSpeed;
+      const p = createProjectile("reflective", spawnX, spawnY, (dx / dist) * speed * 0.3, (dy / dist) * speed);
+      this._coreProjectile = p;
       this._coreState = "charged";
       this._coreChargedTimer = 0;
-      // S2: 首次出现charged提示"可反射"
       if (!this._hintChargedShown) {
         this._hintChargedShown = true;
         this._pendingHint = "可反射";
-        this._hintTimer = 1.5;
+        this._hintTimer = 0.6;
       }
     } else if (this._coreState === "charged" && this._coreCharge >= 2) {
       this.transitionCoreToOverloaded("overcharge");

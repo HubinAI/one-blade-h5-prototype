@@ -39,7 +39,7 @@ describe("BossStrategySliceController — S1.4", () => {
 
   it("S3: 吸收1枚 → charged核心弹出现", () => {
     c.update(0.7);
-    c.getFeeders()[0].x = 195; c.getFeeders()[0].y = 340;
+    c.getFeeders()[0].x = 195; c.getFeeders()[0].y = 330;
     c.update(0.1);
     expect(c.coreState).toBe("charged");
     expect(c.getCoreProjectile()).not.toBeNull();
@@ -47,7 +47,7 @@ describe("BossStrategySliceController — S1.4", () => {
 
   it("S4: charged反射 → 大破绽", () => {
     c.update(0.7);
-    c.getFeeders()[0].x = 195; c.getFeeders()[0].y = 340;
+    c.getFeeders()[0].x = 195; c.getFeeders()[0].y = 330;
     c.update(0.1);
     const core = c.getCoreProjectile();
     if (core) {
@@ -61,7 +61,7 @@ describe("BossStrategySliceController — S1.4", () => {
 
   it("S5: charged直斩 → 补给供能弹", () => {
     c.update(0.7);
-    c.getFeeders()[0].x = 195; c.getFeeders()[0].y = 340;
+    c.getFeeders()[0].x = 195; c.getFeeders()[0].y = 330;
     c.update(0.1);
     const core = c.getCoreProjectile();
     if (core) {
@@ -73,8 +73,8 @@ describe("BossStrategySliceController — S1.4", () => {
 
   it("S6: 吸收2枚 → overloaded", () => {
     c.update(0.7);
-    c.getFeeders()[0].x = 195; c.getFeeders()[0].y = 340;
-    c.getFeeders()[1].x = 195; c.getFeeders()[1].y = 340;
+    c.getFeeders()[0].x = 195; c.getFeeders()[0].y = 330;
+    c.getFeeders()[1].x = 195; c.getFeeders()[1].y = 330;
     c.update(0.1);
     expect(c.coreState).toBe("overloaded");
     expect(c.overloads).toBeGreaterThanOrEqual(1);
@@ -82,8 +82,8 @@ describe("BossStrategySliceController — S1.4", () => {
 
   it("S7: overload → carryOver继承", () => {
     c.update(0.7);
-    c.getFeeders()[0].x = 195; c.getFeeders()[0].y = 340;
-    c.getFeeders()[1].x = 195; c.getFeeders()[1].y = 340;
+    c.getFeeders()[0].x = 195; c.getFeeders()[0].y = 330;
+    c.getFeeders()[1].x = 195; c.getFeeders()[1].y = 330;
     c.update(0.1);
     expect(c.carryOverDangerCount).toBeGreaterThanOrEqual(1);
   });

@@ -1,6 +1,6 @@
 // ========================================================================
-// Boss Strategy Slice — S2 战场信息语法实验
-// 位置/运动/形状/颜色语法 + 压力模型 + 简化刀势经济
+// Boss Strategy Slice — S2.3 战场心流重构
+// 6-8s循环、charged直飞、无缝继承、精准封路
 // ========================================================================
 
 export type SliceCoreState = "seed" | "charged" | "overloaded" | "cut" | "reflected";
@@ -10,39 +10,39 @@ export type SliceDecision = "attack_armor" | "clean_field" | "skip_window" | "lo
 export type SlicePhase = "slice_intro" | "cycle_evolve" | "cycle_window" | "cycle_resolve" | "slice_complete";
 
 export const STRATEGY_SLICE_CONFIG = {
-  /** 切片总时长上限（秒）— S2单轮10–14s，两轮约25s上限 */
-  maxSliceDuration: 30,
+  /** S2.3: 两轮总上限 */
+  maxSliceDuration: 20,
 
-  /** 阶段计时 — S2: 缩小窗口以加快节奏 */
+  /** S2.3: 紧凑窗口 */
   phaseTimers: {
-    sliceIntro: 0.4,
-    windowSmall: 0.9,
+    sliceIntro: 0.25,
+    windowSmall: 0.8,
     windowLarge: 1.5,
-    resolveTransition: 0.3,
+    resolveTransition: 0.25,
   },
 
-  // ---- S2.2 刀势经济 ----
+  // ---- S2.2 刀势经济（不变）----
   bladeEconomy: {
-    initialRatio: 0.55,      // 初始刀势55%
-    feederCutGain: 0.20,     // 斩1枚供能弹+20%
-    normalSlashCost: 0.05,   // 每刀消耗5%
-    reflectThreshold: 0.70,  // 反射门槛70%
-    postReflectRatio: 0.20,  // 反射成功后降至20%
-    postOverloadRatio: 0.20, // 过载受击后降至20%
-    overloadHpDamage: 0.15,  // 过载HP伤害15%
+    initialRatio: 0.55,
+    feederCutGain: 0.20,
+    normalSlashCost: 0.05,
+    reflectThreshold: 0.70,
+    postReflectRatio: 0.20,
+    postOverloadRatio: 0.20,
+    overloadHpDamage: 0.15,
   },
 
-  /** 核心弹吸收区 */
+  /** S2.3: 吸收区下移 */
   absorbZone: {
     cx: 195,
-    cy: 320,     // S2: 稍高以容纳弧线轨迹
-    radius: 50,
+    cy: 310,
+    radius: 45,
   },
 
-  /** 供能弹 */
+  /** 供能弹 — S2.3: 2.2–2.6s到达 */
   feeder: {
     count: 2,
-    speed: 22,           // S2: 加快弹速，供能弹约7s到达
+    speed: 56,           // 130/2.3≈56
     spawnRadius: 130,
     absorbDistance: 22,
   },
@@ -50,21 +50,20 @@ export const STRATEGY_SLICE_CONFIG = {
   /** 核心弹 */
   coreProjectile: {
     spawnPos: { x: 195, y: 260 },
-    chargedDuration: 4.0,   // S2: 延长窗口给反射判断
-    overloadedSpeed: 90,    // S2: 稍慢，但方向指向玩家
+    chargedDuration: 3.0,        // S2.3: 总时间窗口，但核心立即飞向玩家
+    chargedLaunchDelay: 0.25,    // S2.3: charged后短暂停顿再发射
+    overloadedSpeed: 120,        // S2.3: 加速
+    chargedIncomingSpeed: 160,   // S2.3: charged直飞玩家速度
   },
 
-  /** 危险弹 — S2: 路径经过刀路，横向切割 */
+  /** 危险弹 */
   danger: {
     initialCount: 1,
-    speed: 85,
-    spawnRadius: 140,
+    speed: 95,
     basePerCycle: 1,
-    /** S2: 危险弹水平偏移（从左右两侧横穿玩家刀路） */
-    horizontalOffset: 100,
   },
 
-  /** 护甲（右肩） */
+  /** 护甲 */
   armor: {
     durability: 100,
     lowDamage: 25,
