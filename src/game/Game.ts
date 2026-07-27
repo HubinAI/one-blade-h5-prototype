@@ -17,7 +17,7 @@ import { paperBurst, ringParticle, sparkBurst, glowParticle, explosionBurst, cor
 import { BossController } from "./systems/BossController";
 import { BossReactiveController, type ReactiveCollisionEvent } from "./systems/BossReactiveController";
 import { BossStrategySliceController, type SliceCollisionEvent } from "./systems/BossStrategySliceController";
-import { drawEnergyBar, drawHpBar, drawArmorIndicators, drawArmorObjectiveProgress, drawPerfectReflectText } from "./systems/bossReactiveHUD";
+import { drawEnergyBar, drawHpBar, drawArmorIndicators } from "./systems/bossReactiveHUD";
 import { drawBossBody, drawFeederProjectile, drawCoreProjectile, drawDangerProjectile, drawWindowIndicator, drawAbsorbZone, drawFeederTrajectories } from "./systems/bossStrategySliceHUD";
 import { BLADE_MOMENTUM_CONFIG, DEFAULT_BLADE_RUN_MODIFIERS, type BladeMomentumState, type BladeRunModifiers } from "./config/bladeMomentum";
 import { createBladeMomentumState, applyBladeMaxChangePreserveRatio } from "./systems/bladeMomentum";
@@ -439,6 +439,10 @@ export class Game {
     if (this.gameMode === "bossReactive" || this.gameMode === "strategySlice") {
       this.reactiveBladeMax = BLADE_MOMENTUM_CONFIG.baseMax + this.reactiveBladeRunModifiers.maxBonus;
       this.energy = Math.round(this.reactiveBladeMax * BLADE_MOMENTUM_CONFIG.initialRatio);
+      // S1最终: 策略切片独立初始刀势75%，确保反射可行
+      if (this.gameMode === "strategySlice") {
+        this.energy = Math.round(this.reactiveBladeMax * 0.75);
+      }
     } else {
       this.energy = clamp(this.runContext.mode === "freeBurst" ? BALANCE.swordEnergy.max : level.initialEnergy + this.progressionModifiers.initialEnergyBonus, 0, BALANCE.swordEnergy.max);
     }
@@ -518,7 +522,8 @@ export class Game {
       const forceCompleteObjective = (): boolean => {
         const rc = self.reactiveController;
         if (!rc || rc.phase !== "armor_threat") return false;
-        rc.forceCompleteObjectiveForTest();
+        // E2E bridge: force armor break (call left as no-op on main branch)
+        return false;
         return true;
       };
 
@@ -611,10 +616,6 @@ export class Game {
               },
               // V0723016复审P0-3: 时间轴遥测 + gameInstanceId（供 E2E 断言）
               gameInstanceId: instanceId,
-              bossStartTs: snap.bossStartTs,
-              leftBreakTs: snap.leftBreakTs,
-              rightBreakTs: snap.rightBreakTs,
-              chestBreakTs: snap.chestBreakTs,
               breakthroughSuccessTs: self._breakthroughSuccessTs,
             };
           }
@@ -960,6 +961,8 @@ export class Game {
         remainingArmor: snap.remainingArmor,
         windowSmallCount: snap.windowSmallCount,
         windowLargeCount: snap.windowLargeCount,
+        dangerInheritedCycle1: snap.dangerInheritedCycle1,
+        dangerInheritedCycle2: snap.dangerInheritedCycle2,
       } : undefined,
     };
     this.onFinish(result);
@@ -1439,12 +1442,10 @@ export class Game {
       const armors = rc.getArmorBrokenFlags();
       const activeIndex = rc.getActiveArmorIndex();
       drawArmorIndicators(ctx, armors, DESIGN_WIDTH / 2 - 80, 28, activeIndex);
-      // V0723016: 三甲目标进度（威胁阶段显示在护甲状态条下方）
-      drawArmorObjectiveProgress(ctx, rc.objectiveType, rc.objectiveCurrent, rc.objectiveTarget, rc.perfectReflectCount, DESIGN_WIDTH / 2, 52);
-      // V0723016: 精准反射"回锋！"屏幕中央飘字（2秒淡出）
-      if (rc.perfectReflectFlash > 0) {
-        drawPerfectReflectText(ctx, rc.perfectReflectFlash / 2);
-      }
+      // (V0723016 objective progress — not in main, removed)
+      // drawArmorObjectiveProgress(ctx, rc.objectiveType, rc.objectiveCurrent, rc.objectiveTarget, rc.perfectReflectCount, DESIGN_WIDTH / 2, 52);
+      // V0723016: 精准反射（已移除）
+      // (perfectReflect visualization removed for main compatibility)
       //    底部：刀势条（靠近玩家操作区）
       const bm = this.getReactiveBladeMomentum();
       drawEnergyBar(ctx, this.energy, this.reactiveBladeMax, DESIGN_WIDTH / 2 - 90, DESIGN_HEIGHT - 60, 180, 18, bm.band);

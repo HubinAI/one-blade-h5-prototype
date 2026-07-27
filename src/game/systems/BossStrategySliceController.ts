@@ -67,6 +67,8 @@ export interface SliceSnapshot {
   remainingArmor: number;
   windowSmallCount: number;
   windowLargeCount: number;
+  dangerInheritedCycle1: number;
+  dangerInheritedCycle2: number;
   cycle1Decision: SliceDecision | null;
   cycle2Decision: SliceDecision | null;
 }
@@ -120,6 +122,10 @@ export class BossStrategySliceController {
   private _windowSmallCount = 0;
   private _windowLargeCount = 0;
 
+  // S1最终: 每轮继承危险数记录
+  private _dangerInheritedCycle1 = 0;
+  private _dangerInheritedCycle2 = 0;
+
   // ---- 护甲 ----
   private _armorDurability = 100;
 
@@ -150,6 +156,8 @@ export class BossStrategySliceController {
   get chargedReflects(): number { return this._chargedReflects; }
   get overloads(): number { return this._overloads; }
   get coreCharge(): number { return this._coreCharge; }
+  get dangerInheritedCycle1(): number { return this._dangerInheritedCycle1; }
+  get dangerInheritedCycle2(): number { return this._dangerInheritedCycle2; }
   get armorDurability(): number { return this._armorDurability; }
 
   setSeed(n: number): void { this._seed = n; }
@@ -313,6 +321,10 @@ export class BossStrategySliceController {
       const p = createProjectile("dangerous", dx2, dy2, Math.cos(moveAngle) * ds, Math.sin(moveAngle) * ds);
       this._dangerProjectiles.push(p);
     }
+
+    // S1最终: 记录本轮继承的危险数
+    if (index === 1) this._dangerInheritedCycle1 = this._carryOverDangerCount;
+    else if (index === 2) this._dangerInheritedCycle2 = this._carryOverDangerCount;
 
     // 重置 carryOver（本轮已消费）
     this._carryOverDangerCount = 0;
@@ -493,18 +505,26 @@ export class BossStrategySliceController {
     } else if (this._coreState === "charged") {
       // charged：先判断是否可以反射（burst刀势），否则直接斩
       if (momentum.ratio >= 0.7) {
-        // 反射 → 核心弹反向飞向 Boss 右肩 → 大破绽
-        this._coreProjectile.vx = 0;
-        this._coreProjectile.vy = -120;
+        // S1最终: 反射轨迹指向右肩实际位置
+        const sp = STRATEGY_SLICE_CONFIG.armor.shoulderPos;
+        const dx = sp.cx - this._coreProjectile.x;
+        const dy = sp.cy - this._coreProjectile.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const reflectSpeed = 120;
+        this._coreProjectile.vx = (dx / len) * reflectSpeed;
+        this._coreProjectile.vy = (dy / len) * reflectSpeed;
         this._coreProjectile.reflected = true;
         this._coreState = "reflected";
         events.push({ kind: "core_reflected", projectileId: this._coreProjectile.id, description: "核心反射" });
       } else {
-        // 直接斩 → 消除过载风险，不给窗口，补给新供能弹继续本轮
+        // S1最终: 直接斩 → 消除过载风险 → 重置为seed继续本轮
         this._coreProjectile.active = false;
         this._coreProjectile.resolved = true;
-        this._coreState = "cut";
-        events.push({ kind: "core_charged_cut", projectileId: this._coreProjectile.id, description: "充能核心被斩" });
+        this._coreProjectile = null;
+        this._coreState = "seed";
+        this._coreCharge = 0;
+        this._coreChargedTimer = 0;
+        events.push({ kind: "core_charged_cut", projectileId: "charged_cut", description: "充能核心被斩" });
 
         // S1.4: 不结束循环，补充2枚新供能弹
         this.respawnFeeders();
@@ -677,6 +697,8 @@ export class BossStrategySliceController {
       remainingArmor: this._armorDurability,
       windowSmallCount: this._windowSmallCount,
       windowLargeCount: this._windowLargeCount,
+      dangerInheritedCycle1: this._dangerInheritedCycle1,
+      dangerInheritedCycle2: this._dangerInheritedCycle2,
       cycle1Decision: this._cycle1Decision,
       cycle2Decision: this._cycle2Decision,
     };

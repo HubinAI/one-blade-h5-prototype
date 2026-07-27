@@ -483,7 +483,6 @@ export default function App() {
             retryExecutionRequested={retryExecutionRequested}
             onRetryExecutionConsumed={handleRetryExecutionConsumed}
             onBossPhaseChange={handleBossPhaseChange}
-            bossFlow={bossFlow}
             runIndex={runIndex}
           />
           {(() => {
@@ -625,6 +624,11 @@ export default function App() {
             )}
             {sliceResult.windowSmallCount !== undefined && (
               <div style={{ padding: "3px 0" }}>小破绽 <span style={{ color: "#5bc0ff" }}>{sliceResult.windowSmallCount}</span> · 大破绽 <span style={{ color: "#ffd35a" }}>{sliceResult.windowLargeCount}</span></div>
+            )}
+            {(sliceResult.dangerInheritedCycle1 !== undefined || sliceResult.dangerInheritedCycle2 !== undefined) && (
+              <div style={{ padding: "3px 0" }}>
+                继承危险: 第1轮 <span style={{ color: "#ff3535" }}>{sliceResult.dangerInheritedCycle1 ?? 0}</span> · 第2轮 <span style={{ color: "#ff3535" }}>{sliceResult.dangerInheritedCycle2 ?? 0}</span>
+              </div>
             )}
           </div>
           <button className="battle-btn" style={{ width: 200, marginBottom: 10, background: "#c86a22", border: "1px solid #ff8c42", color: "#fff", fontWeight: 700 }} onClick={() => {

@@ -444,6 +444,8 @@ export type BattleResult = {
     remainingArmor?: number;
     windowSmallCount?: number;
     windowLargeCount?: number;
+    dangerInheritedCycle1?: number;
+    dangerInheritedCycle2?: number;
   };
 };
 
