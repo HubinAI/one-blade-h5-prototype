@@ -19,7 +19,7 @@ import { BossReactiveController, type ReactiveCollisionEvent } from "./systems/B
 import { BossStrategySliceController, type SliceCollisionEvent } from "./systems/BossStrategySliceController";
 import { STRATEGY_SLICE_CONFIG } from "./config/bossStrategySlice";
 import { drawEnergyBar, drawHpBar, drawArmorIndicators, drawArmorObjectiveProgress, drawPerfectReflectText } from "./systems/bossReactiveHUD";
-import { drawBossBody, drawFeederProjectile, drawCoreProjectile, drawDangerProjectile, drawWindowIndicator, drawAbsorbZone, drawFeederTrajectories, drawAbsorptionChannels } from "./systems/bossStrategySliceHUD";
+import { drawBossBody, drawFeederProjectile, drawCoreProjectile, drawDangerProjectile, drawWindowIndicator, drawAbsorbZone, drawFeederTrajectories, drawAbsorptionChannels, setHUDVariant } from "./systems/bossStrategySliceHUD";
 import { BLADE_MOMENTUM_CONFIG, DEFAULT_BLADE_RUN_MODIFIERS, type BladeMomentumState, type BladeRunModifiers } from "./config/bladeMomentum";
 import { createBladeMomentumState, applyBladeMaxChangePreserveRatio } from "./systems/bladeMomentum";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
@@ -196,6 +196,8 @@ export class Game {
   private currentRunMode: "normal" | "challenge" | "dailyChallenge" | "freeBurst" | "highYield" = "normal";
   /** P4.4A.1-R3: 游戏模式隔离 */
   private gameMode: "normal" | "boss" | "bossReactive" | "strategySlice" = "normal";
+  /** S2.4: A/B对照变体 — overcorrect 放大版 */
+  private variant: string = ""; // "s23" | "overcorrect"
   private _e2eInstanceId: string | null = null;  // V0723016复审: E2E桥实例ID（供 GameCanvas cleanup 守卫）
   get e2eInstanceId(): string | null { return this._e2eInstanceId; }
   private nextWaveTimer: number = BALANCE.waves.firstWaveDelay;
@@ -427,6 +429,9 @@ export class Game {
     this.onFinish = onFinish;
     this.onReviveOffer = onReviveOffer;
     // P4.4A.2: 第一帧确定游戏模式
+    // S2.4: 读 variant 参数判断 A/B 对照
+    const urlP = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
+    this.variant = urlP.get("variant") || "s23";
     if (runMode === "challenge" && level.bossId === "thunderGeneral") {
       if (bossFlow === "strategySlice") {
         this.gameMode = "strategySlice";
@@ -2879,7 +2884,17 @@ export class Game {
               this.energy = Math.round(this.reactiveBladeMax * STRATEGY_SLICE_CONFIG.bladeEconomy.postReflectRatio);
             }
             else if (ev.kind === "core_charged_cut" || ev.kind === "core_seed_cut") this.particles.push(...sparkBurst(hitPos, 5, "#ffd35a", 30));
-            else if (ev.kind === "dangerous_wrong_cut") this.particles.push(...sparkBurst(hitPos, 6, "#c0392b", 30));
+            else if (ev.kind === "dangerous_wrong_cut") {
+              this.particles.push(...sparkBurst(hitPos, 6, "#c0392b", 30));
+              // S2.4: 误砍危险物惩罚
+              if (this.variant === "overcorrect") {
+                const oc = STRATEGY_SLICE_CONFIG.overcorrect;
+                this.hp = Math.max(1, this.hp - Math.round(this.maxHp * oc.dangerWrongCutHpPct));
+                this.energy = Math.max(0, this.energy - Math.round(this.reactiveBladeMax * oc.dangerWrongCutEnergyPct));
+                this.screenShake = 0.3;
+                this.flash = 0.3;
+              }
+            }
           }
           break;
         }
@@ -8556,9 +8571,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       };
       this.bossController = new BossController("thunderGeneral");
     } else if ((this.gameMode as string) === "strategySlice") {
-      // V0723016-S1: 创建策略切片控制器
       this.strategySliceController = new BossStrategySliceController();
-      // 从 URL 读取 seed
+      // S2.4: 设置 HUD 变体（overcorrect 或 s23）
+      setHUDVariant(this.variant);
       const urlSeed = new URLSearchParams(window.location.search).get("seed");
       if (urlSeed) this.strategySliceController.setSeed(parseInt(urlSeed, 10) || 1);
     } else {

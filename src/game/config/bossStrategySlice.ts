@@ -42,7 +42,7 @@ export const STRATEGY_SLICE_CONFIG = {
   /** 供能弹 — S2.3: 2.2–2.6s到达 */
   feeder: {
     count: 2,
-    speed: 56,           // 130/2.3≈56
+    speed: 72,           // S2.4: overcorrect ~1.8s 到达
     spawnRadius: 130,
     absorbDistance: 22,
   },
@@ -79,5 +79,28 @@ export const STRATEGY_SLICE_CONFIG = {
   /** 过载惩罚 */
   overloadPenalty: {
     extraDangerCount: 1,
+  },
+
+  /** S2.4 矫枉过正：A/B对照超参数 */
+  overcorrect: {
+    /** 对象尺寸放大倍数 */
+    scaleMultiplier: 1.6,
+    /** 供能弹到达时间(s) */
+    feederArrivalTime: 1.6,
+    /** 关系线宽度 */
+    channelWidth: 10,
+    /** 危险走廊可见长度 */
+    dangerCorridorLength: 160,
+    /** 危险走廊可见宽度 */
+    dangerCorridorWidth: 26,
+    /** 误砍危险惩罚 */
+    dangerWrongCutHpPct: 0.08,
+    dangerWrongCutEnergyPct: 0.20,
+    /** Boss 肩抬距离 */
+    bossShoulderLiftPx: 24,
+    /** Boss 侧倾角度 */
+    bossTiltDeg: 10,
+    /** 撞肩后退距离 */
+    bossReflectKnockbackPx: 24,
   },
 };

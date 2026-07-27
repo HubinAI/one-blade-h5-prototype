@@ -79,13 +79,23 @@ export function drawAbsorptionChannels(
 // 🔹 Boss 身体（复用 Reactive 模式外观）
 // ================================================================
 
+// S2.4: overcorrect 辅助函数
+let _variantGlobal: string = "s23";
+export function setHUDVariant(v: string) { _variantGlobal = v; }
+function ocScale(): number {
+  return _variantGlobal === "overcorrect" ? STRATEGY_SLICE_CONFIG.overcorrect.scaleMultiplier : 1;
+}
+
 export function drawBossBody(ctx: CanvasRenderingContext2D, t: number, armorDurability: number, windowType: string, isCharging: boolean): void {
   ctx.save();
-  ctx.translate(BOSS_CX, BOSS_CY);
-  ctx.scale(BOSS_SCALE, BOSS_SCALE);
+  ctx.translate(BOSS_CX, BOSS_CY - 10);
+  const s = BOSS_SCALE * ocScale();
+  ctx.scale(s, s);
 
-  // S2.2: 吸能时右肩抬起（向上偏移3-5px）
-  const shoulderLift = isCharging ? 2 + Math.sin(t * 8) * 2 : 0;
+  // S2.4: 吸能时大幅抬肩+侧倾
+  const tilt = isCharging && _variantGlobal === "overcorrect" ? STRATEGY_SLICE_CONFIG.overcorrect.bossTiltDeg : 0;
+  const lift = isCharging ? (_variantGlobal === "overcorrect" ? STRATEGY_SLICE_CONFIG.overcorrect.bossShoulderLiftPx : 2 + Math.sin(t * 8) * 2) : 0;
+  ctx.rotate(tilt * Math.PI / 180);
 
 
   // 剪影
@@ -124,7 +134,7 @@ export function drawBossBody(ctx: CanvasRenderingContext2D, t: number, armorDura
   // S2.2: 右肩吸能时抬起
   const isWindow = windowType !== "none";
   const durPct = armorDurability / 100;
-  drawShoulderPiece(ctx, "right", 50, -30 - shoulderLift, durPct, isWindow);
+  drawShoulderPiece(ctx, "right", 50, -30 - lift, durPct, isWindow);
   // 胸甲（灰色）
   drawChestPiece(ctx);
 
