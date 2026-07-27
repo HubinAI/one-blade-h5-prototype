@@ -17,6 +17,7 @@ import { paperBurst, ringParticle, sparkBurst, glowParticle, explosionBurst, cor
 import { BossController } from "./systems/BossController";
 import { BossReactiveController, type ReactiveCollisionEvent } from "./systems/BossReactiveController";
 import { BossStrategySliceController, type SliceCollisionEvent } from "./systems/BossStrategySliceController";
+import { STRATEGY_SLICE_CONFIG } from "./config/bossStrategySlice";
 import { drawEnergyBar, drawHpBar, drawArmorIndicators, drawArmorObjectiveProgress, drawPerfectReflectText } from "./systems/bossReactiveHUD";
 import { drawBossBody, drawFeederProjectile, drawCoreProjectile, drawDangerProjectile, drawWindowIndicator, drawAbsorbZone, drawFeederTrajectories } from "./systems/bossStrategySliceHUD";
 import { BLADE_MOMENTUM_CONFIG, DEFAULT_BLADE_RUN_MODIFIERS, type BladeMomentumState, type BladeRunModifiers } from "./config/bladeMomentum";
@@ -439,9 +440,9 @@ export class Game {
     if (this.gameMode === "bossReactive" || this.gameMode === "strategySlice") {
       this.reactiveBladeMax = BLADE_MOMENTUM_CONFIG.baseMax + this.reactiveBladeRunModifiers.maxBonus;
       this.energy = Math.round(this.reactiveBladeMax * BLADE_MOMENTUM_CONFIG.initialRatio);
-      // S1最终: 策略切片独立初始刀势75%，确保反射可行
+      // S2: 策略切片初始刀势55%，按配置
       if (this.gameMode === "strategySlice") {
-        this.energy = Math.round(this.reactiveBladeMax * 0.75);
+        this.energy = Math.round(this.reactiveBladeMax * STRATEGY_SLICE_CONFIG.bladeEconomy.initialRatio);
       }
     } else {
       this.energy = clamp(this.runContext.mode === "freeBurst" ? BALANCE.swordEnergy.max : level.initialEnergy + this.progressionModifiers.initialEnergyBonus, 0, BALANCE.swordEnergy.max);
@@ -1532,7 +1533,7 @@ export class Game {
 
     // 2. Boss身体 + 吸收区（世界层）
     drawBossBody(ctx, this.elapsed, snap.armorDurability, snap.windowType);
-    drawAbsorbZone(ctx, this.elapsed, snap.coreState === "charged");
+    drawAbsorbZone(ctx, this.elapsed, snap.coreState === "charged", snap.coreCharge);
 
     // 3. 供能弹 + 轨迹
     drawFeederTrajectories(ctx, ssc.getFeeders(), this.elapsed);
@@ -1954,7 +1955,10 @@ export class Game {
       this.reactiveController?.registerReactiveSlashStart(this.currentSlash!.id);
       this._currentReactiveSegmentEvents = [];
     } else if (this.gameMode === "strategySlice") {
-      // 策略实验切片：整刀使用PointerDown锁定的lockedMomentum，不消耗energy
+      // S2: 策略实验切片 — 每刀消耗5%刀势，整刀使用PointerDown锁定快照
+      const ce = this.strategySliceController?.bladeEconomy;
+      const costEnergy = ce ? Math.round(this.reactiveBladeMax * ce.normalSlashCost) : 0;
+      this.energy = Math.max(0, this.energy - costEnergy);
     } else {
       this.energy = consumeEnergyByTier(this.energy, tier);
     }
@@ -2823,8 +2827,17 @@ export class Game {
           const events = ssc.resolveProjectileHit(p, momentum);
           for (const ev of events) {
             const hitPos = { x: p.x, y: p.y };
-            if (ev.kind === "feeder_cut") this.particles.push(...sparkBurst(hitPos, 3, "#5bc0ff", 20));
-            else if (ev.kind === "core_reflected") this.particles.push(...sparkBurst(hitPos, 8, "#ffd700", 40));
+            if (ev.kind === "feeder_cut") {
+              this.particles.push(...sparkBurst(hitPos, 3, "#5bc0ff", 20));
+              // S2: 斩供能弹 +15% 刀势
+              const gain = Math.round(this.reactiveBladeMax * STRATEGY_SLICE_CONFIG.bladeEconomy.feederCutGain);
+              this.energy = Math.min(this.reactiveBladeMax, this.energy + gain);
+            }
+            else if (ev.kind === "core_reflected") {
+              this.particles.push(...sparkBurst(hitPos, 8, "#ffd700", 40));
+              // S2: 反射成功后刀势降至35%
+              this.energy = Math.round(this.reactiveBladeMax * STRATEGY_SLICE_CONFIG.bladeEconomy.postReflectRatio);
+            }
             else if (ev.kind === "core_charged_cut" || ev.kind === "core_seed_cut") this.particles.push(...sparkBurst(hitPos, 5, "#ffd35a", 30));
             else if (ev.kind === "dangerous_wrong_cut") this.particles.push(...sparkBurst(hitPos, 6, "#c0392b", 30));
           }

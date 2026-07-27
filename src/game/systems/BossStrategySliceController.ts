@@ -148,6 +148,11 @@ export class BossStrategySliceController {
   get coreState(): SliceCoreState | null { return this._coreState; }
   get feederRemaining(): number { return this._feederRemaining; }
   get carryOverDangerCount(): number { return this._carryOverDangerCount; }
+
+  // S2 刀势经济接口
+  get bladeEconomy() {
+    return STRATEGY_SLICE_CONFIG.bladeEconomy;
+  }
   get windowType(): SliceWindowType { return this._windowType; }
   get windowSource(): SliceWindowSource | null { return this._windowSource; }
   get inputLocked(): boolean { return this._inputLocked; }

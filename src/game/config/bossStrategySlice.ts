@@ -1,68 +1,65 @@
 // ========================================================================
-// Boss Strategy Slice — V0723016-S1.3 实验模式配置
-// 右肩单甲、两轮局势循环，18–25秒策略验证切片
+// Boss Strategy Slice — S2 战场信息语法实验
+// 位置/运动/形状/颜色语法 + 压力模型 + 简化刀势经济
 // ========================================================================
 
-/** 核心弹状态 */
 export type SliceCoreState = "seed" | "charged" | "overloaded" | "cut" | "reflected";
-
-/** 窗口类型 */
 export type SliceWindowType = "none" | "small" | "large";
-
-/** 窗口来源 */
 export type SliceWindowSource = "clean_clear" | "charged_reflect";
-
-/** 玩家决策 */
 export type SliceDecision = "attack_armor" | "clean_field" | "skip_window" | "long_route";
-
-/** 切片阶段 */
-export type SlicePhase =
-  | "slice_intro"
-  | "cycle_evolve"
-  | "cycle_window"
-  | "cycle_resolve"
-  | "slice_complete";
+export type SlicePhase = "slice_intro" | "cycle_evolve" | "cycle_window" | "cycle_resolve" | "slice_complete";
 
 export const STRATEGY_SLICE_CONFIG = {
-  /** 切片总时长上限（秒） */
-  maxSliceDuration: 25,
+  /** 切片总时长上限（秒）— S2单轮10–14s，两轮约25s上限 */
+  maxSliceDuration: 30,
 
-  /** 阶段计时 */
+  /** 阶段计时 — S2: 缩小窗口以加快节奏 */
   phaseTimers: {
-    sliceIntro: 0.6,
-    windowSmall: 1.1,   // 安全清场小破绽
-    windowLarge: 1.8,   // 充能反射大破绽
+    sliceIntro: 0.4,
+    windowSmall: 0.9,
+    windowLarge: 1.5,
     resolveTransition: 0.3,
   },
 
-  /** 核心弹吸收区 — S1.3下移到画面中部，弹幕进入玩家刀路可达范围 */
+  // ---- S2 实验刀势经济 ----
+  bladeEconomy: {
+    initialRatio: 0.55,    // 初始刀势55%
+    feederCutGain: 0.15,   // 斩1枚供能弹+15%
+    normalSlashCost: 0.05,  // 普通挥刀消耗5%
+    reflectThreshold: 0.70,  // 反射要求70%
+    postReflectRatio: 0.35,  // 反射成功后降至35%
+  },
+
+  /** 核心弹吸收区 */
   absorbZone: {
     cx: 195,
-    cy: 340,    // 从260下移到340，弹幕在y≈180–520范围
+    cy: 320,     // S2: 稍高以容纳弧线轨迹
     radius: 50,
   },
 
   /** 供能弹 */
   feeder: {
     count: 2,
-    speed: 16,           // 飞向吸收区的速度（约7s到达，两轮约18s）
-    spawnRadius: 130,    // 出生点距吸收区的距离
-    absorbDistance: 22,  // 进入此距离视为被吸收
+    speed: 22,           // S2: 加快弹速，供能弹约7s到达
+    spawnRadius: 130,
+    absorbDistance: 22,
   },
 
   /** 核心弹 */
   coreProjectile: {
-    spawnPos: { x: 195, y: 260 },  // 核心弹出生位置（吸收区上方）
-    chargedDuration: 3.0,
-    overloadedSpeed: 100,
+    spawnPos: { x: 195, y: 260 },
+    chargedDuration: 4.0,   // S2: 延长窗口给反射判断
+    overloadedSpeed: 90,    // S2: 稍慢，但方向指向玩家
   },
 
-  /** 危险弹 */
+  /** 危险弹 — S2: 路径经过刀路，横向切割 */
   danger: {
     initialCount: 1,
-    speed: 70,
-    spawnRadius: 130,
+    speed: 85,
+    spawnRadius: 140,
     basePerCycle: 1,
+    /** S2: 危险弹水平偏移（从左右两侧横穿玩家刀路） */
+    horizontalOffset: 100,
   },
 
   /** 护甲（右肩） */

@@ -132,37 +132,54 @@ function drawChestPiece(ctx: CanvasRenderingContext2D): void {
 }
 
 // ================================================================
-// 🔹 供能弹（蓝白拖尾 + 吸收轨迹）
+// S2 🔹 供能弹（梭形 + 吸收轨迹线 + 蓝白渐变）
 // ================================================================
 
 export function drawFeederProjectile(ctx: CanvasRenderingContext2D, p: Projectile, t: number): void {
   if (!p.active) return;
   const { cx, cy } = STRATEGY_SLICE_CONFIG.absorbZone;
 
-  // 拖尾
+  // S2: 吸收轨迹线（供能弹→核心，随距离变粗）
   const dx = cx - p.x;
   const dy = cy - p.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
+  const maxDist = STRATEGY_SLICE_CONFIG.feeder.spawnRadius + 40;
+  const proximity = 1 - Math.min(dist / maxDist, 1); // 越近越粗
   if (dist > 0) {
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(p.x, p.y);
-    ctx.lineTo(p.x - (dx / dist) * 18, p.y - (dy / dist) * 18);
-    ctx.strokeStyle = "rgba(130, 200, 255, 0.5)";
-    ctx.lineWidth = 3;
+    ctx.lineTo(p.x + (dx / dist) * 24, p.y + (dy / dist) * 24);
+    ctx.strokeStyle = `rgba(130, 210, 255, ${0.2 + proximity * 0.6})`;
+    ctx.lineWidth = 0.8 + proximity * 3.5;
     ctx.lineCap = "round";
+    ctx.setLineDash([4, 4]);
     ctx.stroke();
+    ctx.setLineDash([]);
     ctx.restore();
   }
 
-  // 弹体
+  // S2: 梭形弹体（菱形）
+  const len = 8 + proximity * 4;
+  const hw = 3 + proximity * 2;
+  const angle = Math.atan2(dy, dx);
   ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(angle);
   ctx.beginPath();
-  ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-  ctx.fillStyle = "#7dc8ff";
-  ctx.shadowColor = "#5bc0ff";
-  ctx.shadowBlur = 6 + 2 * Math.sin(t * 5);
+  ctx.moveTo(len, 0);
+  ctx.lineTo(0, -hw);
+  ctx.lineTo(-len, 0);
+  ctx.lineTo(0, hw);
+  ctx.closePath();
+  const glow = 0.3 + Math.sin(t * 6) * 0.15;
+  ctx.fillStyle = `rgba(140, 210, 255, ${0.85 + glow})`;
+  ctx.strokeStyle = "#5bc0ff";
+  ctx.lineWidth = 1;
+  ctx.shadowColor = "#7dc8ff";
+  ctx.shadowBlur = 5 + proximity * 6;
   ctx.fill();
+  ctx.stroke();
   ctx.shadowBlur = 0;
   ctx.restore();
 }
@@ -172,21 +189,22 @@ export function drawFeederProjectile(ctx: CanvasRenderingContext2D, p: Projectil
 // ================================================================
 
 export function drawCoreProjectile(ctx: CanvasRenderingContext2D, p: Projectile | null, state: SliceCoreState | null, t: number): void {
-  // S1.4: seed 无弹幕对象，在吸收区中心绘制附着核心
+  // S2: seed — 圆核+外环，附着在吸收区
   if (state === "seed") {
-    const { cx, cy } = { cx: 195, cy: 340 };
+    const { cx, cy } = STRATEGY_SLICE_CONFIG.absorbZone;
     ctx.save();
+    const breathe = 1 + 0.06 * Math.sin(t * 3);
+    // 外环
     ctx.beginPath();
-    ctx.arc(cx, cy, 8, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(70, 130, 180, 0.6)";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(120, 170, 220, 0.4)";
+    ctx.arc(cx, cy, 14 * breathe, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(120, 170, 220, 0.35)";
     ctx.lineWidth = 1.5;
     ctx.stroke();
-    ctx.font = 'bold 9px "PingFang SC", sans-serif';
-    ctx.textAlign = "center";
-    ctx.fillStyle = "#8bbfff";
-    ctx.fillText("核心", cx, cy - 16);
+    // 圆核
+    ctx.beginPath();
+    ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(80, 140, 200, 0.7)";
+    ctx.fill();
     ctx.restore();
     return;
   }
@@ -198,54 +216,81 @@ export function drawCoreProjectile(ctx: CanvasRenderingContext2D, p: Projectile 
   ctx.translate(p.x, p.y);
 
   if (state === "charged") {
-    // 亮金呼吸光圈
-    ctx.shadowColor = "#ffd35a";
-    ctx.shadowBlur = 16 * pulse;
+    // S2: 金色呼吸核心 + 外圈膨胀
+    const outerBreathe = 1 + 0.15 * Math.sin(t * 5);
+    // 呼吸外环
     ctx.beginPath();
-    ctx.arc(0, 0, 13 * pulse, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(255, 200, 60, 0.75)";
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    // 外圈呼吸
-    ctx.beginPath();
-    ctx.arc(0, 0, 22 * pulse, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(255, 211, 90, ${0.3 + 0.2 * pulse})`;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  } else if (state === "overloaded") {
-    // 红橙高频闪烁
-    const flash = 0.6 + 0.4 * Math.sin(t * 15);
-    ctx.shadowColor = "#ff3535";
-    ctx.shadowBlur = 22 * pulse;
-    ctx.beginPath();
-    ctx.arc(0, 0, 15, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(255, 50, 30, ${flash})`;
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    // 外圈膨胀
-    ctx.beginPath();
-    ctx.arc(0, 0, 24 * pulse, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(255, 80, 60, ${0.4 * flash})`;
+    ctx.arc(0, 0, 24 * outerBreathe, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255, 211, 90, ${0.4 + 0.2 * Math.sin(t * 4)})`;
     ctx.lineWidth = 2.5;
     ctx.stroke();
-  } else if (state === "reflected") {
-    // 反射路径高亮
-    ctx.shadowColor = "#ff6a33";
-    ctx.shadowBlur = 14;
+    // 核体
+    ctx.shadowColor = "#ffd35a";
+    ctx.shadowBlur = 18 * pulse;
     ctx.beginPath();
-    ctx.arc(0, 0, 10, 0, Math.PI * 2);
-    ctx.fillStyle = "#ff6a33";
+    ctx.arc(0, 0, 11 * pulse, 0, Math.PI * 2);
+    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 11 * pulse);
+    grad.addColorStop(0, "rgba(255, 255, 200, 0.95)");
+    grad.addColorStop(0.6, "rgba(255, 200, 60, 0.8)");
+    grad.addColorStop(1, "rgba(255, 160, 20, 0.3)");
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    // 吸收线指示（指向核心中心的小箭头）
+    const ax = STRATEGY_SLICE_CONFIG.absorbZone.cx;
+    const ay = STRATEGY_SLICE_CONFIG.absorbZone.cy;
+    const adx = ax - p.x;
+    const ady = ay - p.y;
+    const angle = Math.atan2(ady, adx);
+    ctx.save();
+    ctx.rotate(angle);
+    ctx.beginPath();
+    ctx.moveTo(16, 0);
+    ctx.lineTo(10, -5);
+    ctx.lineTo(10, 5);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(255, 211, 90, 0.45)";
+    ctx.fill();
+    ctx.restore();
+  } else if (state === "overloaded") {
+    // S2: 红橙脉冲核心 + 膨胀危险外环
+    const flash = 0.5 + 0.5 * Math.sin(t * 12);
+    const panic = 1 + 0.2 * Math.sin(t * 8);
+    // 膨胀外环
+    ctx.beginPath();
+    ctx.arc(0, 0, 28 * panic, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255, 40, 20, ${0.5 * flash})`;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    // 内核
+    ctx.shadowColor = "#ff2020";
+    ctx.shadowBlur = 24 * pulse;
+    ctx.beginPath();
+    ctx.arc(0, 0, 12 * panic, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255, 40, 20, ${0.8 * flash})`;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  } else if (state === "reflected") {
+    // S2: 反射高亮轨迹
+    ctx.shadowColor = "#ff6a33";
+    ctx.shadowBlur = 16;
+    ctx.beginPath();
+    ctx.arc(0, 0, 9, 0, Math.PI * 2);
+    ctx.fillStyle = "#ff8c42";
     ctx.fill();
     ctx.shadowBlur = 0;
   }
 
-  // 标签
-  if (state !== "cut") {
-    ctx.font = 'bold 9px "PingFang SC", sans-serif';
+  // S2: 状态标签（简洁，仅charged/overloaded）
+  if (state === "charged" || state === "overloaded") {
+    ctx.font = 'bold 10px "PingFang SC", sans-serif';
     ctx.textAlign = "center";
-    ctx.fillStyle = coreColor(state);
-    const label = state === "charged" ? "充能" : state === "overloaded" ? "过载" : "反射";
-    ctx.fillText(label, 0, -22);
+    ctx.fillStyle = state === "charged" ? "#ffd35a" : "#ff3535";
+    ctx.shadowColor = state === "charged" ? "#ffd35a" : "#ff3535";
+    ctx.shadowBlur = 4;
+    const label = state === "charged" ? "充能" : "过载!";
+    ctx.fillText(label, 0, -24);
+    ctx.shadowBlur = 0;
   }
   ctx.restore();
 }
@@ -254,40 +299,34 @@ export function drawCoreProjectile(ctx: CanvasRenderingContext2D, p: Projectile 
 // 🔹 危险弹（红色尖刺轮廓）
 // ================================================================
 
+// ================================================================
+// S2 🔹 危险弹（红橙尖刺裂片 + 旋转切割）
+// ================================================================
+
 export function drawDangerProjectile(ctx: CanvasRenderingContext2D, p: Projectile, t: number): void {
   if (!p.active) return;
   ctx.save();
   ctx.translate(p.x, p.y);
-  const rot = t * 3;
+  const rot = t * 4;
 
-  // 尖刺外圈
-  ctx.strokeStyle = "rgba(255, 40, 40, 0.7)";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  const spikes = 6;
+  // S2: 旋转尖刺裂片
+  ctx.strokeStyle = "rgba(255, 50, 40, 0.8)";
+  ctx.lineWidth = 1.6;
+  const spikes = 5;
   for (let i = 0; i < spikes; i++) {
-    const a1 = rot + (i / spikes) * Math.PI * 2;
-    const a2 = a1 + Math.PI / spikes;
-    ctx.lineTo(Math.cos(a1) * 10, Math.sin(a1) * 10);
-    ctx.lineTo(Math.cos(a2) * 7, Math.sin(a2) * 7);
+    const a = rot + (i / spikes) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * 11, Math.sin(a) * 11);
+    ctx.lineTo(Math.cos(a + 0.4) * 3, Math.sin(a + 0.4) * 3);
+    ctx.lineTo(Math.cos(a - 0.4) * 3, Math.sin(a - 0.4) * 3);
+    ctx.closePath();
+    ctx.stroke();
   }
-  ctx.closePath();
-  ctx.stroke();
-
-  // 内圈
+  // 红核
   ctx.beginPath();
-  ctx.arc(0, 0, 4, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(255, 40, 40, 0.6)";
+  ctx.arc(0, 0, 3, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255, 55, 35, 0.85)";
   ctx.fill();
-
-  // 拖尾
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(-p.vx * 0.3, -p.vy * 0.3);
-  ctx.strokeStyle = "rgba(255, 60, 60, 0.4)";
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
   ctx.restore();
 }
 
@@ -302,7 +341,7 @@ function coreColor(state: SliceCoreState): string {
 export function drawWindowIndicator(ctx: CanvasRenderingContext2D, snap: SliceSnapshot): void {
   if (snap.windowType === "none") return;
 
-  const label = snap.windowType === "small" ? "小破绽" : "⚡ 大破绽";
+  const label = snap.windowType === "small" ? "小破绽" : "大破绽";
   const color = snap.windowType === "small" ? "#5bc0ff" : "#ffd35a";
   const y = DESIGN_H - 145;
 
@@ -322,6 +361,21 @@ export function drawWindowIndicator(ctx: CanvasRenderingContext2D, snap: SliceSn
   ctx.fillText(label, DESIGN_W / 2, y);
   ctx.shadowBlur = 0;
 
+  // S2: 裂纹装饰（白金裂纹线）
+  ctx.save();
+  ctx.strokeStyle = `rgba(255, 255, 255, ${0.25 +0.15 * Math.sin(snap.windowTimer * 5)})`;
+  ctx.lineWidth = 1;
+  const cx = DESIGN_W / 2;
+  for (let i = 0; i < 3; i++) {
+    const ox = cx - 50 + i * 50;
+    ctx.beginPath();
+    ctx.moveTo(ox, y + 20);
+    ctx.lineTo(ox + (i - 1) * 15, y + 32);
+    ctx.lineTo(ox + (i - 1) * 8, y + 38);
+    ctx.stroke();
+  }
+  ctx.restore();
+
   // 进度条
   ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
   ctx.fillRect(barX, y + 8, barW, 6);
@@ -334,19 +388,30 @@ export function drawWindowIndicator(ctx: CanvasRenderingContext2D, snap: SliceSn
 // 🔹 Boss 吸收区光晕
 // ================================================================
 
-export function drawAbsorbZone(ctx: CanvasRenderingContext2D, t: number, isCharging: boolean): void {
+export function drawAbsorbZone(ctx: CanvasRenderingContext2D, t: number, isCharging: boolean, chargePct: number = 0): void {
   const { cx, cy, radius } = STRATEGY_SLICE_CONFIG.absorbZone;
-  const alpha = isCharging ? 0.35 + 0.15 * Math.sin(t * 4) : 0.15 + 0.05 * Math.sin(t * 2);
+  // S2: 充能越强，吸收区越亮且跳动
+  const alpha = 0.12 + chargePct * 0.35 + (isCharging ? 0.08 * Math.sin(t * 5) : 0);
   ctx.save();
   ctx.beginPath();
   ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-  ctx.fillStyle = `rgba(120, 80, 255, ${alpha})`;
+  ctx.fillStyle = `rgba(100, 120, 255, ${alpha})`;
   ctx.fill();
-  ctx.strokeStyle = `rgba(180, 140, 255, ${alpha + 0.15})`;
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([5, 5]);
+  const strokeAlpha = 0.2 + chargePct * 0.4;
+  ctx.strokeStyle = `rgba(160, 180, 255, ${strokeAlpha})`;
+  ctx.lineWidth = 1 + chargePct;
+  ctx.setLineDash([6, 4]);
   ctx.stroke();
   ctx.setLineDash([]);
+  // S2: 充能脉冲环
+  if (chargePct > 0.3) {
+    const pulse = 0.3 + 0.3 * Math.sin(t * 3);
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius + 4, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(180, 200, 255, ${pulse})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
