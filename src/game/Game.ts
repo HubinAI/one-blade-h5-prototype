@@ -18,6 +18,7 @@ import { BossController } from "./systems/BossController";
 import { BossReactiveController, type ReactiveCollisionEvent } from "./systems/BossReactiveController";
 import { BossStrategySliceController, type SliceCollisionEvent } from "./systems/BossStrategySliceController";
 import { BossFormationDirector } from "./systems/BossFormationDirector";
+import { drawFormationBoss, drawDefenseLine, drawAllFormations, drawSlashPreview } from "./systems/bossFormationHUD";
 import { STRATEGY_SLICE_CONFIG } from "./config/bossStrategySlice";
 import { drawEnergyBar, drawHpBar, drawArmorIndicators, drawArmorObjectiveProgress, drawPerfectReflectText } from "./systems/bossReactiveHUD";
 import { drawBossBody, drawFeederProjectile, drawCoreProjectile, drawDangerProjectile, drawWindowIndicator, drawAbsorbZone, drawFeederTrajectories, drawAbsorptionChannels, setHUDVariant } from "./systems/bossStrategySliceHUD";
@@ -9272,6 +9273,73 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.lineTo(x + 2, y + cut);
     ctx.closePath();
   }
+
+  // S3: Formation
+  private updateFormationMode(scaledDt: number): void {
+    const fd = this.formationDirector; if (!fd) return;
+    this.elapsed += scaledDt; this.updateActiveSlash(scaledDt); this.updateParticles(scaledDt);
+    fd.update(scaledDt, this.energy, this.hp);
+    for (const ev of fd.checkDefenseLine()) {
+      if (ev.kind === "threat_reached_defense") {
+        this.hp = Math.max(1, this.hp - Math.round(this.maxHp * 0.08));
+        this.screenShake = 0.3; this.flash = 0.2;
+        this.particles.push(...sparkBurst(ev.position, 6, "#c0392b", 30));
+      }
+    }
+    this.screenShake = Math.max(0, this.screenShake - scaledDt * 2.7);
+    this.flash = Math.max(0, this.flash - scaledDt * 2.2);
+    if (fd.completed) this.onFinish({ result: "bossDefeated", hpRemain: this.hp, time: this.elapsed } as any);
+  }
+  private resolveFormationSlash(a: Vec2, b: Vec2): void {
+    const fd = this.formationDirector; if (!fd) return;
+    const events = fd.resolveSlash(a, b); let totalGain = 0;
+    for (const ev of events) {
+      const pos = ev.position;
+      if (ev.kind === "threat_destroyed") { this.particles.push(...sparkBurst(pos, 4, "#ff4040", 25)); }
+      else if (ev.kind === "energy_collected") { this.particles.push(...sparkBurst(pos, 3, "#5bc0ff", 20)); totalGain += 20; }
+      else if (ev.kind === "counter_hit") {
+        this.particles.push(...sparkBurst(pos, 6, "#ffd700", 35));
+        if (this.energy >= 70) {
+          const r = fd.reflectCounter(); this.energy = 25; totalGain = 0;
+          for (const re of r) {
+            if (re.kind === "counter_reflected") { this.particles.push(...sparkBurst(re.position, 10, "#ffd700", 50)); this.screenShake = 0.6; }
+          }
+        } else { this.particles.push(...sparkBurst(pos, 4, "#999", 15)); }
+      } else if (ev.kind === "forbidden_hit") {
+        this.particles.push(...sparkBurst(pos, 8, "#c0392b", 35));
+        this.hp = Math.max(1, this.hp - Math.round(this.maxHp * 0.08));
+        this.energy = Math.max(0, this.energy - 20); this.screenShake = 0.4; this.flash = 0.3;
+      }
+    }
+    this.energy = Math.max(0, this.energy - 8 + totalGain);
+    const hc = events.filter(e => e.kind === "threat_destroyed" || e.kind === "energy_collected").length;
+    if (hc >= 2) this.energy = Math.min(100, this.energy + ([0, 5, 8][Math.min(hc - 2, 2)] || 0));
+  }
+  private renderFormationMode(ctx: CanvasRenderingContext2D): void {
+    const fd = this.formationDirector; if (!fd) return;
+    const snap = fd.snapshot; const t = this.elapsed;
+    drawFormationBoss(ctx, t, snap.formations.length === 0);
+    const ph = new Set<string>(); let pf = false;
+    if (this.currentSlash?.active) {
+      const a = { x: (this.currentSlash as any).start.x, y: (this.currentSlash as any).start.y };
+      const b = { x: (this.currentSlash as any).end.x, y: (this.currentSlash as any).end.y };
+      const p = fd.previewSlash(a, b);
+      for (const n of p.hitNodes) ph.add(n.id);
+      pf = p.hitsForbidden; drawSlashPreview(ctx, a, b, pf);
+    }
+    drawAllFormations(ctx, snap.formations, t, snap.counterReady, ph, pf);
+    const hc = snap.formations.some(f => f.nodes.some(n => n.type === "threat" && n.active && n.proximity > 0.7));
+    drawDefenseLine(ctx, t, hc);
+    if (snap.windowType !== "none") {
+      const lb = snap.windowType === "large" ? "大破绽" : "小破绽";
+      const cl = snap.windowType === "large" ? "#ff6a33" : "#5bc0ff";
+      ctx.save(); ctx.font = snap.windowType === "large" ? "bold 18px sans-serif" : "bold 13px sans-serif";
+      ctx.textAlign = "center"; ctx.fillStyle = cl;
+      ctx.shadowColor = cl; ctx.shadowBlur = snap.windowType === "large" ? 14 : 6;
+      ctx.fillText(lb, 195, 640); ctx.shadowBlur = 0; ctx.restore();
+    }
+  }
+
 }
 
 /** Canvas 圆角矩形辅助 */
