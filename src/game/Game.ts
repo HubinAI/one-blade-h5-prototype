@@ -427,7 +427,7 @@ export class Game {
     killedBoss: null
   };
 
-  constructor(level: LevelConfig, onFinish: FinishCallback, onReviveOffer?: ReviveOfferCallback, runMode?: "normal" | "challenge", bossFlow?: "legacy" | "reactive" | "strategySlice") {
+  constructor(level: LevelConfig, onFinish: FinishCallback, onReviveOffer?: ReviveOfferCallback, runMode?: "normal" | "challenge", bossFlow?: "legacy" | "reactive" | "strategySlice" | "bossFormation") {
     this.level = level;
     this.onFinish = onFinish;
     this.onReviveOffer = onReviveOffer;
@@ -438,6 +438,8 @@ export class Game {
     if (runMode === "challenge" && level.bossId === "thunderGeneral") {
       if (bossFlow === "strategySlice") {
         this.gameMode = "strategySlice";
+      } else if (bossFlow === "bossFormation") {
+        this.gameMode = "bossFormation";
       } else {
         this.gameMode = bossFlow === "reactive" ? "bossReactive" : "boss";
       }
@@ -445,7 +447,7 @@ export class Game {
     this.maxHp = Math.min(level.hp + this.progressionModifiers.openingShield, BALANCE.player.maxHp + this.progressionModifiers.openingShield);
     this.hp = this.maxHp;
     // P0: reactive模式使用独立能量初始值
-    if (this.gameMode === "bossReactive" || this.gameMode === "strategySlice" || this.gameMode === "bossFormation") {
+    if (this.gameMode === "bossReactive" || this.gameMode === "strategySlice" || (this.gameMode as string) === "bossFormation") {
       this.reactiveBladeMax = BLADE_MOMENTUM_CONFIG.baseMax + this.reactiveBladeRunModifiers.maxBonus;
       this.energy = Math.round(this.reactiveBladeMax * BLADE_MOMENTUM_CONFIG.initialRatio);
       // S2: 策略切片初始刀势55%，按配置
@@ -1075,6 +1077,12 @@ export class Game {
       return;
     }
 
+    // S3: 阵势压境
+    if ((this.gameMode as string) === "bossFormation") {
+      this.updateFormationMode(scaledDt);
+      return;
+    }
+
     // V0723016-S1: 策略切片模式主循环
     if (this.gameMode === "strategySlice") {
       this.updateStrategySliceMode(scaledDt);
@@ -1174,6 +1182,16 @@ export class Game {
       this.renderBossMode(ctx);
       return;
     }
+    // S3: 阵势压境渲染
+    if ((this.gameMode as string) === "bossFormation") {
+      this.renderFormationMode(ctx);
+      return;
+    }
+    // S3: Formation render
+    if ((this.gameMode as string) === "bossFormation") {
+      this.renderFormationMode(ctx);
+      return;
+    }
     // V0723016-S1: 策略切片模式渲染
     if (this.gameMode === "strategySlice") {
       this.renderStrategySliceMode(ctx);
@@ -1253,7 +1271,7 @@ export class Game {
    * 来源：审计文档 §4"显示与战斗解耦"共识 A/B/C
    */
   private getPlayerCombatLayerPolicy(): import("../game/types").PlayerCombatLayerPolicy {
-    if (this.gameMode === "bossReactive" || this.gameMode === "strategySlice" || this.gameMode === "bossFormation") {
+    if (this.gameMode === "bossReactive" || this.gameMode === "strategySlice" || (this.gameMode as string) === "bossFormation") {
       return {
         showDefenseWall: false,
         showWarrior: true,
@@ -2552,6 +2570,16 @@ export class Game {
     // P0: Reactive Boss模式路由到弹幕/护甲检测
     if (this.gameMode === "bossReactive" && this.reactiveController) {
       this.checkReactiveProjectileHits(a, b, trail);
+      return;
+    }
+    // S3: 阵势压境挥刀
+    if ((this.gameMode as string) === "bossFormation" && this.formationDirector) {
+      this.resolveFormationSlash(a, b);
+      return;
+    }
+    // S3: Formation slash
+    if ((this.gameMode as string) === "bossFormation" && this.formationDirector) {
+      this.resolveFormationSlash(a, b);
       return;
     }
     // V0723016-S1: 策略切片模式路由
@@ -8580,6 +8608,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       setHUDVariant(this.variant);
       const urlSeed = new URLSearchParams(window.location.search).get("seed");
       if (urlSeed) this.strategySliceController.setSeed(parseInt(urlSeed, 10) || 1);
+    } else if ((this.gameMode as string) === "bossFormation") {
+      this.formationDirector = new BossFormationDirector();
+      const urlSf = new URLSearchParams(window.location.search).get("seed");
+      if (urlSf) this.formationDirector.setSeed(parseInt(urlSf, 10) || 1);
+      this.energy = 40;
     } else {
       // 创建并启动 BossController（legacy）
       this.bossController = new BossController("thunderGeneral");
@@ -9340,6 +9373,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
   }
 
+
+
+  // S3: Formation
 }
 
 /** Canvas 圆角矩形辅助 */

@@ -19,7 +19,7 @@ type GameCanvasProps = {
   /** P4.4A.4: Boss阶段变更回调 */
   onBossPhaseChange?: (phase: BossPhaseState | null) => void;
   /** P0: Boss流程选择（双入口） */
-  bossFlow?: "legacy" | "reactive" | "strategySlice";
+  bossFlow?: "legacy" | "reactive" | "strategySlice" | "bossFormation";
   /** V0723016复审: runIndex 用于 key + effect deps（key 变化才允许新 Game） */
   runIndex?: number;
 };
