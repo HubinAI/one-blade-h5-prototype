@@ -463,7 +463,7 @@ export class Game {
     this.currentRunMode = runMode ?? this.runContext.mode;
 
     // P4.4A.2: Boss构造期直接初始化（不等待0.5秒）
-    if (this.gameMode === "boss" || this.gameMode === "bossReactive" || this.gameMode === "strategySlice") {
+    if (this.gameMode === "boss" || this.gameMode === "bossReactive" || this.gameMode === "strategySlice" || (this.gameMode as string) === "bossFormation") {
       this.initializeThunderGeneralBoss();
     }
 
