@@ -17,6 +17,7 @@ import { paperBurst, ringParticle, sparkBurst, glowParticle, explosionBurst, cor
 import { BossController } from "./systems/BossController";
 import { BossReactiveController, type ReactiveCollisionEvent } from "./systems/BossReactiveController";
 import { BossStrategySliceController, type SliceCollisionEvent } from "./systems/BossStrategySliceController";
+import { BossFormationDirector } from "./systems/BossFormationDirector";
 import { STRATEGY_SLICE_CONFIG } from "./config/bossStrategySlice";
 import { drawEnergyBar, drawHpBar, drawArmorIndicators, drawArmorObjectiveProgress, drawPerfectReflectText } from "./systems/bossReactiveHUD";
 import { drawBossBody, drawFeederProjectile, drawCoreProjectile, drawDangerProjectile, drawWindowIndicator, drawAbsorbZone, drawFeederTrajectories, drawAbsorptionChannels, setHUDVariant } from "./systems/bossStrategySliceHUD";
@@ -195,7 +196,7 @@ export class Game {
   private wavesFinishedAt = 0; // 最后一波生成完成时 elapsed
   private currentRunMode: "normal" | "challenge" | "dailyChallenge" | "freeBurst" | "highYield" = "normal";
   /** P4.4A.1-R3: 游戏模式隔离 */
-  private gameMode: "normal" | "boss" | "bossReactive" | "strategySlice" = "normal";
+  private gameMode: "normal" | "boss" | "bossReactive" | "strategySlice" | "bossFormation" = "normal";
   /** S2.4: A/B对照变体 — overcorrect 放大版 */
   private variant: string = ""; // "s23" | "overcorrect"
   private _e2eInstanceId: string | null = null;  // V0723016复审: E2E桥实例ID（供 GameCanvas cleanup 守卫）
@@ -278,6 +279,7 @@ export class Game {
   private reactiveController: BossReactiveController | null = null;
   /** V0723016-S1: 策略切片控制器 */
   private strategySliceController: BossStrategySliceController | null = null;
+  private formationDirector: BossFormationDirector | null = null;
   /** P4.2A.1: 统一中央播报调度器 */
   private activeBattleNotice: BattleNotice | null = null;
   private battleNoticeQueue: BattleNotice[] = [];
@@ -442,7 +444,7 @@ export class Game {
     this.maxHp = Math.min(level.hp + this.progressionModifiers.openingShield, BALANCE.player.maxHp + this.progressionModifiers.openingShield);
     this.hp = this.maxHp;
     // P0: reactive模式使用独立能量初始值
-    if (this.gameMode === "bossReactive" || this.gameMode === "strategySlice") {
+    if (this.gameMode === "bossReactive" || this.gameMode === "strategySlice" || this.gameMode === "bossFormation") {
       this.reactiveBladeMax = BLADE_MOMENTUM_CONFIG.baseMax + this.reactiveBladeRunModifiers.maxBonus;
       this.energy = Math.round(this.reactiveBladeMax * BLADE_MOMENTUM_CONFIG.initialRatio);
       // S2: 策略切片初始刀势55%，按配置
@@ -1250,7 +1252,7 @@ export class Game {
    * 来源：审计文档 §4"显示与战斗解耦"共识 A/B/C
    */
   private getPlayerCombatLayerPolicy(): import("../game/types").PlayerCombatLayerPolicy {
-    if (this.gameMode === "bossReactive" || this.gameMode === "strategySlice") {
+    if (this.gameMode === "bossReactive" || this.gameMode === "strategySlice" || this.gameMode === "bossFormation") {
       return {
         showDefenseWall: false,
         showWarrior: true,
@@ -1786,7 +1788,7 @@ export class Game {
 
     // S2: 策略切片不执行旧版被动恢复（使用独立刀势经济）
     this.regenDelayTimer = Math.max(0, this.regenDelayTimer - scaledDt);
-    if (this.gameMode !== "strategySlice" && !this.currentSlash?.active && !this.pendingSlash && this.regenDelayTimer <= 0) {
+    if (this.gameMode !== "strategySlice" && this.gameMode !== "bossFormation" && !this.currentSlash?.active && !this.pendingSlash && this.regenDelayTimer <= 0) {
       this.energy = recoverEnergy(this.energy, scaledDt, this.drumTimer);
     }
     this.screenShake = Math.max(0, this.screenShake - scaledDt * 2.7);
