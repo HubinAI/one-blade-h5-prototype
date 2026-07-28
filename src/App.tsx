@@ -77,9 +77,10 @@ export default function App() {
 
   /** P0: bossFlow 参数（双入口） */
   const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
-  const bossFlow: "legacy" | "reactive" | "strategySlice" =
+  const bossFlow: "legacy" | "reactive" | "strategySlice" | "bossFormation" =
     urlParams.get("bossFlow") === "reactive" ? "reactive" :
-    urlParams.get("bossFlow") === "strategySlice" ? "strategySlice" : "legacy";
+    urlParams.get("bossFlow") === "strategySlice" ? "strategySlice" :
+    urlParams.get("bossFlow") === "bossFormation" ? "bossFormation" : "legacy";
   const [runIndex, setRunIndex] = useState(0);
   const [currentMode, setCurrentMode] = useState<RunMode>("normal");
   const [reviveOffer, setReviveOffer] = useState<ReviveOffer | null>(null);
