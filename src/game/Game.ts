@@ -893,8 +893,8 @@ export class Game {
         ],
       },
     ];
-    // V0730002: 教程波次保留速度/时长设置，但不覆盖刀势
-    this.level.enemySpeed = 1.0;
+    // V0730006: 教程速度与 L1 一致
+    this.level.enemySpeed = 0.98;
     this.level.durationSeconds = 180;
     // initialEnergy/energy 不再覆盖 — 由 V0730001 统一刀势系统初始化（40/100）
   }
@@ -5573,33 +5573,63 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private getDefaultPostChestWavesForLevel1(): typeof this.level.waves {
     return [
       {
-        name: "军令爆发一",
+        name: "军令爆发一·前",
         delay: 0,
         spawnAt: 0.5,
         enemies: [
-          { kind: "infantry", x: 92, count: 4 },
-          { kind: "infantry", x: 188, count: 5 },
-          { kind: "infantry", x: 284, count: 4 }
+          { kind: "infantry", x: 92, yOffset: 0, count: 3 },
+          { kind: "infantry", x: 188, yOffset: 0, count: 3 },
+          { kind: "infantry", x: 284, yOffset: 0, count: 3 }
         ]
       },
       {
-        name: "军令爆发二",
+        name: "军令爆发一·后",
+        delay: 0,
+        spawnAt: 1.5,
+        enemies: [
+          { kind: "infantry", x: 92, yOffset: 84, count: 2 },
+          { kind: "infantry", x: 188, yOffset: 84, count: 2 },
+          { kind: "infantry", x: 284, yOffset: 84, count: 2 }
+        ]
+      },
+      {
+        name: "军令爆发二·前",
         delay: 0,
         spawnAt: 4.8,
         enemies: [
-          { kind: "infantry", x: 76, count: 5 },
-          { kind: "infantry", x: 188, count: 1 },
-          { kind: "infantry", x: 300, count: 5 }
+          { kind: "infantry", x: 76, yOffset: 0, count: 3 },
+          { kind: "infantry", x: 188, yOffset: 0, count: 1 },
+          { kind: "infantry", x: 300, yOffset: 0, count: 3 }
         ]
       },
       {
-        name: "军令爆发三",
+        name: "军令爆发二·后",
+        delay: 0,
+        spawnAt: 5.8,
+        enemies: [
+          { kind: "infantry", x: 76, yOffset: 84, count: 2 },
+          { kind: "infantry", x: 188, yOffset: 84, count: 1 },
+          { kind: "infantry", x: 300, yOffset: 84, count: 2 }
+        ]
+      },
+      {
+        name: "军令爆发三·前",
         delay: 0,
         spawnAt: 9.2,
         enemies: [
-          { kind: "infantry", x: 60, count: 5 },
-          { kind: "infantry", x: 188, count: 1 },
-          { kind: "infantry", x: 316, count: 5 }
+          { kind: "infantry", x: 60, yOffset: 0, count: 3 },
+          { kind: "infantry", x: 188, yOffset: 0, count: 1 },
+          { kind: "infantry", x: 316, yOffset: 0, count: 3 }
+        ]
+      },
+      {
+        name: "军令爆发三·后",
+        delay: 0,
+        spawnAt: 10.2,
+        enemies: [
+          { kind: "infantry", x: 60, yOffset: 84, count: 2 },
+          { kind: "infantry", x: 188, yOffset: 84, count: 1 },
+          { kind: "infantry", x: 316, yOffset: 84, count: 2 }
         ]
       }
     ] as any;
