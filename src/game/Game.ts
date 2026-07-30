@@ -316,6 +316,10 @@ export class Game {
   private _tutorialGroupEnemyIds = new Set<string>();
   private _tutorialGroupReady = false;
 
+  /** V0730016: 刀势审计 — 前12秒每帧记录energy delta */
+  private _energyAuditStart = 0;
+  private _energyAuditPrev = 0;
+
   // ---- 副刀自动AI ----
   private subBlades: Blade[] = [];
   private subBladeTimers: number[] = [];
@@ -1925,7 +1929,10 @@ export class Game {
       this.flash = Math.max(this.flash, 0.8);
     }
     // P4.2A.2: 统一神之一刀判定（使用REWARD_CONFIG阈值），中央播报每局最多1次
-    const triggeredGodSlash = trail.kills >= REWARD_CONFIG.godSlashThreshold || (trail.tier === "burst" && trail.coreCollapseCount > 0);
+    // V0730016: 教学阶段禁止神之一刀
+    // P4.2A.2: 统一神之一刀判定（V0730016: 教学阶段禁止）
+    const triggeredGodSlash = (trail.kills >= REWARD_CONFIG.godSlashThreshold || (trail.tier === "burst" && trail.coreCollapseCount > 0))
+      && !(this.isLogicalLevel1() && this._l1TutorialPhase !== "completed");
     if (triggeredGodSlash) {
       this.stats.oneBladeBreaks += 1;
       if (!this.godSlashNoticeShown) {
