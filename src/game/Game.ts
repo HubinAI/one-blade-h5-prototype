@@ -4768,6 +4768,10 @@ export class Game {
       roles[i] = (fallback ?? "main") as EnemyFlowRole;
       if (fallback) { (quota as any)[fallback] -= 1; }
     }
+    // V0730013: L1前两组统一main角色（同步速度+入场），保证5杀刀路
+    if (this.isLogicalLevel1() && this._l1TutorialPhase !== "completed" && this.wavesSpawned <= 1) {
+      for (let i = 0; i < total; i++) { roles[i] = "main"; }
+    }
     // 分布保护：第一只不为reserve，splitter不得为第一vanguard
     const firstRole = roles[0];
     if (firstRole === "reserve") { roles[0] = "main"; }
