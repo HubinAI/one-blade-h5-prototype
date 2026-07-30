@@ -177,7 +177,7 @@ export type LevelConfig = {
 };
 
 /** 军令爆发阶段类型（二次打磨新增） */
-export type BattlePhase = 'main_waves' | 'elite' | 'chest' | 'edict_burst' | 'result';
+export type BattlePhase = 'main_waves' | 'elite' | 'chest' | 'edict_modal' | 'edict_burst' | 'result';
 
 export type Enemy = {
   id: string;

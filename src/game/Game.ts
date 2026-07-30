@@ -335,6 +335,11 @@ export class Game {
 
   // ---- 军令宝箱 ----
   private chestDropTimer = 0;
+  private _chestDeathAt = 0; // V0730020: 死亡时间用于宝箱时序
+  private _chestLanded = false;
+  private _modalOpenedAt = 0;
+  private _modalPointerFresh = false; // V0730020: 弹窗后首次pointerDown已处理
+  private _recoveryLockUntil = 0; // V0730020: 弹窗打开时间
   private chestDropX = 0;
   private chestDropY = 0;
   private chestDropped = false;
@@ -884,6 +889,8 @@ export class Game {
 
   update(dt: number) {
     const frameDt = Math.min(dt, 0.04);
+    // V0730020: edict_modal 期间完全暂停战斗（仅允许弹窗渲染）
+    if (this.battlePhase === "edict_modal") { this.updateChestDrop(frameDt); return; }
     const baseDt = frameDt * (this.slowMoTimer > 0 ? 0.58 : 1);
     // P2.7：hit stop 叠加效果
     let scaledDt = baseDt;
@@ -1520,12 +1527,11 @@ export class Game {
       this.selectBuffAt(pos);
       return;
     }
-    // P3.8：军令弹窗期间，按钮或面板内部均可确认
+    // V0730020: 军令弹窗输入保护
     if (this.chestPendingConfirm) {
-      if (
-        this.isPointInChestConfirmButton(pos.x, pos.y) ||
-        this.isPointInEdictModalPanel(pos.x, pos.y)
-      ) {
+      if (this.elapsed < this._modalOpenedAt + 0.5) return; // 前0.5秒忽略
+      if (!this._modalPointerFresh) { this._modalPointerFresh = true; return; } // 忽略打开弹窗的同一次pointerDown
+      if (this.isPointInChestConfirmButton(pos.x, pos.y)) {
         this.confirmEliteChestReward();
       }
       return;
@@ -2792,9 +2798,16 @@ export class Game {
           this.triggerEliteShieldBreak(enemy);
         }
       }
-      // 对精英造成伤害
-      const prevHp = enemy.hp;
-      this.damageEnemy(enemy, stage.damage * bladeDmg, trail, false, "elite");
+      // V0730020: L1精英百分比伤害（按刀势档位）
+      let eliteDmg: number;
+      if (this.isLogicalLevel1()) {
+        const bm = createBladeMomentumState(this.energy, this.bladeMomentumMax);
+        const pct = bm.band === "high" ? randomRange(0.18, 0.25) : bm.band === "mid" ? randomRange(0.12, 0.18) : randomRange(0.08, 0.12);
+        eliteDmg = Math.max(1, Math.ceil(enemy.maxHp * pct));
+      } else {
+        eliteDmg = stage.damage * bladeDmg;
+      }
+      this.damageEnemy(enemy, eliteDmg, trail, false, "elite");
       // P2：精英受击反馈
       this.triggerEliteHitFeedback(enemy);
       if (trail.tier === "strong" || trail.tier === "burst") {
@@ -3446,14 +3459,16 @@ export class Game {
               break;
             }
           }
-          if (i === 0 && validEnemies.length >= 3) {
-            // P4.1A.9: 局部80px密集群（不是全部有效敌人的平均点）
+          // V0730020: L1斩刀局部≥4人才发动
+          const isL1 = this.isLogicalLevel1();
+          const slashDensityReq = isL1 ? 4 : 3;
+          if (i === 0 && validEnemies.length >= slashDensityReq) {
             let bestGroup: typeof validEnemies = [];
             for (const seed of validEnemies) {
               const group = validEnemies.filter(e => Math.abs(e.y - seed.y) <= 40);
               if (group.length > bestGroup.length) bestGroup = group;
             }
-            if (bestGroup.length < 3) { anim.phaseTimer += frameDt; break; }
+            if (bestGroup.length < slashDensityReq) { anim.phaseTimer += frameDt; break; }
             const avgX = bestGroup.reduce((s, e) => s + e.x, 0) / bestGroup.length;
             const avgY = bestGroup.reduce((s, e) => s + e.y, 0) / bestGroup.length;
             const centerX = clamp(avgX, 100, DESIGN_WIDTH - 100);
@@ -3597,8 +3612,8 @@ export class Game {
                   }
                 }
                 if (rightTarget) {
-                  // P4.1A.13: 右刀严格单目标伤害
                   this.applyWeakpointDamageByTarget(rightTarget, blade, stats);
+                  if (this.isLogicalLevel1()) this.triggerHitStop(0.07, 0.07); // V0730020
                 }
               }
             }
@@ -4132,10 +4147,12 @@ export class Game {
     let killCount = 0;
     for (const target of hits) {
       // V0730007: L1保证击杀infantry（不秒精英），最多斩5名
-      const l1KillCap = isLevel1 && killCount >= 5;
+      const l1KillCap = isLevel1 && killCount >= 3;
       if (l1KillCap) break;
       const isL1Infantry = isLevel1 && target.kind === "infantry";
-      const damage = isL1Infantry ? Math.max(baseDamage, target.maxHp) : baseDamage;
+      const isL1Elite = isLevel1 && target.kind === "elite";
+      let damage = isL1Infantry ? Math.max(baseDamage, target.maxHp) : baseDamage;
+      if (isL1Elite) damage = Math.min(damage, Math.ceil(target.maxHp * 0.03)); // ≤3%精英HP
       target.hp -= Math.max(1, Math.ceil(damage));
       target.flash = 0.18;
       if (target.kind === "elite") {
@@ -4155,7 +4172,7 @@ export class Game {
     // V0730008: 横扫音效和HitStop只播一次（非每目标）
     if (hits.length > 0) {
       AudioService.slashHit();
-      if (isLevel1) this.triggerHitStop(0.05, 0.12);
+      if (isLevel1) this.triggerHitStop(0.05, 0.05); // V0730020: 斩单次0.05s
     }
 
     // 蓄势返还刀势
@@ -4205,6 +4222,7 @@ export class Game {
     if (target.kind === "elite") {
       this.triggerEliteHitFeedback(target);
       this.checkEliteLowHpFeedback(target);
+      this.addText(target.x, target.y - 36, "-9%", "#ff6a33", 18, 1.0); // V0730020
     }
     const killed = target.hp <= 0;
     if (killed) {
@@ -6086,8 +6104,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       this.edictModalConfirmed = false;
       return;
     }
-
-    this.addText(DESIGN_WIDTH / 2, DESIGN_HEIGHT * 0.52, "军令已生效", "#ffd35a", 16, 0.45);
+    this.battlePhase = "edict_burst"; // V0730020: 恢复战斗
+    this._recoveryLockUntil = this.elapsed + 0.3;
+    this.addText(DESIGN_WIDTH / 2, DESIGN_HEIGHT * 0.52, "继续作战", "#ffd35a", 16, 0.45);
     this.screenShake = Math.max(this.screenShake, 0.08);
   }
 
@@ -8815,14 +8834,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.killedElites.push(enemy.eliteKind);
     this.stats.killedElites = [...this.killedElites];
     this.eliteKilled = true;
+    this._chestDeathAt = this.elapsed;
+    this.chestDropX = enemy.x; this.chestDropY = enemy.y - 10;
 
-    this.startChestDrop(enemy.x, enemy.y - 10);
-    this.particles.push(glowParticle(enemy, "#ffd35a", 25, 50));
-    this.addText(enemy.x, enemy.y - 40, "宝箱掉落！", "#ffd35a", 18, 1.6);
-    // P3.11：精简文本，只保留"军令降临"一条
-
-    this.autoChestResolveAt = this.elapsed + 0.55;
-    // 精英死亡强反馈
+    // V0730020: 时序控制 — 死亡 → 0.5s落箱 → 1.2s弹窗
+    // 死亡即刻：HitStop + 墨爆反馈
     this.triggerHitStop(0.22, 0.08, true);
     this.triggerSlashAfterglow(0.9, 0.28);
     this.triggerEdgeFlash(0.85, 0.30);
@@ -8868,6 +8884,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.chestPendingConfirm = true;
 
     if (!this.setEdictRewardState("modal", "open chest modal")) return;
+    this.battlePhase = "edict_modal"; this._modalOpenedAt = this.elapsed; this._modalPointerFresh = false;
 
     this.addText(DESIGN_WIDTH / 2, 150, "军令降临", "#ffd35a", 24, 1.2);
     this.screenShake = Math.max(this.screenShake, 0.25);
@@ -8929,10 +8946,17 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
     this.chestDropTimer += dt;
 
-    // 兜底：状态机卡在 dropped 超时后自动打开弹窗
-    if (this.edictRewardState === "dropped" && this.chestDropTimer >= 1.2) {
-      console.warn("[edict fallback] dropped state timeout, opening canonical modal", { time: this.elapsed, chestDropTimer: this.chestDropTimer });
-      this.autoResolveEliteChestReward();
+    // V0730020: 时序演出 — 死亡0.5s后掉箱，1.2s后弹窗
+    if (this.edictRewardState === "dropped") {
+      const sinceDeath = this.elapsed - this._chestDeathAt;
+      if (sinceDeath >= 0.5 && !this._chestLanded) {
+        this._chestLanded = true;
+        this.startChestDrop(this.chestDropX || 195, this.chestDropY || 300);
+        this.addText(this.chestDropX || 195, (this.chestDropY || 300) - 40, "宝箱掉落！", "#ffd35a", 18, 1.6);
+      }
+      if (sinceDeath >= 1.2) {
+        this.autoResolveEliteChestReward();
+      }
     }
   }
 
