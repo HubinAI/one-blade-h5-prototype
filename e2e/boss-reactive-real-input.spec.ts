@@ -87,11 +87,11 @@ test.describe("Reactive Boss 真实 Pointer 命中验证", () => {
       const s = window.__ONE_BLADE_E2E__.getState();
       return s.bladeMomentum;
     });
-    expect(initialBM.current).toBeCloseTo(35, 0);
+    // V0730001: 统一刀势 initialRatio=0.40, band="mid" (40%-70%), 移除 activeNodes
+    expect(initialBM.current).toBeCloseTo(40, 0);
     expect(initialBM.max).toBe(100);
-    expect(initialBM.ratio).toBeCloseTo(0.35, 1);
-    expect(initialBM.band).toBe("enhanced");
-    expect(initialBM.activeNodes).toContain("blade_reach");
+    expect(initialBM.ratio).toBeCloseTo(0.40, 1);
+    expect(initialBM.band).toBe("mid");
 
     await expect.poll(async () => {
       const s = await page.evaluate(() => window.__ONE_BLADE_E2E__.getState());
