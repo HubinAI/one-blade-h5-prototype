@@ -2169,9 +2169,9 @@ export class Game {
     return this.gameMode === "normal" && this.getLogicalFloor() === 1;
   }
 
-  /** V0730008: L1副刀解锁条件 —
-   *  a) 玩家完成2次有效主刀(≥3杀)  b) 首进高刀势  c) 10秒 */
+  /** V0730019: L1副刀解锁 — 前三组教学期间不永久解锁，等completed后 */
   private _checkL1SubBladeUnlock(): boolean {
+    if (this._l1TutorialPhase !== "completed") return false;
     if (this._l1MainSlashCount >= 2) return true;
     const bm = createBladeMomentumState(this.energy, this.bladeMomentumMax);
     if (bm.band === "high") return true;
@@ -2219,7 +2219,7 @@ export class Game {
           this._l1TutorialPhase = "group3_active"; this.spawnCurrentWave(this.level.waves[2]); }
         break;
       case "group3_active":
-        if (alive === 0 && queueEmpty) { this._tutorialGroupEnemyIds.clear(); this._l1TutorialPhase = "completed"; this._l1Group1ClearAt = this.elapsed; this._l1PostTutorialBase = this.elapsed + 1.0; }
+        if (alive === 0 && queueEmpty) { this._tutorialGroupEnemyIds.clear(); this._l1SubBladeUnlocked = true; this._l1TutorialPhase = "completed"; this._l1Group1ClearAt = this.elapsed; this._l1PostTutorialBase = this.elapsed + 1.0; }
         break;
     }
   }
