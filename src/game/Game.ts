@@ -309,7 +309,7 @@ export class Game {
   private _l1Group2Spawned = false;
   private _l1Group1ClearAt = 0;
   /** V0730010: 教学状态机: group1_active → wait_group2 → group2_active → completed */
-  private _l1TutorialPhase: "group1_active" | "wait_group2" | "group2_active" | "completed" = "group1_active";
+  private _l1TutorialPhase: "group1_active" | "wait_group2" | "group2_active" | "wait_group3" | "group3_active" | "completed" = "group1_active";
   /** V0730011: 教学完成后波次时间重基准 */
   private _l1PostTutorialBase = 0;
   /** V0730014: 教学组敌人ID集合 */
@@ -2191,10 +2191,12 @@ export class Game {
     const alive = this.enemies.filter(e => e.alive && e.kind === "infantry").length;
     const queueEmpty = this.subSpawnQueue.length === 0;
 
-    // V0730014: groupReady — 教学组5人全部到场（同步入场+main角色保证同时到达）
+    // V0730017: groupReady — 教学组按实际期望数量检测
+    const expectedCount = this._l1TutorialPhase === "group1_active" || this._l1TutorialPhase === "wait_group2" ? 3
+      : this._l1TutorialPhase === "group2_active" || this._l1TutorialPhase === "wait_group3" ? 4 : 5;
     if (!this._tutorialGroupReady && this._tutorialGroupEnemyIds.size > 0 && queueEmpty) {
       const groupAlive = this.enemies.filter(e => this._tutorialGroupEnemyIds.has(e.id) && e.alive).length;
-      if (groupAlive >= 5) this._tutorialGroupReady = true;
+      if (groupAlive >= expectedCount) this._tutorialGroupReady = true;
     }
 
     switch (this._l1TutorialPhase) {
@@ -2208,6 +2210,15 @@ export class Game {
           this._l1TutorialPhase = "group2_active"; this.spawnCurrentWave(this.level.waves[1]); }
         break;
       case "group2_active":
+        if (alive === 0 && queueEmpty) {
+          this._tutorialGroupEnemyIds.clear(); this._tutorialGroupReady = false;
+          this._l1TutorialPhase = "wait_group3"; this._l1Group1ClearAt = this.elapsed; }
+        break;
+      case "wait_group3":
+        if (this.elapsed >= this._l1Group1ClearAt + 0.8) {
+          this._l1TutorialPhase = "group3_active"; this.spawnCurrentWave(this.level.waves[2]); }
+        break;
+      case "group3_active":
         if (alive === 0 && queueEmpty) { this._tutorialGroupEnemyIds.clear(); this._l1TutorialPhase = "completed"; this._l1Group1ClearAt = this.elapsed; this._l1PostTutorialBase = this.elapsed + 1.0; }
         break;
     }
@@ -4445,15 +4456,16 @@ export class Game {
   private updateWaves(dt: number) {
     // P4.4A.1-R3: Boss模式阻断所有波次
     if (this.gameMode === "boss") return;
-    // V0730010: L1教学状态机控制波次
+    // V0730017: L1三组教学状态机控制波次
     if (this.isLogicalLevel1()) {
       const phase = this._l1TutorialPhase;
       if (phase === "group1_active" || phase === "wait_group2") {
-        if (this.wavesSpawned >= 1) return;
-      } else if (phase === "group2_active") {
-        if (this.wavesSpawned >= 2) return;
-      } else if (phase === "completed" && this.wavesSpawned === 2) {
-        // 第二组刚完成，至少等1秒再生成后续波次
+        if (this.wavesSpawned >= 1) return; // 阻塞 ≥1
+      } else if (phase === "group2_active" || phase === "wait_group3") {
+        if (this.wavesSpawned >= 2) return; // 阻塞 ≥2
+      } else if (phase === "group3_active") {
+        if (this.wavesSpawned >= 3) return; // 阻塞 ≥3
+      } else if (phase === "completed" && this.wavesSpawned === 3) {
         if (this.elapsed < this._l1Group1ClearAt + 1.0) return;
       }
     }
@@ -4463,9 +4475,9 @@ export class Game {
     const wave = this.level.waves[this.wavesSpawned];
     // V0730011: L1教学完成后用重基准时间，禁止补刷逾期波次
     let reachedSpawnAt: boolean;
-    if (this.isLogicalLevel1() && this._l1TutorialPhase === "completed" && this.wavesSpawned >= 2) {
-      // 第三波起：effectiveSpawnAt = postTutorialBase + (原始spawnAt - wave[2].spawnAt)
-      const offset = (wave.spawnAt ?? 0) - (this.level.waves[2]?.spawnAt ?? 0);
+    if (this.isLogicalLevel1() && this._l1TutorialPhase === "completed" && this.wavesSpawned >= 3) {
+      // 第四波起：effectiveSpawnAt = postTutorialBase + (原始spawnAt - wave[3].spawnAt)
+      const offset = (wave.spawnAt ?? 0) - (this.level.waves[3]?.spawnAt ?? 0);
       reachedSpawnAt = this.elapsed >= this._l1PostTutorialBase + offset;
     } else {
       reachedSpawnAt = wave.spawnAt !== undefined && this.elapsed >= wave.spawnAt;
@@ -4677,8 +4689,8 @@ export class Game {
       roles[i] = (fallback ?? "main") as EnemyFlowRole;
       if (fallback) { (quota as any)[fallback] -= 1; }
     }
-    // V0730013: L1前两组统一main角色（同步速度+入场），保证5杀刀路
-    if (this.isLogicalLevel1() && this._l1TutorialPhase !== "completed" && this.wavesSpawned <= 1) {
+    // V0730017: L1前三组统一main角色（同步速度+入场），保证教学刀路
+    if (this.isLogicalLevel1() && this._l1TutorialPhase !== "completed" && this.wavesSpawned <= 2) {
       for (let i = 0; i < total; i++) { roles[i] = "main"; }
     }
     // 分布保护：第一只不为reserve，splitter不得为第一vanguard
@@ -4708,8 +4720,8 @@ export class Game {
       const role = roles[i];
       const baseDelay = role === "vanguard" ? vangTime : role === "main" ? mainTime : resvTime;
       const spread = role === "vanguard" ? vangSpread : role === "main" ? mainSpread : resvSpread;
-      // V0730012: L1前两组同步入场，不用分批subSpawnQueue延迟
-      const time = (this.isLogicalLevel1() && this._l1TutorialPhase !== "completed" && this.wavesSpawned <= 1)
+      // V0730017: L1前三组同步入场，不用分批subSpawnQueue延迟
+      const time = (this.isLogicalLevel1() && this._l1TutorialPhase !== "completed" && this.wavesSpawned <= 2)
         ? this.elapsed
         : this.elapsed + baseDelay + Math.random() * spread;
       const entryOff = role === "vanguard" ? vangEntryOff : role === "main" ? mainEntryOff : resvEntryOff;
@@ -4808,8 +4820,8 @@ export class Game {
       enemy.spawnedWithEvent = this._currentWaveEvent;
     }
     this.enemies.push(enemy);
-    // V0730014: 标记教学组敌人（仅wave[0]和wave[1]）
-    if (this.isLogicalLevel1() && this._l1TutorialPhase !== "completed" && this.wavesSpawned <= 2) {
+    // V0730017: 标记教学组敌人（wave[0],[1],[2]）
+    if (this.isLogicalLevel1() && this._l1TutorialPhase !== "completed" && this.wavesSpawned <= 3) {
       this._tutorialGroupEnemyIds.add(enemy.id);
     }
     this.discoveredEnemies.add(item.kind as any);
