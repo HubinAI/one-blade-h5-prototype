@@ -477,7 +477,7 @@ export class Game {
       this.bladeMomentumMax = BLADE_MOMENTUM_CONFIG.baseMax;
     } else {
       // V0730001: 统一刀势 — 普通第1关初始 40%（40/100）
-      const isLevel1 = level.id === 1 && this.runContext.mode !== "freeBurst";
+      const isLevel1 = this.isLogicalLevel1() && this.runContext.mode !== "freeBurst";
       if (this.runContext.mode === "freeBurst") {
         this.energy = BALANCE.swordEnergy.max;
       } else if (isLevel1) {
@@ -717,7 +717,7 @@ export class Game {
     this._eliteClearanceAt = 0;
 
     // 首局教学检测（Boss模式不触发）
-    this.isFirstRun = (this.gameMode !== "boss" && this.gameMode !== "chaseFlash") && (level.id === 1 || level.id === 10001) && !window.localStorage.getItem("one_blade_first_run_done");
+    this.isFirstRun = (this.gameMode !== "boss" && this.gameMode !== "chaseFlash") && this.isLogicalLevel1() && !window.localStorage.getItem("one_blade_first_run_done");
     if (this.isFirstRun) {
       this.overrideWithScriptedTutorial();
       this.showHint("drag-guide", "按住拖动，松手挥出一刀", DESIGN_WIDTH / 2, 118, 2.5);
@@ -1001,7 +1001,7 @@ export class Game {
     // 三次修正：chest_first_clear 的刀势回涌用一个虚拟 drumTimer 注入到 recoverEnergy
     const effectiveDrumTimer = this.drumTimer + this.chestMomentumTimer;
     // V0730001: 第1关使用统一被动恢复（20%封顶，2%/秒），其余关卡保持旧逻辑
-    const isLevel1 = this.level.id === 1 && this.gameMode === "normal";
+    const isLevel1 = this.isLogicalLevel1();
     if (!this.currentSlash?.active && !this.pendingSlash && this.regenDelayTimer <= 0 && this.warDrumNoDecayTimer <= 0) {
       if (isLevel1) {
         const recovery = resolveBladePassiveRecovery(this.energy, this.bladeMomentumMax, scaledDt);
@@ -1017,7 +1017,7 @@ export class Game {
 
     // V0730001: high档位就绪提示（ratio ≥ 70%）
     const bmStateNow = createBladeMomentumState(this.energy, this.bladeMomentumMax);
-    const isHighBand = this.level.id === 1 && this.gameMode === "normal"
+    const isHighBand = this.isLogicalLevel1()
       ? bmStateNow.band === "high"
       : this.energy >= 90; // 第2～10关保持旧逻辑
     if (!this.currentSlash?.active && isHighBand) {
@@ -1877,7 +1877,7 @@ export class Game {
     if (slashBonus > 0) this.score += slashBonus;
 
     // V0730001: 第1关使用统一刀势结算，其余关卡保持旧返还逻辑
-    const isLevel1 = this.level.id === 1 && this.gameMode === "normal";
+    const isLevel1 = this.isLogicalLevel1();
     if (isLevel1) {
       // 统一结算：命中去重已在 trail 中处理，此处只结算数值
       const hitCount = trail.kills; // 对基础兵 = 命中即击杀
@@ -2200,6 +2200,11 @@ export class Game {
   private getLogicalFloor(): number {
     if (this.level.id >= 10000) return this.level.id - 10000;
     return this.level.id;
+  }
+
+  /** V0730003: 第1关统一判断（兼容静态id=1和动态id=10001） */
+  private isLogicalLevel1(): boolean {
+    return this.gameMode === "normal" && this.getLogicalFloor() === 1;
   }
 
   /** P3.8：军令弹窗是否正在暂停战斗 */
@@ -3771,7 +3776,7 @@ export class Game {
   /** P4.3A.3+5: 普通波提前推进（军令active时暂停） */
   private shouldAdvanceNextWave(): boolean {
     // V0730002: 第1关禁止压力系统提前推进，严格按配置时间生成波次
-    if (this.level.id === 1 && this.gameMode === "normal") return false;
+    if (this.isLogicalLevel1()) return false;
     if (this.edictRewardState === "active" || this.battlePhase === "edict_burst") return false;
     const pressure = this.getCombatPressure("normal", 1.2);
     const activeThreat = pressure.proj.projected.mid + pressure.proj.projected.front;
@@ -4292,7 +4297,7 @@ export class Game {
     // V0730002: 第1关禁用强制满刀势（由统一刀势系统管理）
     if (!this._act1Triggered && this.elapsed >= 15) {
       this._act1Triggered = true;
-      const isLevel1 = this.level.id === 1 && this.gameMode === "normal";
+      const isLevel1 = this.isLogicalLevel1();
       if (!isLevel1) {
         this.triggerMomentumBurst();
       }
@@ -4475,7 +4480,7 @@ export class Game {
 
     // ── 决定是否触发事件波（20%概率，同局不重复，第1波不触发）──
     // V0730002: 第1关关闭随机事件潮
-    const isLevel1 = this.level.id === 1 && this.gameMode === "normal";
+    const isLevel1 = this.isLogicalLevel1();
     const triggerEvent = !isLevel1 && this.wavesSpawned > 1 && Math.random() < 0.2;
     // 事件波按关卡解锁
     // P3.9：使用逻辑层数，避免动态主线 level.id=10000+floor 误触发
@@ -7478,7 +7483,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
   private drawDefenseAndWarrior(ctx: CanvasRenderingContext2D) {
     ctx.save();
-    const bmMaxDraw = this.gameMode === "normal" && this.level.id === 1 ? this.bladeMomentumMax : BALANCE.swordEnergy.max;
+    const bmMaxDraw = this.isLogicalLevel1() ? this.bladeMomentumMax : BALANCE.swordEnergy.max;
     const energyRatio = bmMaxDraw > 0 ? this.energy / bmMaxDraw : 0;
     // V0730001: 统一档位判定（用于能量条，stage 仍保留用于气场颜色）
     const bmStateDraw = createBladeMomentumState(this.energy, bmMaxDraw);
@@ -7658,7 +7663,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const eBarH = 14;
     const eBarX = (DESIGN_WIDTH - eBarW) / 2;
     const eBarY = 800;
-    const bmMax = this.gameMode === "normal" && this.level.id === 1 ? this.bladeMomentumMax : BALANCE.swordEnergy.max;
+    const bmMax = this.isLogicalLevel1() ? this.bladeMomentumMax : BALANCE.swordEnergy.max;
     const energyPct = bmMax > 0 ? this.energy / bmMax : 0;
     const bmState = createBladeMomentumState(this.energy, bmMax);
     const bmBand = bmState.band;
@@ -8230,7 +8235,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 三次修正：等所有主波次全部刷完后才出精英（避免精英乱入）
     if (!this.allNormalWavesSpawned) return;
 
-    const isLevel1 = this.level.id === 1 && this.gameMode === "normal";
+    const isLevel1 = this.isLogicalLevel1();
 
     // V0730002: 第1关清场衔接 — 等普通敌人清零 + subSpawnQueue 空
     if (isLevel1) {
