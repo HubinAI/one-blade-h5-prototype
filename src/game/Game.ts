@@ -809,8 +809,7 @@ export class Game {
         speedMultiplier: 1.0,
         enemies: [
           { kind: "infantry", x: 44, yOffset: 0, count: 2 },
-          { kind: "infantry", x: 172, yOffset: 0, count: 2 },
-          { kind: "infantry", x: 300, yOffset: 0, count: 2 },
+          { kind: "infantry", x: 220, yOffset: 0, count: 2 },
         ],
       },
       {
