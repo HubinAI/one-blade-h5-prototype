@@ -2153,7 +2153,7 @@ export class Game {
   private canOfferRevive() {
     return (
       AD_CONFIG.rewardedRevive.enabled &&
-      this.level.id >= 3 &&
+      this.getLogicalFloor() >= 3 &&
       !this.reviveOfferSent &&
       !this.stats.usedReviveAd &&
       this.elapsed >= AD_CONFIG.rewardedRevive.minSurviveTime
@@ -5488,7 +5488,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       return this.level.postChestWaves;
     }
     // 前5关有精英但没配置 postChestWaves 时，提供默认军令爆发
-    if (this.level.eliteSpawnAt && this.level.eliteKind && this.level.id <= 5) {
+    if (this.level.eliteSpawnAt && this.level.eliteKind && this.getLogicalFloor() <= 5) {
       return this.getDefaultPostChestWavesForEarlyLevel();
     }
     return [];
