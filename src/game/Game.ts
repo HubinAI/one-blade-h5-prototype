@@ -297,6 +297,8 @@ export class Game {
   /** P3.2：精英预告/出场播报防重复 */
   private elitePreviewShown = false;
   private eliteSpawnAnnounced = false;
+  /** V0730002: 第1关精英预告时间戳（用于清场衔接计时） */
+  private _elitePreviewAt = 0;
 
   // ---- 副刀自动AI ----
   private subBlades: Blade[] = [];
@@ -710,6 +712,7 @@ export class Game {
     // P3.2：重置精英播报状态，防止上一关残留
     this.elitePreviewShown = false;
     this.eliteSpawnAnnounced = false;
+    this._elitePreviewAt = 0;
 
     // 首局教学检测（Boss模式不触发）
     this.isFirstRun = (this.gameMode !== "boss" && this.gameMode !== "chaseFlash") && (level.id === 1 || level.id === 10001) && !window.localStorage.getItem("one_blade_first_run_done");
@@ -824,9 +827,9 @@ export class Game {
         enemies: [
           { kind: "infantry", x: 44, count: 3 },
           { kind: "infantry", x: 92, count: 2 },
-          { kind: "powder", x: 120, count: 1 },
+          { kind: "infantry", x: 120, count: 1 },
           { kind: "infantry", x: 150, count: 3 },
-          { kind: "powder", x: 188, count: 1 },
+          { kind: "infantry", x: 188, count: 1 },
           { kind: "infantry", x: 220, count: 3 },
           { kind: "infantry", x: 268, count: 2 },
           { kind: "infantry", x: 316, count: 2 },
@@ -839,20 +842,19 @@ export class Game {
         speedMultiplier: 1.0,
         enemies: [
           { kind: "infantry", x: 44, count: 2 },
-          { kind: "shield", x: 92, count: 1 },
+          { kind: "infantry", x: 92, count: 1 },
           { kind: "infantry", x: 140, count: 3 },
-          { kind: "powder", x: 188, count: 1 },
+          { kind: "infantry", x: 188, count: 1 },
           { kind: "infantry", x: 236, count: 2 },
           { kind: "infantry", x: 284, count: 2 },
-          { kind: "shield", x: 332, count: 1 },
+          { kind: "infantry", x: 332, count: 1 },
         ],
       },
     ];
-    // 教程波次：快速冷却、满刀势
-    this.level.initialEnergy = BALANCE.swordEnergy.max;
+    // V0730002: 教程波次保留速度/时长设置，但不覆盖刀势
     this.level.enemySpeed = 1.0;
     this.level.durationSeconds = 180;
-    this.energy = BALANCE.swordEnergy.max;
+    // initialEnergy/energy 不再覆盖 — 由 V0730001 统一刀势系统初始化（40/100）
   }
 
   toggleDebugPanel() {
@@ -3766,6 +3768,8 @@ export class Game {
 
   /** P4.3A.3+5: 普通波提前推进（军令active时暂停） */
   private shouldAdvanceNextWave(): boolean {
+    // V0730002: 第1关禁止压力系统提前推进，严格按配置时间生成波次
+    if (this.level.id === 1 && this.gameMode === "normal") return false;
     if (this.edictRewardState === "active" || this.battlePhase === "edict_burst") return false;
     const pressure = this.getCombatPressure("normal", 1.2);
     const activeThreat = pressure.proj.projected.mid + pressure.proj.projected.front;
@@ -4283,9 +4287,13 @@ export class Game {
     if (this.phase !== "playing") return;
 
     // 15s 第一幕结束 → 满势时刻
+    // V0730002: 第1关禁用强制满刀势（由统一刀势系统管理）
     if (!this._act1Triggered && this.elapsed >= 15) {
       this._act1Triggered = true;
-      this.triggerMomentumBurst();
+      const isLevel1 = this.level.id === 1 && this.gameMode === "normal";
+      if (!isLevel1) {
+        this.triggerMomentumBurst();
+      }
     }
     // 30s 第二幕结束 → 副刀共鸣
     if (!this._act2Triggered && this.elapsed >= 30) {
@@ -4464,7 +4472,9 @@ export class Game {
     this.waveHpBonus = Math.min(5, this.wavesSpawned);
 
     // ── 决定是否触发事件波（20%概率，同局不重复，第1波不触发）──
-    const triggerEvent = this.wavesSpawned > 1 && Math.random() < 0.2;
+    // V0730002: 第1关关闭随机事件潮
+    const isLevel1 = this.level.id === 1 && this.gameMode === "normal";
+    const triggerEvent = !isLevel1 && this.wavesSpawned > 1 && Math.random() < 0.2;
     // 事件波按关卡解锁
     // P3.9：使用逻辑层数，避免动态主线 level.id=10000+floor 误触发
     const e = this.getLogicalFloor();
@@ -7607,10 +7617,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const hpBarW = 150, hpBarH = 10;
     const hpBarX = cx - hpBarW / 2;
     const hpBarY = 770;
-    // 统一血量：心形模式换算为 x25（4心=100HP）
-    const hpScale = this.maxHp <= 10 ? 25 : 1;
-    const displayMax = this.maxHp <= 10 ? 100 : this.maxHp;
-    const displayCurrent = this.hp * hpScale;
+    // V0730002: HP 归一化显示，displayCurrent = round(hp/maxHp × 100), displayMax = 100
+    const displayMax = 100;
+    const displayCurrent = this.maxHp > 0
+      ? Math.round((this.hp / this.maxHp) * 100)
+      : 0;
     const hpRatio = clamp(displayCurrent / displayMax, 0, 1);
     const dangerColor = hpRatio < 0.3;
     // 背景条
@@ -8217,16 +8228,37 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 三次修正：等所有主波次全部刷完后才出精英（避免精英乱入）
     if (!this.allNormalWavesSpawned) return;
 
-    // P3.2：精英预告（出场前 0.75 秒）
-    if (!this.elitePreviewShown) {
-      const previewLead = 0.75;
-      if (this.elapsed >= this.level.eliteSpawnAt - previewLead && this.elapsed < this.level.eliteSpawnAt) {
+    const isLevel1 = this.level.id === 1 && this.gameMode === "normal";
+
+    // V0730002: 第1关清场衔接 — 等普通敌人清零 + subSpawnQueue 空
+    if (isLevel1) {
+      const aliveEnemies = this.enemies.filter(e => e.alive).length;
+      const queueEmpty = this.subSpawnQueue.length === 0;
+      if (aliveEnemies > 0 || !queueEmpty) return;
+
+      // 第一阶段：显示预告
+      if (!this.elitePreviewShown) {
         this.elitePreviewShown = true;
-        // P4.2A.1: 精英预览文字已删除，出场使用showBattleNotice
+        this._elitePreviewAt = this.elapsed;
+        this.showBattleNotice({ text: "火环将·现身", priority: "A", category: "elite", style: "purple", duration: 0.85, dedupeKey: "elite:fireRing:preview", cooldown: 3, interrupt: false });
+        return;
       }
+
+      // 第二阶段：0.8～1.2s 后精英进入
+      if (this.elapsed < this._elitePreviewAt + 0.8) return;
+    } else {
+      // 原逻辑：固定时间点精英生成
+      // P3.2：精英预告（出场前 0.75 秒）
+      if (!this.elitePreviewShown) {
+        const previewLead = 0.75;
+        if (this.elapsed >= this.level.eliteSpawnAt - previewLead && this.elapsed < this.level.eliteSpawnAt) {
+          this.elitePreviewShown = true;
+        }
+      }
+
+      if (this.elapsed < this.level.eliteSpawnAt) return;
     }
 
-    if (this.elapsed < this.level.eliteSpawnAt) return;
     this.eliteSpawned = true;
     const ek = this.level.eliteKind;
     const conf = ELITE_CONFIG[ek];

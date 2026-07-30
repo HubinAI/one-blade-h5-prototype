@@ -43,9 +43,9 @@ export const LEVELS: LevelConfig[] = [
     waves: [
       wave("爽感启动", 1, row("infantry", [0, 1, 2, 4, 5, 6])),
       wave("斜排练刀", 7, diag("infantry", [0, 1, 2, 3, 4, 5, 6, 3])),
-      wave("第一军令", 19, mix([row("infantry", [1, 2, 3, 4, 5], 0), row("infantry", [2, 3, 4], 1), row("shield", [0, 6], 2)]), undefined, 0.95),
-      wave("少量盾兵", 32, mix([row("shield", [2, 4], 0), row("infantry", [0, 1, 3, 5, 6], 1), row("infantry", [2, 3, 4], 2)]), undefined, 1),
-      wave("一刀收束", 49, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("shield", [3], 2)]), undefined, 1.06)
+      wave("第一军令", 19, mix([row("infantry", [1, 2, 3, 4, 5], 0), row("infantry", [2, 3, 4], 1), row("infantry", [0, 6], 2)]), undefined, 0.95),
+      wave("少量盾兵", 32, mix([row("infantry", [2, 4], 0), row("infantry", [0, 1, 3, 5, 6], 1), row("infantry", [2, 3, 4], 2)]), undefined, 1),
+      wave("一刀收束", 49, mix([row("infantry", [0, 1, 2, 3, 4, 5, 6], 0), row("infantry", [1, 2, 3, 4, 5], 1), row("infantry", [3], 2)]), undefined, 1.06)
     ],
     briefing: {
       highlightEnemies: [{ kind: "infantry", label: "步兵纸兵", icon: "↑" }],
