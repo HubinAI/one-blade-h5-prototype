@@ -801,122 +801,9 @@ export class Game {
     this._slowRainMultiplier = 1;
   }
 
-  /** 首局教学：使用固定密集波次代替随机 */
+  /** 首局教学：V0730015 改用 levels.ts 统一波次 */
   private overrideWithScriptedTutorial() {
-    // V0730006: 分层波次 + 加速
-    this.level.waves = [
-      {
-        name: "第一波·前层",
-        delay: 0.2,
-        spawnAt: 0.5,
-        speedMultiplier: 1.0,
-        enemies: [
-          { kind: "infantry", x: 44, yOffset: 0, count: 1 },
-          { kind: "infantry", x: 132, yOffset: 0, count: 1 },
-          { kind: "infantry", x: 220, yOffset: 0, count: 1 },
-          { kind: "infantry", x: 308, yOffset: 0, count: 1 },
-        ],
-      },
-      {
-        name: "第一波·后层",
-        delay: 0.2,
-        spawnAt: 1.5,
-        speedMultiplier: 1.0,
-        enemies: [
-          { kind: "infantry", x: 88, yOffset: 126, count: 1 },
-          { kind: "infantry", x: 176, yOffset: 126, count: 1 },
-          { kind: "infantry", x: 264, yOffset: 126, count: 1 },
-        ],
-      },
-      {
-        name: "第二波·前层",
-        delay: 0.2,
-        spawnAt: 4.0,
-        speedMultiplier: 1.0,
-        enemies: [
-          { kind: "infantry", x: 44, yOffset: 0, count: 2 },
-          { kind: "infantry", x: 220, yOffset: 0, count: 2 },
-        ],
-      },
-      {
-        name: "第二波·后层",
-        delay: 0.2,
-        spawnAt: 5.5,
-        speedMultiplier: 1.0,
-        enemies: [
-          { kind: "infantry", x: 108, yOffset: 126, count: 2 },
-          { kind: "infantry", x: 236, yOffset: 126, count: 2 },
-        ],
-      },
-      {
-        name: "第三波��前层",
-        delay: 0.2,
-        spawnAt: 8.0,
-        speedMultiplier: 1.0,
-        enemies: [
-          { kind: "infantry", x: 44, yOffset: 0, count: 2 },
-          { kind: "infantry", x: 140, yOffset: 0, count: 2 },
-          { kind: "infantry", x: 236, yOffset: 0, count: 2 },
-          { kind: "infantry", x: 332, yOffset: 0, count: 2 },
-        ],
-      },
-      {
-        name: "第三��·后层",
-        delay: 0.2,
-        spawnAt: 9.5,
-        speedMultiplier: 1.0,
-        enemies: [
-          { kind: "infantry", x: 92, yOffset: 126, count: 2 },
-          { kind: "infantry", x: 188, yOffset: 126, count: 2 },
-          { kind: "infantry", x: 284, yOffset: 126, count: 2 },
-        ],
-      },
-      {
-        name: "第四波·前层",
-        delay: 0.2,
-        spawnAt: 13.0,
-        speedMultiplier: 1.0,
-        enemies: [
-          { kind: "infantry", x: 44, yOffset: 0, count: 2 },
-          { kind: "infantry", x: 220, yOffset: 0, count: 2 },
-        ],
-      },
-      {
-        name: "第四波·后层",
-        delay: 0.2,
-        spawnAt: 14.5,
-        speedMultiplier: 1.0,
-        enemies: [
-          { kind: "infantry", x: 140, yOffset: 126, count: 2 },
-          { kind: "infantry", x: 300, yOffset: 126, count: 2 },
-        ],
-      },
-      {
-        name: "第五波·前层",
-        delay: 0.2,
-        spawnAt: 17.0,
-        speedMultiplier: 1.0,
-        enemies: [
-          { kind: "infantry", x: 92, yOffset: 0, count: 2 },
-          { kind: "infantry", x: 236, yOffset: 0, count: 2 },
-        ],
-      },
-      {
-        name: "第五波·后层",
-        delay: 0.2,
-        spawnAt: 18.5,
-        speedMultiplier: 1.0,
-        enemies: [
-          { kind: "infantry", x: 92, yOffset: 126, count: 1 },
-          { kind: "infantry", x: 188, yOffset: 126, count: 1 },
-          { kind: "infantry", x: 284, yOffset: 126, count: 2 },
-        ],
-      },
-    ];
-    // V0730006: 教程速度与 L1 一致
-    this.level.enemySpeed = 0.98;
-    this.level.durationSeconds = 180;
-    // initialEnergy/energy 不再覆盖 — 由 V0730001 统一刀势系统初始化（40/100）
+    // 波次统一使用 levels.ts 第1关配置，此处仅作为入口保留
   }
 
   toggleDebugPanel() {
@@ -1941,9 +1828,9 @@ export class Game {
     // V0730001: 第1关使用统一刀势结算，其余关卡保持旧返还逻辑
     const isLevel1 = this.isLogicalLevel1();
     if (isLevel1) {
-      // 统一结算：命中去重已在 trail 中处理，此处只结算数值
-      const hitCount = trail.kills; // 对基础兵 = 命中即击杀
-      const killCount = trail.kills;
+      // V0730015: 统一结算改用 directMainKills（不含连锁/爆炸/副刀）
+      const hitCount = trail.directMainKills;
+      const killCount = trail.directMainKills;
       const hitGain = hitCount * normalProfile.gains.hitBasic;
       const killGain = killCount * normalProfile.gains.killBasic;
       const multiBonus = resolveMultiSlashBonus(killCount);
@@ -2306,6 +2193,7 @@ export class Game {
     switch (this._l1TutorialPhase) {
       case "group1_active":
         if (this.wavesSpawned >= 1 && alive === 0 && queueEmpty) {
+          this._tutorialGroupEnemyIds.clear(); this._tutorialGroupReady = false;
           this._l1TutorialPhase = "wait_group2"; this._l1Group1ClearAt = this.elapsed; }
         break;
       case "wait_group2":
@@ -2313,7 +2201,7 @@ export class Game {
           this._l1TutorialPhase = "group2_active"; this.spawnCurrentWave(this.level.waves[1]); }
         break;
       case "group2_active":
-        if (alive === 0 && queueEmpty) { this._l1TutorialPhase = "completed"; this._l1Group1ClearAt = this.elapsed; this._l1PostTutorialBase = this.elapsed + 1.0; }
+        if (alive === 0 && queueEmpty) { this._tutorialGroupEnemyIds.clear(); this._l1TutorialPhase = "completed"; this._l1Group1ClearAt = this.elapsed; this._l1PostTutorialBase = this.elapsed + 1.0; }
         break;
     }
   }
