@@ -2194,9 +2194,9 @@ export class Game {
     // V0730017: groupReady — 教学组按实际期望数量检测
     const expectedCount = this._l1TutorialPhase === "group1_active" || this._l1TutorialPhase === "wait_group2" ? 3
       : this._l1TutorialPhase === "group2_active" || this._l1TutorialPhase === "wait_group3" ? 4 : 5;
-    if (!this._tutorialGroupReady && this._tutorialGroupEnemyIds.size > 0 && queueEmpty) {
+    if (!this._tutorialGroupReady && this._tutorialGroupEnemyIds.size === expectedCount && queueEmpty) {
       const groupAlive = this.enemies.filter(e => this._tutorialGroupEnemyIds.has(e.id) && e.alive).length;
-      if (groupAlive >= expectedCount) this._tutorialGroupReady = true;
+      if (groupAlive === expectedCount) this._tutorialGroupReady = true;
     }
 
     switch (this._l1TutorialPhase) {

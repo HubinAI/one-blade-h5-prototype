@@ -27,6 +27,28 @@ function wave(name: string, spawnAt: number, enemies: EnemySpawn[], pickups?: Pi
   return { name, spawnAt, delay: 0, enemies, pickups, speedMultiplier };
 }
 
+/** V0730018: 共享教学波次配置（静态id=1和动态id=10001共用） */
+export const LEVEL1_TUTORIAL_WAVES = [
+  wave("爽感启动·1", 0.5, [
+    { kind: "infantry", x: 120, yOffset: 0, count: 1 },
+    { kind: "infantry", x: 190, yOffset: 0, count: 1 },
+    { kind: "infantry", x: 260, yOffset: 0, count: 1 },
+  ]),
+  wave("爽感启动·2", 2.5, [
+    { kind: "infantry", x: 100, yOffset: 126, count: 1 },
+    { kind: "infantry", x: 160, yOffset: 126, count: 1 },
+    { kind: "infantry", x: 220, yOffset: 126, count: 1 },
+    { kind: "infantry", x: 280, yOffset: 126, count: 1 },
+  ]),
+  wave("爽感启动·3", 4.5, [
+    { kind: "infantry", x: 100, yOffset: 0, count: 1 },
+    { kind: "infantry", x: 145, yOffset: 0, count: 1 },
+    { kind: "infantry", x: 190, yOffset: 0, count: 1 },
+    { kind: "infantry", x: 235, yOffset: 0, count: 1 },
+    { kind: "infantry", x: 280, yOffset: 0, count: 1 },
+  ]),
+];
+
 export const LEVELS: LevelConfig[] = [
   {
     id: 1,
@@ -41,25 +63,7 @@ export const LEVELS: LevelConfig[] = [
     eliteSpawnAt: 25,
     eliteKind: "fireRing",
     waves: [
-      // V0730017: 三组教学 3→4→5，保证运行时实际数量严格一致
-      wave("爽感启动·1", 0.5, [
-        { kind: "infantry", x: 120, yOffset: 0 },
-        { kind: "infantry", x: 190, yOffset: 0 },
-        { kind: "infantry", x: 260, yOffset: 0 },
-      ]),
-      wave("爽感启动·2", 2.5, [
-        { kind: "infantry", x: 100, yOffset: 126 },
-        { kind: "infantry", x: 160, yOffset: 126 },
-        { kind: "infantry", x: 220, yOffset: 126 },
-        { kind: "infantry", x: 280, yOffset: 126 },
-      ]),
-      wave("爽感启动·3", 4.5, [
-        { kind: "infantry", x: 100, yOffset: 0 },
-        { kind: "infantry", x: 145, yOffset: 0 },
-        { kind: "infantry", x: 190, yOffset: 0 },
-        { kind: "infantry", x: 235, yOffset: 0 },
-        { kind: "infantry", x: 280, yOffset: 0 },
-      ]),
+      ...LEVEL1_TUTORIAL_WAVES,
       wave("斜排练刀·前", 7, row("infantry", [0, 1, 3, 5])),
       wave("斜排练刀·后", 8.5, row("infantry", [2, 4, 6, 0], 3)),
       wave("第一军令·前", 16, row("infantry", [0, 2, 4, 6, 1])),

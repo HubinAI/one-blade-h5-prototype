@@ -1,4 +1,5 @@
 import type { BossId } from "../types";
+import { LEVEL1_TUTORIAL_WAVES } from "../../data/levels";
 
 // ════════════════════════════════════════════
 // 品质阶梯
@@ -439,42 +440,9 @@ export function getStageNameByFloor(floor: number): string {
 
 /** 第一关硬编码波次配置（0715割草密度激进调优版） */
 function createLevel1Config(): LevelConfig {
+  // V0730018: 前三波替换为共享教学配置 3→4→5
   const level1Waves: WaveConfig[] = [
-    // Wave 1: 入场横排 (0.5s, 16~20敌) 三次修正：放宽间隔，玩家有反应时间
-    {
-      name: "散修潮",
-      delay: 0.2,
-      spawnAt: 0.5,
-      enemies: [
-        { kind: "infantry", count: 8, x: 44 },
-        { kind: "infantry", count: 8, x: 140 },
-        { kind: "infantry", count: 4, x: 236 }
-      ]
-    },
-    // Wave 2: 密集小潮 (4.0s, 18~22敌)
-    {
-      name: "密集阵",
-      delay: 0.2,
-      spawnAt: 4.0,
-      enemies: [
-        { kind: "infantry", count: 8, x: 92 },
-        { kind: "infantry", count: 6, x: 188 },
-        { kind: "infantry", count: 4, x: 140 },
-        { kind: "powder", count: 1, x: 236 }
-      ]
-    },
-    // Wave 3: 双排推进 (8.0s, 20~24敌)
-    {
-      name: "双排队",
-      delay: 0.2,
-      spawnAt: 8.0,
-      enemies: [
-        { kind: "infantry", count: 8, x: 44 },
-        { kind: "infantry", count: 8, x: 188 },
-        { kind: "infantry", count: 4, x: 140 },
-        { kind: "shield", count: 2, x: 284 }
-      ]
-    },
+    ...LEVEL1_TUTORIAL_WAVES,
     // Wave 4: 火药爆点波 (13.0s, 22~28敌)
     {
       name: "火药阵",
