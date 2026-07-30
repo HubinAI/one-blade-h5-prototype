@@ -299,6 +299,7 @@ export class Game {
   private eliteSpawnAnnounced = false;
   /** V0730002: 第1关精英预告时间戳（用于清场衔接计时） */
   private _elitePreviewAt = 0;
+  private _eliteClearanceAt = 0;
 
   // ---- 副刀自动AI ----
   private subBlades: Blade[] = [];
@@ -713,6 +714,7 @@ export class Game {
     this.elitePreviewShown = false;
     this.eliteSpawnAnnounced = false;
     this._elitePreviewAt = 0;
+    this._eliteClearanceAt = 0;
 
     // 首局教学检测（Boss模式不触发）
     this.isFirstRun = (this.gameMode !== "boss" && this.gameMode !== "chaseFlash") && (level.id === 1 || level.id === 10001) && !window.localStorage.getItem("one_blade_first_run_done");
@@ -8236,16 +8238,23 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const queueEmpty = this.subSpawnQueue.length === 0;
       if (aliveEnemies > 0 || !queueEmpty) return;
 
-      // 第一阶段：显示预告
+      // 记录清场时间点
+      if (this._eliteClearanceAt === 0) {
+        this._eliteClearanceAt = this.elapsed;
+        return;
+      }
+
+      // 第一阶段：清场后 0.5 秒显示预告"火环将·现身"
       if (!this.elitePreviewShown) {
+        if (this.elapsed < this._eliteClearanceAt + 0.5) return;
         this.elitePreviewShown = true;
         this._elitePreviewAt = this.elapsed;
         this.showBattleNotice({ text: "火环将·现身", priority: "A", category: "elite", style: "purple", duration: 0.85, dedupeKey: "elite:fireRing:preview", cooldown: 3, interrupt: false });
         return;
       }
 
-      // 第二阶段：0.8～1.2s 后精英进入
-      if (this.elapsed < this._elitePreviewAt + 0.8) return;
+      // 第二阶段：清场后 1.0 秒精英进入画面
+      if (this.elapsed < this._eliteClearanceAt + 1.0) return;
     } else {
       // 原逻辑：固定时间点精英生成
       // P3.2：精英预告（出场前 0.75 秒）
