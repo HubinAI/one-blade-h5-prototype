@@ -310,6 +310,8 @@ export class Game {
   private _l1Group1ClearAt = 0;
   /** V0730010: 教学状态机: group1_active → wait_group2 → group2_active → completed */
   private _l1TutorialPhase: "group1_active" | "wait_group2" | "group2_active" | "completed" = "group1_active";
+  /** V0730011: 教学完成后波次时间重基准 */
+  private _l1PostTutorialBase = 0;
 
   // ---- 副刀自动AI ----
   private subBlades: Blade[] = [];
@@ -733,6 +735,7 @@ export class Game {
     this._l1Group2Spawned = false;
     this._l1Group1ClearAt = 0;
     this._l1TutorialPhase = "group1_active";
+    this._l1PostTutorialBase = 0;
 
     // 首局教学检测（Boss模式不触发）
     this.isFirstRun = (this.gameMode !== "boss" && this.gameMode !== "chaseFlash") && this.isLogicalLevel1() && !window.localStorage.getItem("one_blade_first_run_done");
@@ -2298,7 +2301,7 @@ export class Game {
           this._l1TutorialPhase = "group2_active"; this.spawnCurrentWave(this.level.waves[1]); }
         break;
       case "group2_active":
-        if (alive === 0 && queueEmpty) { this._l1TutorialPhase = "completed"; this._l1Group1ClearAt = this.elapsed; }
+        if (alive === 0 && queueEmpty) { this._l1TutorialPhase = "completed"; this._l1Group1ClearAt = this.elapsed; this._l1PostTutorialBase = this.elapsed + 1.0; }
         break;
     }
   }
@@ -4549,12 +4552,19 @@ export class Game {
     // 军令阶段停止普通波提前推进
     if (this.edictRewardState === "active" || this.battlePhase === "edict_burst") return;
     const wave = this.level.waves[this.wavesSpawned];
-    const reachedSpawnAt = wave.spawnAt !== undefined && this.elapsed >= wave.spawnAt;
+    // V0730011: L1教学完成后用重基准时间，禁止补刷逾期波次
+    let reachedSpawnAt: boolean;
+    if (this.isLogicalLevel1() && this._l1TutorialPhase === "completed" && this.wavesSpawned >= 2) {
+      // 第三波起：effectiveSpawnAt = postTutorialBase + (原始spawnAt - wave[2].spawnAt)
+      const offset = (wave.spawnAt ?? 0) - (this.level.waves[2]?.spawnAt ?? 0);
+      reachedSpawnAt = this.elapsed >= this._l1PostTutorialBase + offset;
+    } else {
+      reachedSpawnAt = wave.spawnAt !== undefined && this.elapsed >= wave.spawnAt;
+    }
     const shouldAdvance = this.shouldAdvanceNextWave();
     if (reachedSpawnAt || shouldAdvance) {
       this.spawnCurrentWave(wave);
       this.waveAdvanceLockedUntil = this.elapsed + randomRange(0.65, 0.90);
-      if (!reachedSpawnAt) this.waveAdvanceLockedUntil = this.elapsed + randomRange(0.65, 0.90);
     }
   }
 
