@@ -853,9 +853,7 @@ export class Game {
         speedMultiplier: 1.0,
         enemies: [
           { kind: "infantry", x: 44, yOffset: 0, count: 2 },
-          { kind: "infantry", x: 150, yOffset: 0, count: 2 },
           { kind: "infantry", x: 220, yOffset: 0, count: 2 },
-          { kind: "infantry", x: 316, yOffset: 0, count: 2 },
         ],
       },
       {
@@ -864,9 +862,8 @@ export class Game {
         spawnAt: 14.5,
         speedMultiplier: 1.0,
         enemies: [
-          { kind: "infantry", x: 92, yOffset: 126, count: 2 },
-          { kind: "infantry", x: 188, yOffset: 126, count: 2 },
-          { kind: "infantry", x: 268, yOffset: 126, count: 2 },
+          { kind: "infantry", x: 140, yOffset: 126, count: 2 },
+          { kind: "infantry", x: 300, yOffset: 126, count: 2 },
         ],
       },
       {
@@ -875,10 +872,8 @@ export class Game {
         spawnAt: 17.0,
         speedMultiplier: 1.0,
         enemies: [
-          { kind: "infantry", x: 44, yOffset: 0, count: 2 },
-          { kind: "infantry", x: 140, yOffset: 0, count: 2 },
+          { kind: "infantry", x: 92, yOffset: 0, count: 2 },
           { kind: "infantry", x: 236, yOffset: 0, count: 2 },
-          { kind: "infantry", x: 332, yOffset: 0, count: 1 },
         ],
       },
       {
@@ -5585,8 +5580,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         spawnAt: 0.5,
         enemies: [
           { kind: "infantry", x: 92, yOffset: 0, count: 2 },
-          { kind: "infantry", x: 188, yOffset: 0, count: 2 },
-          { kind: "infantry", x: 284, yOffset: 0, count: 2 }
+          { kind: "infantry", x: 236, yOffset: 0, count: 2 }
         ]
       },
       {
@@ -5594,8 +5588,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         delay: 0,
         spawnAt: 1.5,
         enemies: [
-          { kind: "infantry", x: 92, yOffset: 126, count: 2 },
-          { kind: "infantry", x: 188, yOffset: 126, count: 2 },
+          { kind: "infantry", x: 140, yOffset: 126, count: 2 },
           { kind: "infantry", x: 284, yOffset: 126, count: 2 }
         ]
       },
@@ -5605,8 +5598,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         spawnAt: 4.8,
         enemies: [
           { kind: "infantry", x: 76, yOffset: 0, count: 2 },
-          { kind: "infantry", x: 188, yOffset: 0, count: 1 },
-          { kind: "infantry", x: 300, yOffset: 0, count: 2 }
+          { kind: "infantry", x: 236, yOffset: 0, count: 2 }
         ]
       },
       {
@@ -5614,9 +5606,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         delay: 0,
         spawnAt: 5.8,
         enemies: [
-          { kind: "infantry", x: 76, yOffset: 126, count: 2 },
-          { kind: "infantry", x: 188, yOffset: 126, count: 1 },
-          { kind: "infantry", x: 300, yOffset: 126, count: 2 }
+          { kind: "infantry", x: 140, yOffset: 126, count: 2 },
+          { kind: "infantry", x: 284, yOffset: 126, count: 2 }
         ]
       },
       {
@@ -5624,9 +5615,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         delay: 0,
         spawnAt: 9.2,
         enemies: [
-          { kind: "infantry", x: 60, yOffset: 0, count: 2 },
-          { kind: "infantry", x: 188, yOffset: 0, count: 1 },
-          { kind: "infantry", x: 316, yOffset: 0, count: 2 }
+          { kind: "infantry", x: 92, yOffset: 0, count: 2 },
+          { kind: "infantry", x: 236, yOffset: 0, count: 2 }
         ]
       },
       {
@@ -5634,9 +5624,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         delay: 0,
         spawnAt: 10.2,
         enemies: [
-          { kind: "infantry", x: 60, yOffset: 126, count: 2 },
-          { kind: "infantry", x: 188, yOffset: 126, count: 1 },
-          { kind: "infantry", x: 316, yOffset: 126, count: 2 }
+          { kind: "infantry", x: 140, yOffset: 126, count: 2 },
+          { kind: "infantry", x: 284, yOffset: 126, count: 2 }
         ]
       }
     ] as any;
