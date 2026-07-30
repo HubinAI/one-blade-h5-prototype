@@ -5489,9 +5489,49 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
     // 前5关有精英但没配置 postChestWaves 时，提供默认军令爆发
     if (this.level.eliteSpawnAt && this.level.eliteKind && this.getLogicalFloor() <= 5) {
+      // V0730005: 第1关全程只有 infantry，使用纯基础兵军令
+      if (this.isLogicalLevel1()) {
+        return this.getDefaultPostChestWavesForLevel1();
+      }
       return this.getDefaultPostChestWavesForEarlyLevel();
     }
     return [];
+  }
+
+  /** V0730005: 第1关专用军令爆发（纯 infantry，无盾/火） */
+  private getDefaultPostChestWavesForLevel1(): typeof this.level.waves {
+    return [
+      {
+        name: "军令爆发一",
+        delay: 0,
+        spawnAt: 0.5,
+        enemies: [
+          { kind: "infantry", x: 92, count: 4 },
+          { kind: "infantry", x: 188, count: 5 },
+          { kind: "infantry", x: 284, count: 4 }
+        ]
+      },
+      {
+        name: "军令爆发二",
+        delay: 0,
+        spawnAt: 4.8,
+        enemies: [
+          { kind: "infantry", x: 76, count: 5 },
+          { kind: "infantry", x: 188, count: 1 },
+          { kind: "infantry", x: 300, count: 5 }
+        ]
+      },
+      {
+        name: "军令爆发三",
+        delay: 0,
+        spawnAt: 9.2,
+        enemies: [
+          { kind: "infantry", x: 60, count: 5 },
+          { kind: "infantry", x: 188, count: 1 },
+          { kind: "infantry", x: 316, count: 5 }
+        ]
+      }
+    ] as any;
   }
 
   private getDefaultPostChestWavesForEarlyLevel(): typeof this.level.waves {
