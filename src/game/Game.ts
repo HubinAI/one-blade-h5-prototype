@@ -4913,8 +4913,8 @@ export class Game {
       enemy.spawnedWithEvent = this._currentWaveEvent;
     }
     this.enemies.push(enemy);
-    // V0730014: 标记教学组敌人用于groupReady检测
-    if (this.isLogicalLevel1() && this._l1TutorialPhase !== "completed") {
+    // V0730014: 标记教学组敌人（仅wave[0]和wave[1]）
+    if (this.isLogicalLevel1() && this._l1TutorialPhase !== "completed" && this.wavesSpawned <= 2) {
       this._tutorialGroupEnemyIds.add(enemy.id);
     }
     this.discoveredEnemies.add(item.kind as any);
