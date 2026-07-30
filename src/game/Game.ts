@@ -797,9 +797,9 @@ export class Game {
         spawnAt: 1.5,
         speedMultiplier: 1.0,
         enemies: [
-          { kind: "infantry", x: 88, yOffset: 84, count: 1 },
-          { kind: "infantry", x: 176, yOffset: 84, count: 1 },
-          { kind: "infantry", x: 264, yOffset: 84, count: 1 },
+          { kind: "infantry", x: 88, yOffset: 126, count: 1 },
+          { kind: "infantry", x: 176, yOffset: 126, count: 1 },
+          { kind: "infantry", x: 264, yOffset: 126, count: 1 },
         ],
       },
       {
@@ -819,8 +819,8 @@ export class Game {
         spawnAt: 5.5,
         speedMultiplier: 1.0,
         enemies: [
-          { kind: "infantry", x: 108, yOffset: 84, count: 2 },
-          { kind: "infantry", x: 236, yOffset: 84, count: 2 },
+          { kind: "infantry", x: 108, yOffset: 126, count: 2 },
+          { kind: "infantry", x: 236, yOffset: 126, count: 2 },
         ],
       },
       {
@@ -829,9 +829,9 @@ export class Game {
         spawnAt: 8.0,
         speedMultiplier: 1.0,
         enemies: [
-          { kind: "infantry", x: 44, yOffset: 0, count: 3 },
-          { kind: "infantry", x: 140, yOffset: 0, count: 3 },
-          { kind: "infantry", x: 236, yOffset: 0, count: 3 },
+          { kind: "infantry", x: 44, yOffset: 0, count: 2 },
+          { kind: "infantry", x: 140, yOffset: 0, count: 2 },
+          { kind: "infantry", x: 236, yOffset: 0, count: 2 },
           { kind: "infantry", x: 332, yOffset: 0, count: 2 },
         ],
       },
@@ -841,9 +841,9 @@ export class Game {
         spawnAt: 9.5,
         speedMultiplier: 1.0,
         enemies: [
-          { kind: "infantry", x: 92, yOffset: 84, count: 3 },
-          { kind: "infantry", x: 188, yOffset: 84, count: 3 },
-          { kind: "infantry", x: 284, yOffset: 84, count: 3 },
+          { kind: "infantry", x: 92, yOffset: 126, count: 2 },
+          { kind: "infantry", x: 188, yOffset: 126, count: 2 },
+          { kind: "infantry", x: 284, yOffset: 126, count: 2 },
         ],
       },
       {
@@ -852,9 +852,9 @@ export class Game {
         spawnAt: 13.0,
         speedMultiplier: 1.0,
         enemies: [
-          { kind: "infantry", x: 44, yOffset: 0, count: 3 },
-          { kind: "infantry", x: 150, yOffset: 0, count: 3 },
-          { kind: "infantry", x: 220, yOffset: 0, count: 3 },
+          { kind: "infantry", x: 44, yOffset: 0, count: 2 },
+          { kind: "infantry", x: 150, yOffset: 0, count: 2 },
+          { kind: "infantry", x: 220, yOffset: 0, count: 2 },
           { kind: "infantry", x: 316, yOffset: 0, count: 2 },
         ],
       },
@@ -864,9 +864,9 @@ export class Game {
         spawnAt: 14.5,
         speedMultiplier: 1.0,
         enemies: [
-          { kind: "infantry", x: 92, yOffset: 84, count: 2 },
-          { kind: "infantry", x: 188, yOffset: 84, count: 2 },
-          { kind: "infantry", x: 268, yOffset: 84, count: 2 },
+          { kind: "infantry", x: 92, yOffset: 126, count: 2 },
+          { kind: "infantry", x: 188, yOffset: 126, count: 2 },
+          { kind: "infantry", x: 268, yOffset: 126, count: 2 },
         ],
       },
       {
@@ -876,7 +876,7 @@ export class Game {
         speedMultiplier: 1.0,
         enemies: [
           { kind: "infantry", x: 44, yOffset: 0, count: 2 },
-          { kind: "infantry", x: 140, yOffset: 0, count: 3 },
+          { kind: "infantry", x: 140, yOffset: 0, count: 2 },
           { kind: "infantry", x: 236, yOffset: 0, count: 2 },
           { kind: "infantry", x: 332, yOffset: 0, count: 1 },
         ],
@@ -887,9 +887,9 @@ export class Game {
         spawnAt: 18.5,
         speedMultiplier: 1.0,
         enemies: [
-          { kind: "infantry", x: 92, yOffset: 84, count: 1 },
-          { kind: "infantry", x: 188, yOffset: 84, count: 1 },
-          { kind: "infantry", x: 284, yOffset: 84, count: 2 },
+          { kind: "infantry", x: 92, yOffset: 126, count: 1 },
+          { kind: "infantry", x: 188, yOffset: 126, count: 1 },
+          { kind: "infantry", x: 284, yOffset: 126, count: 2 },
         ],
       },
     ];
@@ -4150,10 +4150,11 @@ export class Game {
     const isLevel1 = this.isLogicalLevel1();
     let killCount = 0;
     for (const target of hits) {
-      // V0730006: L1保证击杀infantry，最多斩5名
+      // V0730007: L1保证击杀infantry（不秒精英），最多斩5名
       const l1KillCap = isLevel1 && killCount >= 5;
       if (l1KillCap) break;
-      const damage = isLevel1 ? Math.max(baseDamage, target.maxHp) : baseDamage;
+      const isL1Infantry = isLevel1 && target.kind === "infantry";
+      const damage = isL1Infantry ? Math.max(baseDamage, target.maxHp) : baseDamage;
       target.hp -= Math.max(1, Math.ceil(damage));
       target.flash = 0.18;
       if (target.kind === "elite") {
@@ -4166,6 +4167,9 @@ export class Game {
         killCount++;
         this.particles.push(...paperBurst(target, 5, ["#5bc0ff", "#f6e7bd"]));
       }
+      // V0730007: 副刀命中反馈（独立音效+短HitStop）
+      AudioService.slashHit();
+      if (isLevel1) this.triggerHitStop(0.05, 0.12);
       this.particles.push(ringParticle({ x: target.x, y: target.y }, s.color, 18));
       if (blade.affix) this.applySubAffixEffect(blade.affix, target, killed, 'momentum_sweep');
     }
@@ -4228,6 +4232,9 @@ export class Game {
       }
     }
     this.particles.push(ringParticle({ x: target.x, y: target.y }, "#b58cff", 22));
+    // V0730007: 副刀命中反馈（独立音效+短HitStop）
+    AudioService.slashHit();
+    if (isLevel1) this.triggerHitStop(0.07, 0.14);
     if (blade.affix) this.applySubAffixEffect(blade.affix, target, killed, 'weakpoint_chase');
     const highValue: EnemyKind[] = ["core", "powder", "elite", "shield"];
     if (highValue.includes(target.kind) && !killed) {
@@ -4604,7 +4611,7 @@ export class Game {
     } else if (chosenEvent === "eliteStrike") {
       // P4.2A.1: 改为单条A级播报
       this.showBattleNotice({ text: "精锐护阵", priority: "A", category: "mechanic", style: "purple", duration: 0.8, dedupeKey: `event:eliteStrike:${this.wavesSpawned}`, cooldown: 2, interrupt: false });
-      extraEnemies.push({ kind: "shield", count: 3, x: 140, yOffset: 0 });
+      extraEnemies.push({ kind: "shield", count: 2, x: 140, yOffset: 0 });
       extraEnemies.push({ kind: "infantry", count: 4, x: 236, yOffset: 0 });
     } else if (chosenEvent === "trapFormation") {
       this.showBattleNotice({ text: "陷阱阵", priority: "A", category: "mechanic", style: "danger", duration: 0.8, dedupeKey: `event:trapFormation:${this.wavesSpawned}`, cooldown: 2, interrupt: false });
@@ -5577,9 +5584,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         delay: 0,
         spawnAt: 0.5,
         enemies: [
-          { kind: "infantry", x: 92, yOffset: 0, count: 3 },
-          { kind: "infantry", x: 188, yOffset: 0, count: 3 },
-          { kind: "infantry", x: 284, yOffset: 0, count: 3 }
+          { kind: "infantry", x: 92, yOffset: 0, count: 2 },
+          { kind: "infantry", x: 188, yOffset: 0, count: 2 },
+          { kind: "infantry", x: 284, yOffset: 0, count: 2 }
         ]
       },
       {
@@ -5587,9 +5594,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         delay: 0,
         spawnAt: 1.5,
         enemies: [
-          { kind: "infantry", x: 92, yOffset: 84, count: 2 },
-          { kind: "infantry", x: 188, yOffset: 84, count: 2 },
-          { kind: "infantry", x: 284, yOffset: 84, count: 2 }
+          { kind: "infantry", x: 92, yOffset: 126, count: 2 },
+          { kind: "infantry", x: 188, yOffset: 126, count: 2 },
+          { kind: "infantry", x: 284, yOffset: 126, count: 2 }
         ]
       },
       {
@@ -5597,9 +5604,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         delay: 0,
         spawnAt: 4.8,
         enemies: [
-          { kind: "infantry", x: 76, yOffset: 0, count: 3 },
+          { kind: "infantry", x: 76, yOffset: 0, count: 2 },
           { kind: "infantry", x: 188, yOffset: 0, count: 1 },
-          { kind: "infantry", x: 300, yOffset: 0, count: 3 }
+          { kind: "infantry", x: 300, yOffset: 0, count: 2 }
         ]
       },
       {
@@ -5607,9 +5614,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         delay: 0,
         spawnAt: 5.8,
         enemies: [
-          { kind: "infantry", x: 76, yOffset: 84, count: 2 },
-          { kind: "infantry", x: 188, yOffset: 84, count: 1 },
-          { kind: "infantry", x: 300, yOffset: 84, count: 2 }
+          { kind: "infantry", x: 76, yOffset: 126, count: 2 },
+          { kind: "infantry", x: 188, yOffset: 126, count: 1 },
+          { kind: "infantry", x: 300, yOffset: 126, count: 2 }
         ]
       },
       {
@@ -5617,9 +5624,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         delay: 0,
         spawnAt: 9.2,
         enemies: [
-          { kind: "infantry", x: 60, yOffset: 0, count: 3 },
+          { kind: "infantry", x: 60, yOffset: 0, count: 2 },
           { kind: "infantry", x: 188, yOffset: 0, count: 1 },
-          { kind: "infantry", x: 316, yOffset: 0, count: 3 }
+          { kind: "infantry", x: 316, yOffset: 0, count: 2 }
         ]
       },
       {
@@ -5627,9 +5634,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         delay: 0,
         spawnAt: 10.2,
         enemies: [
-          { kind: "infantry", x: 60, yOffset: 84, count: 2 },
-          { kind: "infantry", x: 188, yOffset: 84, count: 1 },
-          { kind: "infantry", x: 316, yOffset: 84, count: 2 }
+          { kind: "infantry", x: 60, yOffset: 126, count: 2 },
+          { kind: "infantry", x: 188, yOffset: 126, count: 1 },
+          { kind: "infantry", x: 316, yOffset: 126, count: 2 }
         ]
       }
     ] as any;
