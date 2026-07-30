@@ -437,7 +437,9 @@ export class Game {
     remainingHp: 0,
     pickupCollectRate: 0,
     killedElites: [],
-    killedBoss: null
+    killedBoss: null,
+    maxDirectMainSlashKills: 0,
+    subBladeKills: 0
   };
 
   constructor(level: LevelConfig, onFinish: FinishCallback, onReviveOffer?: ReviveOfferCallback, runMode?: "normal" | "challenge", bossFlow?: "legacy" | "reactive" | "chaseFlash") {
@@ -1982,6 +1984,8 @@ export class Game {
     }
 
     this.stats.maxSingleBlade = Math.max(this.stats.maxSingleBlade, trail.kills);
+    // V0730008: 拆开主刀直接击杀和副刀击杀统计
+    this.stats.maxDirectMainSlashKills = Math.max(this.stats.maxDirectMainSlashKills, trail.kills);
     this.stats.maxChain = Math.max(this.stats.maxChain, trail.chain);
     // P2.8：多杀综合反馈
     this.triggerSlashKillFeedback(trail.kills, last?.x, last?.y);
@@ -2256,7 +2260,7 @@ export class Game {
     const bm = createBladeMomentumState(this.energy, this.bladeMomentumMax);
     if (bm.band === "high") return true;
     if (this.elapsed >= 10) return true;
-    const urgent = this.enemies.some(e => e.alive && e.y >= CHASE_CONFIG.playerDefenseLineY - 100);
+    const urgent = this.enemies.some(e => e.alive && e.y >= BALANCE.battlefield.bottomDefenseY - 100);
     return urgent;
   }
 
@@ -4187,6 +4191,7 @@ export class Game {
       if (killed) {
         this.handleDirectEnemyKilledBySystem(target, "sub_momentum");
         killCount++;
+        this.stats.subBladeKills++;
         this.particles.push(...paperBurst(target, 5, ["#5bc0ff", "#f6e7bd"]));
       }
       this.particles.push(ringParticle({ x: target.x, y: target.y }, s.color, 18));
@@ -4249,6 +4254,7 @@ export class Game {
     const killed = target.hp <= 0;
     if (killed) {
       this.handleDirectEnemyKilledBySystem(target, "sub_weakpoint");
+      this.stats.subBladeKills++;
       this.particles.push(...paperBurst(target, 6, ["#ff6a33", "#ffd35a"]));
       // V0730006: L1击杀反馈
       if (isLevel1) {

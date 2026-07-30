@@ -371,6 +371,9 @@ export type BattleStats = {
   /** 本局击杀的精英/Boss（供图鉴追踪） */
   killedElites: EliteKind[];
   killedBoss: BossId | null;
+  /** V0730008: L1拆分击杀统计 */
+  maxDirectMainSlashKills: number;
+  subBladeKills: number;
 };
 
 export type RunRewards = {
