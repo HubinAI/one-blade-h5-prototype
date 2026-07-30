@@ -304,6 +304,10 @@ export class Game {
   /** V0730008: L1主刀计数（副刀延迟攻击门控） */
   private _l1MainSlashCount = 0;
   private _l1SubBladeUnlocked = false;
+  /** V0730009: L1前两组事件驱动 — 第一组清除后触发第二组 */
+  private _l1Group1Cleared = false;
+  private _l1Group2Spawned = false;
+  private _l1Group1ClearAt = 0;
 
   // ---- 副刀自动AI ----
   private subBlades: Blade[] = [];
@@ -723,6 +727,9 @@ export class Game {
     this._eliteClearanceAt = 0;
     this._l1MainSlashCount = 0;
     this._l1SubBladeUnlocked = false;
+    this._l1Group1Cleared = false;
+    this._l1Group2Spawned = false;
+    this._l1Group1ClearAt = 0;
 
     // 首局教学检测（Boss模式不触发）
     this.isFirstRun = (this.gameMode !== "boss" && this.gameMode !== "chaseFlash") && this.isLogicalLevel1() && !window.localStorage.getItem("one_blade_first_run_done");
@@ -1102,6 +1109,7 @@ export class Game {
     this.updatePickups(scaledDt);
     this.updateParticles(scaledDt);
     this.updateTexts(scaledDt);
+    this._updateL1TutorialGroups();
     this.updateWaves(scaledDt);
     this.updateSubSpawnQueue();
     this.updateEliteSpawn();
@@ -1820,8 +1828,6 @@ export class Game {
     this.nextSoul = false;
     this.nextOil = false;
     this.stats.slashes += 1;
-    // V0730008: L1主刀计数（副刀延迟攻击门控）
-    if (this.isLogicalLevel1()) this._l1MainSlashCount++;
     // V0723014-Final.1 P0-2: Reactive 模式用 lockedMomentum.current 统计
     // 非 Reactive 模式保持旧 lockedEnergy 统计。
     this.totalSlashEnergy += isReactiveMode && lockedMomentum ? lockedMomentum.current : lockedEnergy;
@@ -1986,6 +1992,10 @@ export class Game {
     this.stats.maxSingleBlade = Math.max(this.stats.maxSingleBlade, trail.kills);
     // V0730008: 拆开主刀直接击杀和副刀击杀统计
     this.stats.maxDirectMainSlashKills = Math.max(this.stats.maxDirectMainSlashKills, trail.kills);
+    // V0730009: L1有效主刀计数（≥3直接击杀才算一次有效主刀）
+    if (this.isLogicalLevel1() && trail.kills >= 3) {
+      this._l1MainSlashCount++;
+    }
     this.stats.maxChain = Math.max(this.stats.maxChain, trail.chain);
     // P2.8：多杀综合反馈
     this.triggerSlashKillFeedback(trail.kills, last?.x, last?.y);
@@ -2254,14 +2264,37 @@ export class Game {
   }
 
   /** V0730008: L1副刀解锁条件 —
-   *  a) 玩家完成2次主刀  b) 首进高刀势  c) 10秒  d) 紧急托底(最近敌人在防线100px内) */
+   *  a) 玩家完成2次有效主刀(≥3杀)  b) 首进高刀势  c) 10秒 */
   private _checkL1SubBladeUnlock(): boolean {
     if (this._l1MainSlashCount >= 2) return true;
     const bm = createBladeMomentumState(this.energy, this.bladeMomentumMax);
     if (bm.band === "high") return true;
     if (this.elapsed >= 10) return true;
-    const urgent = this.enemies.some(e => e.alive && e.y >= BALANCE.battlefield.bottomDefenseY - 100);
-    return urgent;
+    return false;
+  }
+
+  /** V0730009: L1副刀紧急托底 — 仅≤40px时临时允许破副刀攻击最近1人，不永久解锁 */
+  private _checkL1SubBladeEmergencyUnlock(): boolean {
+    return this.enemies.some(e => e.alive && e.y >= BALANCE.battlefield.bottomDefenseY - 40);
+  }
+
+  /** V0730009: L1前两组事件驱动 —
+   *  第一组0.5s生成 → 清除后0.8s生成第二组 → 后续波次暂停 */
+  private _updateL1TutorialGroups(): void {
+    if (!this.isLogicalLevel1()) return;
+    if (!this._l1Group1Cleared && this.wavesSpawned >= 1) {
+      const alive = this.enemies.filter(e => e.alive && e.kind === "infantry").length;
+      if (alive === 0 && this.subSpawnQueue.length === 0) {
+        this._l1Group1Cleared = true;
+        this._l1Group1ClearAt = this.elapsed;
+      }
+    }
+    if (this._l1Group1Cleared && !this._l1Group2Spawned && this.elapsed >= this._l1Group1ClearAt + 0.8) {
+      this._l1Group2Spawned = true;
+      if (this.wavesSpawned <= 1) {
+        this.spawnCurrentWave(this.level.waves[1]);
+      }
+    }
   }
 
   /** P3.8：军令弹窗是否正在暂停战斗 */
@@ -3482,10 +3515,13 @@ export class Game {
             anim.phaseTimer += frameDt;
             break;
           }
-          // V0730008: L1副刀延迟攻击 — 等玩家先完成2刀或10s或紧急托底
+          // V0730009: L1副刀延迟攻击 — 等2次有效主刀/高刀势/10s解锁
+          // 紧急(≤40px)只允许"破"临时点杀，不永久解锁
           if (this.isLogicalLevel1() && !this._l1SubBladeUnlocked) {
             if (this._checkL1SubBladeUnlock()) {
               this._l1SubBladeUnlocked = true;
+            } else if (i === 1 && this._checkL1SubBladeEmergencyUnlock()) {
+              // 允许"破"临时托底（不永久解锁，下次ready阶段重新判断）
             } else {
               anim.phaseTimer += frameDt; // 保持Ready展示
               break;
@@ -4490,6 +4526,8 @@ export class Game {
   private updateWaves(dt: number) {
     // P4.4A.1-R3: Boss模式阻断所有波次
     if (this.gameMode === "boss") return;
+    // V0730009: L1第二组完成前暂停波次2+
+    if (this.isLogicalLevel1() && this._l1Group1Cleared && !this._l1Group2Spawned && this.wavesSpawned >= 1) return;
     if (this.wavesSpawned >= this.level.waves.length) return;
     // 军令阶段停止普通波提前推进
     if (this.edictRewardState === "active" || this.battlePhase === "edict_burst") return;
