@@ -27,10 +27,10 @@ export function drawEnergyBar(
   // P0-9: 颜色按 band 读取，band 必传，删除 ratio fallback（避免第三套判档源）
   let barColor: string;
   let glowColor: string;
-  if (band === "base") {
+  if (band === "low") {
     barColor = "#666666";
     glowColor = "rgba(102,102,102,0.4)";
-  } else if (band === "enhanced") {
+  } else if (band === "mid") {
     barColor = "#5bc0ff";
     glowColor = "rgba(91,192,255,0.6)";
   } else {

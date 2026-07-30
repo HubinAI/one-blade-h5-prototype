@@ -240,11 +240,11 @@ describe("BossReactiveController", () => {
     expect(f.armorDurabilityDamage).toBe(25);
   });
 
-  it("B5 护甲伤害公式 — 边界值 30 (中刀势) 固定 55", () => {
+  it("B5 护甲伤害公式 — 边界值 40 (中刀势) 固定 55", () => {
     expect.assertions(1);
     const c = new BossReactiveController();
     advanceToOpportunity(c);
-    const f = hitCurrentArmor(c, "s_30", 30);
+    const f = hitCurrentArmor(c, "s_40", 40);
     expect(f.armorDurabilityDamage).toBe(55);
   });
 
@@ -635,7 +635,7 @@ describe("BossReactiveController", () => {
     expect.assertions(5);
     expect(REACTIVE_BOSS_CONFIG.bladeEnergy.passiveRegenPerSecond).toBe(1.0);
     expect(BLADE_MOMENTUM_CONFIG.baseMax).toBe(100);
-    expect(BLADE_MOMENTUM_CONFIG.initialRatio).toBe(0.35);
+    expect(BLADE_MOMENTUM_CONFIG.initialRatio).toBe(0.40);
     expect(controller.currentSlashEnergy).toBe(0);
     controller.setProgrammaticSlashEnergy(50);
     expect(controller.currentSlashEnergy).toBe(50);
@@ -1550,15 +1550,15 @@ describe("BossReactiveController", () => {
   }
 
   describe("P0-10: max=140/180 生产集成测试", () => {
-    it("max=140 enhanced (42/140) → 护甲伤害严格 55 → finishSlash 后 max 仍 140", () => {
+    it("max=140 mid (56/140) → 护甲伤害严格 55 → finishSlash 后 max 仍 140", () => {
       const c = new BossReactiveController();
       advanceToOpportunity(c);
-      const result = hitWithMax(c, "s_max140_enh", 42, 140);
+      const result = hitWithMax(c, "s_max140_mid", 56, 140);
       expect(result.armorHit).toBe(true);
       expect(result.armorDurabilityDamage).toBe(55);
       expect(result.momentumBefore.max).toBe(140);
       expect(result.momentumAfter.max).toBe(140);
-      expect(result.momentumBefore.band).toBe("enhanced");
+      expect(result.momentumBefore.band).toBe("mid");
     });
 
     it("max=140 burst (98/140) → 直接破甲 → 可反射", () => {
@@ -1566,7 +1566,7 @@ describe("BossReactiveController", () => {
       advanceToOpportunity(c);
       const result = hitWithMax(c, "s_max140_burst", 98, 140);
       expect(result.armorBroken).toBe(true);
-      expect(result.momentumBefore.band).toBe("burst");
+      expect(result.momentumBefore.band).toBe("high");
       expect(result.momentumBefore.max).toBe(140);
       expect(result.momentumAfter.max).toBe(140);
     });
@@ -1606,7 +1606,7 @@ describe("BossReactiveController", () => {
       const result = c.finishSlash("s_lock", momentumBefore, 100, DEFAULT_BLADE_RUN_MODIFIERS);
       // 本刀仍用起刀快照
       expect(result.momentumBefore.max).toBe(100);
-      expect(result.momentumBefore.band).toBe("burst");
+      expect(result.momentumBefore.band).toBe("high");
       expect(result.momentumAfter.max).toBe(100);
     });
 
@@ -1615,9 +1615,7 @@ describe("BossReactiveController", () => {
       advanceToOpportunity(c);
       const result = hitWithMax(c, "s_max180", 126, 180);
       expect(result.momentumBefore.max).toBe(180);
-      expect(result.momentumBefore.band).toBe("burst");
-      expect(result.momentumBefore.activeNodes).toContain("blade_reach");
-      expect(result.momentumBefore.activeNodes).toContain("armor_break");
+      expect(result.momentumBefore.band).toBe("high");
       expect(result.momentumAfter.max).toBe(180);
     });
 
@@ -1638,7 +1636,7 @@ describe("BossReactiveController", () => {
 
       // 用 lockedMomentum=98/140 (burst) 命中弹幕
       const momentum = createBladeMomentumState(98, 140);
-      expect(momentum.band).toBe("burst");
+      expect(momentum.band).toBe("high");
       c.setProgrammaticSlashEnergy(98);
       const segA = v(refl.x - 20, refl.y - 40);
       const segB = v(refl.x + 20, refl.y + 20);
@@ -1687,7 +1685,7 @@ describe("BossReactiveController", () => {
 
       // 起刀快照不变：momentumBefore.max 仍为 100
       expect(result.momentumBefore.max).toBe(100);
-      expect(result.momentumBefore.band).toBe("burst");
+      expect(result.momentumBefore.band).toBe("high");
       // 结算用起刀 max：momentumAfter.max 仍为 100（不受 modifiers.maxBonus 影响）
       expect(result.momentumAfter.max).toBe(100);
       // energyAfter 被 clamp 在 [0, 100]（起刀 max）
@@ -1722,7 +1720,7 @@ describe("BossReactiveController", () => {
       // 断言: 本刀用起刀快照 70/100，不受中途 max=140 影响
       expect(result1.momentumBefore.max).toBe(100);
       expect(result1.momentumBefore.current).toBe(70);
-      expect(result1.momentumBefore.band).toBe("burst");
+      expect(result1.momentumBefore.band).toBe("high");
       expect(result1.momentumAfter.max).toBe(100);
       expect(result1.momentumAfter.current).toBeLessThanOrEqual(100);
 

@@ -18,8 +18,9 @@ import { paperBurst, ringParticle, sparkBurst, glowParticle, explosionBurst, cor
 import { BossController } from "./systems/BossController";
 import { BossReactiveController, type ReactiveCollisionEvent } from "./systems/BossReactiveController";
 import { drawEnergyBar, drawHpBar, drawArmorIndicators } from "./systems/bossReactiveHUD";
-import { BLADE_MOMENTUM_CONFIG, DEFAULT_BLADE_RUN_MODIFIERS, type BladeMomentumState, type BladeRunModifiers } from "./config/bladeMomentum";
-import { createBladeMomentumState, applyBladeMaxChangePreserveRatio } from "./systems/bladeMomentum";
+import { BLADE_MOMENTUM_CONFIG, DEFAULT_BLADE_RUN_MODIFIERS, type BladeMomentumState, type BladeRunModifiers, type BladeMomentumBand, type BladeMomentumEffect } from "./config/bladeMomentum";
+import { createBladeMomentumState, applyBladeMaxChangePreserveRatio, resolveBladeMomentumBand, resolveBladeMomentumRatio, resolveBladeMomentumEffect, resolveBladeGainMultiplier, resolveBladePassiveRecovery, resolveBladeMomentumAfterSlash, spendBladeMomentum, gainBladeMomentum, changeBladeMomentumMaxPreserveRatio, resolveMultiSlashBonus, type BladeMomentumSettleInput, type BladeMomentumSettleOutput } from "./systems/bladeMomentum";
+import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
@@ -139,11 +140,13 @@ export class Game {
   private hp: number;
   private maxHp: number;
   private score = 0;
-  private energy: number;
+  private energy: number = 0;
   /** V0723014: Reactive 模式刀势上限（可成长，默认 100） */
   private reactiveBladeMax: number = BLADE_MOMENTUM_CONFIG.baseMax;
   /** V0723014: Reactive 模式肉鸽修正器 */
   private reactiveBladeRunModifiers: BladeRunModifiers = { ...DEFAULT_BLADE_RUN_MODIFIERS };
+  /** V0730001: 统一刀势上限（普通关用，默认 100，可成长） */
+  private bladeMomentumMax: number = BLADE_MOMENTUM_CONFIG.baseMax;
   private regenDelayTimer = 0;
   private drumTimer = 0;
   /** 三次修正：chest_first_clear 持续刀势回涌的 flag（独立于 drumTimer，避免显示"鼓"图标） */
@@ -464,8 +467,19 @@ export class Game {
     if (this.gameMode === "bossReactive") {
       this.reactiveBladeMax = BLADE_MOMENTUM_CONFIG.baseMax + this.reactiveBladeRunModifiers.maxBonus;
       this.energy = Math.round(this.reactiveBladeMax * BLADE_MOMENTUM_CONFIG.initialRatio);
+    } else if (this.gameMode === "chaseFlash") {
+      // Boss V1: 能量由 initializeChaseFlashMode 初始化，此处不覆写
     } else {
-      this.energy = clamp(this.runContext.mode === "freeBurst" ? BALANCE.swordEnergy.max : level.initialEnergy + this.progressionModifiers.initialEnergyBonus, 0, BALANCE.swordEnergy.max);
+      // V0730001: 统一刀势 — 普通第1关初始 40%（40/100）
+      const isLevel1 = level.id === 1 && this.runContext.mode !== "freeBurst";
+      if (this.runContext.mode === "freeBurst") {
+        this.energy = BALANCE.swordEnergy.max;
+      } else if (isLevel1) {
+        this.bladeMomentumMax = BLADE_MOMENTUM_CONFIG.baseMax;
+        this.energy = Math.round(this.bladeMomentumMax * normalProfile.initialRatio);
+      } else {
+        this.energy = clamp(level.initialEnergy + this.progressionModifiers.initialEnergyBonus, 0, BALANCE.swordEnergy.max);
+      }
     }
     if (this.gameMode === "chaseFlash") {
       this.maxHp = CHASE_CONFIG.playerMaxHp;
@@ -573,13 +587,12 @@ export class Game {
               bridgeTriggered: snap.bridgeTriggered,
               // P4.4B-R5.7: reactiveController 置空前捕获的最终快照
               lastReactiveExitSnapshot: self._lastReactiveExitSnapshot ?? undefined,
-              // V0723014: 刀势只读快照
+              // V0730001: 刀势只读快照
               bladeMomentum: {
                 current: bm.current,
                 max: bm.max,
                 ratio: bm.ratio,
                 band: bm.band,
-                activeNodes: bm.activeNodes,
               },
             };
           }
@@ -980,16 +993,27 @@ export class Game {
     this.chestMomentumTimer = Math.max(0, this.chestMomentumTimer - scaledDt);
     // 三次修正：chest_first_clear 的刀势回涌用一个虚拟 drumTimer 注入到 recoverEnergy
     const effectiveDrumTimer = this.drumTimer + this.chestMomentumTimer;
+    // V0730001: 第1关使用统一被动恢复（20%封顶，2%/秒），其余关卡保持旧逻辑
+    const isLevel1 = this.level.id === 1 && this.gameMode === "normal";
     if (!this.currentSlash?.active && !this.pendingSlash && this.regenDelayTimer <= 0 && this.warDrumNoDecayTimer <= 0) {
-      this.energy = recoverEnergy(this.energy, scaledDt * this.getPassiveRegenMultiplier(), effectiveDrumTimer);
+      if (isLevel1) {
+        const recovery = resolveBladePassiveRecovery(this.energy, this.bladeMomentumMax, scaledDt);
+        this.energy = recovery.newCurrent;
+      } else {
+        this.energy = recoverEnergy(this.energy, scaledDt * this.getPassiveRegenMultiplier(), effectiveDrumTimer);
+      }
     }
     // 鼓阵：击杀后1s内刀势不衰减（不扣regenDelay）
     if (!this.currentSlash?.active && this.warDrumNoDecayTimer > 0) {
       // 不恢复也不衰减，维持当前刀势
     }
 
-    // 三幕制阶段爆发检查在主循环后面调用
-    if (!this.currentSlash?.active && this.energy >= 90) {
+    // V0730001: high档位就绪提示（ratio ≥ 70%）
+    const bmStateNow = createBladeMomentumState(this.energy, this.bladeMomentumMax);
+    const isHighBand = this.level.id === 1 && this.gameMode === "normal"
+      ? bmStateNow.band === "high"
+      : this.energy >= 90; // 第2～10关保持旧逻辑
+    if (!this.currentSlash?.active && isHighBand) {
       this.showHint("burst-ready", "破阵锋已成", DESIGN_WIDTH / 2, 656, 1);
     }
 
@@ -1518,10 +1542,10 @@ export class Game {
       this._reactiveTelemetry.passiveGain += this.energy - energyBeforeRegen;
     }
 
-    // V0723015: 累计档位时间
+    // V0730001: 累计档位时间（使用统一 low/mid/high）
     const bandMomentum = this.getReactiveBladeMomentum();
-    if (bandMomentum.band === "base") this._reactiveTelemetry.baseBandSeconds += scaledDt;
-    else if (bandMomentum.band === "enhanced") this._reactiveTelemetry.enhancedBandSeconds += scaledDt;
+    if (bandMomentum.band === "low") this._reactiveTelemetry.baseBandSeconds += scaledDt;
+    else if (bandMomentum.band === "mid") this._reactiveTelemetry.enhancedBandSeconds += scaledDt;
     else this._reactiveTelemetry.burstBandSeconds += scaledDt;
 
     this.screenShake = Math.max(0, this.screenShake - scaledDt * 2.7);
@@ -1559,18 +1583,9 @@ export class Game {
       return;
     }
     if (this.phase !== "playing") return;
-    // P4.4A.4: execution阶段允许一刀（绕过刀势不足检查）
-    const isExecutionPhase = this.bossController?.phase === "execution";
+    // V0730001: 0刀势也能挥刀，不再检查 canSlash。
+    // 仅以下情况允许输入锁定：弹窗、暂停、结算、Boss演出或不可交互状态、明确的状态机输入锁。
     const isReactive = this.gameMode === "bossReactive";
-    if (!isExecutionPhase && !isReactive) {
-      // 蓄势阶段（0-9%）不可挥刀
-      if (!canSlash(this.energy)) {
-        this.showHint("蓄势中", "刀势不足", DESIGN_WIDTH / 2, 200, 0.6);
-        return;
-      }
-    } else {
-      // execution阶段或reactive模式确保有足够的能量挥刀
-    }
     this.pointerDown = true;
     const start = this.clampPointer(pos);
     this.pointerPos = start;
@@ -1634,12 +1649,11 @@ export class Game {
     if (this.currentSlash?.active) this.extendSlash(firstMovePos);
   }
 
-  /** V0723014: 获取 Reactive 模式刀势只读快照 */
+  /** V0730001: 获取 Reactive 模式刀势只读快照 */
   private getReactiveBladeMomentum(): BladeMomentumState {
     return createBladeMomentumState(
       this.energy,
       this.reactiveBladeMax,
-      this.reactiveBladeRunModifiers,
     );
   }
 
@@ -1743,14 +1757,15 @@ export class Game {
       }
       // BossV1: 重置单刀命中去重状态
       if (this.gameMode === "chaseFlash") {
-        this.energy = Math.max(0, this.energy - CHASE_CONFIG.bladeEconomy.slashCost);
+        this.energy = spendBladeMomentum(this.energy, BLADE_MOMENTUM_CONFIG.baseMax, CHASE_CONFIG.bladeEconomy.slashCost);
         this._chaseSlashHitCore = false;
         this._chaseSlashHitShell = false;
         this._chaseSlashHitBarrages.clear();
         this.chaseController?.resetSlashDedup();
       }
     } else {
-      this.energy = consumeEnergyByTier(this.energy, tier);
+      // V0730001: 统一刀势 — 固定挥刀消耗 8 点
+      this.energy = spendBladeMomentum(this.energy, this.bladeMomentumMax, BLADE_MOMENTUM_CONFIG.slash.baseCost);
     }
     this.regenDelayTimer = BALANCE.swordEnergy.regenDelayAfterSlash;
     this.nextSoul = false;
@@ -1854,16 +1869,43 @@ export class Game {
     const slashBonus = this.getSlashScoreBonus(trail.kills);
     if (slashBonus > 0) this.score += slashBonus;
 
-    // 新刀势返还：基于击杀数和段位的阶梯返还
-    const refund = calculateMomentumRefund(trail.kills, trail.tier, {
-      powderChains: trail.explosionCount,
-      coreCollapses: trail.coreCollapseCount
-    });
-    if (refund > 0) {
-      this.energy = clamp(this.energy + refund, 0, BALANCE.swordEnergy.max);
-      // 返还 >= 15 时显示返还量
-      if (refund >= 15) {
-        this.addText(DESIGN_WIDTH / 2, 810, `+${refund}% 刀势`, "#5bc0ff", 12, 0.7);
+    // V0730001: 第1关使用统一刀势结算，其余关卡保持旧返还逻辑
+    const isLevel1 = this.level.id === 1 && this.gameMode === "normal";
+    if (isLevel1) {
+      // 统一结算：命中去重已在 trail 中处理，此处只结算数值
+      const hitCount = trail.kills; // 对基础兵 = 命中即击杀
+      const killCount = trail.kills;
+      const hitGain = hitCount * normalProfile.gains.hitBasic;
+      const killGain = killCount * normalProfile.gains.killBasic;
+      const multiBonus = resolveMultiSlashBonus(killCount);
+      const totalGain = hitGain + killGain + multiBonus;
+      const gm = resolveBladeGainMultiplier(this.bladeMomentumMax);
+
+      const momentumBefore = createBladeMomentumState(this.energy, this.bladeMomentumMax);
+      const settleResult = resolveBladeMomentumAfterSlash({
+        momentumBefore,
+        baseCost: 0, // 基础消耗已在 startSlash 时扣除
+        activeGain: totalGain,
+        penalty: 0,
+        gainMultiplier: gm,
+      });
+      this.energy = settleResult.current;
+      // Debug 日志
+      if (this.debugEnabled) {
+        console.log(`[BladeMomentum] L1 slash: kills=${killCount} hitGain=${hitGain} killGain=${killGain} multiBonus=${multiBonus} gm=${gm.toFixed(2)} energyBefore=${momentumBefore.current} energyAfter=${settleResult.current} netChange=${settleResult.netChange}`);
+      }
+    } else {
+      // 新刀势返还：基于击杀数和段位的阶梯返还（第2～10关保持旧逻辑）
+      const refund = calculateMomentumRefund(trail.kills, trail.tier, {
+        powderChains: trail.explosionCount,
+        coreCollapses: trail.coreCollapseCount
+      });
+      if (refund > 0) {
+        this.energy = clamp(this.energy + refund, 0, BALANCE.swordEnergy.max);
+        // 返还 >= 15 时显示返还量
+        if (refund >= 15) {
+          this.addText(DESIGN_WIDTH / 2, 810, `+${refund}% 刀势`, "#5bc0ff", 12, 0.7);
+        }
       }
     }
 
@@ -2479,7 +2521,7 @@ export class Game {
       `energy: ${Math.round(this.energy)}`,
       `[Momentum] ratio:${(momentum.ratio * 100).toFixed(0)}% band:${momentum.band}`,
       `[Momentum] cur:${momentum.current} max:${momentum.max}`,
-      `[Momentum] nodes: ${momentum.activeNodes.join(",") || "-"}`,
+      `[Momentum] nodes: -`,
       `inputLocked: ${snap.inputLocked}`,
       `projectileCount: ${snap.projectileCount}`,
       `bridgeTriggered: ${snap.bridgeTriggered}`,
@@ -4727,7 +4769,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
           AudioService.defenseHit();
         } else {
           // V0723015-Final: 护甲文字按 lockedMomentum.band 判断（不再用 slashEnergy < 30 绝对值）
-          if (result.momentumBefore.band === "base") {
+          if (result.momentumBefore.band === "low") {
             this.addText(fx, fy - 20, `裂痕 ${result.armorDurabilityDamage}`, "#d9b45b", 14, 0.7);
           } else {
             this.addText(fx, fy - 20, `护甲 -${result.armorDurabilityDamage}`, "#f0e130", 16, 0.7);
@@ -7421,7 +7463,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
   private drawDefenseAndWarrior(ctx: CanvasRenderingContext2D) {
     ctx.save();
-    const energyRatio = this.energy / BALANCE.swordEnergy.max;
+    const bmMaxDraw = this.gameMode === "normal" && this.level.id === 1 ? this.bladeMomentumMax : BALANCE.swordEnergy.max;
+    const energyRatio = bmMaxDraw > 0 ? this.energy / bmMaxDraw : 0;
+    // V0730001: 统一档位判定（用于能量条，stage 仍保留用于气场颜色）
+    const bmStateDraw = createBladeMomentumState(this.energy, bmMaxDraw);
+    const bmBandDraw = bmStateDraw.band;
     // P4.4B-R3 P0-A: Boss 模式（reactive + legacy）不画城墙（policy.showDefenseWall=false），
     // 只画玩家主体 + 主刀气场 + 心形 HP + 副刀槽。
     // 普通模式 _playerCombatLayerPolicy 可能为 null（render 主循环直接调用），
@@ -7476,9 +7522,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.save();
     ctx.translate(cx, cy);
     ctx.globalCompositeOperation = "lighter";
-    // 弱化：仅在 >= 轻斩(0.1) 阶段显示能量气场
-    if (energyRatio >= 0.1) {
-      const auraCount = energyRatio >= 0.9 ? 3 : energyRatio >= 0.6 ? 2 : 1;
+    // V0730001: 统一 aura 阈值（低→中→高）
+    if (energyRatio >= 0.20) {
+      const auraCount = energyRatio >= 0.70 ? 3 : energyRatio >= 0.40 ? 2 : 1;
       for (let i = 0; i < auraCount; i += 1) {
         ctx.strokeStyle = stage.color;
         ctx.shadowColor = stage.color;
@@ -7591,19 +7637,27 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.drawSubBladeSlot(ctx, 1, rightSlot.boxX, rightSlot.boxY, rightSlot.iconR, 0xb58cff);
 
     // 刀势三段能量条 —— 屏幕底部居中（窄条），普通关与 Boss 关共用
+    // V0730001: 统一使用 low/mid/high 档位，40%/70% 分界
     const eBarW = 210;
     const eBarH = 14;
     const eBarX = (DESIGN_WIDTH - eBarW) / 2;
     const eBarY = 800;
-    const energyPct = this.energy / BALANCE.swordEnergy.max;
-    const eTier = getBladeTier(this.energy);
-    const eTierName = SWORD_STAGE_BY_ID[eTier]?.name ?? "蓄势";
+    const bmMax = this.gameMode === "normal" && this.level.id === 1 ? this.bladeMomentumMax : BALANCE.swordEnergy.max;
+    const energyPct = bmMax > 0 ? this.energy / bmMax : 0;
+    const bmState = createBladeMomentumState(this.energy, bmMax);
+    const bmBand = bmState.band;
+    const bandNames: Record<BladeMomentumBand, string> = { low: "残锋", mid: "锐芒", high: "破阵" };
+    const bandColors: Record<BladeMomentumBand, string> = { low: "#888", mid: "#5bc0ff", high: "#ffd35a" };
+    const bandGlow: Record<BladeMomentumBand, { color: string; blur: number }> = {
+      low: { color: "rgba(160, 160, 160, 0.3)", blur: 3 },
+      mid: { color: "rgba(91, 192, 255, 0.6)", blur: 8 },
+      high: { color: "rgba(255, 211, 90, 0.8)", blur: 14 },
+    };
 
-    // 段位分界刻度（条下方对应位置的小三角）
+    // 段位分界刻度（40%/70%）
     const tierMarks = [
-      { pct: 0.10, color: "rgba(192, 208, 224, 0.6)" },  // 蓄势终点 → 轻斩
-      { pct: 0.40, color: "rgba(91, 192, 255, 0.7)" },    // 轻斩终点 → 强斩
-      { pct: 0.90, color: "rgba(255, 211, 90, 0.85)" },   // 强斩终点 → 破阵
+      { pct: 0.40, color: "rgba(91, 192, 255, 0.7)", label: "锐芒" },
+      { pct: 0.70, color: "rgba(255, 211, 90, 0.85)", label: "破阵" },
     ];
 
     // 背景（深色实心，明确未填充区域）
@@ -7616,11 +7670,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.stroke();
 
     // 段位色彩分层（极淡的色块作为背景刻度，仅作为视觉参考）
+    // V0730001: low(0-40%), mid(40-70%), high(70-100%)
     const segColors = [
-      { x0: 0, x1: 0.10, color: "rgba(192, 208, 224, 0.03)" },
-      { x0: 0.10, x1: 0.40, color: "rgba(192, 208, 224, 0.04)" },
-      { x0: 0.40, x1: 0.90, color: "rgba(91, 192, 255, 0.04)" },
-      { x0: 0.90, x1: 1.00, color: "rgba(255, 211, 90, 0.05)" },
+      { x0: 0, x1: 0.40, color: "rgba(160, 160, 160, 0.03)" },
+      { x0: 0.40, x1: 0.70, color: "rgba(91, 192, 255, 0.04)" },
+      { x0: 0.70, x1: 1.00, color: "rgba(255, 211, 90, 0.05)" },
     ];
     for (const seg of segColors) {
       ctx.fillStyle = seg.color;
@@ -7631,22 +7685,22 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const fillX = eBarX;
     const fillW = eBarW * energyPct;
     if (fillW > 0) {
-      // 渐变填充：从灰→青→金（按当前段位走色）
+      // 渐变填充：按统一档位走色
       const grad = ctx.createLinearGradient(fillX, 0, fillX + fillW, 0);
       const fillPct = energyPct;
-      if (fillPct < 0.4) {
-        grad.addColorStop(0, "#666");
-        grad.addColorStop(1, "#c0d0e0");
-      } else if (fillPct < 0.9) {
-        grad.addColorStop(0, "#c0d0e0");
+      if (fillPct < 0.40) {
+        grad.addColorStop(0, "#555");
+        grad.addColorStop(1, "#999");
+      } else if (fillPct < 0.70) {
+        grad.addColorStop(0, "#999");
         grad.addColorStop(1, "#5bc0ff");
       } else {
         grad.addColorStop(0, "#5bc0ff");
         grad.addColorStop(1, "#ffd35a");
       }
       ctx.fillStyle = grad;
-      ctx.shadowColor = eTier === "burst" ? "rgba(255, 211, 90, 0.8)" : eTier === "strong" ? "rgba(91, 192, 255, 0.6)" : "rgba(192, 208, 224, 0.4)";
-      ctx.shadowBlur = eTier === "burst" ? 14 : 6;
+      ctx.shadowColor = bandGlow[bmBand].color;
+      ctx.shadowBlur = bandGlow[bmBand].blur;
       roundRect(ctx, fillX, eBarY, fillW, eBarH, 6);
       ctx.fill();
       ctx.shadowBlur = 0;
@@ -7677,11 +7731,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.fill();
     }
 
-    // 百分比 + 段位名（条下方居中）
+    // V0730001: 百分比 + 统一档位名
     ctx.textAlign = "center";
-    ctx.fillStyle = "#f6e7bd";
+    ctx.fillStyle = bandColors[bmBand];
     ctx.font = '700 12px "Microsoft YaHei", sans-serif';
-    const pctText = `${Math.floor(this.energy)}% ${eTierName}`;
+    const pctText = `${Math.floor(energyPct * 100)}% ${bandNames[bmBand]}`;
     ctx.fillText(pctText, DESIGN_WIDTH / 2, eBarY - 4);
 
     // P4.1A.10：一刀斩"下一刀×2"小状态（仅oneBladeModeTimer>0时显示）
@@ -7701,8 +7755,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
     ctx.restore();
 
-    // 破阵就绪提示（移到屏幕顶部下方，与关卡文字分隔）
-    if (eTier === "burst" && !this._breakReadyNotified) {
+    // V0730001: high 档位就绪提示
+    if (bmBand === "high" && !this._breakReadyNotified) {
       this._breakReadyNotified = true;
       // V0715008 二次打磨：屏蔽"破阵斩已就绪！"飘字
       // this.addText(DESIGN_WIDTH / 2, 100, "破阵斩已就绪！", "#ffd35a", 20, 1.8);
@@ -8966,9 +9020,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         this.particles.push(...sparkBurst(ev.hitPoint, pc * 2.5, "#ffd700", 60 + (tier === "high" ? 40 : 0)));
         this.particles.push(...sparkBurst(ev.hitPoint, pc, "#ffffff", 30 + (tier === "high" ? 20 : 0)));  // 白闪
         this.particles.push(glowParticle(ev.hitPoint, "#ffd700", 2.0, 40 + (tier === "high" ? 30 : tier === "mid" ? 15 : 5)));
-        // 刀势回流
+        // V0730001: 刀势回流 — 使用统���接口
         const momentumGain = tier === "high" ? 22 : tier === "mid" ? 15 : 10;
-        this.energy = clamp(this.energy + momentumGain, 0, BALANCE.swordEnergy.max);
+        this.energy = gainBladeMomentum(this.energy, BLADE_MOMENTUM_CONFIG.baseMax, momentumGain);
       } else if (ev.kind === "shell_hit") {
         this.screenShake = Math.max(this.screenShake, 0.15); this.flash = Math.max(this.flash, 0.08);
         this.particles.push(...sparkBurst(ev.position, 3, "#9b59b6", 15));
@@ -9027,10 +9081,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       }
     }
     if (energyGain > 0) {
-      this.energy = Math.min(100, this.energy + energyGain);
+      this.energy = gainBladeMomentum(this.energy, BLADE_MOMENTUM_CONFIG.baseMax, energyGain);
       const bc = this._chaseBarrageHitCount;
-      if (bc >= 3) { this.energy = Math.min(100, this.energy + 8); this.screenShake = Math.max(this.screenShake, 0.45); this.particles.push(...sparkBurst({ x: 195, y: 500 }, 15, "#ffd700", 40)); }
-      else if (bc >= 2) { this.energy = Math.min(100, this.energy + 5); }
+      if (bc >= 3) { this.energy = gainBladeMomentum(this.energy, BLADE_MOMENTUM_CONFIG.baseMax, 8); this.screenShake = Math.max(this.screenShake, 0.45); this.particles.push(...sparkBurst({ x: 195, y: 500 }, 15, "#ffd700", 40)); }
+      else if (bc >= 2) { this.energy = gainBladeMomentum(this.energy, BLADE_MOMENTUM_CONFIG.baseMax, 5); }
     }
   }
   private renderChaseFlashMode(ctx: CanvasRenderingContext2D): void {

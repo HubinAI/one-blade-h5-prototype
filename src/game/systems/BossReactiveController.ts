@@ -833,7 +833,7 @@ export class BossReactiveController {
 
     const newEvents: ReactiveCollisionEvent[] = [];
     // V0723014: 使用 lockedMomentum.band 判定反射（替代 energy threshold）
-    const isBurst = geometry.lockedMomentum.band === "burst";
+    const isBurst = geometry.lockedMomentum.band === "high";
 
     // 1. 弹幕判定
     for (const cap of geometry.capsules) {
@@ -973,9 +973,9 @@ export class BossReactiveController {
   private calculateArmorDamage(momentum: BladeMomentumState, armor: ReactiveArmorTarget): number {
     const cfg = REACTIVE_BOSS_CONFIG.armor;
     switch (momentum.band) {
-      case "burst":
+      case "high":
         return armor.durability; // 直接破甲
-      case "enhanced":
+      case "mid":
         return Math.min(armor.durability, cfg.midEnergyDamage); // 固定55
       default:
         return Math.min(armor.durability, cfg.lowEnergyCrack); // 固定25
@@ -1183,7 +1183,7 @@ export class BossReactiveController {
     const appliedActiveGain = Math.max(0, energyAfter - energyAfterWithoutGain);
 
     // V0723014: 构建 momentumAfter（使用 momentumBefore.max 保持上限一致）
-    const momentumAfter = createBladeMomentumState(energyAfter, momentumBefore.max, effectiveModifiers);
+    const momentumAfter = createBladeMomentumState(energyAfter, momentumBefore.max);
 
     // ---- primaryResult（V0723015: 新增 armor_closed 优先级） ----
     // 优先级: armor_broken > armor_hit > dangerous_wrong_cut > body_wrong_hit
@@ -1332,10 +1332,10 @@ export class BossReactiveController {
 
     let color: string;
     let glowColor: string;
-    if (band === "base") {
+    if (band === "low") {
       color = cfg.lowEnergyColor;
       glowColor = "rgba(102,102,102,0.25)";
-    } else if (band === "enhanced") {
+    } else if (band === "mid") {
       color = cfg.midEnergyColor;
       glowColor = "rgba(91,192,255,0.6)";
     } else {
