@@ -304,11 +304,8 @@ export class Game {
   /** V0730008: L1主刀计数（副刀延迟攻击门控） */
   private _l1MainSlashCount = 0;
   private _l1SubBladeUnlocked = false;
-  /** V0730009: L1前两组事件驱动 — 第一组清除后触发第二组 */
-  private _l1Group1Cleared = false;
-  private _l1Group2Spawned = false;
   private _l1Group1ClearAt = 0;
-  /** V0730010: 教学状态机: group1_active → wait_group2 → group2_active → completed */
+  /** V0730017: 教学状态机: g1→w1→g2→w2→g3→completed */
   private _l1TutorialPhase: "group1_active" | "wait_group2" | "group2_active" | "wait_group3" | "group3_active" | "completed" = "group1_active";
   /** V0730011: 教学完成后波次时间重基准 */
   private _l1PostTutorialBase = 0;
@@ -738,8 +735,6 @@ export class Game {
     this._eliteClearanceAt = 0;
     this._l1MainSlashCount = 0;
     this._l1SubBladeUnlocked = false;
-    this._l1Group1Cleared = false;
-    this._l1Group2Spawned = false;
     this._l1Group1ClearAt = 0;
     this._l1TutorialPhase = "group1_active";
     this._l1PostTutorialBase = 0;
@@ -749,7 +744,6 @@ export class Game {
     // 首局教学检测（Boss模式不触发）
     this.isFirstRun = (this.gameMode !== "boss" && this.gameMode !== "chaseFlash") && this.isLogicalLevel1() && !window.localStorage.getItem("one_blade_first_run_done");
     if (this.isFirstRun) {
-      this.overrideWithScriptedTutorial();
       this.showHint("drag-guide", "按住拖动，松手挥出一刀", DESIGN_WIDTH / 2, 118, 2.5);
     }
 
@@ -803,11 +797,6 @@ export class Game {
     this._usedEvents = new Set();
     this._activeEventTimer = 0;
     this._slowRainMultiplier = 1;
-  }
-
-  /** 首局教学：V0730015 改用 levels.ts 统一波次 */
-  private overrideWithScriptedTutorial() {
-    // 波次统一使用 levels.ts 第1关配置，此处仅作为入口保留
   }
 
   toggleDebugPanel() {
