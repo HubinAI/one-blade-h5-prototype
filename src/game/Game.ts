@@ -301,6 +301,10 @@ export class Game {
   private _elitePreviewAt = 0;
   private _eliteClearanceAt = 0;
 
+  /** V0730008: L1主刀计数（副刀延迟攻击门控） */
+  private _l1MainSlashCount = 0;
+  private _l1SubBladeUnlocked = false;
+
   // ---- 副刀自动AI ----
   private subBlades: Blade[] = [];
   private subBladeTimers: number[] = [];
@@ -715,6 +719,8 @@ export class Game {
     this.eliteSpawnAnnounced = false;
     this._elitePreviewAt = 0;
     this._eliteClearanceAt = 0;
+    this._l1MainSlashCount = 0;
+    this._l1SubBladeUnlocked = false;
 
     // 首局教学检测（Boss模式不触发）
     this.isFirstRun = (this.gameMode !== "boss" && this.gameMode !== "chaseFlash") && this.isLogicalLevel1() && !window.localStorage.getItem("one_blade_first_run_done");
@@ -1812,7 +1818,9 @@ export class Game {
     this.nextSoul = false;
     this.nextOil = false;
     this.stats.slashes += 1;
-    // V0723014-Final.1 P0-2: Reactive 模式用 lockedMomentum.current 统计（反映真实刀势值）。
+    // V0730008: L1主刀计数（副刀延迟攻击门控）
+    if (this.isLogicalLevel1()) this._l1MainSlashCount++;
+    // V0723014-Final.1 P0-2: Reactive 模式用 lockedMomentum.current 统计
     // 非 Reactive 模式保持旧 lockedEnergy 统计。
     this.totalSlashEnergy += isReactiveMode && lockedMomentum ? lockedMomentum.current : lockedEnergy;
     // P1-2: Reactive 模式不写入普通关卡绝对阈值统计（max=180 时 60/180=33% 不应算高刀势）
@@ -2239,6 +2247,17 @@ export class Game {
   /** V0730003: 第1关统一判断（兼容静态id=1和动态id=10001） */
   private isLogicalLevel1(): boolean {
     return this.gameMode === "normal" && this.getLogicalFloor() === 1;
+  }
+
+  /** V0730008: L1副刀解锁条件 —
+   *  a) 玩家完成2次主刀  b) 首进高刀势  c) 10秒  d) 紧急托底(最近敌人在防线100px内) */
+  private _checkL1SubBladeUnlock(): boolean {
+    if (this._l1MainSlashCount >= 2) return true;
+    const bm = createBladeMomentumState(this.energy, this.bladeMomentumMax);
+    if (bm.band === "high") return true;
+    if (this.elapsed >= 10) return true;
+    const urgent = this.enemies.some(e => e.alive && e.y >= CHASE_CONFIG.playerDefenseLineY - 100);
+    return urgent;
   }
 
   /** P3.8：军令弹窗是否正在暂停战斗 */
@@ -3459,6 +3478,15 @@ export class Game {
             anim.phaseTimer += frameDt;
             break;
           }
+          // V0730008: L1副刀延迟攻击 — 等玩家先完成2刀或10s或紧急托底
+          if (this.isLogicalLevel1() && !this._l1SubBladeUnlocked) {
+            if (this._checkL1SubBladeUnlock()) {
+              this._l1SubBladeUnlocked = true;
+            } else {
+              anim.phaseTimer += frameDt; // 保持Ready展示
+              break;
+            }
+          }
           if (i === 0 && validEnemies.length >= 3) {
             // P4.1A.9: 局部80px密集群（不是全部有效敌人的平均点）
             let bestGroup: typeof validEnemies = [];
@@ -4161,11 +4189,13 @@ export class Game {
         killCount++;
         this.particles.push(...paperBurst(target, 5, ["#5bc0ff", "#f6e7bd"]));
       }
-      // V0730007: 副刀命中反馈（独立音效+短HitStop）
-      AudioService.slashHit();
-      if (isLevel1) this.triggerHitStop(0.05, 0.12);
       this.particles.push(ringParticle({ x: target.x, y: target.y }, s.color, 18));
       if (blade.affix) this.applySubAffixEffect(blade.affix, target, killed, 'momentum_sweep');
+    }
+    // V0730008: 横扫音效和HitStop只播一次（非每目标）
+    if (hits.length > 0) {
+      AudioService.slashHit();
+      if (isLevel1) this.triggerHitStop(0.05, 0.12);
     }
 
     // 蓄势返还刀势

@@ -41,11 +41,11 @@ export const LEVELS: LevelConfig[] = [
     eliteSpawnAt: 25,
     eliteKind: "fireRing",
     waves: [
-      // V0730007: 分层波次，rowGap*3≈126px，每层≤5人，前后层x错开
+      // V0730008: 前两组5+5分开，保证两次正确5杀→刀势成长
       wave("爽感启动·前", 0.5, row("infantry", [0, 2, 4, 6, 1])),
-      wave("爽感启动·后", 1.5, row("infantry", [3, 5, 0], 3)),
-      wave("斜排练刀·前", 6, row("infantry", [0, 2, 4, 6])),
-      wave("斜排练刀·后", 7.5, row("infantry", [1, 3, 5], 3)),
+      wave("爽感启动·后", 2.5, row("infantry", [3, 5, 0, 2, 4], 3)),
+      wave("斜排练刀·前", 7, row("infantry", [0, 1, 3, 5])),
+      wave("斜排练刀·后", 8.5, row("infantry", [2, 4, 6, 0], 3)),
       wave("第一军令·前", 16, row("infantry", [0, 2, 4, 6, 1])),
       wave("第一军令·后", 17.5, row("infantry", [3, 5, 0, 2], 3)),
       wave("步兵潮·前", 27, row("infantry", [1, 3, 5, 0, 6])),
