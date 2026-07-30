@@ -429,6 +429,24 @@ export type BattleResult = {
   /** 本局击杀的精英/Boss（图鉴追踪） */
   killedElites: EliteKind[];
   killedBoss: BossId | null;
+  /** V0723016-S1.2: 策略切片实验模式标志+总结数据 */
+  strategySlice?: boolean;
+  strategySliceSummary?: {
+    cleanClears: number;
+    chargedReflects: number;
+    overloads: number;
+    windowAttacks: number;
+    windowSkips: number;
+    dangerWrongCuts: number;
+    totalTime: number;
+    cycleOutcomes: ("safe_clear" | "charged_reflect" | "overloaded")[];
+    totalArmorDamage?: number;
+    remainingArmor?: number;
+    windowSmallCount?: number;
+    windowLargeCount?: number;
+    dangerInheritedCycle1?: number;
+    dangerInheritedCycle2?: number;
+  };
 };
 
 /** 图鉴条目 */
@@ -524,6 +542,32 @@ export type BladeContinuousEffect = {
   color: string;
   glowColor: string;
 };
+
+// ---- V0723016: 三甲目标系统新增类型 ----
+
+/** 三甲目标类型 */
+export type ObjectiveType = "cut_normal" | "reflect" | "mixed_round";
+
+/** 三甲目标配置（左肩/右肩共用，V0723016复审：右肩改 points 制 + minWavesRequired） */
+export interface ArmorObjectiveConfig {
+  normalCutsRequired: number;     // 左肩：斩弹需求数
+  reflectPointsRequired: number;  // 右肩：反射总点数需求
+  normalReflectPoints: number;    // 右肩：普通反射得分(1)
+  perfectReflectPoints: number;   // 右肩：精准反射得分(2)
+  perfectReflectRatio: number;    // 右肩：精准反射阈值(0.9)
+  minWavesRequired: number;       // 最少活跃波次数(2)
+  timeout: number;                 // 超时兜底秒数
+}
+
+/** 三甲目标集合 */
+export interface ArmorObjectivesConfig {
+  left: ArmorObjectiveConfig;
+  right: ArmorObjectiveConfig;
+  chest: { mixedRoundsRequired: number; timeout: number };
+}
+
+/** armorObjectives 配置键 */
+export type ArmorKey = "left" | "right" | "chest";
 
 // ---- V0723015: 刀势经济遥测 ----
 

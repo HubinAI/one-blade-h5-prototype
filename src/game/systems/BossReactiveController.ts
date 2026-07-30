@@ -3,7 +3,7 @@
 // 状态流: armor_prepare → armor_threat → armor_opportunity
 //        → armor_resolve → armor_recovery → (循环或bridgeToPursuit)
 // ========================================================================
-import type { BossPhaseState, Vec2, Projectile, ProjectileKind, ReactiveArmorTarget, PlayerHpState, BladeContinuousEffect } from "../types";
+import type { BossPhaseState, Vec2, Projectile, ProjectileKind, ReactiveArmorTarget, PlayerHpState, BladeContinuousEffect, ObjectiveType } from "../types";
 import { DESIGN_WIDTH, DESIGN_HEIGHT } from "../config/constants";
 import { BLADE_MOMENTUM_CONFIG, DEFAULT_BLADE_RUN_MODIFIERS, type BladeMomentumState, type BladeRunModifiers } from "../config/bladeMomentum";
 import { createBladeMomentumState } from "./bladeMomentum";
@@ -170,7 +170,30 @@ export class BossReactiveController {
   private _elapsed = 0;
   private phaseTimer = 0;
   private threatSpawnTimer = 0;
-  private threatDuration = 2.5;
+
+  // ---- V0723016: 三甲目标驱动开窗系统（替代旧 threatDuration 固定时长） ----
+  private _objectiveType: ObjectiveType | null = null;
+  private _objectiveCurrent = 0;
+  private _objectiveTarget = 0;
+  private _objectiveCompleted = false;
+  private _objectiveCompletedBy: "action" | "timeout" | null = null;
+  private _objectiveTimeout = 8; // 按当前护甲从 armorObjectives 读取
+  private _perfectReflectCount = 0;
+  private _mixedRoundCount = 0;
+  private _currentMixedRoundHandled = false;
+  private _armorBreakTimestamps: number[] = [];
+  private _bridgeTimestamp: number | null = null;
+  private _inputLockedSeconds = 0;
+  private _perfectReflectFlash = 0; // V0723016: "回锋！"飘字 timer（2秒淡出）
+  // V0723016复审P0-3: 时间轴遥测
+  private _bossStartTs: number | null = null;
+  private _leftBreakTs: number | null = null;
+  private _rightBreakTs: number | null = null;
+  private _chestBreakTs: number | null = null;
+  // V0723016最终收口P0-2: 波次门槛（禁止同一波内一次完成整个护甲目标）
+  private _objectiveWaveCount = 0;
+  private _currentWaveId = 0;
+  private _minWavesRequired = 0;
 
   // ---- 护甲 ----
   private armorTargets: ReactiveArmorTarget[] = [];
@@ -272,7 +295,28 @@ export class BossReactiveController {
     this._elapsed = 0;
     this.phaseTimer = 0;
     this.threatSpawnTimer = 0;
-    this.threatDuration = 2.5;
+    // V0723016: 清空 objective 状态
+    this._objectiveType = null;
+    this._objectiveCurrent = 0;
+    this._objectiveTarget = 0;
+    this._objectiveCompleted = false;
+    this._objectiveCompletedBy = null;
+    this._objectiveTimeout = 8;
+    this._perfectReflectCount = 0;
+    this._mixedRoundCount = 0;
+    this._currentMixedRoundHandled = false;
+    this._armorBreakTimestamps = [];
+    this._bridgeTimestamp = null;
+    this._inputLockedSeconds = 0;
+    this._perfectReflectFlash = 0;
+    // V0723016复审P0-3: 清空时间轴遥测
+    this._bossStartTs = null;
+    this._leftBreakTs = null;
+    this._rightBreakTs = null;
+    this._chestBreakTs = null;
+    this._objectiveWaveCount = 0;
+    this._currentWaveId = 0;
+    this._minWavesRequired = 0;
     this.armorProgress = 0;
     this.activeArmorIndex = ARMOR_L;
     this.projectiles = [];
@@ -305,6 +349,10 @@ export class BossReactiveController {
   update(dt: number): void {
     this._elapsed += dt;
     this.phaseTimer += dt;
+    // V0723016: 累计输入锁定时长（用于节奏遥测）
+    if (this.inputLocked) this._inputLockedSeconds += dt;
+    // V0723016: "回锋！"飘字 timer 衰减
+    this._perfectReflectFlash = Math.max(0, this._perfectReflectFlash - dt);
     this.playerHp.invincibleTimer = Math.max(0, this.playerHp.invincibleTimer - dt);
     this.playerHp.flashTimer = Math.max(0, this.playerHp.flashTimer - dt);
     this.shakeTimer = Math.max(0, this.shakeTimer - dt * 3);
@@ -360,7 +408,14 @@ export class BossReactiveController {
       this.spawnProjectileForCurrentArmor();
     }
 
-    if (this.phaseTimer >= this.threatDuration) {
+    // V0723016: 目标驱动开窗 — 目标完成(action) 或 超时兜底(timeout)
+    // 删除旧 phaseTimer >= threatDuration 固定时长第三套来源
+    if (this._objectiveCompleted || this.phaseTimer >= this._objectiveTimeout) {
+      if (!this._objectiveCompleted) {
+        // 超时兜底触发：标记完成方式为 timeout（action 已由各 check 方法设置）
+        this._objectiveCompleted = true;
+        this._objectiveCompletedBy = "timeout";
+      }
       this.transitionToOpportunity();
     }
   }
@@ -417,11 +472,95 @@ export class BossReactiveController {
     this._phase = "armor_threat";
     this.phaseTimer = 0;
     this.threatSpawnTimer = 0;
-    // 随机持续时间 2.0~3.0
-    const [min, max] = REACTIVE_BOSS_CONFIG.phaseTimers.threatDuration;
-    this.threatDuration = min + Math.random() * (max - min);
+    // V0723016: 初始化三甲目标（替代旧 threatDuration 固定时长随机开窗）
+    this.initObjective();
     // Boss动作
     this.performBossAction(this.getCurrentArmor());
+  }
+
+  // ================================================================
+  // V0723016: 三甲目标驱动系统（替代旧 threatDuration 固定时长）
+  // 开窗来源只剩 2 个：目标完成(action) / 超时兜底(timeout)
+  // ================================================================
+
+  /** 根据当前护甲初始化 objective 参数（transitionToThreat 调用） */
+  private initObjective(): void {
+    const cfg = REACTIVE_BOSS_CONFIG.armorObjectives;
+    if (this._bossStartTs === null) this._bossStartTs = this._elapsed;  // V0723016复审P0-3: 记录Boss开始时间
+    this._objectiveCompleted = false;
+    this._objectiveCompletedBy = null;
+    this._objectiveCurrent = 0;
+    this._perfectReflectCount = 0;
+    this._mixedRoundCount = 0;
+    this._currentMixedRoundHandled = false;
+    // V0723016最终收口P0-2: 重置波次门槛
+    this._objectiveWaveCount = 0;
+    this._currentWaveId = 0;
+
+    if (this.activeArmorIndex === ARMOR_L) {
+      this._objectiveType = "cut_normal";
+      this._objectiveTarget = cfg.left.normalCutsRequired;
+      this._objectiveTimeout = cfg.left.timeout;
+      this._minWavesRequired = cfg.left.minWavesRequired;
+    } else if (this.activeArmorIndex === ARMOR_R) {
+      this._objectiveType = "reflect";
+      this._objectiveTarget = cfg.right.reflectPointsRequired;
+      this._objectiveTimeout = cfg.right.timeout;
+      this._minWavesRequired = cfg.right.minWavesRequired;
+    } else {
+      this._objectiveType = "mixed_round";
+      this._objectiveTarget = cfg.chest.mixedRoundsRequired;
+      this._objectiveTimeout = cfg.chest.timeout;
+      this._minWavesRequired = cfg.chest.mixedRoundsRequired; // 胸甲轮次本身就是波次
+    }
+  }
+
+  /** 左肩：斩断普通弹幕计数（resolveGeometry 中 projectile_cut 且当前护甲为左肩时调用） */
+  private checkLeftShoulderProgress(): void {
+    if (this._objectiveType !== "cut_normal" || this._objectiveCompleted) return;
+    this._objectiveCurrent++;
+    if (this._objectiveCurrent >= this._objectiveTarget && this._objectiveWaveCount >= this._minWavesRequired) {
+      this._objectiveCompleted = true;
+      this._objectiveCompletedBy = "action";
+    }
+  }
+
+  /** 右肩：反射 points 制（V0723016复审P0-2）
+   *  ratio >= perfectReflectRatio(0.90) → 精准反射，得 perfectReflectPoints(2) 分
+   *  0.70 <= ratio < 0.90 → 普通反射，得 normalReflectPoints(1) 分
+   *  累计到 reflectPointsRequired(3) 分完成目标
+   *  ratio < 0.70 → cut 非 reflect，不计数 */
+  private checkRightShoulderProgress(momentum: BladeMomentumState): void {
+    if (this._objectiveType !== "reflect" || this._objectiveCompleted) return;
+    const cfg = REACTIVE_BOSS_CONFIG.armorObjectives.right;
+    if (momentum.ratio >= cfg.perfectReflectRatio) {
+      // 精准反射：得 perfectReflectPoints(2) 分
+      this._perfectReflectCount++;
+      this._objectiveCurrent += cfg.perfectReflectPoints;
+      this._perfectReflectFlash = 2.0; // 触发"回锋！"飘字
+    } else {
+      // 普通反射：得 normalReflectPoints(1) 分
+      this._objectiveCurrent += cfg.normalReflectPoints;
+    }
+    if (this._objectiveCurrent >= cfg.reflectPointsRequired && this._objectiveWaveCount >= this._minWavesRequired) {
+      this._objectiveCompleted = true;
+      this._objectiveCompletedBy = "action";
+    }
+  }
+
+  /** 胸甲：混合轮次处理追踪（resolveGeometry 中处理非危险弹幕时调用）
+   *  每轮处理 ≥1 枚非危险弹幕(cut/reflect) → _currentMixedRoundHandled=true, _mixedRoundCount++
+   *  危险误砍不重置轮次进度（惩罚已在 resolveGeometry 处理） */
+  private checkChestProgress(isNonDangerous: boolean): void {
+    if (this._objectiveType !== "mixed_round" || this._objectiveCompleted) return;
+    if (isNonDangerous && !this._currentMixedRoundHandled) {
+      this._currentMixedRoundHandled = true;
+      this._mixedRoundCount++;
+      if (this._mixedRoundCount >= this._objectiveTarget && this._objectiveWaveCount >= this._minWavesRequired) {
+        this._objectiveCompleted = true;
+        this._objectiveCompletedBy = "action";
+      }
+    }
   }
 
   /** P4.4B-R5.2 P0-2: 清理机会窗口宽限（必须在所有状态转换点调用） */
@@ -467,10 +606,17 @@ export class BossReactiveController {
 
   private finishRecovery(): void {
     this.clearOpportunityGrace(); // P0-2: 切换护甲时清理
+    // V0723016: 记录破甲时间戳（每次 finishRecovery = 一块护甲彻底破碎完成）
+    this._armorBreakTimestamps.push(this._elapsed);
+    // V0723016复审P0-3: 记录对应护甲的破甲时间
+    if (this.activeArmorIndex === ARMOR_L) this._leftBreakTs = this._elapsed;
+    else if (this.activeArmorIndex === ARMOR_R) this._rightBreakTs = this._elapsed;
+    else this._chestBreakTs = this._elapsed;
     const remaining = this.armorTargets.filter(a => !a.broken);
     if (remaining.length === 0) {
       this._phase = "exit";
       this._bridgeTriggered = true;
+      this._bridgeTimestamp = this._elapsed; // V0723016: 桥接时间戳
       return;
     }
     // 找下一个未破碎的护甲
@@ -493,6 +639,7 @@ export class BossReactiveController {
     } else {
       this._phase = "exit";
       this._bridgeTriggered = true;
+      this._bridgeTimestamp = this._elapsed; // V0723016: 桥接时间戳
     }
   }
 
@@ -502,6 +649,16 @@ export class BossReactiveController {
 
   private spawnProjectileForCurrentArmor(): void {
     const armor = this.getCurrentArmor();
+    // V0723016最终收口P0-2: 每次 spawn 是一个新波次
+    this._currentWaveId++;
+    this._objectiveWaveCount++;
+    // V0723016复审P0-3: 补充波次门槛检查（兼容三种护甲类型）
+    if (!this._objectiveCompleted && this._objectiveWaveCount >= this._minWavesRequired) {
+      const objReached = this._objectiveType === "mixed_round"
+        ? this._mixedRoundCount >= this._objectiveTarget
+        : this._objectiveCurrent >= this._objectiveTarget;
+      if (objReached) { this._objectiveCompleted = true; if (!this._objectiveCompletedBy) this._objectiveCompletedBy = "action"; }
+    }
     // P4.4B-R5.1 P1-3: 使用统一世界变换接口获取弹幕出生点
     const origin = this.getProjectileSpawnOrigin();
     const bx = origin.x;
@@ -524,11 +681,13 @@ export class BossReactiveController {
       );
       this.projectiles.push(p);
     } else if (armor.projectileKind === "dangerous") {
-      // 混合模式：发射普通弹幕 + 危险雷球
-      // 普通弹幕x1
+      // V0723016: 胸甲轮次切换 — 上一轮已处理(非危险弹幕被 cut/reflect)则进入下一轮
+      if (this._currentMixedRoundHandled) {
+        this._currentMixedRoundHandled = false; // 开始新一轮
+      }
+      // 混合模式：每轮发射普通弹幕 + 危险雷球各1枚
       const p1 = createProjectile("normal", bx - 20, by, 0, REACTIVE_BOSS_CONFIG.projectiles.normal.speed);
       this.projectiles.push(p1);
-      // 危险雷球x1
       const p2 = createProjectile("dangerous", bx + 20, by, 0, REACTIVE_BOSS_CONFIG.projectiles.dangerous.speed);
       this.projectiles.push(p2);
     }
@@ -698,6 +857,9 @@ export class BossReactiveController {
           const ev: ReactiveCollisionEvent = { kind: "projectile_cut", projectileId: p.id, projectileKind: "normal", collisionSource: cap.source, hitPos };
           newEvents.push(ev);
           this._session.events.push(ev);
+          // V0723016: 三甲目标进度 — 左肩斩弹计数 / 胸甲非危险弹幕处理
+          if (this.activeArmorIndex === ARMOR_L) this.checkLeftShoulderProgress();
+          else if (this.activeArmorIndex === ARMOR_C) this.checkChestProgress(true);
         } else if (p.kind === "reflective") {
           if (isBurst) {
             // reflect: 反向继续，不设 resolved（避免被清理），不伤害玩家
@@ -708,6 +870,9 @@ export class BossReactiveController {
             const ev: ReactiveCollisionEvent = { kind: "projectile_reflect", projectileId: p.id, projectileKind: "reflective", collisionSource: cap.source, hitPos };
             newEvents.push(ev);
             this._session.events.push(ev);
+            // V0723016: 右肩反射计数/精准反射(≥0.90) / 胸甲非危险弹幕处理
+            if (this.activeArmorIndex === ARMOR_R) this.checkRightShoulderProgress(geometry.lockedMomentum);
+            else if (this.activeArmorIndex === ARMOR_C) this.checkChestProgress(true);
           } else {
             p.resolution = "cut";
             p.resolved = true;
@@ -715,6 +880,9 @@ export class BossReactiveController {
             const ev: ReactiveCollisionEvent = { kind: "projectile_cut", projectileId: p.id, projectileKind: "reflective", collisionSource: cap.source, hitPos };
             newEvents.push(ev);
             this._session.events.push(ev);
+            // V0723016: 非 burst 时 reflective 被 cut — 左肩计数 / 胸甲处理
+            if (this.activeArmorIndex === ARMOR_L) this.checkLeftShoulderProgress();
+            else if (this.activeArmorIndex === ARMOR_C) this.checkChestProgress(true);
           }
         } else if (p.kind === "dangerous") {
           p.resolution = "wrong_cut";
@@ -724,6 +892,8 @@ export class BossReactiveController {
           const ev: ReactiveCollisionEvent = { kind: "projectile_dangerous", projectileId: p.id, projectileKind: "dangerous", collisionSource: cap.source, hitPos };
           newEvents.push(ev);
           this._session.events.push(ev);
+          // V0723016: 危险误砍不计数（胸甲 checkChestProgress(false) 不影响轮次进度）
+          if (this.activeArmorIndex === ARMOR_C) this.checkChestProgress(false);
         }
       }
     }
@@ -1220,6 +1390,42 @@ export class BossReactiveController {
     return this._bridgeTriggered;
   }
 
+  // ---- V0723016: 三甲目标只读状态 getter（供 Debug 遥测 / E2E 快照） ----
+  get objectiveType(): ObjectiveType | null { return this._objectiveType; }
+  get objectiveCurrent(): number { return this._objectiveCurrent; }
+  get objectiveTarget(): number { return this._objectiveTarget; }
+  get objectiveCompleted(): boolean { return this._objectiveCompleted; }
+  get objectiveCompletedBy(): "action" | "timeout" | null { return this._objectiveCompletedBy; }
+  get objectiveElapsed(): number { return this.phaseTimer; }
+  get perfectReflectCount(): number { return this._perfectReflectCount; }
+  get mixedRoundCount(): number { return this._mixedRoundCount; }
+  get bossElapsed(): number { return this._elapsed; }
+  get inputLockedSeconds(): number { return this._inputLockedSeconds; }
+  get armorBreakTimestamps(): number[] { return [...this._armorBreakTimestamps]; }
+  get bridgeTimestamp(): number | null { return this._bridgeTimestamp; }
+  get successTimestamp(): number | null { return this._bridgeTimestamp; }
+  get perfectReflectFlash(): number { return this._perfectReflectFlash; }
+
+  /** V0723016复审: E2E 程序化完成当前 objective（threat 阶段不等 timeout，避免玩家被弹幕打死） */
+  forceCompleteObjectiveForTest(): void {
+    if (this._phase !== "armor_threat") return;
+    this._objectiveCurrent = this._objectiveTarget;  // 满足目标数量
+    this._objectiveWaveCount = this._minWavesRequired;  // 满足波次门槛
+    this._objectiveCompleted = true;
+    this._objectiveCompletedBy = "action";
+  }
+
+  // V0723016最终收口P0-2: 波次门槛 getter
+  get objectiveWaveCount(): number { return this._objectiveWaveCount; }
+  get currentWaveId(): number { return this._currentWaveId; }
+  get minWavesRequired(): number { return this._minWavesRequired; }
+
+  // ---- V0723016复审P0-3: 时间轴遥测 getter ----
+  get bossStartTs(): number | null { return this._bossStartTs; }
+  get leftBreakTs(): number | null { return this._leftBreakTs; }
+  get rightBreakTs(): number | null { return this._rightBreakTs; }
+  get chestBreakTs(): number | null { return this._chestBreakTs; }
+
   /** P4.4B-R5.7: 获取弹幕列表深拷贝快照（外部只读访问，禁止篡改内部引用） */
   getProjectiles(): Projectile[] {
     return this.projectiles.map(p => ({ ...p }));
@@ -1255,6 +1461,29 @@ export class BossReactiveController {
     energy: number;
     playerHp: { current: number; max: number };
     currentBladeEffect: BladeContinuousEffect;
+    // ---- V0723016: objective 遥测字段 ----
+    objectiveType: ObjectiveType | null;
+    objectiveCurrent: number;
+    objectiveTarget: number;
+    objectiveCompleted: boolean;
+    objectiveCompletedBy: "action" | "timeout" | null;
+    objectiveElapsed: number;
+    perfectReflectCount: number;
+    mixedRoundCount: number;
+    bossElapsed: number;
+    inputLockedSeconds: number;
+    armorBreakTimestamps: number[];
+    bridgeTimestamp: number | null;
+    successTimestamp: number | null;
+    // V0723016复审P0-3: 时间轴遥测字段
+    bossStartTs: number | null;
+    leftBreakTs: number | null;
+    rightBreakTs: number | null;
+    chestBreakTs: number | null;
+    // V0723016最终收口P0-2: 波次门槛遥测
+    objectiveWaveCount: number;
+    currentWaveId: number;
+    minWavesRequired: number;
   } {
     const armorDone = this.armorProgress;
     return {
@@ -1278,6 +1507,29 @@ export class BossReactiveController {
         max: this.playerHp.max,
       },
       currentBladeEffect: { ...this.bladeEffect },
+      // ---- V0723016: objective 遥测 ----
+      objectiveType: this._objectiveType,
+      objectiveCurrent: this._objectiveCurrent,
+      objectiveTarget: this._objectiveTarget,
+      objectiveCompleted: this._objectiveCompleted,
+      objectiveCompletedBy: this._objectiveCompletedBy,
+      objectiveElapsed: this.phaseTimer,
+      perfectReflectCount: this._perfectReflectCount,
+      mixedRoundCount: this._mixedRoundCount,
+      bossElapsed: this._elapsed,
+      inputLockedSeconds: this._inputLockedSeconds,
+      armorBreakTimestamps: [...this._armorBreakTimestamps],
+      bridgeTimestamp: this._bridgeTimestamp,
+      successTimestamp: this._bridgeTimestamp,
+      // V0723016复审P0-3: 时间轴遥测
+      bossStartTs: this._bossStartTs,
+      leftBreakTs: this._leftBreakTs,
+      rightBreakTs: this._rightBreakTs,
+      chestBreakTs: this._chestBreakTs,
+      // V0723016最终收口P0-2: 波次门槛遥测
+      objectiveWaveCount: this._objectiveWaveCount,
+      currentWaveId: this._currentWaveId,
+      minWavesRequired: this._minWavesRequired,
     };
   }
 

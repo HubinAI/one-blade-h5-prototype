@@ -1,3 +1,4 @@
+import { APP_VERSION } from "../version";
 import { LEVELS } from "../data/levels";
 import { ENEMY_DEFS } from "../data/enemies";
 import { PICKUP_DEFS } from "../data/pickups";
@@ -25,6 +26,9 @@ import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeMod
 import { BLADE_BASE_STATS, QUALITY_ORDER } from "./config/synthesis";
 import type { Blade } from "./services/BladeService";
 import type { Quality } from "./config/synthesis";
+import { BossChaseController } from "./systems/BossChaseController";
+import { CHASE_CONFIG } from "./config/bossChase";
+import { drawChaseMode, pushBarrageHitVfx, updateBarrageVfx, clearBarrageHitVfx } from "./systems/BossChaseHUD";
 import { logEvent } from "./services/Analytics";
 import { AudioService } from "./services/AudioService";
 import { calculateSkillScores } from "./services/SkillTracker";
@@ -192,7 +196,7 @@ export class Game {
   private wavesFinishedAt = 0; // 最后一波生成完成时 elapsed
   private currentRunMode: "normal" | "challenge" | "dailyChallenge" | "freeBurst" | "highYield" = "normal";
   /** P4.4A.1-R3: 游戏模式隔离 */
-  private gameMode: "normal" | "boss" | "bossReactive" = "normal";
+  private gameMode: "normal" | "boss" | "bossReactive" | "chaseFlash" = "normal";
   private nextWaveTimer: number = BALANCE.waves.firstWaveDelay;
   private screenShake = 0;
   private flash = 0;
@@ -269,6 +273,17 @@ export class Game {
   private bossController: BossController | null = null;
   /** P0: Reactive Boss控制器 */
   private reactiveController: BossReactiveController | null = null;
+  private chaseController: BossChaseController | null = null;
+  private chasePrevPositions: { x: number; y: number }[] = [];
+  private _chaseDebugBtn: { x: number; y: number; w: number; h: number } | null = null;
+  private _chaseKnockback = 0;
+  private _phase2Active = false;
+  private _chaseBarrageHitCount = 0;
+  private _transFlashTimer = 0;  // 30%转场防线脉冲
+  // 单刀去重：同一 slashId 下各目标只结算一次
+  private _chaseSlashHitCore = false;
+  private _chaseSlashHitShell = false;
+  private _chaseSlashHitBarrages = new Set<string>();
   /** P4.2A.1: 统一中央播报调度器 */
   private activeBattleNotice: BattleNotice | null = null;
   private battleNoticeQueue: BattleNotice[] = [];
@@ -415,13 +430,33 @@ export class Game {
     killedBoss: null
   };
 
-  constructor(level: LevelConfig, onFinish: FinishCallback, onReviveOffer?: ReviveOfferCallback, runMode?: "normal" | "challenge", bossFlow?: "legacy" | "reactive") {
+  constructor(level: LevelConfig, onFinish: FinishCallback, onReviveOffer?: ReviveOfferCallback, runMode?: "normal" | "challenge", bossFlow?: "legacy" | "reactive" | "chaseFlash") {
     this.level = level;
     this.onFinish = onFinish;
     this.onReviveOffer = onReviveOffer;
-    // P4.4A.2: 第一帧确定游戏模式
-    if (runMode === "challenge" && level.bossId === "thunderGeneral") {
-      this.gameMode = bossFlow === "reactive" ? "bossReactive" : "boss";
+
+    // ═══════════════════════════════════════════
+    // P0: 模式隔离 — bossFlow 只能决定"用了哪套Boss实现"，
+    // 不能决定"当前是不是Boss战"
+    // ═══════════════════════════════════════════
+    const isBreakthroughBoss =
+      runMode === "challenge" &&
+      level.bossId === "thunderGeneral" &&
+      level.id < 10000;
+
+    if (isBreakthroughBoss) {
+      this.gameMode = bossFlow === "chaseFlash" ? "chaseFlash" :
+                      bossFlow === "reactive" ? "bossReactive" : "boss";
+    } else {
+      this.gameMode = "normal";
+    }
+
+    // 运行时硬断言
+    if (level.id >= 10000 && this.gameMode !== "normal") {
+      throw new Error(`[MODE_LEAK] normal floor ${level.id - 10000} started as ${this.gameMode}`);
+    }
+    if (runMode === "normal" && (this.gameMode !== "normal")) {
+      throw new Error(`[MODE_LEAK] boss controller created in normal run (gameMode=${this.gameMode})`);
     }
     this.maxHp = Math.min(level.hp + this.progressionModifiers.openingShield, BALANCE.player.maxHp + this.progressionModifiers.openingShield);
     this.hp = this.maxHp;
@@ -431,6 +466,11 @@ export class Game {
       this.energy = Math.round(this.reactiveBladeMax * BLADE_MOMENTUM_CONFIG.initialRatio);
     } else {
       this.energy = clamp(this.runContext.mode === "freeBurst" ? BALANCE.swordEnergy.max : level.initialEnergy + this.progressionModifiers.initialEnergyBonus, 0, BALANCE.swordEnergy.max);
+    }
+    if (this.gameMode === "chaseFlash") {
+      this.maxHp = CHASE_CONFIG.playerMaxHp;
+      this.hp = CHASE_CONFIG.playerMaxHp;
+      this.initializeChaseFlashMode();
     }
     this.hintSeen = this.readSeenHints();
     this.discoveredEnemies.add("infantry");
@@ -656,7 +696,7 @@ export class Game {
     this.eliteSpawnAnnounced = false;
 
     // 首局教学检测（Boss模式不触发）
-    this.isFirstRun = this.gameMode !== "boss" && (level.id === 1 || level.id === 10001) && !window.localStorage.getItem("one_blade_first_run_done");
+    this.isFirstRun = (this.gameMode !== "boss" && this.gameMode !== "chaseFlash") && (level.id === 1 || level.id === 10001) && !window.localStorage.getItem("one_blade_first_run_done");
     if (this.isFirstRun) {
       this.overrideWithScriptedTutorial();
       this.showHint("drag-guide", "按住拖动，松手挥出一刀", DESIGN_WIDTH / 2, 118, 2.5);
@@ -852,6 +892,9 @@ export class Game {
 
   /** P4.4A.4: Boss阶段getter（供GameCanvas轮询） */
   get bossPhase(): BossPhaseState | null {
+    if (this.chaseController) {
+      if (!this.chaseController.snapshot.showUI) return "intro";
+    }
     return this.bossController?.phase ?? null;
   }
 
@@ -923,6 +966,12 @@ export class Game {
     // P0: Reactive Boss模式专用主循环
     if (this.gameMode === "bossReactive") {
       this.updateReactiveBossMode(scaledDt, frameDt);
+      return;
+    }
+
+    // BossV1: 追影连斩
+    if (this.gameMode === "chaseFlash") {
+      this.updateChaseFlashMode(scaledDt);
       return;
     }
 
@@ -1014,6 +1063,8 @@ export class Game {
   }
 
   render(ctx: CanvasRenderingContext2D) {
+    // BossV1: 追影连斩
+    if (this.gameMode === "chaseFlash") { this.renderChaseFlashMode(ctx); return; }
     // P4.4A.2: Boss模式渲染白名单
     if (this.gameMode === "boss" || this.gameMode === "bossReactive") {
       this.renderBossMode(ctx);
@@ -1055,6 +1106,7 @@ export class Game {
     if (this.bossController) {
       this.bossController.render(ctx);
     }
+    // chaseFlash 模式有自己的 FSM 诊断面板，无需旧通用调试
     if (this.debugEnabled) this.drawDebugPanel(ctx);
     // P4.4A.2-R2: 调试十字准星——显示系统记录的触摸位置
     if (this.debugEnabled && this.pointerPos) {
@@ -1093,7 +1145,7 @@ export class Game {
    * 来源：审计文档 §4"显示与战斗解耦"共识 A/B/C
    */
   private getPlayerCombatLayerPolicy(): import("../game/types").PlayerCombatLayerPolicy {
-    if (this.gameMode === "bossReactive") {
+    if (this.gameMode === "bossReactive" || this.gameMode === "chaseFlash") {
       return {
         showDefenseWall: false,
         showWarrior: true,
@@ -1258,6 +1310,7 @@ export class Game {
     }
 
     // P0: Reactive Boss模式渲染
+    if ((this.gameMode as string) === "chaseFlash" && this.chaseController) { this.renderChaseFlashMode(ctx); return; }
     if (this.gameMode === "bossReactive" && this.reactiveController) {
       const rc = this.reactiveController;
       // 1. 背景层（修复黑屏问题）
@@ -1559,12 +1612,15 @@ export class Game {
     this.extendSlash(next);
   }
 
-  handlePointerUp() {
-    // P4.4A.2: pointerUp永远先做清理，再检查输入锁定
+  handlePointerUp(reason: string = "收刀") {
     this.pointerDown = false;
     this.pendingSlash = null;
     if (this.currentSlash?.active) {
-      this.endSlash("收刀");
+      this.endSlash(reason);
+    }
+    // chaseFlash: pointercancel/lostpointercapture 清除所有候选
+    if (this.gameMode === "chaseFlash" && this.chaseController && (reason === "cancel" || reason === "blur")) {
+      this.chaseController.clearPendingCandidates(reason);
     }
     // P4.4B-R2 P0-A: 清理后按模式路由输入锁（保留 pointerUp 先清理的正确规则）
     if (this.isCurrentBossInputLocked()) return;
@@ -1601,7 +1657,7 @@ export class Game {
     // V0723014-Final.1 P0-1: Reactive 模式起刀时继承 pending.lockedMomentum（PointerDown 时锁定）。
     // 禁止重新调用 this.getReactiveBladeMomentum()，避免 pending 期间 max 变化导致快照不一致。
     // 无 pending 的程序化入口（如 E2E 桥）才允许创建新快照。
-    const isReactiveMode = this.gameMode === "bossReactive";
+    const isReactiveMode = this.gameMode === "bossReactive" || this.gameMode === "chaseFlash";
     const lockedMomentum = isReactiveMode
       ? (pending?.lockedMomentum ?? this.getReactiveBladeMomentum())
       : undefined;
@@ -1677,14 +1733,22 @@ export class Game {
     if (slashHasSoul) this.nextSoul = false;
     if (slashHasOil) this.nextOil = false;
 
-    // P0: Reactive模式起刀时锁定刀势快照，不执行旧版消耗
-    if (this.gameMode === "bossReactive") {
+    // P0: Reactive模式/BossV1 起刀时锁定刀势快照，不执行旧版消耗
+    if (this.gameMode === "bossReactive" || this.gameMode === "chaseFlash") {
       // V0723014-Final.1 P0-1: 起刀快照已锁定在 lockedMomentum 中（PointerDown 时生成），整刀使用
       // 不执行 consumeEnergyByTier — 由 endSlash/finalizeBossSlashCommon 统一结算
-      // P4.4B-R5.2 P0-6: 注册 Reactive 挥刀起始，供机会窗口按 slashId 宽限
-      this.reactiveController?.registerReactiveSlashStart(this.currentSlash!.id);
-      // P0: 每次起刀重置碰撞事件列表
-      this._currentReactiveSegmentEvents = [];
+      if (this.gameMode === "bossReactive") {
+        this.reactiveController?.registerReactiveSlashStart(this.currentSlash!.id);
+        this._currentReactiveSegmentEvents = [];
+      }
+      // BossV1: 重置单刀命中去重状态
+      if (this.gameMode === "chaseFlash") {
+        this.energy = Math.max(0, this.energy - CHASE_CONFIG.bladeEconomy.slashCost);
+        this._chaseSlashHitCore = false;
+        this._chaseSlashHitShell = false;
+        this._chaseSlashHitBarrages.clear();
+        this.chaseController?.resetSlashDedup();
+      }
     } else {
       this.energy = consumeEnergyByTier(this.energy, tier);
     }
@@ -1767,8 +1831,12 @@ export class Game {
   private endSlash(reason: string) {
     const trail = this.currentSlash;
     if (!trail?.active) return;
-
     trail.active = false;
+
+    // chaseFlash: slash 级统一提交伤害
+    if (this.gameMode === "chaseFlash" && this.chaseController) {
+      this.chaseController.finalizeSlashDamage();
+    }
 
     // P4.4A.2: Boss模式收刀 → 仅清理，不执行普通反馈
     if (this.gameMode === "boss" || this.gameMode === "bossReactive") {
@@ -2200,6 +2268,7 @@ export class Game {
   }
 
   private checkSegmentHits(a: Vec2, b: Vec2, trail: SlashTrail) {
+    if ((this.gameMode as string) === "chaseFlash" && this.chaseController) { this.resolveChaseSlash(a, b); return; }
     // P4.4A.2: Boss模式先路由到护甲检测（不再走Enemy圆碰撞）
     if (this.gameMode === "boss" && this.bossController) {
       // P4.4A.4: execution阶段路由到命核判定
@@ -5988,16 +6057,20 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     size: number,
     life: number = BALANCE.feedback.floatingTextLife
   ) {
-    // P4.2A.3: addText仅允许13px以下的小型文字
-    const allowedLegacy = size <= 13 && y >= 330;
-    if (!allowedLegacy) {
-      console.warn("[P4.2 legacy addText blocked]", { text, x, y, size });
-      return;
-    }
-    // P4.2A.2: 正式环境阻止中央大字通过addText
-    if (Math.abs(x - DESIGN_WIDTH / 2) < 56 && y < 330 && size >= 18) {
-      console.warn("[P4.2 blocked central addText]", { text, x, y, size });
-      return;
+    // BossV1: chaseFlash 模式豁免 addText 尺寸限制（不再被日志刷屏）
+    if (this.gameMode === "chaseFlash") { /* whitelist */ }
+    else {
+      // P4.2A.3: addText仅允许13px以下的小型文字
+      const allowedLegacy = size <= 13 && y >= 330;
+      if (!allowedLegacy) {
+        console.warn("[P4.2 legacy addText blocked]", { text, x, y, size });
+        return;
+      }
+      // P4.2A.2: 正式环境阻止中央大字通过addText
+      if (Math.abs(x - DESIGN_WIDTH / 2) < 56 && y < 330 && size >= 18) {
+        console.warn("[P4.2 blocked central addText]", { text, x, y, size });
+        return;
+      }
     }
     // 文字去重：相同内容已存在则不重复添加
     if (this.texts.some(t => t.text === text && t.life > life * 0.5)) {
@@ -6303,6 +6376,20 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   }
 
   private getDefensePressure() {
+    // Boss模式：检查弹幕位置
+    if (this.gameMode === "chaseFlash" && this.chaseController) {
+      const cc = this.chaseController;
+      const ly = CHASE_CONFIG.playerDefenseLineY;
+      let minDist = Number.POSITIVE_INFINITY;
+      // 遍历弹幕：仅统计 active、未越过防线
+      const barrages: Array<{y: number; active: boolean}> = (cc as any).barrages ?? [];
+      for (const b of barrages) {
+        if (b.active && b.y <= ly) minDist = Math.min(minDist, ly - b.y);
+      }
+      if (minDist < 200 && minDist > 0) return clamp(1 - minDist / 200, 0, 1);
+      return 0;
+    }
+    // 普通模式：检查敌人
     if (this.enemies.length === 0) return 0;
     const closest = this.enemies.reduce(
       (min, enemy) => (enemy.alive ? Math.min(min, BALANCE.battlefield.bottomDefenseY - enemy.y) : min),
@@ -6345,20 +6432,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.lineTo(0, 270);
     ctx.closePath();
     ctx.fill();
-
-    // 防线
-    const pressure = this.getDefensePressure();
-    ctx.strokeStyle = pressure > 0 ? `rgba(255, 86, 68, ${0.22 + pressure * 0.58})` : "rgba(255, 214, 124, 0.22)";
-    ctx.lineWidth = pressure > 0 ? 1.5 + pressure * 3 : 1;
-    ctx.shadowColor = "rgba(255, 70, 56, 0.55)";
-    ctx.shadowBlur = pressure * 18;
-    ctx.setLineDash([8, 8]);
-    ctx.beginPath();
-    ctx.moveTo(18, BALANCE.battlefield.bottomDefenseY);
-    ctx.lineTo(DESIGN_WIDTH - 18, BALANCE.battlefield.bottomDefenseY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.shadowBlur = 0;
   }
 
   /** 远景山间雾气遮罩：画在敌人上方，让敌人从雾后现身 */
@@ -7354,20 +7427,32 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 普通模式 _playerCombatLayerPolicy 可能为 null（render 主循环直接调用），
     // 此时走默认 true 画城墙。renderPlayerCombatLayer 会先设置 policy 再调用本方法。
     const policy = this._playerCombatLayerPolicy;
-    const showWall = policy ? policy.showDefenseWall : true;
-    if (showWall) {
-      const wall = ctx.createLinearGradient(0, WALL_TOP_Y, 0, DESIGN_HEIGHT);
-      wall.addColorStop(0, "#57331f");
+
+    // ═══ 底座（普通/Boss 统一）═══
+    {
+      const wall = ctx.createLinearGradient(0, CHASE_CONFIG.playerDefenseLineY, 0, DESIGN_HEIGHT);
+      wall.addColorStop(0, "#472a18");
+      wall.addColorStop(0.12, "#362014");
       wall.addColorStop(1, "#1f140f");
       ctx.fillStyle = wall;
-      ctx.fillRect(0, WALL_TOP_Y, DESIGN_WIDTH, DESIGN_HEIGHT - WALL_TOP_Y);
-      ctx.strokeStyle = "#d8a75d";
-      ctx.lineWidth = 2;
+      ctx.fillRect(0, CHASE_CONFIG.playerDefenseLineY, DESIGN_WIDTH, DESIGN_HEIGHT - CHASE_CONFIG.playerDefenseLineY);
+      // 唯一防线：近敌预警 → 亮度/发光增强
+      const pr = this.getDefensePressure();
+      const bright = pr > 0 ? (0.28 + pr * 0.72) : 0.28;
+      const glowBlur = pr > 0 ? (6 + pr * 18) : 0;
+      ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+      ctx.shadowColor = pr > 0 ? `rgba(255, 100, 56, ${pr * 0.55})` : "transparent";
+      ctx.shadowBlur = glowBlur;
+      ctx.strokeStyle = pr > 0 ? `rgba(255, 86, 56, ${bright})` : `rgba(255, 214, 124, ${bright})`;
+      ctx.lineWidth = pr > 0 ? (1.5 + pr * 3) : 1.5;
       ctx.beginPath();
-      ctx.moveTo(0, WALL_TOP_Y);
-      ctx.lineTo(DESIGN_WIDTH, WALL_TOP_Y);
+      ctx.moveTo(18, CHASE_CONFIG.playerDefenseLineY);
+      ctx.lineTo(DESIGN_WIDTH - 18, CHASE_CONFIG.playerDefenseLineY);
       ctx.stroke();
-      if (energyRatio >= 0.9) {
+      ctx.shadowBlur = 0;
+    }
+
+    if (energyRatio >= 0.9) {
         const pulse = 0.5 + Math.sin(this.elapsed * 6) * 0.5;
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
@@ -7376,28 +7461,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ctx.shadowBlur = 18 + pulse * 10;
         ctx.lineWidth = 4;
         ctx.beginPath();
-        ctx.moveTo(0, WALL_TOP_Y + 1);
-        ctx.lineTo(DESIGN_WIDTH, WALL_TOP_Y + 1);
+        ctx.moveTo(0, CHASE_CONFIG.playerDefenseLineY + 1);
+        ctx.lineTo(DESIGN_WIDTH, CHASE_CONFIG.playerDefenseLineY + 1);
         ctx.stroke();
         ctx.restore();
       }
 
-      ctx.save();
-      ctx.globalAlpha = 0.1;
-      ctx.fillStyle = "#8a5d2e";
-      // 顶部砖块：更不规则、更像墙
-      for (let x = 4; x < DESIGN_WIDTH; x += 36) {
-        ctx.fillRect(x, WALL_TOP_Y + 4, 28, 3);
-      }
-      // 第二层：错开半个位置
-      for (let x = -12; x < DESIGN_WIDTH; x += 36) {
-        ctx.fillRect(x, WALL_TOP_Y + 14, 28, 3);
-      }
-      ctx.restore();
-    }
-
     const cx = DESIGN_WIDTH / 2;
-    const cy = BALANCE.battlefield.warriorY + 28;
+    const cy = BALANCE.battlefield.warriorY + 28 + this._chaseKnockback;
     const stage = SWORD_STAGE_BY_ID[getBladeTier(this.energy)];
     const drawPulse = this.warriorDrawTimer > 0 ? 1 : 0;
     const sheathPulse = this.warriorSheathTimer > 0 ? 1 : 0;
@@ -7411,8 +7482,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       for (let i = 0; i < auraCount; i += 1) {
         ctx.strokeStyle = stage.color;
         ctx.shadowColor = stage.color;
-        ctx.shadowBlur = 4 + energyRatio * 8; // 减弱 12+28 → 4+8
-        ctx.lineWidth = 1.5 + energyRatio * 2 - i * 0.4; // 减弱 4+7 → 1.5+2
+        ctx.shadowBlur = 3 + energyRatio * 6; // 降低常驻光晕 30%
+        ctx.lineWidth = 1.2 + energyRatio * 1.5;
         ctx.globalAlpha = (0.06 + energyRatio * 0.18) / (i + 1); // 减弱 0.16+0.46 → 0.06+0.18
         ctx.beginPath();
         ctx.arc(0, -12, 36 + energyRatio * 12 + i * 5 + Math.sin(this.elapsed * 5 + i) * 2, -Math.PI * 0.85, -Math.PI * 0.85 + energyRatio * Math.PI * 1.7);
@@ -7480,35 +7551,33 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.stroke();
     ctx.shadowBlur = 0;
 
-    // 头顶心形：显示当前生命
-    // P4.4B-R4 P0-D: Boss 模式隐藏旧三心 HP（policy.showLegacyHpHearts=false），
-    // 避免与左上 Reactive HP 条双源重复。
-    // 普通模式 policy 可能 null，默认显示。
-    if (policy?.showLegacyHpHearts ?? true) {
+    // 统一 HP 进度条（替换旧三心 HP）—— 紧贴刀势条上方
+    // 普通关与 Boss 关共用同一个 HP 显示
     ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0); // 重置到屏幕坐标
-    for (let i = 0; i < this.maxHp; i += 1) {
-      const hx = cx + (i - (this.maxHp - 1) / 2) * 20;
-      const hy = cy - 70;
-      const alive = i < this.hp;
-      const pulse = alive ? (1 + Math.sin(this.elapsed * 4 - i * 0.6) * 0.08) : 1;
-      // 心形
-      ctx.fillStyle = alive ? "#d64b3b" : "rgba(214, 75, 59, 0.18)";
-      ctx.strokeStyle = alive ? "#ffd35a" : "rgba(255, 211, 90, 0.18)";
-      ctx.lineWidth = 1;
-      const size = 6 * pulse;
-      ctx.beginPath();
-      // 用心形曲线（两个半圆 + V型）
-      const topY = hy;
-      ctx.moveTo(hx, topY + 2);
-      ctx.bezierCurveTo(hx - size * 1.4, topY - size * 0.8, hx - size * 1.4, topY + size * 0.4, hx, topY + size * 1.4);
-      ctx.bezierCurveTo(hx + size * 1.4, topY + size * 0.4, hx + size * 1.4, topY - size * 0.8, hx, topY + 2);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const hpBarW = 150, hpBarH = 10;
+    const hpBarX = cx - hpBarW / 2;
+    const hpBarY = 770;
+    // 统一血量：心形模式换算为 x25（4心=100HP）
+    const hpScale = this.maxHp <= 10 ? 25 : 1;
+    const displayMax = this.maxHp <= 10 ? 100 : this.maxHp;
+    const displayCurrent = this.hp * hpScale;
+    const hpRatio = clamp(displayCurrent / displayMax, 0, 1);
+    const dangerColor = hpRatio < 0.3;
+    // 背景条
+    ctx.fillStyle = "rgba(20,14,8,0.85)";
+    ctx.strokeStyle = dangerColor ? "rgba(220,60,40,0.5)" : "rgba(220,200,160,0.3)";
+    ctx.lineWidth = 1;
+    ctx.fillRect(hpBarX - 1, hpBarY - 1, hpBarW + 2, hpBarH + 2);
+    ctx.beginPath(); ctx.roundRect(hpBarX - 1, hpBarY - 1, hpBarW + 2, hpBarH + 2, 4); ctx.stroke();
+    // HP 填充
+    ctx.fillStyle = dangerColor ? "#d64b3b" : "#4ac29a";
+    ctx.beginPath(); ctx.roundRect(hpBarX, hpBarY, hpBarW * hpRatio, hpBarH, 3); ctx.fill();
+    // HP 数字居中在条内
+    ctx.fillStyle = "#1a1008"; ctx.font = "bold 8px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(`${displayCurrent}/${displayMax}`, cx, hpBarY + 7);
     ctx.restore();
-    } // end if (policy.showLegacyHpHearts)
 
     ctx.restore();
 
@@ -7521,14 +7590,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.drawSubBladeSlot(ctx, 0, leftSlot.boxX, leftSlot.boxY, leftSlot.iconR, 0x5bc0ff);
     this.drawSubBladeSlot(ctx, 1, rightSlot.boxX, rightSlot.boxY, rightSlot.iconR, 0xb58cff);
 
-    // 刀势三段能量条 —— 屏幕底部居中（窄条）
-    // P4.4B-R4 P0-D: Boss 模式隐藏旧刀势条（policy.showLegacyEnergyBar=false），
-    // 避免与底部 Reactive 刀势条双源重复。普通模式默认显示。
-    if (policy?.showLegacyEnergyBar ?? true) {
-    const eBarW = 200;
+    // 刀势三段能量条 —— 屏幕底部居中（窄条），普通关与 Boss 关共用
+    const eBarW = 210;
     const eBarH = 14;
     const eBarX = (DESIGN_WIDTH - eBarW) / 2;
-    const eBarY = DESIGN_HEIGHT - 36;
+    const eBarY = 800;
     const energyPct = this.energy / BALANCE.swordEnergy.max;
     const eTier = getBladeTier(this.energy);
     const eTierName = SWORD_STAGE_BY_ID[eTier]?.name ?? "蓄势";
@@ -7643,10 +7709,18 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       this.slowMoTimer = Math.max(this.slowMoTimer, 0.06);
     }
     ctx.restore();
-    } // end if (policy.showLegacyEnergyBar)
   }
 
-  /** 右下角临时效果图标：鼓/魂/油，含圆形旋转倒计时 */
+  /** 统一玩家受击（普通关和Boss关共用） */
+  private applyPlayerDamage(dmg: number): void {
+    this.hp = Math.max(0, this.hp - dmg);
+    this.screenShake = 0.25; this.flash = 0.3;
+    this.addText(DESIGN_WIDTH / 2, DESIGN_HEIGHT - 120, `-${dmg}`, "#ff4040", 12, 0.8);
+    this._chaseKnockback = Math.min(this._chaseKnockback + 14, 44);
+    this.energy = Math.max(0, this.energy - 4);
+  }
+
+  /** 右下角临时效果图标：鼓/魂/油 */
   private drawPickupBuffs(ctx: CanvasRenderingContext2D) {
     const items: Array<{ key: string; label: string; color: string; ratio: number; active: boolean }> = [];
     if (this.drumTimer > 0) {
@@ -7955,6 +8029,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
   private drawDebugPanel(ctx: CanvasRenderingContext2D) {
     if (!this.debugEnabled) return;
+    // chaseFlash 模式有自己的 FSM 诊断面板（drawFsmDiagnostics in BossChaseHUD），不需要旧的通用调试面板
+    if (this.gameMode === "chaseFlash") return;
     const tier = getBladeTier(this.energy);
     const stage = getTierConfig(tier);
     const slash = this.currentSlash;
@@ -7975,7 +8051,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       `energy: ${this.energy.toFixed(1)}`,
       `stage: ${stage.label}`,
       `slash stage: ${slash ? SWORD_STAGE_BY_ID[slash.tier].name : "-"}`,
-      `--- V0715009 Debug ---`,
+      `--- ${APP_VERSION} Debug ---`,
       `entryEndY: ${z.entryEndY}`,
       `midfieldStartY: ${z.midfieldStartY}`,
       `harvestStartY: ${z.harvestStartY}`,
@@ -8852,6 +8928,134 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.lineTo(x, y + h - cut);
     ctx.lineTo(x + 2, y + cut);
     ctx.closePath();
+  }
+
+  // ================================================================
+  // BossV1: 追影连斩
+  // ================================================================
+  private initializeChaseFlashMode(): void {
+    this.chaseController = new BossChaseController();
+    const usp = new URLSearchParams(window.location.search);
+    const sf = usp.get("seed"); if (sf) this.chaseController.setSeed(parseInt(sf, 10) || 1);
+    this.chasePrevPositions = []; this._chaseDebugBtn = null; clearBarrageHitVfx();
+    for (const e of this.enemies) { e.alive = false; }
+    this.enemies = [];
+    this.pointerDown = false; this.pendingSlash = null; this.currentSlash = undefined;
+    for (let i = 0; i < 2; i++) { if (this.subBladeAnim[i]) this.subBladeAnim[i].phase = "idle"; }
+    this.wavesSpawned = 0; this.subSpawnQueue = [];
+  }
+  private updateChaseFlashMode(scaledDt: number): void {
+    const cc = this.chaseController; if (!cc) return;
+    this._chaseBarrageHitCount = 0;
+    this.elapsed += scaledDt;
+    this.updateActiveSlash(scaledDt); this.updateParticles(scaledDt); this.updateTexts(scaledDt); this.updateSubBlades(scaledDt);
+    cc.update(scaledDt, this.energy, this.hp);
+    updateBarrageVfx(scaledDt);
+    for (const ev of cc.events) {
+      if (ev.kind === "barrage_miss") {
+        this.applyPlayerDamage(this._phase2Active ? CHASE_CONFIG.damage.berserkHit : CHASE_CONFIG.damage.barrageHit);
+      } else if (ev.kind === "core_hit_confirmed") {
+        // ---- 核心命中即时确认：完整强反馈 ----
+        const tier = ev.momentumTier;
+        const pc = tier === "high" ? 26 : tier === "mid" ? 18 : 16;
+        // 震屏 + 强白闪（保底：低刀势也能看见）
+        this.screenShake = tier === "high" ? 0.8 : tier === "mid" ? 0.6 : 0.5;
+        this.flash = tier === "high" ? 0.7 : tier === "mid" ? 0.5 : 0.45;
+        // 核心墨爆（白闪+金闪+扩散环）
+        this.particles.push(...coreCollapseBurst(ev.hitPoint, pc, tier === "high" ? 3 : tier === "mid" ? 1.8 : 1));
+        this.particles.push(...sparkBurst(ev.hitPoint, pc * 2.5, "#ffd700", 60 + (tier === "high" ? 40 : 0)));
+        this.particles.push(...sparkBurst(ev.hitPoint, pc, "#ffffff", 30 + (tier === "high" ? 20 : 0)));  // 白闪
+        this.particles.push(glowParticle(ev.hitPoint, "#ffd700", 2.0, 40 + (tier === "high" ? 30 : tier === "mid" ? 15 : 5)));
+        // 刀势回流
+        const momentumGain = tier === "high" ? 22 : tier === "mid" ? 15 : 10;
+        this.energy = clamp(this.energy + momentumGain, 0, BALANCE.swordEnergy.max);
+      } else if (ev.kind === "shell_hit") {
+        this.screenShake = Math.max(this.screenShake, 0.15); this.flash = Math.max(this.flash, 0.08);
+        this.particles.push(...sparkBurst(ev.position, 3, "#9b59b6", 15));
+      } else if (ev.kind === "shell_hit_pending") {
+        // 外壳命中即时反馈（金属火花+弹刀，伤害延迟）
+        this.particles.push(...sparkBurst(ev.position, 4, "#9b59b6", 12));
+      } else if (ev.kind === "barrage_hit") {
+        this.particles.push(glowParticle(ev.position, "#c850ff", 2, 12));
+        pushBarrageHitVfx(ev.position.x, ev.position.y, this.lastSlashAngle);
+        this._chaseBarrageHitCount++;
+      } else if (ev.kind === "phase_transition") {
+        // 30%转场事件：根据次数增强反馈
+        this.screenShake = Math.max(this.screenShake, 0.55);
+        this.flash = Math.max(this.flash, 0.5);
+        this.particles.push(...sparkBurst({ x: 195, y: 350 }, 18, "#ff4a3a", 55));
+        this.particles.push(...coreCollapseBurst({ x: 195, y: 320 }, 10, 1.5));
+        clearBarrageHitVfx();
+        // 防线红橙脉冲：整条防线强光闪现
+        this._transFlashTimer = 0.25;
+      } else if (ev.kind === "victory") { this.finish(true); }
+      else if (ev.kind === "failure") { this.finish(false); }
+    }
+    this.screenShake = Math.max(0, this.screenShake - scaledDt * 2.7);
+    this.flash = Math.max(0, this.flash - scaledDt * 2.2);
+    this._chaseKnockback = Math.max(0, this._chaseKnockback - scaledDt * 25);
+    this._transFlashTimer = Math.max(0, this._transFlashTimer - scaledDt);
+    this._phase2Active = cc.snapshot.phase2Active;
+    cc.checkBarrageMisses(CHASE_CONFIG.playerDefenseLineY);
+    for (const ev of cc.events) {
+      if (ev.kind === "barrage_miss") {
+        this.applyPlayerDamage(this._phase2Active ? CHASE_CONFIG.damage.berserkHit : CHASE_CONFIG.damage.barrageHit);
+      } else if (ev.kind === "victory") { this.finish(true); }
+      else if (ev.kind === "failure") { this.finish(false); }
+    }
+    if (this.hp <= 0 && !cc.done) { this.finish(false); return; }
+    this.chasePrevPositions.push({ x: cc.snapshot.bossX, y: cc.snapshot.bossY });
+    if (this.chasePrevPositions.length > 6) this.chasePrevPositions.shift();
+  }
+  private resolveChaseSlash(a: {x:number;y:number}, b: {x:number;y:number}): void {
+    const cc = this.chaseController; if (!cc) return;
+    const result = cc.resolveSlash(a, b);
+    // 单刀去重：核心/外��/同弹幕只结算一次
+    let energyGain = 0;
+    if (result.hitCore && !this._chaseSlashHitCore) {
+      this._chaseSlashHitCore = true;
+      energyGain += CHASE_CONFIG.coreEnergyGain;
+    }
+    if (result.hitShell && !this._chaseSlashHitShell) {
+      this._chaseSlashHitShell = true;
+      energyGain += CHASE_CONFIG.shellEnergyGain;
+    }
+    for (const bid of result.hitBarrages) {
+      if (!this._chaseSlashHitBarrages.has(bid)) {
+        this._chaseSlashHitBarrages.add(bid);
+        energyGain += CHASE_CONFIG.projectileEnergyGain;
+      }
+    }
+    if (energyGain > 0) {
+      this.energy = Math.min(100, this.energy + energyGain);
+      const bc = this._chaseBarrageHitCount;
+      if (bc >= 3) { this.energy = Math.min(100, this.energy + 8); this.screenShake = Math.max(this.screenShake, 0.45); this.particles.push(...sparkBurst({ x: 195, y: 500 }, 15, "#ffd700", 40)); }
+      else if (bc >= 2) { this.energy = Math.min(100, this.energy + 5); }
+    }
+  }
+  private renderChaseFlashMode(ctx: CanvasRenderingContext2D): void {
+    const cc = this.chaseController; if (!cc) return;
+    const snap = cc.snapshot;
+    ctx.save(); ctx.clearRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+    if (this.screenShake > 0) { const shake = this.screenShake * 5; ctx.translate(randomRange(-shake, shake), randomRange(-shake, shake)); }
+    drawChaseMode(ctx, snap, this.elapsed, this.chasePrevPositions);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);  // 重置震屏 → HUD 固定
+    if (snap.showUI) {
+      this.drawSlash(ctx); this.drawParticles(ctx);
+      this.renderPlayerCombatLayer(ctx);
+      this.drawFloatingTexts(ctx); this.drawEdgeFlash(ctx);
+      if (this.debugEnabled) this.drawDebugPanel(ctx);
+      if (this.flash > 0) { ctx.fillStyle = `rgba(255, 232, 146, ${this.flash * 0.18})`; ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT); }
+    }
+    const es = snap.state;
+    if (es === "battle_victory" || es === "battle_failure") { ctx.fillStyle = "rgba(0, 0, 0, 0.55)"; ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT); }
+    if (new URLSearchParams(window.location.search).get("debug") === "1") {
+      this._chaseDebugBtn = { x: DESIGN_WIDTH - 42, y: DESIGN_HEIGHT - 32, w: 36, h: 26 };
+      ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.beginPath(); ctx.roundRect(this._chaseDebugBtn.x, this._chaseDebugBtn.y, this._chaseDebugBtn.w, this._chaseDebugBtn.h, 5); ctx.fill();
+      ctx.fillStyle = this.debugEnabled ? "#ffd35a" : "#666"; ctx.font = '13px sans-serif'; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("D", this._chaseDebugBtn.x + 18, this._chaseDebugBtn.y + 13);
+    }
+    ctx.restore();
   }
 }
 

@@ -4,6 +4,7 @@
 import { DESIGN_WIDTH, DESIGN_HEIGHT } from "../config/constants";
 import { clamp } from "../../utils/math";
 import type { BladeMomentumBand } from "../config/bladeMomentum";
+import type { ObjectiveType } from "../types";
 
 /** 绘制刀势条 */
 export function drawEnergyBar(
@@ -166,5 +167,54 @@ export function drawFloatText(
   ctx.shadowColor = color;
   ctx.shadowBlur = 8;
   ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+/** V0723016: 绘制三甲目标进度（威胁阶段顶部显示） */
+export function drawArmorObjectiveProgress(
+  ctx: any,
+  objectiveType: ObjectiveType | null,
+  current: number,
+  target: number,
+  perfectReflectCount: number,
+  x: number,
+  y: number
+): void {
+  if (!objectiveType) return;
+  ctx.save();
+  ctx.fillStyle = "rgba(20, 14, 8, 0.85)";
+  ctx.strokeStyle = "rgba(255, 211, 90, 0.3)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(x - 65, y - 11, 130, 22, 6);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#ffd35a";
+  ctx.font = 'bold 11px "Microsoft YaHei", sans-serif';
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  let label: string;
+  if (objectiveType === "cut_normal") {
+    label = `破势 ${current}/${target}`;
+  } else if (objectiveType === "reflect") {
+    label = perfectReflectCount > 0 ? "回锋 精准！" : `回锋 ${current}/${target}`;
+  } else {
+    label = `雷阵 ${current}/${target} 轮`;
+  }
+  ctx.fillText(label, x, y);
+  ctx.restore();
+}
+
+/** V0723016: 精准反射"回锋！"屏幕中央金色飘字（2s 淡入淡出） */
+export function drawPerfectReflectText(ctx: any, alpha: number): void {
+  ctx.save();
+  ctx.globalAlpha = clamp(alpha, 0, 1);
+  ctx.fillStyle = "#ffd35a";
+  ctx.font = 'bold 28px "Microsoft YaHei", sans-serif';
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.shadowColor = "#ffd35a";
+  ctx.shadowBlur = 16;
+  ctx.fillText("回锋！", DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2);
   ctx.restore();
 }

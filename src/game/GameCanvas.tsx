@@ -19,7 +19,7 @@ type GameCanvasProps = {
   /** P4.4A.4: Boss阶段变更回调 */
   onBossPhaseChange?: (phase: BossPhaseState | null) => void;
   /** P0: Boss流程选择（双入口） */
-  bossFlow?: "legacy" | "reactive";
+  bossFlow?: "legacy" | "reactive" | "chaseFlash";
 };
 
 export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, declineReviveSignal = 0, paused = false, runMode, retryExecutionRequested = false, onRetryExecutionConsumed, onBossPhaseChange, bossFlow = "legacy" }: GameCanvasProps) {
@@ -129,7 +129,7 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
   }
 
   return (
-    <div style={{ position: "relative", width: DESIGN_WIDTH, height: DESIGN_HEIGHT }}>
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
       <canvas
         ref={canvasRef}
         className="game-canvas"
@@ -150,7 +150,7 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
         }}
         onPointerCancel={(event) => {
           event.preventDefault();
-          gameRef.current?.handlePointerUp();
+          gameRef.current?.handlePointerUp("cancel");
         }}
       />
       <TribulationOverlay bossPhase={overlayPhase} />

@@ -77,10 +77,18 @@ export default function App() {
 
   /** P0: bossFlow 参数（双入口） */
   const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
-  const bossFlow: "legacy" | "reactive" = urlParams.get("bossFlow") === "reactive" ? "reactive" : "legacy";
+  const urlBossFlow = urlParams.get("bossFlow");
+  const bossFlow: "legacy" | "reactive" | "chaseFlash" =
+    urlBossFlow === "reactive" ? "reactive" :
+    urlBossFlow === "chaseFlash" ? "chaseFlash" : "legacy";
   const [runIndex, setRunIndex] = useState(0);
   const [currentMode, setCurrentMode] = useState<RunMode>("normal");
   const [reviveOffer, setReviveOffer] = useState<ReviveOffer | null>(null);
+  /** bossFlow 只能决定 Boss 实现方案，不能决定是否进入 Boss 战 */
+  const isCurrentBossBattle =
+    currentMode === "challenge" &&
+    currentLevel.bossId === "thunderGeneral" &&
+    currentLevel.id < 10000;
   const [reviveSignal, setReviveSignal] = useState(0);
   const [declineReviveSignal, setDeclineReviveSignal] = useState(0);
   const [retryExecutionRequested, setRetryExecutionRequested] = useState(false);
@@ -462,7 +470,7 @@ export default function App() {
       {screen === "battle" && (
         <section className="battle-shell" aria-label="战斗">
           <GameCanvas
-            key={`${currentLevel.id}-${runIndex}`}
+            key={`${currentLevel.id}-${runIndex}-${isCurrentBossBattle ? bossFlow : "normal"}`}
             level={currentLevel}
             onFinish={handleFinish}
             onReviveOffer={setReviveOffer}
@@ -473,11 +481,12 @@ export default function App() {
             retryExecutionRequested={retryExecutionRequested}
             onRetryExecutionConsumed={handleRetryExecutionConsumed}
             onBossPhaseChange={handleBossPhaseChange}
-            bossFlow={bossFlow}
+            bossFlow={isCurrentBossBattle ? bossFlow : undefined}
           />
           {(() => {
             const isExecutionPhase = bossPhase && ["execution_intro", "execution", "execution_success", "execution_fail"].includes(bossPhase);
-            return !reviveOffer && !paused && !isExecutionPhase ? (
+            const isIntroPhase = bossPhase === "intro";
+            return !reviveOffer && !paused && !isExecutionPhase && !isIntroPhase ? (
               <button
                 className="battle-pause-btn"
                 onClick={() => setPaused(true)}
@@ -546,8 +555,8 @@ export default function App() {
       {screen === "bossFailScreen" && (
         <section className="screen" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0d0015', color: '#d7bde2' }}>
           <h1 style={{ fontSize: 28, color: '#ff6a33', marginBottom: 12 }}>挑战失败</h1>
-          <p style={{ fontSize: 14, marginBottom: 6, opacity: 0.7 }}>一刀未命中命核</p>
-          <p style={{ fontSize: 14, marginBottom: 24, opacity: 0.7 }}>终结阶段失败</p>
+          <p style={{ fontSize: 14, marginBottom: 6, opacity: 0.7 }}>未能挡住雷将攻势</p>
+          <p style={{ fontSize: 14, marginBottom: 24, opacity: 0.7 }}>防线失守</p>
           <button
             className="battle-btn"
             style={{ width: 180, marginBottom: 8, background: '#6c3483', border: '1px solid #8e44ad' }}

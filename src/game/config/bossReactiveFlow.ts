@@ -2,6 +2,7 @@
 // Boss Reactive Flow — 配置中心
 // 全部数值常量集中在此，方便调参
 // ========================================================================
+import type { ArmorObjectivesConfig } from "../types";
 
 export const REACTIVE_BOSS_CONFIG = {
   // P4.4B-R5 P1-B: Boss 视觉缩放统一配置（构造与 reset 都读此值，避免不一致）
@@ -10,11 +11,17 @@ export const REACTIVE_BOSS_CONFIG = {
   },
   phaseTimers: {
     armorPrepare: 0.3,
-    threatDuration: [2.0, 3.0],
+    // V0723016: 删除 threatDuration，改为 armorObjectives 各 armor 的 timeout 字段
     opportunityDuration: 1.5,
     resolveDuration: 0.12,
     recoveryDuration: 0.2,
   },
+  // V0723016复审P0-2: 三甲目标配置（右肩改 points 制 + minWavesRequired + 胸甲3轮）
+  armorObjectives: {
+    left: { normalCutsRequired: 3, reflectPointsRequired: 0, normalReflectPoints: 0, perfectReflectPoints: 0, perfectReflectRatio: 0, minWavesRequired: 2, timeout: 10 },
+    right: { normalCutsRequired: 0, reflectPointsRequired: 3, normalReflectPoints: 1, perfectReflectPoints: 2, perfectReflectRatio: 0.9, minWavesRequired: 2, timeout: 12 },
+    chest: { mixedRoundsRequired: 3, timeout: 15 },
+  } as ArmorObjectivesConfig,
   bladeEnergy: {
     // V0723015: 1.5 → 1.0（主动收益必须高于被动等待）
     passiveRegenPerSecond: 1.0,

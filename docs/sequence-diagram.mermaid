@@ -1,57 +1,104 @@
 sequenceDiagram
-    participant E2E as E2E Test
-    participant Game as Game.getState
-    participant RC as BossReactiveController
-
-    Note over E2E,RC: 场景1: bridgeTriggered 前（bossReactive 模式）
-    E2E->>Game: getState()
-    Game->>Game: gameMode === "bossReactive" && reactiveController
-    Game-->>E2E: { ..., lastReactiveExitSnapshot: undefined }
-
-    Note over E2E,RC: bridgeTriggered → 捕获 snapshot
-    RC->>RC: bridgeTriggered = true
-    Game->>Game: _lastReactiveExitSnapshot = snap
-    Game->>Game: reactiveController = null, gameMode = "boss"
-
-    Note over E2E,RC: 场景2: 切到 boss 模式后
-    E2E->>Game: getState()
-    Game->>Game: gameMode === "boss"
-    Game-->>E2E: { ..., lastReactiveExitSnapshot: { armorProgress: "3/3", ... } }
-
-sequenceDiagram
     participant Game as Game
     participant RC as BossReactiveController
+    participant HUD as bossReactiveHUD
+    participant BM as bladeMomentum
 
-    Game->>RC: resolveGeometry(geometry)
-    RC->>RC: commitArmorDamage(energy, index, source, hitPos)
-    RC->>RC: _session.events.push(armorEv)  // 第1次 push
-    RC-->>Game: [armorEv]  // newEvents 包含 armorEv
+    Note over RC: === 左肩·斩弹破势 ===
+    RC->>RC: transitionToThreat() 左肩
+    RC->>RC: initObjective("cut_normal", target=2, timeout=8)
+    RC->>RC: _objectiveTimeout = 8
 
-    Game->>RC: finishSlash(slashId, energyBefore, pathLen)
-    RC->>RC: events = [...this._session.events]  // 已含 armorEv
-    Note over RC: 不再 push armorEv 到 events
-    RC-->>Game: { events: [armorEv], ... }  // 仅1次
-
-sequenceDiagram
-    participant Game as Game
-    participant RC as BossReactiveController
-
-    Note over Game,RC: 起刀
-    Game->>Game: _currentReactiveSegmentEvents = []
-
-    loop 每帧 pointerMove
-        Game->>RC: resolveGeometry(geometry)
-        RC-->>Game: newEvents
-        Game->>Game: _currentReactiveSegmentEvents = newEvents
-        Game->>Game: 粒子反馈（从 _currentReactiveSegmentEvents 读）
+    loop 每帧 update
+        RC->>RC: updateArmorThreat(dt)
+        alt 已到 spawn 间隔
+            RC->>RC: spawnProjectileForCurrentArmor() [normal弹幕]
+        end
     end
 
-    Note over Game,RC: 收刀
-    Game->>RC: finishSlash(slashId, ...)
-    RC-->>Game: result
-    Game->>Game: _lastReactiveResolve = result
-    Game->>Game: _lastResolvedReactiveEvents = result.events
+    Game->>RC: resolveGeometry(geometry) [玩家斩中normal弹幕]
+    RC->>RC: kind==="projectile_cut" && 当前护甲是左肩
+    RC->>RC: _objectiveCurrent++ (0→1)
+    HUD->>HUD: 显示"破势 1/2"
 
-    Note over Game,RC: Debug 绘制（全部来自同一时间点）
-    Game->>Game: drawReactiveDebugOverlay
-    Note over Game: lastResult ← _lastReactiveResolve.primaryResult<br/>eventsSummary ← _lastReactiveResolve.eventsSummary<br/>counts ← _lastReactiveResolve.cutCount/etc.
+    Game->>RC: resolveGeometry(geometry) [玩家再次斩中normal弹幕]
+    RC->>RC: _objectiveCurrent++ (1→2)
+    alt objectiveCurrent >= target
+        RC->>RC: _objectiveCompleted = true
+        RC->>RC: _objectiveCompletedBy = "action"
+        RC->>RC: transitionToOpportunity()
+        HUD->>HUD: 显示"破势 2/2 → 开窗！"
+    end
+
+    Note over RC: 超时兜底分支
+    alt phaseTimer >= 8 && !objectiveCompleted
+        RC->>RC: _objectiveCompleted = true
+        RC->>RC: _objectiveCompletedBy = "timeout"
+        RC->>RC: transitionToOpportunity()
+    end
+
+    Note over RC: === 右肩·回锋反制 ===
+    RC->>RC: transitionToThreat() 右肩
+    RC->>RC: initObjective("reflect", target=2, timeout=10)
+    RC->>RC: _objectiveTimeout = 10
+
+    loop 每帧 spawn
+        RC->>RC: spawnProjectileForCurrentArmor() [reflective弹幕]
+    end
+
+    Game->>RC: resolveGeometry(geometry) [玩家命中reflective弹幕]
+    RC->>BM: 读取 lockedMomentum.ratio
+    alt ratio >= 0.90
+        RC->>RC: _perfectReflectCount++
+        Note over RC: 精准反射！一次即完成目标
+        RC->>RC: _objectiveCompleted = true
+        RC->>RC: _objectiveCompletedBy = "action"
+        RC->>RC: transitionToOpportunity()
+        HUD->>HUD: 显示"回锋！"
+    else ratio >= 0.70 && ratio < 0.90
+        RC->>RC: 普通反射，_objectiveCurrent++
+        HUD->>HUD: 显示"反射 1/2"
+        alt objectiveCurrent >= 2
+            RC->>RC: transitionToOpportunity()
+        end
+    else ratio < 0.70
+        RC->>RC: cut 而非 reflect（不计数）
+    end
+
+    Note over RC: === 胸甲·真假雷阵 ===
+    RC->>RC: transitionToThreat() 胸甲
+    RC->>RC: initObjective("mixed_round", target=2, timeout=12)
+    RC->>RC: _mixedRoundCount = 0
+    RC->>RC: _currentMixedRoundHandled = false
+
+    loop 每轮混合处理
+        Note over RC: 第N轮 spawn
+        RC->>RC: spawnProjectileForCurrentArmor()
+        Note over RC: 生成 normal + dangerous 各1枚
+
+        Game->>RC: resolveGeometry() [玩家cut normal弹幕]
+        RC->>RC: _currentMixedRoundHandled = true
+
+        alt 玩家误砍dangerous
+            RC->>RC: 刀势惩罚-9, HP-3
+            Note over RC: 不重置轮次进度，不延长等待
+        end
+
+        Note over RC: 下一帧 spawn 时检查
+        RC->>RC: if _currentMixedRoundHandled
+        RC->>RC: _mixedRoundCount++ (0→1→2)
+        RC->>RC: _currentMixedRoundHandled = false
+
+        alt mixedRoundCount >= target
+            RC->>RC: _objectiveCompleted = true
+            RC->>RC: transitionToOpportunity()
+        end
+    end
+
+    Note over RC: === 桥接 ===
+    alt 所有护甲破碎
+        RC->>RC: finishRecovery()
+        RC->>RC: _bridgeTriggered = true
+        RC->>RC: _bridgeTimestamp = this._elapsed
+        Game->>Game: 桥接到 pursuit
+    end

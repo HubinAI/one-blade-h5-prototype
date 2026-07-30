@@ -83,7 +83,11 @@ function geom(segA: { x: number; y: number }, segB: { x: number; y: number }, sl
  */
 function advanceToOpportunity(c: BossReactiveController): void {
   c.update(REACTIVE_BOSS_CONFIG.phaseTimers.armorPrepare + 0.05);
-  c.update(REACTIVE_BOSS_CONFIG.phaseTimers.threatDuration[1] + 0.01);
+  // V0723016: threatDuration 已删除，按当前护甲读 armorObjectives 超时兜底推进
+  const idx = c.getActiveArmorIndex();
+  const cfg = REACTIVE_BOSS_CONFIG.armorObjectives;
+  const timeout = idx === 0 ? cfg.left.timeout : idx === 1 ? cfg.right.timeout : cfg.chest.timeout;
+  c.update(timeout + 0.01);
 }
 
 /**
@@ -140,7 +144,7 @@ describe("BossReactiveController", () => {
     expect(controller.phase).toBe("armor_prepare");
     controller.update(0.35);
     expect(controller.phase).toBe("armor_threat");
-    controller.update(3.0);
+    controller.update(REACTIVE_BOSS_CONFIG.armorObjectives.left.timeout + 0.01);
     expect(controller.phase).toBe("armor_opportunity");
     controller.update(1.7);
     expect(controller.phase).toBe("armor_recovery");
@@ -1902,5 +1906,287 @@ describe("BossReactiveController", () => {
       expect(r.baseCost).toBe(0); // 7 * 0 = 0
       expect(r.energyAfter).toBe(35); // 35-0=35（无目标不罚空挥）
     });
+  });
+});
+
+// ============================================================================
+// V0723016: 三甲目标驱动开窗机制 — 12 项单测
+// 左肩斩弹破势 / 右肩回锋反制(精准反射≥0.90) / 胸甲真假雷阵(混合轮次)
+// ============================================================================
+describe("V0723016 三甲目标驱动开窗", () => {
+  let c: BossReactiveController;
+
+  beforeEach(() => {
+    resetProjectileIdCounter();
+    c = new BossReactiveController();
+  });
+
+  /** 辅助：推进到左肩 threat */
+  function toLeftThreat(): void {
+    c.update(REACTIVE_BOSS_CONFIG.phaseTimers.armorPrepare + 0.05);
+  }
+
+  /** 辅助：破当前护甲并切到下一护甲 threat（若仍在 threat 先推进到 opportunity） */
+  function breakAndAdvance(slashId: string): void {
+    // V0723016: 若仍在 threat 阶段，先推进到 opportunity（超时兜底）才能破甲
+    if (c.phase === "armor_threat") {
+      const idx = c.getActiveArmorIndex();
+      const cfg = REACTIVE_BOSS_CONFIG.armorObjectives;
+      const timeout = idx === 0 ? cfg.left.timeout : idx === 1 ? cfg.right.timeout : cfg.chest.timeout;
+      c.update(timeout + 0.01);
+    }
+    hitCurrentArmor(c, slashId, 100);
+    advanceThroughResolveAndRecovery(c);
+    c.update(REACTIVE_BOSS_CONFIG.phaseTimers.armorPrepare + 0.05);
+  }
+
+  /** 辅助：斩中静止弹幕 */
+  function cutProjectile(kind: ProjectileKind, slashId: string, energy: number = 50): void {
+    // V0723016最终收口P0-2: 先推进 spawn 间隔递增波次（满足 minWavesRequired）
+    const si = REACTIVE_BOSS_CONFIG.threatSpawn.intervalBase + REACTIVE_BOSS_CONFIG.threatSpawn.intervalJitter;
+    c.update(si + 0.01);
+    const p = c.spawnProjectileForTest(kind, BOSS_CX, BOSS_CY + 100, 0, 0);
+    c.resolveGeometry(geom(v(p.x - 30, p.y - 30), v(p.x + 30, p.y + 30), slashId, energy));
+    c.finishSlash(slashId, createBladeMomentumState(energy, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
+  }
+
+  // K1: 左肩斩3枚普通弹幕后开窗（V0723016复审P0-2: normalCutsRequired=3）
+  it("K1: 左肩斩3枚普通弹幕后开窗", () => {
+    toLeftThreat();
+    expect(c.phase).toBe("armor_threat");
+    expect(c.objectiveType).toBe("cut_normal");
+    expect(c.objectiveTarget).toBe(3);
+    cutProjectile("normal", "k1a");
+    expect(c.objectiveCurrent).toBe(1);
+    expect(c.objectiveCompleted).toBe(false);
+    cutProjectile("normal", "k1b");
+    expect(c.objectiveCurrent).toBe(2);
+    expect(c.objectiveCompleted).toBe(false);
+    cutProjectile("normal", "k1c");
+    expect(c.objectiveCurrent).toBe(3);
+    expect(c.objectiveCompleted).toBe(true);
+    expect(c.objectiveCompletedBy).toBe("action");
+    c.update(0.01);
+    expect(c.phase).toBe("armor_opportunity");
+  });
+
+  // K2: 左肩8秒超时开窗
+  it("K2: 左肩8秒超时开窗", () => {
+    toLeftThreat();
+    const timeout = REACTIVE_BOSS_CONFIG.armorObjectives.left.timeout;
+    c.update(timeout + 0.01);
+    expect(c.phase).toBe("armor_opportunity");
+    expect(c.objectiveCompletedBy).toBe("timeout");
+  });
+
+  // K3: 右肩3次普通反射后开窗（V0723016复审P0-2: reflectPointsRequired=3, normalReflectPoints=1）
+  it("K3: 右肩3次普通反射后开窗(3点)", () => {
+    toLeftThreat();
+    breakAndAdvance("k3_brk_l");
+    expect(c.phase).toBe("armor_threat");
+    expect(c.objectiveType).toBe("reflect");
+    // ratio=0.75 → burst 但 <0.90 → 普通反射(1分/次)
+    cutProjectile("reflective", "k3a", 75);
+    expect(c.objectiveCurrent).toBe(1);
+    expect(c.perfectReflectCount).toBe(0);
+    cutProjectile("reflective", "k3b", 75);
+    expect(c.objectiveCurrent).toBe(2);
+    expect(c.objectiveCompleted).toBe(false);
+    cutProjectile("reflective", "k3c", 75);
+    expect(c.objectiveCurrent).toBe(3);
+    expect(c.objectiveCompleted).toBe(true);
+    c.update(0.01);
+    expect(c.phase).toBe("armor_opportunity");
+  });
+
+  // K4: 右肩1精准+1普通反射达到3点开窗（V0723016复审P0-2: perfectReflectPoints=2, normalReflectPoints=1）
+  it("K4: 右肩1精准(2分)+1普通(1分)达到3点开窗", () => {
+    toLeftThreat();
+    breakAndAdvance("k4_brk_l");
+    // ratio=0.90 → 精准反射(2分)
+    cutProjectile("reflective", "k4a", 90);
+    expect(c.perfectReflectCount).toBe(1);
+    expect(c.objectiveCurrent).toBe(2);
+    expect(c.objectiveCompleted).toBe(false);
+    // ratio=0.75 → 普通反射(1分)，累计3分完成
+    cutProjectile("reflective", "k4b", 75);
+    expect(c.objectiveCurrent).toBe(3);
+    expect(c.objectiveCompleted).toBe(true);
+    expect(c.objectiveCompletedBy).toBe("action");
+    c.update(0.01);
+    expect(c.phase).toBe("armor_opportunity");
+  });
+
+  // K5: 89.99%不触发精准反射
+  it("K5: 89.99%不触发精准反射（走普通反射）", () => {
+    toLeftThreat();
+    breakAndAdvance("k5_brk_l");
+    // ratio=0.8999 → burst 但 <0.90 → 普通反射
+    cutProjectile("reflective", "k5a", 89.99);
+    expect(c.perfectReflectCount).toBe(0);
+    expect(c.objectiveCurrent).toBe(1);
+    expect(c.objectiveCompleted).toBe(false);
+  });
+
+  // K6: 胸甲3轮混合处理开窗（V0723016复审P0-2: mixedRoundsRequired=3）
+  it("K6: 胸甲3轮混合处理后开窗", () => {
+    toLeftThreat();
+    breakAndAdvance("k6_brk_l");
+    breakAndAdvance("k6_brk_r");
+    expect(c.phase).toBe("armor_threat");
+    expect(c.objectiveType).toBe("mixed_round");
+    // 第1轮处理
+    cutProjectile("normal", "k6a");
+    expect(c.mixedRoundCount).toBe(1);
+    expect(c.objectiveCompleted).toBe(false);
+    // 推进 spawn 间隔，触发轮次切换（handled=true → 重置）
+    const si = REACTIVE_BOSS_CONFIG.threatSpawn.intervalBase + REACTIVE_BOSS_CONFIG.threatSpawn.intervalJitter;
+    c.update(si + 0.01);
+    // 第2轮处理
+    cutProjectile("normal", "k6b");
+    expect(c.mixedRoundCount).toBe(2);
+    expect(c.objectiveCompleted).toBe(false);
+    c.update(si + 0.01);
+    // 第3轮处理
+    cutProjectile("normal", "k6c");
+    expect(c.mixedRoundCount).toBe(3);
+    expect(c.objectiveCompleted).toBe(true);
+    expect(c.objectiveCompletedBy).toBe("action");
+    c.update(0.01);
+    expect(c.phase).toBe("armor_opportunity");
+  });
+
+  // K7: 胸甲危险误砍不重置进度
+  it("K7: 胸甲危险误砍不重置轮次进度", () => {
+    toLeftThreat();
+    breakAndAdvance("k7_brk_l");
+    breakAndAdvance("k7_brk_r");
+    // 第1轮处理1枚 normal
+    cutProjectile("normal", "k7a");
+    expect(c.mixedRoundCount).toBe(1);
+    // 误砍 dangerous（不重置进度）
+    cutProjectile("dangerous", "k7d");
+    expect(c.mixedRoundCount).toBe(1); // 仍是1，未重置
+    expect(c.objectiveCompleted).toBe(false);
+  });
+
+  // K8: 三甲 timeout 不软锁
+  it("K8: 三甲各自超时后正常开窗不软锁", () => {
+    toLeftThreat();
+    // 左肩超时
+    c.update(REACTIVE_BOSS_CONFIG.armorObjectives.left.timeout + 0.01);
+    expect(c.phase).toBe("armor_opportunity");
+    // 破左肩切右肩
+    breakAndAdvance("k8_brk_l");
+    expect(c.phase).toBe("armor_threat");
+    // 右肩超时
+    c.update(REACTIVE_BOSS_CONFIG.armorObjectives.right.timeout + 0.01);
+    expect(c.phase).toBe("armor_opportunity");
+    // 破右肩切胸甲
+    breakAndAdvance("k8_brk_r");
+    expect(c.phase).toBe("armor_threat");
+    // 胸甲超时
+    c.update(REACTIVE_BOSS_CONFIG.armorObjectives.chest.timeout + 0.01);
+    expect(c.phase).toBe("armor_opportunity");
+  });
+
+  // K9: 目标完成后只开窗一次
+  it("K9: 目标完成后不会二次开窗", () => {
+    toLeftThreat();
+    cutProjectile("normal", "k9a");
+    cutProjectile("normal", "k9b");
+    cutProjectile("normal", "k9c");
+    expect(c.objectiveCompleted).toBe(true);
+    c.update(0.01);
+    expect(c.phase).toBe("armor_opportunity");
+    // 再 update 不应回到 threat 或重复触发
+    const phaseBefore = c.phase;
+    c.update(0.01);
+    expect(c.phase).toBe(phaseBefore); // 仍是 opportunity
+  });
+
+  // K10: 完整三甲后只桥接一次
+  it("K10: 完整三甲全破后 bridgeTriggered=true 且只一次", () => {
+    toLeftThreat();
+    breakAndAdvance("k10_brk_l");
+    breakAndAdvance("k10_brk_r");
+    breakAndAdvance("k10_brk_c");
+    expect(c.bridgeTriggered).toBe(true);
+    expect(c.bridgeTimestamp).not.toBeNull();
+    // 再 update 不会重复桥接
+    c.update(0.01);
+    expect(c.bridgeTriggered).toBe(true); // 仍 true，未变 false
+  });
+
+  // K11: reset 清空 objective 状态
+  it("K11: reset 清空所有 objective 状态", () => {
+    toLeftThreat();
+    cutProjectile("normal", "k11a");
+    expect(c.objectiveCurrent).toBe(1);
+    c.reset();
+    expect(c.objectiveType).toBeNull();
+    expect(c.objectiveCurrent).toBe(0);
+    expect(c.objectiveTarget).toBe(0);
+    expect(c.objectiveCompleted).toBe(false);
+    expect(c.objectiveCompletedBy).toBeNull();
+    expect(c.perfectReflectCount).toBe(0);
+    expect(c.mixedRoundCount).toBe(0);
+    expect(c.armorBreakTimestamps).toEqual([]);
+    expect(c.bridgeTimestamp).toBeNull();
+    expect(c.inputLockedSeconds).toBe(0);
+  });
+
+  // K12: 原数值不变（护甲耐久/伤害/奖励未被修改）
+  it("K12: 原数值不变 — 护甲耐久/伤害/弹幕奖励/反射奖励", () => {
+    expect(REACTIVE_BOSS_CONFIG.armor.durabilityPerPiece).toBe(100);
+    expect(REACTIVE_BOSS_CONFIG.armor.lowEnergyCrack).toBe(25);
+    expect(REACTIVE_BOSS_CONFIG.armor.midEnergyDamage).toBe(55);
+    expect(REACTIVE_BOSS_CONFIG.armor.highEnergyOneShot).toBe(100);
+    expect(REACTIVE_BOSS_CONFIG.bladeEnergy.normalBulletReward).toBe(8);
+    expect(REACTIVE_BOSS_CONFIG.bladeEnergy.reflectReward).toBe(16);
+    expect(REACTIVE_BOSS_CONFIG.bladeEnergy.dangerousWrongCutPenalty).toBe(9);
+    expect(REACTIVE_BOSS_CONFIG.bladeEnergy.bodyWrongHitPenalty).toBe(7);
+  });
+
+  // ---- V0723016复审P0-3: 波次门槛补充测试 ----
+
+  function cutInSameWave(kind: ProjectileKind, slashId: string, energy = 50) {
+    const p = c.spawnProjectileForTest(kind, BOSS_CX, BOSS_CY + 100, 0, 0);
+    c.resolveGeometry(geom(v(p.x - 30, p.y - 30), v(p.x + 30, p.y + 30), slashId, energy));
+    c.finishSlash(slashId, createBladeMomentumState(energy, BLADE_MOMENTUM_CONFIG.baseMax), 100, DEFAULT_BLADE_RUN_MODIFIERS);
+  }
+  function advanceOneWave() { const si = REACTIVE_BOSS_CONFIG.threatSpawn.intervalBase + REACTIVE_BOSS_CONFIG.threatSpawn.intervalJitter; c.update(si + 0.01); }
+
+  it("K13: 左肩波次门槛 — 同一波斩满3枚但波次不足不开窗", () => {
+    toLeftThreat();
+    expect(c.minWavesRequired).toBe(2);
+    cutInSameWave("normal", "k13_a"); cutInSameWave("normal", "k13_b"); cutInSameWave("normal", "k13_c");
+    expect(c.objectiveCurrent).toBe(3); expect(c.objectiveCompleted).toBe(false);
+    advanceOneWave(); expect(c.objectiveWaveCount).toBe(1); expect(c.objectiveCompleted).toBe(false);
+    advanceOneWave(); expect(c.objectiveWaveCount).toBe(2); expect(c.objectiveCompleted).toBe(true); expect(c.objectiveCompletedBy).toBe("action");
+    c.update(0.01); expect(c.phase).toBe("armor_opportunity");
+  });
+
+  it("K14: 右肩波次门槛 — 同一波拿满3分但波次不足不开窗", () => {
+    toLeftThreat(); breakAndAdvance("k14_brk_l");
+    expect(c.minWavesRequired).toBe(2);
+    cutInSameWave("reflective", "k14_a", 90); cutInSameWave("reflective", "k14_b", 90);
+    expect(c.objectiveCurrent).toBe(4); expect(c.objectiveCompleted).toBe(false);
+    advanceOneWave(); expect(c.objectiveWaveCount).toBe(1); expect(c.objectiveCompleted).toBe(false);
+    advanceOneWave(); expect(c.objectiveWaveCount).toBe(2); expect(c.objectiveCompleted).toBe(true); expect(c.objectiveCompletedBy).toBe("action");
+    c.update(0.01); expect(c.phase).toBe("armor_opportunity");
+  });
+
+  it("K15: 胸甲轮次门槛 — 单波多枚只计1次，必须3个顺序波次", () => {
+    toLeftThreat(); breakAndAdvance("k15_brk_l"); breakAndAdvance("k15_brk_r");
+    expect(c.minWavesRequired).toBe(3);
+    cutInSameWave("normal", "k15_a"); expect(c.mixedRoundCount).toBe(1);
+    cutInSameWave("normal", "k15_b"); expect(c.mixedRoundCount).toBe(1);
+    cutInSameWave("normal", "k15_c"); expect(c.mixedRoundCount).toBe(1);
+    advanceOneWave(); cutInSameWave("normal", "k15_d"); expect(c.mixedRoundCount).toBe(2);
+    advanceOneWave(); cutInSameWave("normal", "k15_e"); expect(c.mixedRoundCount).toBe(3);
+    expect(c.objectiveCompleted).toBe(false);
+    advanceOneWave(); expect(c.objectiveWaveCount).toBe(3); expect(c.objectiveCompleted).toBe(true);
+    c.update(0.01); expect(c.phase).toBe("armor_opportunity");
   });
 });
