@@ -7,6 +7,7 @@ import {
   type BossRuntimeState, type BarrageProjectile,
 } from "../config/bossChase";
 import { DESIGN_WIDTH } from "../config/constants";
+import { BLADE_MOMENTUM_CONFIG } from "../config/bladeMomentum";
 
 export interface BarrageHitEvent { kind: "barrage_hit"; id: string; position: Vec2; }
 export interface CoreHitEvent { kind: "core_hit"; position: Vec2; isBerserk: boolean; }
@@ -64,7 +65,7 @@ export class BossChaseController {
   private _elapsed = 0;
   private _random: () => number;
   private _energy = CHASE_CONFIG.bladeEconomy.initial;
-  private _maxEnergy = 100;
+  private _maxEnergy = BLADE_MOMENTUM_CONFIG.baseMax; // V0730001: 统一使用公共配置
   private _playerHp = 100;
   private _lastTeleportIdx = -1;
   private _lastSideSeq = 0;

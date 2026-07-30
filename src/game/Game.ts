@@ -12,7 +12,7 @@ import { RUN_BUFFS, RUN_BUFF_BY_ID, ROUTE_COLORS, ROUTE_NAMES, ROUTE_BUFFS, getN
 import { BOSS_CONFIG, getBossPhase } from "./config/bosses";
 import { ELITE_CONFIG, ELITE_KINDS } from "./config/elites";
 import { REWARD_CONFIG } from "./config/rewards";
-import { getBladeTier, getBladeTierName, getTierConfig, canSlash, consumeEnergyByTier, calculateMomentumRefund, getSubBladeCDReduction, recoverEnergy } from "./systems/bladeEnergySystem";
+import { getBladeTier, getTierConfig, calculateMomentumRefund, getSubBladeCDReduction, recoverEnergy } from "./systems/bladeEnergySystem";
 import { isSharpTurn, segmentHitCircle } from "./systems/collisionSystem";
 import { paperBurst, ringParticle, sparkBurst, glowParticle, explosionBurst, coreCollapseBurst } from "./systems/particleSystem";
 import { BossController } from "./systems/BossController";
@@ -468,7 +468,10 @@ export class Game {
       this.reactiveBladeMax = BLADE_MOMENTUM_CONFIG.baseMax + this.reactiveBladeRunModifiers.maxBonus;
       this.energy = Math.round(this.reactiveBladeMax * BLADE_MOMENTUM_CONFIG.initialRatio);
     } else if (this.gameMode === "chaseFlash") {
-      // Boss V1: 能量由 initializeChaseFlashMode 初始化，此处不覆写
+      // V0730001 fix: chaseFlash energy 必须在构造函数中设置
+      // BossChaseController._energy 初始为 50，但第一帧 cc.update 会用 this.energy 覆盖
+      this.energy = CHASE_CONFIG.bladeEconomy.initial;
+      this.bladeMomentumMax = BLADE_MOMENTUM_CONFIG.baseMax;
     } else {
       // V0730001: 统一刀势 — 普通第1关初始 40%（40/100）
       const isLevel1 = level.id === 1 && this.runContext.mode !== "freeBurst";
