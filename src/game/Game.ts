@@ -4690,7 +4690,7 @@ export class Game {
       if (fallback) { (quota as any)[fallback] -= 1; }
     }
     // V0730017: L1前三组统一main角色（同步速度+入场），保证教学刀路
-    if (this.isLogicalLevel1() && this._l1TutorialPhase !== "completed" && this.wavesSpawned <= 2) {
+    if (this.isLogicalLevel1() && this._l1TutorialPhase !== "completed" && this.wavesSpawned <= 3) {
       for (let i = 0; i < total; i++) { roles[i] = "main"; }
     }
     // 分布保护：第一只不为reserve，splitter不得为第一vanguard
@@ -4721,7 +4721,7 @@ export class Game {
       const baseDelay = role === "vanguard" ? vangTime : role === "main" ? mainTime : resvTime;
       const spread = role === "vanguard" ? vangSpread : role === "main" ? mainSpread : resvSpread;
       // V0730017: L1前三组同步入场，不用分批subSpawnQueue延迟
-      const time = (this.isLogicalLevel1() && this._l1TutorialPhase !== "completed" && this.wavesSpawned <= 2)
+      const time = (this.isLogicalLevel1() && this._l1TutorialPhase !== "completed" && this.wavesSpawned <= 3)
         ? this.elapsed
         : this.elapsed + baseDelay + Math.random() * spread;
       const entryOff = role === "vanguard" ? vangEntryOff : role === "main" ? mainEntryOff : resvEntryOff;
