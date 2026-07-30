@@ -4795,7 +4795,10 @@ export class Game {
       const role = roles[i];
       const baseDelay = role === "vanguard" ? vangTime : role === "main" ? mainTime : resvTime;
       const spread = role === "vanguard" ? vangSpread : role === "main" ? mainSpread : resvSpread;
-      const time = this.elapsed + baseDelay + Math.random() * spread;
+      // V0730012: L1前两组同步入场，不用分批subSpawnQueue延迟
+      const time = (this.isLogicalLevel1() && this._l1TutorialPhase !== "completed" && this.wavesSpawned <= 1)
+        ? this.elapsed
+        : this.elapsed + baseDelay + Math.random() * spread;
       const entryOff = role === "vanguard" ? vangEntryOff : role === "main" ? mainEntryOff : resvEntryOff;
       this.subSpawnQueue.push({
         time, kind: enemy.kind, x: enemy.x, speedMultiplier, yOffset: enemy.yOffset,
