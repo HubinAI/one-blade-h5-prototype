@@ -777,79 +777,119 @@ export class Game {
 
   /** 首局教学：使用固定密集波次代替随机 */
   private overrideWithScriptedTutorial() {
+    // V0730006: 分层波次 + 加速
     this.level.waves = [
       {
-        name: "第一波·横切",
+        name: "第一波·前层",
         delay: 0.2,
         spawnAt: 0.5,
         speedMultiplier: 1.0,
         enemies: [
-          { kind: "infantry", x: 44, count: 1 },
-          { kind: "infantry", x: 88, count: 1 },
-          { kind: "infantry", x: 132, count: 1 },
-          { kind: "infantry", x: 176, count: 1 },
-          { kind: "infantry", x: 220, count: 1 },
-          { kind: "infantry", x: 264, count: 1 },
-          { kind: "infantry", x: 308, count: 1 },
+          { kind: "infantry", x: 44, yOffset: 0, count: 1 },
+          { kind: "infantry", x: 132, yOffset: 0, count: 1 },
+          { kind: "infantry", x: 220, yOffset: 0, count: 1 },
+          { kind: "infantry", x: 308, yOffset: 0, count: 1 },
         ],
       },
       {
-        name: "第二波·双排",
+        name: "第一波·后层",
+        delay: 0.2,
+        spawnAt: 1.5,
+        speedMultiplier: 1.0,
+        enemies: [
+          { kind: "infantry", x: 88, yOffset: 84, count: 1 },
+          { kind: "infantry", x: 176, yOffset: 84, count: 1 },
+          { kind: "infantry", x: 264, yOffset: 84, count: 1 },
+        ],
+      },
+      {
+        name: "第二波·前层",
         delay: 0.2,
         spawnAt: 4.0,
         speedMultiplier: 1.0,
         enemies: [
-          { kind: "infantry", x: 44, count: 2 },
-          { kind: "infantry", x: 108, count: 2 },
-          { kind: "infantry", x: 172, count: 2 },
-          { kind: "infantry", x: 236, count: 2 },
-          { kind: "infantry", x: 300, count: 2 },
+          { kind: "infantry", x: 44, yOffset: 0, count: 2 },
+          { kind: "infantry", x: 172, yOffset: 0, count: 2 },
+          { kind: "infantry", x: 300, yOffset: 0, count: 2 },
         ],
       },
       {
-        name: "第三波·密集阵",
+        name: "第二波·后层",
         delay: 0.2,
-        spawnAt: 9.0,
+        spawnAt: 5.5,
         speedMultiplier: 1.0,
         enemies: [
-          { kind: "infantry", x: 44, count: 3 },
-          { kind: "infantry", x: 92, count: 3 },
-          { kind: "infantry", x: 140, count: 3 },
-          { kind: "infantry", x: 188, count: 3 },
-          { kind: "infantry", x: 236, count: 3 },
-          { kind: "infantry", x: 284, count: 3 },
-          { kind: "infantry", x: 332, count: 2 },
+          { kind: "infantry", x: 108, yOffset: 84, count: 2 },
+          { kind: "infantry", x: 236, yOffset: 84, count: 2 },
         ],
       },
       {
-        name: "第四波·火药连锁",
+        name: "第三波��前层",
         delay: 0.2,
-        spawnAt: 15.0,
+        spawnAt: 8.0,
         speedMultiplier: 1.0,
         enemies: [
-          { kind: "infantry", x: 44, count: 3 },
-          { kind: "infantry", x: 92, count: 2 },
-          { kind: "infantry", x: 120, count: 1 },
-          { kind: "infantry", x: 150, count: 3 },
-          { kind: "infantry", x: 188, count: 1 },
-          { kind: "infantry", x: 220, count: 3 },
-          { kind: "infantry", x: 268, count: 2 },
-          { kind: "infantry", x: 316, count: 2 },
+          { kind: "infantry", x: 44, yOffset: 0, count: 3 },
+          { kind: "infantry", x: 140, yOffset: 0, count: 3 },
+          { kind: "infantry", x: 236, yOffset: 0, count: 3 },
+          { kind: "infantry", x: 332, yOffset: 0, count: 2 },
         ],
       },
       {
-        name: "第五波·混合流",
+        name: "第三��·后层",
         delay: 0.2,
-        spawnAt: 20.0,
+        spawnAt: 9.5,
         speedMultiplier: 1.0,
         enemies: [
-          { kind: "infantry", x: 44, count: 2 },
-          { kind: "infantry", x: 92, count: 1 },
-          { kind: "infantry", x: 140, count: 3 },
-          { kind: "infantry", x: 188, count: 1 },
-          { kind: "infantry", x: 236, count: 2 },
-          { kind: "infantry", x: 284, count: 2 },
-          { kind: "infantry", x: 332, count: 1 },
+          { kind: "infantry", x: 92, yOffset: 84, count: 3 },
+          { kind: "infantry", x: 188, yOffset: 84, count: 3 },
+          { kind: "infantry", x: 284, yOffset: 84, count: 3 },
+        ],
+      },
+      {
+        name: "第四波·前层",
+        delay: 0.2,
+        spawnAt: 13.0,
+        speedMultiplier: 1.0,
+        enemies: [
+          { kind: "infantry", x: 44, yOffset: 0, count: 3 },
+          { kind: "infantry", x: 150, yOffset: 0, count: 3 },
+          { kind: "infantry", x: 220, yOffset: 0, count: 3 },
+          { kind: "infantry", x: 316, yOffset: 0, count: 2 },
+        ],
+      },
+      {
+        name: "第四波·后层",
+        delay: 0.2,
+        spawnAt: 14.5,
+        speedMultiplier: 1.0,
+        enemies: [
+          { kind: "infantry", x: 92, yOffset: 84, count: 2 },
+          { kind: "infantry", x: 188, yOffset: 84, count: 2 },
+          { kind: "infantry", x: 268, yOffset: 84, count: 2 },
+        ],
+      },
+      {
+        name: "第五波·前层",
+        delay: 0.2,
+        spawnAt: 17.0,
+        speedMultiplier: 1.0,
+        enemies: [
+          { kind: "infantry", x: 44, yOffset: 0, count: 2 },
+          { kind: "infantry", x: 140, yOffset: 0, count: 3 },
+          { kind: "infantry", x: 236, yOffset: 0, count: 2 },
+          { kind: "infantry", x: 332, yOffset: 0, count: 1 },
+        ],
+      },
+      {
+        name: "第五波·后层",
+        delay: 0.2,
+        spawnAt: 18.5,
+        speedMultiplier: 1.0,
+        enemies: [
+          { kind: "infantry", x: 92, yOffset: 84, count: 1 },
+          { kind: "infantry", x: 188, yOffset: 84, count: 1 },
+          { kind: "infantry", x: 284, yOffset: 84, count: 2 },
         ],
       },
     ];
@@ -4106,12 +4146,16 @@ export class Game {
       const dist = distanceToSegment(enemy, { x: s.x1, y: s.y1 }, { x: s.x2, y: s.y2 });
       if (dist < enemy.radius + 32) hits.push(enemy);
     }
-    const damage = stats.damageMultiplier * 0.8; // 蓄势副刀伤害略低
+    const baseDamage = stats.damageMultiplier * 0.8; // 蓄势副刀伤害略低
+    const isLevel1 = this.isLogicalLevel1();
     let killCount = 0;
     for (const target of hits) {
+      // V0730006: L1保证击杀infantry，最多斩5名
+      const l1KillCap = isLevel1 && killCount >= 5;
+      if (l1KillCap) break;
+      const damage = isLevel1 ? Math.max(baseDamage, target.maxHp) : baseDamage;
       target.hp -= Math.max(1, Math.ceil(damage));
       target.flash = 0.18;
-      // P2：副刀命中精英反馈
       if (target.kind === "elite") {
         this.triggerEliteHitFeedback(target);
         this.checkEliteLowHpFeedback(target);
@@ -4128,19 +4172,26 @@ export class Game {
 
     // 蓄势返还刀势
     if (killCount > 0) {
-      const refund = killCount * 1; // 每击杀1个 +1%
-      if (killCount >= 3) {
-        const extraRefund = 5; // 击杀3+ 额外 +5%
-        this.addText(s.x1 + (s.x2 - s.x1) / 2, s.y1 + (s.y2 - s.y1) / 2 - 16, `蓄势连斩 +${refund + extraRefund}%`, "#5bc0ff", 16, 1.0);
-        this.energy = clamp(this.energy + refund + extraRefund, 0, BALANCE.swordEnergy.max);
-        // P4.1A.10: 击杀5+ 只推进下一轮CD，不永久修改subBladeCooldowns
-        if (killCount >= 5 && s.bladeIdx < this.subBladeTimers.length) {
-          const cd = this.subBladeCooldowns[s.bladeIdx];
-          this.subBladeTimers[s.bladeIdx] = Math.max(this.subBladeTimers[s.bladeIdx], cd * 0.2);
-        }
+      if (isLevel1) {
+        // V0730006: L1副刀回势上限3，不再有击杀3+额外奖励
+        const refund = Math.min(killCount, 3);
+        this.energy = gainBladeMomentum(this.energy, this.bladeMomentumMax, refund);
+        this.addText(s.x1 + (s.x2 - s.x1) / 2, s.y1 + (s.y2 - s.y1) / 2 - 16, `副刀横扫 ×${killCount}`, "#5bc0ff", 16, 1.0);
       } else {
-        this.addText(s.x1 + (s.x2 - s.x1) / 2, s.y1 + (s.y2 - s.y1) / 2 - 16, `蓄势 +${refund}%`, "#5bc0ff", 14, 0.8);
-        this.energy = clamp(this.energy + refund, 0, BALANCE.swordEnergy.max);
+        const refund = killCount * 1; // 每击杀1个 +1%
+        if (killCount >= 3) {
+          const extraRefund = 5; // 击杀3+ 额外 +5%
+          this.addText(s.x1 + (s.x2 - s.x1) / 2, s.y1 + (s.y2 - s.y1) / 2 - 16, `蓄势连斩 +${refund + extraRefund}%`, "#5bc0ff", 16, 1.0);
+          this.energy = clamp(this.energy + refund + extraRefund, 0, BALANCE.swordEnergy.max);
+          // P4.1A.10: 击杀5+ 只推进下一轮CD，不永久修改subBladeCooldowns
+          if (killCount >= 5 && s.bladeIdx < this.subBladeTimers.length) {
+            const cd = this.subBladeCooldowns[s.bladeIdx];
+            this.subBladeTimers[s.bladeIdx] = Math.max(this.subBladeTimers[s.bladeIdx], cd * 0.2);
+          }
+        } else {
+          this.addText(s.x1 + (s.x2 - s.x1) / 2, s.y1 + (s.y2 - s.y1) / 2 - 16, `蓄势 +${refund}%`, "#5bc0ff", 14, 0.8);
+          this.energy = clamp(this.energy + refund, 0, BALANCE.swordEnergy.max);
+        }
       }
     }
   }
@@ -4149,7 +4200,18 @@ export class Game {
   /** P4.1A.13: 右刀严格单目标伤害 */
   private applyWeakpointDamageByTarget(target: Enemy, blade: Blade, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]) {
     if (!target.alive) return;
-    const damage = stats.damageMultiplier * 1.0;
+    const isLevel1 = this.isLogicalLevel1();
+    // V0730006: L1保证击杀infantry；精英打8-10%maxHP
+    let damage: number;
+    if (isLevel1) {
+      if (target.kind === "elite") {
+        damage = Math.ceil(target.maxHp * 0.09); // 9%精英HP
+      } else {
+        damage = Math.max(stats.damageMultiplier * 1.0, target.maxHp); // 保证击杀
+      }
+    } else {
+      damage = stats.damageMultiplier * 1.0;
+    }
     target.hp -= Math.max(1, Math.ceil(damage));
     target.flash = 0.2;
     if (target.kind === "elite") {
@@ -4160,6 +4222,10 @@ export class Game {
     if (killed) {
       this.handleDirectEnemyKilledBySystem(target, "sub_weakpoint");
       this.particles.push(...paperBurst(target, 6, ["#ff6a33", "#ffd35a"]));
+      // V0730006: L1击杀反馈
+      if (isLevel1) {
+        this.addText(target.x, target.y - 28, "破点斩杀", "#ff6a33", 17, 1.2);
+      }
     }
     this.particles.push(ringParticle({ x: target.x, y: target.y }, "#b58cff", 22));
     if (blade.affix) this.applySubAffixEffect(blade.affix, target, killed, 'weakpoint_chase');
@@ -4168,9 +4234,14 @@ export class Game {
       this.weakpointMarks.set(target.id, 2.0);
       this.addText(target.x, target.y - 20, "+ 破绽", "#ff6a33", 16, 1.2);
     }
-    if (killed && highValue.includes(target.kind)) {
-      this.energy = clamp(this.energy + 5, 0, BALANCE.swordEnergy.max);
-      this.addText(target.x, target.y - 36, "+5%刀势", "#ffd35a", 14, 0.8);
+    // V0730006: L1回势上限2，删除+5%刀势
+    if (killed) {
+      if (isLevel1) {
+        this.energy = gainBladeMomentum(this.energy, this.bladeMomentumMax, Math.min(2, highValue.includes(target.kind) ? 2 : 1));
+      } else if (highValue.includes(target.kind)) {
+        this.energy = clamp(this.energy + 5, 0, BALANCE.swordEnergy.max);
+        this.addText(target.x, target.y - 36, "+5%刀势", "#ffd35a", 14, 0.8);
+      }
     }
   }
 
