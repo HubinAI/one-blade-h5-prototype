@@ -1789,6 +1789,7 @@ export class Game {
       oilTriggeredIds: new Set(),
       hasOil: slashHasOil,
       kills: 0,
+      directMainKills: 0,
       chain: 0,
       active: true,
       // P4.4B-R3 P1-A: Reactive 模式起刀时锁定连续刀势视觉快照。
@@ -1990,10 +1991,10 @@ export class Game {
     }
 
     this.stats.maxSingleBlade = Math.max(this.stats.maxSingleBlade, trail.kills);
-    // V0730008: 拆开主刀直接击杀和副刀击杀统计
-    this.stats.maxDirectMainSlashKills = Math.max(this.stats.maxDirectMainSlashKills, trail.kills);
-    // V0730009: L1有效主刀计数（≥3直接击杀才算一次有效主刀）
-    if (this.isLogicalLevel1() && trail.kills >= 3) {
+    // V0730009: 拆开主刀直接击杀（不含连锁/爆炸）和副刀击杀统计
+    this.stats.maxDirectMainSlashKills = Math.max(this.stats.maxDirectMainSlashKills, trail.directMainKills);
+    // V0730009: L1有效主刀计数（≥3主刀直接击杀才算一次有效主刀）
+    if (this.isLogicalLevel1() && trail.directMainKills >= 3) {
       this._l1MainSlashCount++;
     }
     this.stats.maxChain = Math.max(this.stats.maxChain, trail.chain);
@@ -3063,6 +3064,7 @@ export class Game {
 
     enemy.alive = false;
     trail.kills += 1;
+    if (!chainKill) trail.directMainKills += 1;
     if (chainKill) trail.chain += 1;
     this.stats.kills += 1;
     const stage = SWORD_STAGE_BY_ID[trail.tier];
@@ -5531,6 +5533,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       levelId: this.level.id,
       kills: this.stats.kills,
       maxSingleBlade: this.stats.maxSingleBlade,
+      maxDirectMainSlashKills: this.stats.maxDirectMainSlashKills,
+      subBladeKills: this.stats.subBladeKills,
       maxChain: this.stats.maxChain,
       oneBladeBreaks: this.stats.oneBladeBreaks,
       coreCollapseCount: this.stats.coreCollapses,
@@ -5547,6 +5551,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       score: this.score,
       kills: this.stats.kills,
       maxSingleBlade: this.stats.maxSingleBlade,
+      maxDirectMainSlashKills: this.stats.maxDirectMainSlashKills,
+      subBladeKills: this.stats.subBladeKills,
       maxChain: this.stats.maxChain,
       oneBladeBreaks: this.stats.oneBladeBreaks,
       triggeredOneBlade,

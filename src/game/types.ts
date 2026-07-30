@@ -308,6 +308,8 @@ export type SlashTrail = {
   oilTriggeredIds: Set<string>;
   hasOil: boolean;
   kills: number;
+  /** V0730009: 主刀直接击杀（不含爆炸/连锁/副刀） */
+  directMainKills: number;
   chain: number;
   active: boolean;
   /** P4.4B-R3 P1-A: Reactive 模式起刀时的连续刀势视觉快照。
@@ -349,6 +351,10 @@ export type FloatingText = Vec2 & {
 export type BattleStats = {
   kills: number;
   maxSingleBlade: number;
+  /** V0730009: 主刀直接击杀（不含连锁） */
+  maxDirectMainSlashKills: number;
+  /** V0730009: 副刀总击杀 */
+  subBladeKills: number;
   maxChain: number;
   oneBladeBreaks: number;
   coreHits: number;
@@ -371,9 +377,6 @@ export type BattleStats = {
   /** 本局击杀的精英/Boss（供图鉴追踪） */
   killedElites: EliteKind[];
   killedBoss: BossId | null;
-  /** V0730008: L1拆分击杀统计 */
-  maxDirectMainSlashKills: number;
-  subBladeKills: number;
 };
 
 export type RunRewards = {
@@ -410,6 +413,10 @@ export type BattleResult = {
   score: number;
   kills: number;
   maxSingleBlade: number;
+  /** V0730009: 主刀直接击杀（不含连锁） */
+  maxDirectMainSlashKills: number;
+  /** V0730009: 副刀总击杀 */
+  subBladeKills: number;
   maxChain: number;
   oneBladeBreaks: number;
   triggeredOneBlade: boolean;

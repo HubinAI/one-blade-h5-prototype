@@ -106,8 +106,8 @@ export function ResultScreen({
       {/* 核心数据 */}
       <div className="result-stats-section" onClick={stop}>
         <div className="result-stat">
-          <span className="result-stat-label">最大单刀击杀</span>
-          <span className="result-stat-value">{result.maxSingleBlade}</span>
+          <span className="result-stat-label">主刀直接最多</span>
+          <span className="result-stat-value">{result.maxDirectMainSlashKills ?? result.maxSingleBlade}</span>
         </div>
         <div className="result-stat">
           <span className="result-stat-label">最大连锁</span>

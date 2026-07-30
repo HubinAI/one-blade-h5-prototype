@@ -81,6 +81,8 @@ export type BattleRewardInput = {
   levelId: number;
   kills: number;
   maxSingleBlade: number;
+  maxDirectMainSlashKills?: number;
+  subBladeKills?: number;
   maxChain: number;
   oneBladeBreaks: number;
   coreCollapseCount: number;
@@ -446,6 +448,8 @@ export function evaluateRating(input: {
   win: boolean;
   kills: number;
   maxSingleBlade: number;
+  maxDirectMainSlashKills?: number;
+  subBladeKills?: number;
   maxChain: number;
   triggeredOneBlade: boolean;
   coreCollapseCount: number;
