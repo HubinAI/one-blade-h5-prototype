@@ -41,9 +41,21 @@ export const LEVELS: LevelConfig[] = [
     eliteSpawnAt: 25,
     eliteKind: "fireRing",
     waves: [
-      // V0730013: 前两组5人紧密阵型（相邻车道，一刀可覆盖）
-      wave("爽感启动·前", 0.5, row("infantry", [2, 3, 4, 5, 6])),
-      wave("爽感启动·后", 2.5, row("infantry", [1, 2, 3, 4, 5], 3)),
+      // V0730014: 教学阵型 — 专用固定坐标（180px跨度，同深度，一刀可覆盖）
+      wave("爽感启动·前", 0.5, [
+        { kind: "infantry", x: 100, yOffset: 0 },
+        { kind: "infantry", x: 145, yOffset: 0 },
+        { kind: "infantry", x: 190, yOffset: 0 },
+        { kind: "infantry", x: 235, yOffset: 0 },
+        { kind: "infantry", x: 280, yOffset: 0 },
+      ]),
+      wave("爽感启动·后", 2.5, [
+        { kind: "infantry", x: 100, yOffset: 126 },
+        { kind: "infantry", x: 145, yOffset: 126 },
+        { kind: "infantry", x: 190, yOffset: 126 },
+        { kind: "infantry", x: 235, yOffset: 126 },
+        { kind: "infantry", x: 280, yOffset: 126 },
+      ]),
       wave("斜排练刀·前", 7, row("infantry", [0, 1, 3, 5])),
       wave("斜排练刀·后", 8.5, row("infantry", [2, 4, 6, 0], 3)),
       wave("第一军令·前", 16, row("infantry", [0, 2, 4, 6, 1])),

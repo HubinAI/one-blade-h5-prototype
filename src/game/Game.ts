@@ -312,6 +312,9 @@ export class Game {
   private _l1TutorialPhase: "group1_active" | "wait_group2" | "group2_active" | "completed" = "group1_active";
   /** V0730011: 教学完成后波次时间重基准 */
   private _l1PostTutorialBase = 0;
+  /** V0730014: 教学组敌人ID集合 */
+  private _tutorialGroupEnemyIds = new Set<string>();
+  private _tutorialGroupReady = false;
 
   // ---- 副刀自动AI ----
   private subBlades: Blade[] = [];
@@ -736,6 +739,8 @@ export class Game {
     this._l1Group1ClearAt = 0;
     this._l1TutorialPhase = "group1_active";
     this._l1PostTutorialBase = 0;
+    this._tutorialGroupEnemyIds = new Set();
+    this._tutorialGroupReady = false;
 
     // 首局教学检测（Boss模式不触发）
     this.isFirstRun = (this.gameMode !== "boss" && this.gameMode !== "chaseFlash") && this.isLogicalLevel1() && !window.localStorage.getItem("one_blade_first_run_done");
@@ -2291,6 +2296,13 @@ export class Game {
     if (!this.isLogicalLevel1()) return;
     const alive = this.enemies.filter(e => e.alive && e.kind === "infantry").length;
     const queueEmpty = this.subSpawnQueue.length === 0;
+
+    // V0730014: groupReady — 教学组5人全部到场（同步入场+main角色保证同时到达）
+    if (!this._tutorialGroupReady && this._tutorialGroupEnemyIds.size > 0 && queueEmpty) {
+      const groupAlive = this.enemies.filter(e => this._tutorialGroupEnemyIds.has(e.id) && e.alive).length;
+      if (groupAlive >= 5) this._tutorialGroupReady = true;
+    }
+
     switch (this._l1TutorialPhase) {
       case "group1_active":
         if (this.wavesSpawned >= 1 && alive === 0 && queueEmpty) {
@@ -2734,6 +2746,8 @@ export class Game {
   }
 
   private handleEnemyHit(enemy: Enemy, trail: SlashTrail) {
+    // V0730014: 教学组ready前不接受主刀伤害
+    if (this._tutorialGroupEnemyIds.has(enemy.id) && !this._tutorialGroupReady) return;
     // P4.4A.2: 防御性断言——thunderGeneral 不得进入普通伤害链路
     if (enemy.bossId === "thunderGeneral") {
       throw new Error("ThunderGeneral must not enter normal damage pipeline");
@@ -4899,6 +4913,10 @@ export class Game {
       enemy.spawnedWithEvent = this._currentWaveEvent;
     }
     this.enemies.push(enemy);
+    // V0730014: 标记教学组敌人用于groupReady检测
+    if (this.isLogicalLevel1() && this._l1TutorialPhase !== "completed") {
+      this._tutorialGroupEnemyIds.add(enemy.id);
+    }
     this.discoveredEnemies.add(item.kind as any);
     this.particles.push(glowParticle({ x: item.x, y: spawnY }, "#5c4a3a", 10, 16));
     // P4.3A.3: 记录敌人来源
