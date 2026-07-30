@@ -308,6 +308,8 @@ export class Game {
   private _l1Group1Cleared = false;
   private _l1Group2Spawned = false;
   private _l1Group1ClearAt = 0;
+  /** V0730010: 教学状态机: group1_active → wait_group2 → group2_active → completed */
+  private _l1TutorialPhase: "group1_active" | "wait_group2" | "group2_active" | "completed" = "group1_active";
 
   // ---- 副刀自动AI ----
   private subBlades: Blade[] = [];
@@ -730,6 +732,7 @@ export class Game {
     this._l1Group1Cleared = false;
     this._l1Group2Spawned = false;
     this._l1Group1ClearAt = 0;
+    this._l1TutorialPhase = "group1_active";
 
     // 首局教学检测（Boss模式不触发）
     this.isFirstRun = (this.gameMode !== "boss" && this.gameMode !== "chaseFlash") && this.isLogicalLevel1() && !window.localStorage.getItem("one_blade_first_run_done");
@@ -2281,20 +2284,22 @@ export class Game {
 
   /** V0730009: L1前两组事件驱动 —
    *  第一组0.5s生成 → 清除后0.8s生成第二组 → 后续波次暂停 */
-  private _updateL1TutorialGroups(): void {
+  private   _updateL1TutorialGroups(): void {
     if (!this.isLogicalLevel1()) return;
-    if (!this._l1Group1Cleared && this.wavesSpawned >= 1) {
-      const alive = this.enemies.filter(e => e.alive && e.kind === "infantry").length;
-      if (alive === 0 && this.subSpawnQueue.length === 0) {
-        this._l1Group1Cleared = true;
-        this._l1Group1ClearAt = this.elapsed;
-      }
-    }
-    if (this._l1Group1Cleared && !this._l1Group2Spawned && this.elapsed >= this._l1Group1ClearAt + 0.8) {
-      this._l1Group2Spawned = true;
-      if (this.wavesSpawned <= 1) {
-        this.spawnCurrentWave(this.level.waves[1]);
-      }
+    const alive = this.enemies.filter(e => e.alive && e.kind === "infantry").length;
+    const queueEmpty = this.subSpawnQueue.length === 0;
+    switch (this._l1TutorialPhase) {
+      case "group1_active":
+        if (this.wavesSpawned >= 1 && alive === 0 && queueEmpty) {
+          this._l1TutorialPhase = "wait_group2"; this._l1Group1ClearAt = this.elapsed; }
+        break;
+      case "wait_group2":
+        if (this.elapsed >= this._l1Group1ClearAt + 0.8) {
+          this._l1TutorialPhase = "group2_active"; this.spawnCurrentWave(this.level.waves[1]); }
+        break;
+      case "group2_active":
+        if (alive === 0 && queueEmpty) { this._l1TutorialPhase = "completed"; this._l1Group1ClearAt = this.elapsed; }
+        break;
     }
   }
 
@@ -4528,8 +4533,18 @@ export class Game {
   private updateWaves(dt: number) {
     // P4.4A.1-R3: Boss模式阻断所有波次
     if (this.gameMode === "boss") return;
-    // V0730009: L1第二组完成前暂停波次2+
-    if (this.isLogicalLevel1() && this._l1Group1Cleared && !this._l1Group2Spawned && this.wavesSpawned >= 1) return;
+    // V0730010: L1教学状态机控制波次
+    if (this.isLogicalLevel1()) {
+      const phase = this._l1TutorialPhase;
+      if (phase === "group1_active" || phase === "wait_group2") {
+        if (this.wavesSpawned >= 1) return;
+      } else if (phase === "group2_active") {
+        if (this.wavesSpawned >= 2) return;
+      } else if (phase === "completed" && this.wavesSpawned === 2) {
+        // 第二组刚完成，至少等1秒再生成后续波次
+        if (this.elapsed < this._l1Group1ClearAt + 1.0) return;
+      }
+    }
     if (this.wavesSpawned >= this.level.waves.length) return;
     // 军令阶段停止普通波提前推进
     if (this.edictRewardState === "active" || this.battlePhase === "edict_burst") return;
