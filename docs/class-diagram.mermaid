@@ -1,0 +1,108 @@
+classDiagram
+    class BossReactiveController {
+        -_phase: BossPhaseState
+        -_elapsed: number
+        -phaseTimer: number
+        -_objectiveTimeout: number
+        -_objectiveType: ObjectiveType | null
+        -_objectiveCurrent: number
+        -_objectiveTarget: number
+        -_objectiveCompleted: boolean
+        -_objectiveCompletedBy: "action" | "timeout" | null
+        -_perfectReflectCount: number
+        -_mixedRoundCount: number
+        -_currentMixedRoundHandled: boolean
+        -_armorBreakTimestamps: number[]
+        -_bridgeTimestamp: number | null
+        -_inputLockedSeconds: number
+        +get objectiveType(): ObjectiveType | null
+        +get objectiveCurrent(): number
+        +get objectiveTarget(): number
+        +get objectiveCompleted(): boolean
+        +get objectiveElapsed(): number
+        +get perfectReflectCount(): number
+        +get mixedRoundCount(): number
+        +get bossElapsed(): number
+        +get inputLockedSeconds(): number
+        +get armorBreakTimestamps(): number[]
+        +get bridgeTimestamp(): number | null
+        +update(dt: number): void
+        -updateArmorThreat(dt: number): void
+        -updateArmorOpportunity(dt: number): void
+        -transitionToThreat(): void
+        -transitionToOpportunity(): void
+        -initObjective(): void
+        -checkObjectiveProgress(): void
+        -checkLeftShoulderProgress(): void
+        -checkRightShoulderProgress(): void
+        -checkChestProgress(): void
+        -spawnProjectileForCurrentArmor(): void
+        +resolveGeometry(geometry): ReactiveCollisionEvent[]
+        +getReactiveSnapshot(): ReactiveSnapshot
+        +reset(): void
+    }
+
+    class ReactiveArmorTarget {
+        +id: number
+        +name: string
+        +relX: number
+        +relY: number
+        +radiusX: number
+        +radiusY: number
+        +active: boolean
+        +broken: boolean
+        +durability: number
+        +maxDurability: number
+        +crackProgress: number
+        +animTimer: number
+        +projectileKind: ProjectileKind
+        +bossAction: "sweep" | "reflect" | "mixed"
+    }
+
+    class ArmorObjectiveConfig {
+        +normalCutsRequired: number
+        +reflectsRequired: number
+        +perfectReflectRatio: number
+        +timeout: number
+    }
+
+    class ChestObjectiveConfig {
+        +mixedRoundsRequired: number
+        +timeout: number
+    }
+
+    class ArmorObjectivesConfig {
+        +left: ArmorObjectiveConfig
+        +right: ArmorObjectiveConfig
+        +chest: ChestObjectiveConfig
+    }
+
+    class ReactiveSnapshot {
+        +phase: BossPhaseState
+        +armorProgress: string
+        +activeArmorIndex: number
+        +armorDurability: number[]
+        +inputLocked: boolean
+        +bridgeTriggered: boolean
+        +projectileCount: number
+        +energy: number
+        +playerHp: PlayerHpState
+        +currentBladeEffect: BladeContinuousEffect
+        +objectiveType: ObjectiveType | null
+        +objectiveCurrent: number
+        +objectiveTarget: number
+        +objectiveCompleted: boolean
+        +objectiveCompletedBy: "action" | "timeout" | null
+        +objectiveElapsed: number
+        +perfectReflectCount: number
+        +mixedRoundCount: number
+        +bossElapsed: number
+        +inputLockedSeconds: number
+        +armorBreakTimestamps: number[]
+        +bridgeTimestamp: number | null
+        +successTimestamp: number | null
+    }
+
+    BossReactiveController --> ReactiveArmorTarget : manages
+    BossReactiveController --> ArmorObjectivesConfig : reads
+    BossReactiveController --> ReactiveSnapshot : produces

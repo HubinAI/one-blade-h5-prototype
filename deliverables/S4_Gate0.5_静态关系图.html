@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>S4 Gate0.5 — 阵势压境 静态关系图（修正版）</title>
+<style>
+  :root {
+    --bg: #080812;
+    --card: #10101d;
+    --border: #1e1e35;
+    --text: #c5c5d8;
+    --gold: #ffd35a;
+    --blue: #5bc0ff;
+    --red: #ff4040;
+    --armor: #b02020;
+    --dim: #3a3a4a;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:'Microsoft YaHei',-apple-system,sans-serif; padding:12px 10px; }
+  h1 { color:var(--gold); font-size:16px; text-align:center; margin:0 0 4px; }
+  h2 { color:#d7bde2; font-size:14px; text-align:center; margin:4px 0 16px; font-weight:400; }
+  .tabs { display:flex; justify-content:center; gap:6px; margin:0 0 12px; flex-wrap:wrap; }
+  .tab { padding:6px 14px; border-radius:6px; cursor:pointer; font-size:12px; border:1px solid var(--border); background:var(--card); color:var(--text); transition:.15s; }
+  .tab.active { background:#2a2040; border-color:var(--gold); color:var(--gold); }
+  .view { display:none; }
+  .view.active { display:block; }
+  .panel-row { display:flex; gap:18px; justify-content:center; flex-wrap:wrap; }
+  .panel-card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px 10px 4px; }
+  .panel-card h3 { margin:0 0 6px; font-size:12px; text-align:center; color:#bfa0d0; }
+  .panel-card canvas { display:block; border-radius:4px; background:#080812; }
+  .overview-row { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
+  .legend { margin-top:16px; padding:12px 16px; background:var(--card); border:1px solid var(--border); border-radius:8px; display:flex; flex-wrap:wrap; gap:14px; justify-content:center; font-size:11px; }
+  .legend .item { display:flex; align-items:center; gap:5px; white-space:nowrap; }
+  .legend .swatch { display:inline-block; width:14px; height:14px; border-radius:3px; }
+  .legend .line-sample { display:inline-block; width:22px; height:3px; border-radius:2px; }
+  .footer { text-align:center; color:var(--dim); font-size:10px; margin-top:12px; }
+</style>
+</head>
+<body>
+<h1>S4 断链破阵 · Gate 0.5</h1>
+<h2>去说明化 / 结构优先 / 结果导向（静态关系图修正版）</h2>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('panels')">三张阵势图</div>
+  <div class="tab" onclick="switchTab('overview')">总览拼图</div>
+  <div class="tab" onclick="switchTab('nolabel')">去说明化验收</div>
+</div>
+
+<!-- =========================================================== -->
+<!-- VIEW 1: 三张面板 -->
+<!-- =========================================================== -->
+<div id="view-panels" class="view active">
+  <div class="panel-row">
+    <div class="panel-card"><h3>图1 · 阶段1（0-6s）— 切关系，不是切单体</h3><canvas id="p1" width="213" height="456"></canvas></div>
+    <div class="panel-card"><h3>图2 · 阶段2（5-13s）— 结构不同，解法不同</h3><canvas id="p2" width="213" height="456"></canvas></div>
+    <div class="panel-card"><h3>图3 · 阶段3（11-25s）— 优先级冲突</h3><canvas id="p3" width="213" height="456"></canvas></div>
+  </div>
+</div>
+
+<!-- VIEW 2: 总览拼图 -->
+<div id="view-overview" class="view">
+  <div class="overview-row">
+    <div><h3 style="font-size:11px;margin:0 0 4px;color:#bfa0d0;">阶段1 · 教学阵</h3><canvas id="ov1" width="213" height="456"></canvas></div>
+    <div><h3 style="font-size:11px;margin:0 0 4px;color:#bfa0d0;">阶段2 · 甲链阵</h3><canvas id="ov2" width="213" height="456"></canvas></div>
+    <div><h3 style="font-size:11px;margin:0 0 4px;color:#bfa0d0;">阶段3 · 叠压阵</h3><canvas id="ov3" width="213" height="456"></canvas></div>
+  </div>
+</div>
+
+<!-- VIEW 3: 去说明化 -->
+<div id="view-nolabel" class="view">
+  <div class="panel-row">
+    <canvas id="nl1" width="213" height="456" style="border-radius:4px;"></canvas>
+    <canvas id="nl2" width="213" height="456" style="border-radius:4px;"></canvas>
+    <canvas id="nl3" width="213" height="456" style="border-radius:4px;"></canvas>
+  </div>
+  <p style="text-align:center;font-size:10px;color:var(--dim);margin-top:8px;">去说明化验收：只看结构本身是否能传达关系</p>
+</div>
+
+<div class="legend">
+  <div class="item"><span class="swatch" style="background:#ffd35a;box-shadow:0 0 4px #ffd35a"></span> 金色命核</div>
+  <div class="item"><span class="swatch" style="background:#5bc0ff;box-shadow:0 0 4px #5bc0ff"></span> 蓝色可切关节</div>
+  <div class="item"><span class="swatch" style="background:#ff4040;box-shadow:0 0 4px #ff4040"></span> 红色威胁刃</div>
+  <div class="item"><span class="line-sample" style="background:#ffd35a;height:4px"></span> Boss主链</div>
+  <div class="item"><span class="line-sample" style="background:#5bc0ff;height:3px"></span> 可切分支</div>
+  <div class="item"><span class="line-sample" style="background:#b02020;height:5px;border-radius:3px"></span> 甲链/不可切</div>
+  <div class="item"><span class="line-sample" style="background:rgba(255,255,255,.3);height:1.5px;border:1px dashed rgba(255,255,255,.2)"></span> 候选刀路</div>
+  <div class="item"><span style="color:#666">◽</span> 旧残阵</div>
+</div>
+<div class="footer">S4 Gate0.5 · 去说明化蓝图 v2</div>
+
+<script>
+// ====== 共享常量 ======
+const DW=213, DH=456;
+
+// ====== 四层渲染模型 ======
+function renderBaseLayer(ctx, bgType='normal') {
+  // 背景
+  const bg = ctx.createLinearGradient(0,0,0,DH);
+  if (bgType==='dark') { bg.addColorStop(0,'#06040c'); bg.addColorStop(0.4,'#0d0818'); bg.addColorStop(0.7,'#0a0a14'); bg.addColorStop(1,'#06060e'); }
+  else { bg.addColorStop(0,'#0a0612'); bg.addColorStop(0.35,'#100b1e'); bg.addColorStop(0.65,'#0e0c16'); bg.addColorStop(1,'#08080e'); }
+  ctx.fillStyle=bg; ctx.fillRect(0,0,DW,DH);
+
+  // Boss区
+  ctx.fillStyle='rgba(30,10,50,0.25)'; ctx.fillRect(0,0,DW,110);
+  ctx.strokeStyle='rgba(80,40,110,0.15)'; ctx.setLineDash([5,10]); ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(0,110); ctx.lineTo(DW,110); ctx.stroke(); ctx.setLineDash([]);
+
+  // 防线 — 警告色
+  const dy=345;
+  ctx.strokeStyle='rgba(255,45,20,0.3)'; ctx.setLineDash([8,5]); ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(15,dy); ctx.lineTo(DW-15,dy); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle='rgba(255,30,10,0.04)'; ctx.fillRect(0,dy-10,DW,22);
+}
+
+function drawBoss(ctx, bx, by) {
+  ctx.fillStyle='#0a0415'; ctx.shadowColor='rgba(40,10,60,0.5)'; ctx.shadowBlur=14;
+  ctx.beginPath(); ctx.roundRect(bx-20,by-32,40,56,7); ctx.fill(); ctx.shadowBlur=0;
+
+  // 右肩/武器铰接
+  ctx.fillStyle='#1c0830';
+  ctx.beginPath(); ctx.roundRect(bx+18,by-22,16,32,5); ctx.fill();
+
+  // 核心铰点
+  ctx.fillStyle='rgba(200,140,255,0.35)';
+  ctx.beginPath(); ctx.arc(bx+26,by-28,6,0,Math.PI*2); ctx.fill();
+}
+
+function drawPlayer(ctx, px, py) {
+  ctx.fillStyle='#1a1a2e'; ctx.beginPath(); ctx.roundRect(px-14,py-10,28,28,7); ctx.fill();
+  ctx.fillStyle='rgba(91,192,255,0.3)'; ctx.beginPath(); ctx.arc(px,py-15,7,0,Math.PI*2); ctx.fill();
+}
+
+// ====== 五种视觉语法（严格区分） ======
+
+// 1. Boss主链：粗金，中轴感
+function drawBossTether(ctx, x1,y1, x2,y2, active, width) {
+  ctx.save();
+  ctx.strokeStyle=active?'rgba(255,211,90,0.7)':'rgba(180,140,60,0.3)';
+  ctx.lineWidth=width||4;
+  ctx.shadowColor=active?'rgba(255,211,90,0.3)':'rgba(0,0,0,0)';
+  ctx.shadowBlur=active?8:0;
+  if (!active) ctx.setLineDash([6,6]);
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  ctx.setLineDash([]); ctx.shadowBlur=0;
+  ctx.restore();
+}
+
+// 2. 可切分支：蓝/白，较粗
+function drawCuttableBranch(ctx, x1,y1, x2,y2, active) {
+  ctx.save();
+  ctx.strokeStyle=active?'rgba(91,192,255,0.55)':'rgba(60,100,130,0.25)';
+  ctx.lineWidth=active?3:1.5;
+  if (!active) ctx.setLineDash([4,4]);
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+// 3. 甲链：粗黑红，节状锁定
+function drawArmorChain(ctx, pts, active) {
+  if (!pts||pts.length<2) return;
+  ctx.save();
+  const alpha=active?0.55:0.2;
+  // 粗底
+  ctx.strokeStyle=`rgba(180,20,20,${alpha})`;
+  ctx.lineWidth=active?5:2;
+  ctx.shadowColor=`rgba(200,30,30,${alpha*0.5})`;
+  ctx.shadowBlur=active?6:2;
+  ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
+  for (let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x,pts[i].y);
+  ctx.stroke(); ctx.shadowBlur=0;
+
+  // 节状标记
+  for (let i=0;i<pts.length;i++) {
+    ctx.fillStyle=`rgba(200,30,30,${alpha*0.8})`;
+    ctx.beginPath(); ctx.roundRect(pts[i].x-4,pts[i].y-3,8,6,2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// 4. 红威胁刃（三角 + 归属标记）
+function drawThreat(ctx, x, y, r, urgent, grayed) {
+  ctx.save(); ctx.translate(x,y);
+  const alpha=grayed?0.2:(urgent?0.9:0.7);
+  ctx.rotate(Math.PI);
+  ctx.beginPath(); ctx.moveTo(0,-r); ctx.lineTo(-r*0.8,r*0.5); ctx.lineTo(r*0.8,r*0.5); ctx.closePath();
+  ctx.fillStyle=grayed?'rgba(100,40,30,0.3)':(urgent?`rgba(255,30,15,${alpha})`:`rgba(200,40,25,${alpha})`);
+  ctx.fill();
+  ctx.strokeStyle=grayed?'rgba(150,80,70,0.3)':(urgent?'#ff2020':'#ff4040');
+  ctx.lineWidth=urgent&&!grayed?2.5:1.5;
+  ctx.stroke();
+  if (urgent&&!grayed) { ctx.shadowColor='#ff2020'; ctx.shadowBlur=10; ctx.fill(); ctx.shadowBlur=0; }
+  // 灰化打叉
+  if (grayed) {
+    ctx.rotate(Math.PI); ctx.strokeStyle='rgba(255,255,255,0.3)'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(-4,-4); ctx.lineTo(4,4); ctx.moveTo(4,-4); ctx.lineTo(-4,4); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// 5. 蓝关节（+十字）
+function drawJoint(ctx, x, y, r, highlighted, grayed) {
+  ctx.save(); ctx.translate(x,y);
+  const alpha=grayed?0.2:0.7;
+  ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2);
+  ctx.fillStyle=highlighted?'rgba(96,200,255,0.9)':(grayed?'rgba(40,80,120,0.3)':`rgba(80,160,240,${alpha})`);
+  ctx.fill();
+  ctx.strokeStyle=highlighted?'#a0e0ff':(grayed?'rgba(80,120,160,0.3)':'rgba(130,210,255,0.6)');
+  ctx.lineWidth=2; ctx.stroke();
+  if (!grayed) {
+    ctx.strokeStyle=highlighted?'rgba(200,240,255,0.6)':'rgba(180,220,255,0.4)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(-r*0.4,0); ctx.lineTo(r*0.4,0); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,-r*0.4); ctx.lineTo(0,r*0.4); ctx.stroke();
+    if (highlighted) { ctx.shadowColor='#5bc0ff'; ctx.shadowBlur=10; ctx.stroke(); ctx.shadowBlur=0; }
+  } else { ctx.strokeStyle='rgba(255,255,255,0.2)'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(-3,-3); ctx.lineTo(3,3); ctx.moveTo(3,-3); ctx.lineTo(-3,3); ctx.stroke(); }
+  ctx.restore();
+}
+
+// 命核
+function drawCore(ctx, x, y, r, active, highlighted) {
+  ctx.save(); ctx.translate(x,y);
+  const alpha=active?0.75:0.25;
+  ctx.beginPath(); ctx.moveTo(0,-r); ctx.lineTo(r*0.7,0); ctx.lineTo(0,r); ctx.lineTo(-r*0.7,0); ctx.closePath();
+  ctx.fillStyle=highlighted?'rgba(255,220,60,0.95)':(active?`rgba(255,200,40,${alpha})`:'rgba(120,100,40,0.3)');
+  ctx.fill();
+  ctx.strokeStyle=highlighted?'#ffe060':(active?'#ffd35a':'rgba(150,130,60,0.3)');
+  ctx.lineWidth=2.5; ctx.stroke();
+  ctx.shadowColor=highlighted?'#ffd35a':(active?'rgba(255,211,90,0.4)':'rgba(0,0,0,0)');
+  ctx.shadowBlur=highlighted?14:6;
+  ctx.stroke(); ctx.shadowBlur=0;
+  ctx.restore();
+}
+
+// 阵势外轮廓（优先感知）
+function drawHull(ctx, pts, alpha, dashed) {
+  if (!pts||pts.length<3) return;
+  ctx.save();
+  ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
+  for (let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x,pts[i].y);
+  ctx.closePath();
+  ctx.fillStyle=`rgba(45,15,65,${0.14*alpha})`; ctx.fill();
+  ctx.strokeStyle=`rgba(90,50,130,${0.32*alpha})`;
+  ctx.lineWidth=2.5;
+  if (dashed) ctx.setLineDash([6,4]);
+  ctx.stroke(); ctx.setLineDash([]);
+  ctx.restore();
+}
+
+// ====== 候选刀路 + 后果 ======
+function drawCandidatePath(ctx, pts, color, label, dashed) {
+  if (!pts||pts.length<2) return;
+  ctx.save();
+  ctx.strokeStyle=color; ctx.lineWidth=1.8;
+  if (dashed) ctx.setLineDash([5,4]);
+  ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
+  for (let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x,pts[i].y);
+  ctx.stroke(); ctx.setLineDash([]);
+
+  // 箭头
+  const last=pts[pts.length-1], prev=pts[pts.length-2];
+  const ang=Math.atan2(last.y-prev.y,last.x-prev.x);
+  ctx.beginPath(); ctx.moveTo(last.x,last.y);
+  ctx.lineTo(last.x-Math.cos(ang-0.4)*9,last.y-Math.sin(ang-0.4)*9);
+  ctx.lineTo(last.x-Math.cos(ang+0.4)*9,last.y-Math.sin(ang+0.4)*9);
+  ctx.closePath(); ctx.fillStyle=color; ctx.fill();
+
+  if (label) { ctx.fillStyle=color; ctx.font='bold 8px "Microsoft YaHei"'; ctx.textAlign='left'; ctx.fillText(label,last.x+6,last.y+4); }
+  ctx.restore();
+}
+
+// 阻断标记
+function drawBlocked(ctx, x, y) {
+  ctx.save(); ctx.fillStyle='rgba(255,40,40,0.7)'; ctx.font='bold 16px "Arial"'; ctx.textAlign='center';
+  ctx.fillText('⊘',x,y);
+  ctx.restore();
+}
+
+// ====== 面板渲染 ======
+
+// 图1：阶段1 单分支教学阵
+function panel1(ctx, showLabels) {
+  renderBaseLayer(ctx);
+  const bx=106, by=48, px=106, py=380;
+  drawBoss(ctx,bx,by); drawPlayer(ctx,px,py);
+
+  const ox=106, oy=165;
+  const hull = [
+    {x:ox-58,y:oy-12},{x:ox+50,y:oy-12},
+    {x:ox+42,y:oy+145},{x:ox-68,y:oy+145}
+  ];
+  drawHull(ctx, hull, 1.0, false);
+
+  // 蓝关节 + 红刃分支
+  const jy=oy+35, ty=oy+110;
+  drawJoint(ctx, ox-32, jy, 10, false, false);
+  drawThreat(ctx, ox-55, ty, 11, false, false);
+  drawThreat(ctx, ox+10, ty, 11, false, false);
+
+  // 分支线
+  drawCuttableBranch(ctx, ox-32, jy, ox-55, ty, true);
+  drawCuttableBranch(ctx, ox-32, jy, ox+10, ty, true);
+
+  // 下游归属区域（虚线框）
+  ctx.save(); ctx.strokeStyle='rgba(255,255,255,0.15)'; ctx.lineWidth=1; ctx.setLineDash([3,3]);
+  ctx.beginPath(); ctx.roundRect(ox-72, ty-18, 100, 42, 4); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+
+  if (showLabels!==false) {
+    ctx.fillStyle='rgba(91,192,255,0.5)'; ctx.font='8px "Microsoft YaHei"'; ctx.textAlign='center';
+    ctx.fillText('可切关节', ox-32, jy-16);
+    ctx.fillText('断链→下游全失效', ox-15, ty+38);
+  }
+
+  // 刀路A：推荐（切蓝关节）
+  drawCandidatePath(ctx, [
+    {x:px-30,y:py-10},{x:ox-32,y:jy}
+  ], 'rgba(91,192,255,0.55)', showLabels!==false?'✓ 断链':'', false);
+
+  // 刀路表现（A的效果：两红刃灰化打叉）
+  drawThreat(ctx, ox-80, ty+15, 10, false, true);
+  drawThreat(ctx, ox+25, ty+15, 10, false, true);
+
+  // 刀路B：错误（直接切单红刃）
+  drawCandidatePath(ctx, [
+    {x:px-40,y:py},{x:ox-55,y:ty}
+  ], 'rgba(255,150,100,0.38)', showLabels!==false?'✗ 单切':'', false);
+  if (showLabels!==false) {
+    ctx.fillStyle='rgba(255,120,80,0.4)'; ctx.font='7px "Microsoft YaHei"'; ctx.textAlign='right';
+    ctx.fillText('另一枚仍存活', ox+25, ty-5);
+  }
+
+  if (showLabels!==false) {
+    ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.font='bold 9px "Microsoft YaHei"'; ctx.textAlign='center';
+    // 标题
+  }
+}
+
+// 图2：阶段2 双分支+甲链
+function panel2(ctx, showLabels) {
+  renderBaseLayer(ctx);
+  const bx=106, by=48, px=106, py=380;
+  drawBoss(ctx,bx,by); drawPlayer(ctx,px,py);
+
+  const ox=106, oy=160;
+  const hull = [
+    {x:ox-68,y:oy-10},{x:ox+65,y:oy-10},
+    {x:ox+58,y:oy+160},{x:ox-75,y:oy+160}
+  ];
+  drawHull(ctx, hull, 1.0, false);
+
+  // 左分支：可切
+  const jly=oy+35, tly=oy+115;
+  drawJoint(ctx, ox-48, jly, 10, false, false);
+  drawThreat(ctx, ox-48, tly, 11, false, false);
+  drawCuttableBranch(ctx, ox-48, jly, ox-48, tly, true);
+
+  // 右分支：被甲链保护
+  const jry=oy+45, try_=oy+118;
+  drawThreat(ctx, ox+48, try_, 11, false, false);
+
+  // 甲链（粗黑红，节状，横跨）
+  const armorPts = [
+    {x:ox+48,y:jry+5},{x:ox+15,y:oy+65},{x:ox-15,y:oy+75},{x:ox-48,y:tly-10}
+  ];
+  drawArmorChain(ctx, armorPts, true);
+  if (showLabels!==false) {
+    ctx.fillStyle='rgba(255,60,40,0.6)'; ctx.font='bold 9px "Microsoft YaHei"'; ctx.textAlign='center';
+    ctx.fillText('甲链不可切', ox+4, oy+64);
+  }
+
+  if (showLabels!==false) {
+    ctx.fillStyle='rgba(91,192,255,0.4)'; ctx.font='8px "Microsoft YaHei"'; ctx.textAlign='left';
+    ctx.fillText('可切分支', ox-60, jly-16);
+    ctx.fillStyle='rgba(180,20,20,0.5)'; ctx.font='8px "Microsoft YaHei"';
+    ctx.fillText('受甲链保护', ox+24, jry-16);
+  }
+
+  // 刀路A：切左关节 → 左刃失效
+  drawCandidatePath(ctx, [
+    {x:px-28,y:py-10},{x:ox-48,y:jly}
+  ], 'rgba(91,192,255,0.55)', showLabels!==false?'✓ 断左分枝':'', false);
+  drawThreat(ctx, ox-65, tly+15, 10, false, true);
+
+  // 刀路B：穿甲链 → 阻断
+  drawCandidatePath(ctx, [
+    {x:px+10,y:py-15},{x:ox+48,y:try_}
+  ], 'rgba(255,40,40,0.4)', showLabels!==false?'✗ 甲链阻断':'', false);
+  drawBlocked(ctx, ox+25, oy+50);
+
+  if (showLabels!==false) {
+    ctx.fillStyle='rgba(255,40,40,0.5)'; ctx.font='7px "Microsoft YaHei"'; ctx.textAlign='left';
+    ctx.fillText('后半段无效', ox+15, oy+90);
+  }
+}
+
+// 图3：阶段3 完整命核+旧残阵叠压
+function panel3(ctx, showLabels) {
+  renderBaseLayer(ctx);
+  const bx=106, by=48, px=106, py=380;
+  drawBoss(ctx,bx,by); drawPlayer(ctx,px,py);
+
+  // --- 旧残阵（低优先级，暗色） ---
+  const oldOx=90, oldOy=325;
+  if (showLabels!==false) {
+    ctx.fillStyle='rgba(60,60,70,0.2)'; ctx.strokeStyle='rgba(90,80,90,0.25)'; ctx.lineWidth=1.5; ctx.setLineDash([8,4]);
+    ctx.beginPath(); ctx.roundRect(oldOx-60,oldOy-30,110,42,4); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle='rgba(140,100,100,0.3)'; ctx.font='bold 8px "Microsoft YaHei"'; ctx.textAlign='center';
+    ctx.fillText('旧残阵 (上轮未清)', oldOx, oldOy-38);
+  }
+  drawThreat(ctx, oldOx+10, oldOy-5, 12, true, false);
+  if (showLabels!==false) {
+    ctx.fillStyle='rgba(255,80,50,0.5)'; ctx.font='7px "Microsoft YaHei"'; ctx.textAlign='left';
+    ctx.fillText('即将触线', oldOx+25, oldOy-8);
+  }
+
+  // --- 新阵 ---
+  const ox=106, oy=150;
+  const hull = [
+    {x:ox-72,y:oy-22},{x:ox+70,y:oy-22},
+    {x:ox+60,y:oy+170},{x:ox-78,y:oy+170}
+  ];
+  drawHull(ctx, hull, 1.0, false);
+
+  // 命核
+  drawCore(ctx, ox, oy-2, 13, true, false);
+
+  // Boss主链
+  drawBossTether(ctx, bx, by+20, ox, oy-15, true, 4);
+
+  // 左分支
+  drawJoint(ctx, ox-42, oy+42, 10, false, false);
+  drawThreat(ctx, ox-60, oy+118, 11, false, false);
+  drawThreat(ctx, ox-25, oy+128, 11, false, false);
+  drawCuttableBranch(ctx, ox, oy+3, ox-42, oy+42, true);
+  drawCuttableBranch(ctx, ox-42, oy+42, ox-60, oy+118, true);
+  drawCuttableBranch(ctx, ox-42, oy+42, ox-25, oy+128, true);
+
+  // 右分支（带甲链）
+  drawThreat(ctx, ox+55, oy+120, 11, false, false);
+  drawCuttableBranch(ctx, ox, oy+3, ox+42, oy+48, true);
+
+  // 甲链段
+  const armorPts2 = [
+    {x:ox+42,y:oy+50},{x:ox+10,y:oy+85},{x:ox-5,y:oy+95},{x:ox-25,y:oy+125}
+  ];
+  drawArmorChain(ctx, armorPts2, true);
+  if (showLabels!==false) {
+    ctx.fillStyle='rgba(255,60,40,0.5)'; ctx.font='bold 8px "Microsoft YaHei"'; ctx.textAlign='center';
+    ctx.fillText('甲链', ox+4, oy+80);
+  }
+
+  if (showLabels!==false) {
+    ctx.fillStyle='rgba(255,211,90,0.45)'; ctx.font='9px "Microsoft YaHei"'; ctx.textAlign='left';
+    ctx.fillText('命核', ox-50, oy-15);
+  }
+
+  // 刀路A：先救旧残阵
+  drawCandidatePath(ctx, [
+    {x:px-20,y:py},{x:oldOx+10,y:oldOy-5}
+  ], 'rgba(255,140,80,0.5)', showLabels!==false?'A: 保命 × 放弃反击':'', false);
+  drawThreat(ctx, oldOx+30, oldOy+10, 10, false, true);
+
+  // 刀路B：赌命核反卷
+  drawCandidatePath(ctx, [
+    {x:ox-80,y:oy+128},{x:ox,y:oy-2}
+  ], 'rgba(255,211,90,0.45)', showLabels!==false?'B: 反卷 × 旧残留威胁':'', false);
+  drawCore(ctx, ox+15, oy, 13, true, true);  // 高亮命核
+
+  if (showLabels!==false) {
+    ctx.fillStyle='rgba(255,140,80,0.4)'; ctx.font='7px "Microsoft YaHei"'; ctx.textAlign='left';
+    ctx.fillText('旧残留仍存', oldOx+35, oldOy+22);
+  }
+}
+
+// ====== 渲染所有面板 ======
+function renderAll(showLabels) {
+  const canvases = [
+    {id:'p1',fn:panel1},{id:'p2',fn:panel2},{id:'p3',fn:panel3},
+    {id:'ov1',fn:panel1},{id:'ov2',fn:panel2},{id:'ov3',fn:panel3},
+    {id:'nl1',fn:panel1},{id:'nl2',fn:panel2},{id:'nl3',fn:panel3},
+  ];
+  for (const c of canvases) {
+    const canvas = document.getElementById(c.id);
+    if (!canvas) continue;
+    const ctx2d = canvas.getContext('2d');
+    ctx2d.clearRect(0,0,DW,DH);
+    c.fn(ctx2d, c.id.startsWith('nl')?false:showLabels);
+  }
+}
+
+function switchTab(view) {
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.querySelector(`.tab:nth-child(${view==='panels'?1:view==='overview'?2:3})`).classList.add('active');
+  document.getElementById(`view-${view}`).classList.add('active');
+}
+
+renderAll(true);
+</script>
+</body>
+</html>

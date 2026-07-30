@@ -1,0 +1,32 @@
+node_modules/
+dist/
+.vite/
+.env
+.env.*
+# 例外：E2E 测试构建开关（仅启用测试桥，无密钥，不进生产构建）
+!.env.e2e
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.local
+.DS_Store
+Thumbs.db
+
+.version-state.json
+
+# 自动化测试
+*.mjs
+e2e-screenshots/
+test-results/
+playwright-report/
+dist_old/
+dist_out/
+dist_old/
+dist_old2/
+# 临时验证构建产物（审计六：prod/e2e 分离验证用，不进仓库）
+dist_prod_clean*/
+dist_e2e_clean*/
+dist_prod_check*/
+dist_check/
+test_output*.txt
