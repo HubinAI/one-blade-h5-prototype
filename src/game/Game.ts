@@ -1523,6 +1523,7 @@ export class Game {
   handlePointerDown(pos: Vec2) {
     // P4.4B-R2 P0-A: 按模式路由输入锁（reactive 读 reactiveController，旧 bossController 不再阻断 reactive 输入）
     if (this.isCurrentBossInputLocked()) return;
+    if (this.elapsed < this._recoveryLockUntil) return; // V0730020
     if (this.phase === "buffChoice") {
       this.selectBuffAt(pos);
       return;
@@ -5342,8 +5343,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
   /** 二次打磨：自动切换 battlePhase HUD 显示 */
   private updateBattlePhase() {
-    // 已进入结果页
     if (this.finished) { this.battlePhase = 'result'; return; }
+    // V0730020: 弹窗期间不覆盖 battlePhase
+    if (this.edictRewardState === "modal") return;
 
     // P3.5：军令爆发阶段（不再用 chestDone 永久锁死）
     if (
@@ -6743,6 +6745,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         break;
       case 'chest':
         phaseText = "军令激活";
+        break;
+      case 'edict_modal':
+        phaseText = "";
         break;
       case 'edict_burst':
         const postWaves = this.getEffectivePostChestWaves();
