@@ -1712,13 +1712,13 @@ handlePointerUp(reason: string = "收刀") {
         this._chaseSlashHitCore = false;
         this._chaseSlashHitShell = false;
         this._chaseSlashHitBarrages.clear();
-        this._eliteDamageDedup.clear(); // V0731003
       }
     } else {
       // V0730001: 统一刀势 — 固定挥刀消耗 8 点
       this.energy = spendBladeMomentum(this.energy, this.bladeMomentumMax, BLADE_MOMENTUM_CONFIG.slash.baseCost);
     }
     this.regenDelayTimer = BALANCE.swordEnergy.regenDelayAfterSlash;
+    this._eliteDamageDedup.clear(); // V0731003: 每刀开始时清除去重
     this.nextSoul = false;
     this.nextOil = false;
     this.stats.slashes += 1;
