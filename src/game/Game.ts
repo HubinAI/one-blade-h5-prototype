@@ -2258,6 +2258,8 @@ handlePointerUp(reason: string = "收刀") {
   private _eliteDefeatedHandled = false;
 
   private handleEliteDefeatedAndContinue(enemy: Enemy, source: string) {
+    // V0731007: 总是输出诊断日志，确认调用路径
+    console.log("[V0731007] handleEliteDefeatedAndContinue ENTRY", { source, enemyKind: enemy.kind, enemyEliteKind: enemy.eliteKind, gameMode: this.gameMode, alreadyHandled: this._eliteDefeatedHandled, battlePhase: this.battlePhase });
     if (this._eliteDefeatedHandled) return;
     if (this.gameMode !== "normal") return;
     this._eliteDefeatedHandled = true;
@@ -2267,8 +2269,12 @@ handlePointerUp(reason: string = "收刀") {
     // 1. 标记精英已击杀
     this.eliteKilled = true;
 
-    // 2. 启动后续怪潮（如有）
-    const continuationStarted = this.startPostEliteContinuationOnce();
+    // V0731007: 第1关不再启动旧军令爆发怪潮，直接离开elite，场上清空即胜利
+    if (this.isLogicalLevel1()) {
+      this.allPostChestWavesSpawned = true; // 标记为完成，跳过旧波次生成
+    } else {
+      this.startPostEliteContinuationOnce();
+    }
 
     const phaseAfter = this.battlePhase;
     const hasContWaves = (this.level.postChestWaves?.length ?? 0) > 0;
@@ -2277,10 +2283,8 @@ handlePointerUp(reason: string = "收刀") {
       console.log("[elite defeated]", {
         source,
         battlePhaseBefore: phaseBefore,
-        battlePhaseAfter: phaseAfter,
+        battlePhaseAfter: this.battlePhase,
         eliteKilled: this.eliteKilled,
-        hasContinuationWaves: hasContWaves,
-        continuationStarted,
         progressChest: this._chestRuntime.progress,
         chestStatus: this._chestRuntime.status,
         victoryEligible: this.shouldFinishVictory(),
@@ -5270,29 +5274,35 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
   /** 判定是否应立刻胜利结算（二次打磨：检查 battlePhase） */
   private shouldFinishVictory(): boolean {
-    // P4.4A.1-R3: Boss模式禁止自然胜利，只能由BossController/Debug触发
     if (this.gameMode === "boss") return false;
     const allWavesDone = this.wavesSpawned >= this.level.waves.length;
-    const noAliveEnemies = !this.enemies.some(e => e.alive);
     const notResolving = !this.currentSlash;
-
-    // 基础条件
     if (!allWavesDone || !notResolving) return false;
 
-    // 禁止在精英阶段/宝箱阶段结算
+    // V0731007: 第1关普通模式彻底跳过旧军令链，精英死后清空即胜利
+    if (this.isLogicalLevel1()) {
+      if (this.battlePhase === 'elite') return false;
+      if (this.level.eliteSpawnAt && this.level.eliteKind && !this.eliteKilled) return false;
+      this.cleanupOutOfBattleEnemiesForVictoryCheck();
+      if (this.subSpawnQueue.length > 0) return false;
+      if (this.enemies.some(e => e.alive)) return false;
+      if (this.currentSlash) return false;
+      return true;
+    }
+
+    // ═══ 非L1关卡：保留原有军令链检查 ═══
+    const noAliveEnemies = !this.enemies.some(e => e.alive);
+
     if (this.battlePhase === 'elite' || this.battlePhase === 'chest') return false;
 
-    // V0731006: 有精英的关卡，精英必须已击杀
     if (this.level.eliteSpawnAt && this.level.eliteKind) {
       if (!this.eliteKilled) return false;
-      // V0731006: 普通模式不再强制旧军令chestDone
       if (this.gameMode !== "normal" && this.chestDropped && !this.chestDone) return false;
     }
 
     const postWaves = this.getEffectivePostChestWaves();
     const hasPostChest = postWaves.length > 0;
     if (hasPostChest) {
-      // V0731006: 普通模式使用新流程状态
       if (this.gameMode === "normal") {
         if (!this.edictPostWavesQueued) return false;
         if (!this.allPostChestWavesSpawned) {
@@ -5318,28 +5328,15 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       }
     }
 
-    // V0731006: 普通模式无宝箱后怪潮时不再强制chestDone
     if (!hasPostChest && this.level.eliteSpawnAt && this.chestDropped) {
       if (this.gameMode !== "normal" && !this.chestDone) return false;
     }
 
-    // 紧急修正：严格清场检查
-    // 清理屏幕外异常敌人
     this.cleanupOutOfBattleEnemiesForVictoryCheck();
-
-    // 仍有待刷出的敌人，不能结算
     if (this.subSpawnQueue.length > 0) return false;
-
-    // 场上仍有存活敌人，不能结算
-    const aliveCount = this.enemies.filter(e => e.alive).length;
-    if (aliveCount > 0) return false;
-
-    // 军令弹窗 / 飞行 / 奖励未完成，不能结算
+    if (this.enemies.filter(e => e.alive).length > 0) return false;
     if (this.chestPendingConfirm || this.edictIconFlying || this.edictRewardState === "modal" || this.edictRewardState === "flying") return false;
-
-    // 当前仍有挥刀处理，不能结算
     if (this.currentSlash) return false;
-
     return true;
   }
 
