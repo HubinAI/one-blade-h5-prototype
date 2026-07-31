@@ -1523,15 +1523,13 @@ export class Game {
       return;
     }
     // V0730020: 军令弹窗输入保护
+    // V0730020: 军令弹窗输入保护
     if (this.chestPendingConfirm) {
-      if (this.elapsed < this._modalOpenedAt + 0.5) return; // 前0.5秒忽略
-      // V0730021: 按钮点击直接生效，无需等待"非首次"
-      if (this.isPointInChestConfirmButton(pos.x, pos.y)) {
-        this._modalPointerFresh = true; // 标记已激活
+      const hit = this.isPointInChestConfirmButton(pos.x, pos.y);
+      if (this.debugEnabled) console.log(`[modal] pos=(${pos.x},${pos.y}) hit=${hit} fresh=${this._modalPointerFresh} phase=${this.phase}`);
+      if (hit) {
         this.confirmEliteChestReward();
-        return;
       }
-      if (!this._modalPointerFresh) { this._modalPointerFresh = true; return; } // 外部首点仅锁定一次
       return;
     }
     if (this.phase !== "playing") return;
