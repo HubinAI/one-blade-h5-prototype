@@ -2272,6 +2272,7 @@ export class Game {
       lastKillSource: "",
     };
     this._activeEdicts = [];
+    this._tripleSideTrails = []; // V0731010: 清空派生刀痕
   }
 
   /** 宝箱进度统一计数入口 */
@@ -2443,7 +2444,7 @@ export class Game {
   }
   // ═══════════════════ V0731010: 三锋令 ═══════════════════
   /** 主刀后派生两道平行刀痕 */
-  private _fireTripleSideTrails(main: import("./types").SlashTrail) {
+  private _fireTripleSideTrails(main: SlashTrail) {
     if (main.points.length < 2) return;
     const pts = main.points;
     // 计算主刀方向，派生偏移
@@ -2491,7 +2492,7 @@ export class Game {
   }
 
   /** 派生刀痕碰撞检测 */
-  private _checkTripleSideHits(offsetPts: { x: number; y: number }[], main: import("./types").SlashTrail) {
+  private _checkTripleSideHits(offsetPts: { x: number; y: number }[], main: SlashTrail) {
     const hitIds = new Set<string>(); // 每道派生刀痕对同目标只结算一次
     for (let i = 0; i < offsetPts.length - 1; i++) {
       const a = offsetPts[i];
