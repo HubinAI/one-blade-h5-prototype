@@ -440,76 +440,97 @@ export function getStageNameByFloor(floor: number): string {
 
 /** 第一关硬编码波次配置（0715割草密度激进调优版） */
 function createLevel1Config(): LevelConfig {
-  // V0730018: 前三波替换为共享教学配置 3→4→5
-  const level1Waves: WaveConfig[] = [
-    ...LEVEL1_TUTORIAL_WAVES,
-    // Wave 4: 火药爆点波 (13.0s, 22~28敌)
+  // V0731003: 前三波教学 + 后两波纯步兵分层
+  const level1PostTutorialWaves: WaveConfig[] = [
     {
-      name: "火药阵",
+      name: "步兵潮·前",
       delay: 0.2,
-      spawnAt: 13.0,
+      spawnAt: 0.0,
       enemies: [
-        { kind: "infantry", count: 10, x: 44 },
-        { kind: "infantry", count: 8, x: 140 },
-        { kind: "powder", count: 2, x: 236 },
-        { kind: "infantry", count: 6, x: 92 },
-        { kind: "powder", count: 1, x: 284 }
+        { kind: "infantry", count: 1, x: 80, yOffset: 0 },
+        { kind: "infantry", count: 1, x: 140, yOffset: 0 },
+        { kind: "infantry", count: 1, x: 200, yOffset: 0 },
+        { kind: "infantry", count: 1, x: 260, yOffset: 0 },
+        { kind: "infantry", count: 1, x: 320, yOffset: 0 },
       ]
     },
-    // Wave 5: 精英前压迫波 (19.0s, 22~28敌)
     {
-      name: "压迫阵",
+      name: "步兵潮·后",
       delay: 0.2,
-      spawnAt: 19.0,
+      spawnAt: 0.9,
       enemies: [
-        { kind: "infantry", count: 8, x: 44 },
-        { kind: "shield", count: 2, x: 140 },
-        { kind: "infantry", count: 8, x: 188 },
-        { kind: "infantry", count: 6, x: 92 },
-        { kind: "powder", count: 1, x: 284 }
+        { kind: "infantry", count: 1, x: 110, yOffset: 126 },
+        { kind: "infantry", count: 1, x: 170, yOffset: 126 },
+        { kind: "infantry", count: 1, x: 230, yOffset: 126 },
+        { kind: "infantry", count: 1, x: 290, yOffset: 126 },
+        { kind: "infantry", count: 1, x: 350, yOffset: 126 },
       ]
-    }
+    },
+    // V0731003: 第5波纯步兵 — 前4/中4/后4，三层错开，层间距126px，间隔0.8s
+    {
+      name: "军团·前",
+      delay: 0.2,
+      spawnAt: 6.0,
+      enemies: [
+        { kind: "infantry", count: 1, x: 80, yOffset: 0 },
+        { kind: "infantry", count: 1, x: 160, yOffset: 0 },
+        { kind: "infantry", count: 1, x: 240, yOffset: 0 },
+        { kind: "infantry", count: 1, x: 320, yOffset: 0 },
+      ]
+    },
+    {
+      name: "军团·中",
+      delay: 0.2,
+      spawnAt: 6.8,
+      enemies: [
+        { kind: "infantry", count: 1, x: 110, yOffset: 126 },
+        { kind: "infantry", count: 1, x: 190, yOffset: 126 },
+        { kind: "infantry", count: 1, x: 270, yOffset: 126 },
+        { kind: "infantry", count: 1, x: 350, yOffset: 126 },
+      ]
+    },
+    {
+      name: "军团·后",
+      delay: 0.2,
+      spawnAt: 7.6,
+      enemies: [
+        { kind: "infantry", count: 1, x: 80, yOffset: 252 },
+        { kind: "infantry", count: 1, x: 160, yOffset: 252 },
+        { kind: "infantry", count: 1, x: 240, yOffset: 252 },
+        { kind: "infantry", count: 1, x: 320, yOffset: 252 },
+      ]
+    },
   ];
 
-  // 精英后宝箱后爆发怪潮（3波）
+  // V0731003: 军令怪潮纯步兵（3波）
   const level1PostChestWaves: WaveConfig[] = [
-    // Post-Wave 1: 宝箱后第一波 (宝箱开启后0.5s, 24~30敌)
     {
       name: "反扑·一",
       delay: 0.2,
       spawnAt: 0.5,
       enemies: [
-        { kind: "infantry", count: 10, x: 44 },
-        { kind: "infantry", count: 8, x: 140 },
-        { kind: "powder", count: 2, x: 236 },
-        { kind: "infantry", count: 8, x: 188 }
+        { kind: "infantry", count: 5, x: 80, yOffset: 0 },
+        { kind: "infantry", count: 5, x: 200, yOffset: 0 },
       ]
     },
-    // Post-Wave 2: 宝箱后第二波 (宝箱开启后5.0s, 30~38敌)
     {
       name: "反扑·二",
       delay: 0.2,
       spawnAt: 5.0,
       enemies: [
-        { kind: "infantry", count: 10, x: 44 },
-        { kind: "shield", count: 2, x: 140 },
-        { kind: "infantry", count: 10, x: 188 },
-        { kind: "infantry", count: 8, x: 92 },
-        { kind: "powder", count: 3, x: 284 }
+        { kind: "infantry", count: 4, x: 110, yOffset: 126 },
+        { kind: "infantry", count: 4, x: 230, yOffset: 126 },
+        { kind: "infantry", count: 4, x: 170, yOffset: 252 },
       ]
     },
-    // Post-Wave 3: 最终怪潮 (宝箱开启后10.5s, 38~50敌)
     {
       name: "反扑·终",
       delay: 0.2,
       spawnAt: 10.5,
       enemies: [
-        { kind: "infantry", count: 14, x: 44 },
-        { kind: "infantry", count: 12, x: 140 },
-        { kind: "powder", count: 3, x: 236 },
-        { kind: "infantry", count: 8, x: 92 },
-        { kind: "shield", count: 2, x: 284 },
-        { kind: "infantry", count: 6, x: 188 }
+        { kind: "infantry", count: 6, x: 80, yOffset: 0 },
+        { kind: "infantry", count: 5, x: 170, yOffset: 126 },
+        { kind: "infantry", count: 5, x: 260, yOffset: 252 },
       ]
     }
   ];
@@ -524,7 +545,7 @@ function createLevel1Config(): LevelConfig {
     pickupChance: 0.03,
     durationSeconds: 90,
     buffTimes: [],
-    waves: level1Waves,
+    waves: [...LEVEL1_TUTORIAL_WAVES, ...level1PostTutorialWaves],
     eliteSpawnAt: 25, // 三次修正：推迟到 wave 5 之后 (19s + 6s)
     eliteKind: "fireRing" as any,
     chestBuffId: "chest_first_clear",

@@ -283,8 +283,9 @@ export class Game {
   private _phase2Active = false;
   private _chaseBarrageHitCount = 0;
   private _transFlashTimer = 0;  // 30%转场防线脉冲
-  // 单刀去重：同一 slashId 下各目标只结算一次
   private _chaseSlashHitCore = false;
+  // V0731003: 精英单刀去重 — 同一刀对同一精英只结算一次
+  private _eliteDamageDedup: Set<string> = new Set();
   private _chaseSlashHitShell = false;
   private _chaseSlashHitBarrages = new Set<string>();
   /** P4.2A.1: 统一中央播报调度器 */
@@ -338,8 +339,8 @@ export class Game {
   private _chestDeathAt = 0; // V0730020: 死亡时间用于宝箱时序
   private _chestLanded = false;
   private _modalOpenedAt = 0;
-  private _modalPointerFresh = false; // V0730020: 弹窗后首次pointerDown已处理
-  private _recoveryLockUntil = 0; // V0730020: 弹窗打开时间
+  private _modalUnlockAtMs = 0; // V0731003: 用 performance.now()
+  private _modalAwaitPointerUp = false; // V0730020: 弹窗打开时间
   private chestDropX = 0;
   private chestDropY = 0;
   private chestDropped = false;
@@ -1517,14 +1518,14 @@ export class Game {
   handlePointerDown(pos: Vec2) {
     // P4.4B-R2 P0-A: 按模式路由输入锁（reactive 读 reactiveController，旧 bossController 不再阻断 reactive 输入）
     if (this.isCurrentBossInputLocked()) return;
-    if (this.elapsed < this._recoveryLockUntil) return; // V0730020
     if (this.phase === "buffChoice") {
       this.selectBuffAt(pos);
       return;
     }
     // V0730020: 军令弹窗输入保护
     // V0730020: 军令弹窗输入保护
-    if (this.chestPendingConfirm) {
+if (this.chestPendingConfirm) {
+      if (performance.now() < this._modalUnlockAtMs) return;
       if (this.isPointInChestConfirmButton(pos.x, pos.y)) {
         this.confirmEliteChestReward();
       }
@@ -1575,7 +1576,8 @@ export class Game {
     this.extendSlash(next);
   }
 
-  handlePointerUp(reason: string = "收刀") {
+handlePointerUp(reason: string = "收刀") {
+    if (this._modalAwaitPointerUp) { this._modalAwaitPointerUp = false; return; } // V0731003
     this.pointerDown = false;
     this.pendingSlash = null;
     if (this.currentSlash?.active) {
@@ -1710,7 +1712,7 @@ export class Game {
         this._chaseSlashHitCore = false;
         this._chaseSlashHitShell = false;
         this._chaseSlashHitBarrages.clear();
-        this.chaseController?.resetSlashDedup();
+        this._eliteDamageDedup.clear(); // V0731003
       }
     } else {
       // V0730001: 统一刀势 — 固定挥刀消耗 8 点
@@ -2793,10 +2795,13 @@ export class Game {
         }
       }
       // V0730020: L1精英百分比伤害（按刀势档位）
+      const dedupKey = `elite_${enemy.id}`;
+      if (this._eliteDamageDedup.has(dedupKey)) return;
+      this._eliteDamageDedup.add(dedupKey);
       let eliteDmg: number;
       if (this.isLogicalLevel1()) {
         const bm = createBladeMomentumState(this.energy, this.bladeMomentumMax);
-        const pct = bm.band === "high" ? randomRange(0.18, 0.25) : bm.band === "mid" ? randomRange(0.12, 0.18) : randomRange(0.08, 0.12);
+        const pct = bm.band === "high" ? 0.20 : bm.band === "mid" ? 0.15 : 0.10;
         eliteDmg = Math.max(1, Math.ceil(enemy.maxHp * pct));
       } else {
         eliteDmg = stage.damage * bladeDmg;
@@ -6099,8 +6104,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       this.edictModalConfirmed = false;
       return;
     }
-    this.battlePhase = "edict_burst"; // V0730020: 恢复战斗
-    this._recoveryLockUntil = this.elapsed + 0.3;
+    this.battlePhase = "edict_burst";
     this.addText(DESIGN_WIDTH / 2, DESIGN_HEIGHT * 0.52, "继续作战", "#ffd35a", 16, 0.45);
     this.screenShake = Math.max(this.screenShake, 0.08);
   }
@@ -8882,7 +8886,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.chestPendingConfirm = true;
 
     if (!this.setEdictRewardState("modal", "open chest modal")) return;
-    this.battlePhase = "edict_modal"; this._modalOpenedAt = this.elapsed; this._modalPointerFresh = false;
+    this.battlePhase = "edict_modal"; this._modalUnlockAtMs = performance.now() + 300; this._modalAwaitPointerUp = true;
 
     this.addText(DESIGN_WIDTH / 2, 150, "军令降临", "#ffd35a", 24, 1.2);
     this.screenShake = Math.max(this.screenShake, 0.25);
