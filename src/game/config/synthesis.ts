@@ -457,7 +457,7 @@ function createLevel1Config(): LevelConfig {
     {
       name: "步兵潮·后",
       delay: 0.2,
-      spawnAt: 0.9,
+      spawnAt: 0.65,
       enemies: [
         { kind: "infantry", count: 1, x: 110, yOffset: 126 },
         { kind: "infantry", count: 1, x: 170, yOffset: 126 },
@@ -470,7 +470,7 @@ function createLevel1Config(): LevelConfig {
     {
       name: "军团·前",
       delay: 0.2,
-      spawnAt: 6.0,
+      spawnAt: 3.0,
       enemies: [
         { kind: "infantry", count: 1, x: 80, yOffset: 0 },
         { kind: "infantry", count: 1, x: 160, yOffset: 0 },
@@ -481,7 +481,7 @@ function createLevel1Config(): LevelConfig {
     {
       name: "军团·中",
       delay: 0.2,
-      spawnAt: 6.8,
+      spawnAt: 3.65,
       enemies: [
         { kind: "infantry", count: 1, x: 110, yOffset: 126 },
         { kind: "infantry", count: 1, x: 190, yOffset: 126 },
@@ -492,7 +492,7 @@ function createLevel1Config(): LevelConfig {
     {
       name: "军团·后",
       delay: 0.2,
-      spawnAt: 7.6,
+      spawnAt: 4.3,
       enemies: [
         { kind: "infantry", count: 1, x: 80, yOffset: 252 },
         { kind: "infantry", count: 1, x: 160, yOffset: 252 },

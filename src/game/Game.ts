@@ -2801,7 +2801,7 @@ handlePointerUp(reason: string = "收刀") {
       let eliteDmg: number;
       if (this.isLogicalLevel1()) {
         const bm = createBladeMomentumState(this.energy, this.bladeMomentumMax);
-        const pct = bm.band === "high" ? 0.20 : bm.band === "mid" ? 0.15 : 0.10;
+        const pct = bm.band === "high" ? 0.10 : bm.band === "mid" ? 0.08 : 0.06;
         eliteDmg = Math.max(1, Math.ceil(enemy.maxHp * pct));
       } else {
         eliteDmg = stage.damage * bladeDmg;
@@ -4151,7 +4151,7 @@ handlePointerUp(reason: string = "收刀") {
       const isL1Infantry = isLevel1 && target.kind === "infantry";
       const isL1Elite = isLevel1 && target.kind === "elite";
       let damage = isL1Infantry ? Math.max(baseDamage, target.maxHp) : baseDamage;
-      if (isL1Elite) damage = Math.min(damage, Math.ceil(target.maxHp * 0.03)); // ≤3%精英HP
+      if (isL1Elite) damage = Math.min(damage, Math.ceil(target.maxHp * 0.02)); // ≤2%精英HP
       target.hp -= Math.max(1, Math.ceil(damage));
       target.flash = 0.18;
       if (target.kind === "elite") {
@@ -4209,7 +4209,7 @@ handlePointerUp(reason: string = "收刀") {
     let damage: number;
     if (isLevel1) {
       if (target.kind === "elite") {
-        damage = Math.ceil(target.maxHp * 0.09); // 9%精英HP
+        damage = Math.ceil(target.maxHp * 0.06); // 6%精英HP
       } else {
         damage = Math.max(stats.damageMultiplier * 1.0, target.maxHp); // 保证击杀
       }
@@ -4221,7 +4221,7 @@ handlePointerUp(reason: string = "收刀") {
     if (target.kind === "elite") {
       this.triggerEliteHitFeedback(target);
       this.checkEliteLowHpFeedback(target);
-      this.addText(target.x, target.y - 36, "-9%", "#ff6a33", 18, 1.0); // V0730020
+      this.addText(target.x, target.y - 36, "-6%", "#ff6a33", 18, 1.0); // V0731004
     }
     const killed = target.hp <= 0;
     if (killed) {
@@ -8886,7 +8886,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.chestPendingConfirm = true;
 
     if (!this.setEdictRewardState("modal", "open chest modal")) return;
-    this.battlePhase = "edict_modal"; this._modalUnlockAtMs = performance.now() + 300; this._modalAwaitPointerUp = true;
+    this.battlePhase = "edict_modal"; this._modalUnlockAtMs = performance.now() + 800; this._modalAwaitPointerUp = true;
 
     this.addText(DESIGN_WIDTH / 2, 150, "军令降临", "#ffd35a", 24, 1.2);
     this.screenShake = Math.max(this.screenShake, 0.25);
