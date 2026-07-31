@@ -121,6 +121,9 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
       } else if (event.key.toLowerCase() === "y") {
         // V0731011: 调试用授予燎原令
         (window as any).__grantScorch?.();
+      } else if (event.key.toLowerCase() === "u") {
+        // V0731012: 调试用授予凝霜令
+        (window as any).__grantFrost?.();
       }
     };
 

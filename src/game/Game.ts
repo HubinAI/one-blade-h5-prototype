@@ -809,6 +809,10 @@ export class Game {
       (window as any).__grantScorch = () => {
         self._activeEdicts.push({ id: "scorch", level: 1 });
       };
+      // V0731012: 直接授予凝霜令
+      (window as any).__grantFrost = () => {
+        self._activeEdicts.push({ id: "frost", level: 1 });
+      };
     }
 
     // P3.2：重置精英播报状态，防止上一关残留
@@ -1082,6 +1086,7 @@ export class Game {
     this._tripleSideTrails = this._tripleSideTrails.filter(t => { t.life -= scaledDt; return t.life > 0; });
     // V0731011: 更新火径生命 + 敌人伤害
     this._updateScorchTrails(scaledDt);
+    this._updateFrostStates(scaledDt); // V0731012
     if (BATTLEFIELD_FLOW.enabled) {
       this.updateBattlefieldFlow(scaledDt);
     }
@@ -1161,6 +1166,7 @@ export class Game {
     this._drawChestOpeningFlow(ctx); // V0731008
     this._drawTripleSideTrails(ctx); // V0731010
     this._drawScorchTrails(ctx); // V0731011
+    this._drawFrostEffects(ctx); // V0731012
     this.drawMidfieldEventBorder(ctx);
     // P4.2: drawIntroOverlay已删除，由BattleNotice系统替代
     // P2.8：战斗层之后绘制边缘金光和破阵过渡
@@ -1929,6 +1935,11 @@ export class Game {
       while (this._scorchTrails.length > 3) this._scorchTrails.shift();
     }
 
+    // V0731012: 凝霜令 — 主刀命中未死亡敌人施加霜冻
+    if (this._activeEdicts.some(e => e.id === "frost")) {
+      this._applyFrostToTrailHits(trail);
+    }
+
     // ---- 燎原路线收刀特效：所有点燃敌军额外爆炸 ----
     if (this.hasBuff("scorch")) {
       this.triggerScorchEnd(trail);
@@ -2552,6 +2563,42 @@ export class Game {
   // ═══════════════════ V0731011: 燎原令火径 ═══════════════════
   private _scorchTrails: { points: { x: number; y: number }[]; life: number; maxLife: number; lastTickTime: number }[] = [];
   // ═══════════════════ V0731011 End ═══════════════════
+
+  // V0731012: 凝霜令 — 施加 + 更新
+  private _applyFrostToTrailHits(trail: SlashTrail) {
+    for (const enemy of this.enemies) {
+      if (!enemy.alive) continue;
+      let hit = false;
+      for (let i = 0; i < trail.points.length - 1 && !hit; i++) {
+        const a = trail.points[i], b = trail.points[i + 1];
+        const abx = b.x - a.x, aby = b.y - a.y, eax = a.x - enemy.x, eay = a.y - enemy.y;
+        const dot = abx * abx + aby * aby;
+        if (dot < 1) continue;
+        const t = clamp(-(eax * abx + eay * aby) / dot, 0, 1);
+        if (Math.hypot(a.x + abx * t - enemy.x, a.y + aby * t - enemy.y) <= enemy.radius + 16) hit = true;
+      }
+      if (!hit) continue;
+      const isElite = !!enemy.eliteKind;
+      const fs = (enemy as any)._frostState as { slowLeft: number; frozenLeft: number } | undefined;
+      if (isElite) {
+        if (!fs || fs.slowLeft <= 0) (enemy as any)._frostState = { slowLeft: 2.5, frozenLeft: 0 };
+        else fs.slowLeft = 2.5;
+      } else {
+        if (fs && fs.slowLeft > 0 && fs.frozenLeft <= 0) fs.frozenLeft = 0.6;
+        else (enemy as any)._frostState = { slowLeft: 2.5, frozenLeft: 0 };
+      }
+    }
+  }
+
+  private _updateFrostStates(dt: number) {
+    for (const enemy of this.enemies) {
+      const fs = (enemy as any)._frostState as { slowLeft: number; frozenLeft: number } | undefined;
+      if (!fs) continue;
+      if (fs.frozenLeft > 0) { fs.frozenLeft -= dt; continue; } // 冻结优先消耗
+      if (fs.slowLeft > 0) fs.slowLeft -= dt;
+      if (fs.slowLeft <= 0 && fs.frozenLeft <= 0) { (enemy as any)._frostState = undefined; }
+    }
+  }
 
   // V0731011: 火径更新 + 敌人伤害
   private _updateScorchTrails(dt: number) {
@@ -3651,6 +3698,16 @@ export class Game {
         // P4.3A: 动态flow倍率替代固定harvestSlow
         const flowMul = enemy.flow?.currentSpeedMultiplier ?? 1;
         enemy.y += enemy.speed * entryMultiplier * rushMultiplier * statusSlow * fortressSlow * flowMul * dt;
+        // V0731012: 凝霜减速 — 普通40%, 精英20%
+        const fs = (enemy as any)._frostState as { slowLeft: number; frozenLeft: number } | undefined;
+        if (fs && fs.slowLeft > 0) {
+          const frostMul = enemy.eliteKind ? 0.80 : 0.60;
+          enemy.y -= enemy.speed * entryMultiplier * rushMultiplier * statusSlow * fortressSlow * flowMul * dt * (1 - frostMul);
+        }
+        if (fs && fs.frozenLeft > 0) {
+          enemy.y = (enemy as any)._frostY ?? enemy.y; // 冻结时完全不动
+          (enemy as any)._frostY = enemy.y;
+        }
         // V0731009: 精英到达防线后不继续下移
         if (enemy.eliteKind && enemy.y >= BALANCE.battlefield.bottomDefenseY) {
           enemy.y = BALANCE.battlefield.bottomDefenseY;
@@ -7293,8 +7350,15 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
     // V0731011: 燎原令常驻图标
     if (this._activeEdicts.some(e => e.id === "scorch")) {
-      ctx.font = '14px "Microsoft YaHei", sans-serif';
-      ctx.fillText("🔥", cx, cy + (this._activeEdicts.some(e => e.id === "triple_slash") ? 62 : 46));
+      const yOff = this._activeEdicts.some(e => e.id === "triple_slash") ? 62 : 46;
+      ctx.fillText("🔥", cx, cy + yOff);
+    }
+    // V0731012: 凝霜令常驻图标
+    if (this._activeEdicts.some(e => e.id === "frost")) {
+      let yOff = 46;
+      if (this._activeEdicts.some(e => e.id === "triple_slash")) yOff += 16;
+      if (this._activeEdicts.some(e => e.id === "scorch")) yOff += 16;
+      ctx.fillText("❄️", cx, cy + yOff);
     }
   }
 
@@ -7457,6 +7521,38 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ctx.fillStyle = "#ffeebb";
         ctx.beginPath();
         ctx.arc(enemy.x + Math.sin(now * 18) * 4, enemy.y - enemy.radius - 4 - Math.abs(Math.sin(now * 10)) * 5, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  // V0731012: 冰霜效果绘制
+  private _drawFrostEffects(ctx: CanvasRenderingContext2D) {
+    for (const enemy of this.enemies) {
+      if (!enemy.alive) continue;
+      const fs = (enemy as any)._frostState as { slowLeft: number; frozenLeft: number } | undefined;
+      if (!fs || (fs.slowLeft <= 0 && fs.frozenLeft <= 0)) continue;
+      const isFrozen = fs.frozenLeft > 0;
+      const a = isFrozen ? 0.7 : 0.35;
+      const t = performance.now() / 1000;
+      ctx.save(); ctx.globalAlpha = a;
+      ctx.fillStyle = "#88ccff"; ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius + 5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#aaddff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius + 3, 0, Math.PI * 2); ctx.stroke();
+      if (isFrozen) {
+        ctx.globalAlpha = 0.8; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.5;
+        for (let i = 0; i < 6; i++) {
+          const ang = i * Math.PI / 3;
+          ctx.beginPath();
+          ctx.moveTo(enemy.x + Math.cos(ang) * (enemy.radius + 4), enemy.y + Math.sin(ang) * (enemy.radius + 4));
+          ctx.lineTo(enemy.x + Math.cos(ang + 0.3) * (enemy.radius + 2 + Math.sin(t * 5 + i) * 3), enemy.y + Math.sin(ang + 0.3) * (enemy.radius + 2 + Math.sin(t * 5 + i) * 3));
+          ctx.stroke();
+        }
+      }
+      ctx.globalAlpha = 0.3; ctx.fillStyle = "#ddeeff";
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(enemy.x + Math.sin(t * 3 + i) * (enemy.radius + 2), enemy.y + enemy.radius + Math.abs(Math.sin(t * 7 + i)) * 8, 2, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.restore();
