@@ -2577,7 +2577,7 @@ export class Game {
         (enemy as any)._scorchTickAt = t;
         const isElite = !!enemy.eliteKind;
         const dmg = Math.max(1, Math.ceil(isElite ? 2 : 4));
-        const safeTrail = this.currentSlash ?? { kills: 0, chain: 0, directMainKills: 0, tier: "low", energyBank: 0, id: "scorch", points: [], active: false, explosionCount: 0, coreCollapseCount: 0 } as any;
+        const safeTrail = this.currentSlash ?? { kills: 0, chain: 0, directMainKills: 0, tier: "weak", energyBank: 0, id: "scorch", points: [], active: false, explosionCount: 0, coreCollapseCount: 0 } as any;
         this.damageEnemy(enemy, dmg, safeTrail, false, "scorch");
         (enemy as any)._scorchBurning = 0.6;
       }
