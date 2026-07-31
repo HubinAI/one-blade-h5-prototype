@@ -1525,9 +1525,7 @@ export class Game {
     // V0730020: 军令弹窗输入保护
     // V0730020: 军令弹窗输入保护
     if (this.chestPendingConfirm) {
-      const hit = this.isPointInChestConfirmButton(pos.x, pos.y);
-      if (this.debugEnabled) console.log(`[modal] pos=(${pos.x},${pos.y}) hit=${hit} fresh=${this._modalPointerFresh} phase=${this.phase}`);
-      if (hit) {
+      if (this.isPointInChestConfirmButton(pos.x, pos.y)) {
         this.confirmEliteChestReward();
       }
       return;
