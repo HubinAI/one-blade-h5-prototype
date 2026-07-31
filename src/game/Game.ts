@@ -7390,29 +7390,75 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
   }
 
-  // V0731011: 火径绘制 + 敌人挂火
+  // V0731011: 火径绘制（强化版）
   private _drawScorchTrails(ctx: CanvasRenderingContext2D) {
+    const now = performance.now() / 1000;
     for (const t of this._scorchTrails) {
       if (t.points.length < 2) continue;
       const a = clamp(t.life / t.maxLife, 0, 1);
-      ctx.save(); ctx.globalAlpha = a * 0.55; ctx.strokeStyle = "#ff6633"; ctx.lineWidth = 8; ctx.lineCap = "round";
+      // 底层深橙轮廓（旧基线保留）
+      ctx.save(); ctx.globalAlpha = a * 0.55; ctx.strokeStyle = "#cc4400"; ctx.lineWidth = 10; ctx.lineCap = "round";
       ctx.beginPath(); ctx.moveTo(t.points[0].x, t.points[0].y);
       for (let i = 1; i < t.points.length; i++) ctx.lineTo(t.points[i].x, t.points[i].y);
       ctx.stroke();
-      ctx.globalAlpha = a * 0.7; ctx.strokeStyle = "#ffcc44"; ctx.lineWidth = 3;
+      // 中层火焰核心
+      ctx.globalAlpha = a * 0.7; ctx.strokeStyle = "#ff8833"; ctx.lineWidth = 5;
       ctx.beginPath(); ctx.moveTo(t.points[0].x, t.points[0].y);
       for (let i = 1; i < t.points.length; i++) ctx.lineTo(t.points[i].x, t.points[i].y);
-      ctx.stroke(); ctx.restore();
+      ctx.stroke();
+      // 亮黄内核
+      ctx.globalAlpha = a * 0.5; ctx.strokeStyle = "#ffcc44"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(t.points[0].x, t.points[0].y);
+      for (let i = 1; i < t.points.length; i++) ctx.lineTo(t.points[i].x, t.points[i].y);
+      ctx.stroke();
+      // 跳动火苗点缀
+      ctx.globalAlpha = a * 0.5;
+      const sampleGap = Math.max(1, Math.floor(t.points.length / 10));
+      for (let i = 0; i < t.points.length; i += sampleGap) {
+        const p = t.points[i];
+        const flicker = 1 + Math.sin(now * 12 + i * 0.7) * 0.4;
+        ctx.globalAlpha = a * 0.35 * flicker;
+        ctx.fillStyle = "#ffaa33";
+        ctx.beginPath(); ctx.arc(p.x + (Math.sin(now * 8 + i) * 4), p.y - 4 * flicker, 3 * flicker, 0, Math.PI * 2); ctx.fill();
+        // 火星偶尔飞出
+        if (Math.sin(now * 15 + i * 2.3) > 0.3) {
+          ctx.globalAlpha = a * 0.25;
+          ctx.fillStyle = "#ffcc88";
+          ctx.beginPath();
+          ctx.arc(p.x + (Math.sin(now * 10 + i) * 6), p.y - 6 - Math.abs(Math.sin(now * 7 + i)) * 8, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      // 轻烟
+      ctx.globalAlpha = a * 0.12;
+      ctx.strokeStyle = "rgba(180,160,140,0.4)"; ctx.lineWidth = 16;
+      ctx.beginPath(); ctx.moveTo(t.points[0].x, t.points[0].y);
+      for (let i = 1; i < t.points.length; i++) ctx.lineTo(t.points[i].x, t.points[i].y);
+      ctx.stroke();
+      ctx.restore();
     }
+    // 敌人挂火——延长燃烧显示
     for (const enemy of this.enemies) {
       if (!enemy.alive) continue;
       const burn = (enemy as any)._scorchBurning ?? 0;
       if (burn <= 0) continue;
-      (enemy as any)._scorchBurning = Math.max(0, burn - 0.02);
-      ctx.save(); ctx.globalAlpha = burn * 0.6; ctx.fillStyle = "#ff6633";
-      ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius + 4, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#ffcc44";
-      ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius + 1, 0, Math.PI * 2); ctx.fill();
+      (enemy as any)._scorchBurning = Math.max(0, burn - 0.012); // 慢衰减，覆盖两个伤害间隔
+      const pulse = 0.6 + Math.sin(now * 14) * 0.4;
+      ctx.save();
+      ctx.globalAlpha = burn * 0.65;
+      ctx.fillStyle = "#ff5500";
+      ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius + 5, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = burn * 0.5 * pulse;
+      ctx.fillStyle = "#ffbb33";
+      ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius + 2, 0, Math.PI * 2); ctx.fill();
+      // 余烬火花
+      if (burn > 0.3) {
+        ctx.globalAlpha = burn * 0.3;
+        ctx.fillStyle = "#ffeebb";
+        ctx.beginPath();
+        ctx.arc(enemy.x + Math.sin(now * 18) * 4, enemy.y - enemy.radius - 4 - Math.abs(Math.sin(now * 10)) * 5, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.restore();
     }
   }
