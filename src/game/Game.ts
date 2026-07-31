@@ -374,8 +374,7 @@ export class Game {
   private hasPendingKeyAnimation = false;
   /** 最终波清场率（存活敌人/总生成） */
   private finalWaveClearRatio = 0;
-  /** 第一轮修正：精英死后自动resolve chest的时间戳 */
-  private autoChestResolveAt: number | null = null;
+
   /** 第一轮修正：军令爆发开始的时间基准 */
   private postChestStartAt: number | null = null;
   /** P2.7：hit stop 计时器 */
@@ -1019,11 +1018,6 @@ export class Game {
     this.updateMechanicEnemies(scaledDt);
     this.updateChestDrop(scaledDt);
 
-    // 第一轮修正：精英死后 1 秒，自动 resolve 第一关 chest
-    if (this.autoChestResolveAt !== null && this.elapsed >= this.autoChestResolveAt) {
-      this.autoChestResolveAt = null;
-      this.autoResolveEliteChestReward();
-    }
 
     this.updateEdictIconFly(frameDt);
     this.updateEdictStatusIcon(frameDt);
@@ -8893,11 +8887,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
     this.addText(DESIGN_WIDTH / 2, 150, "军令降临", "#ffd35a", 24, 1.2);
     this.screenShake = Math.max(this.screenShake, 0.25);
-  }
-
-  /** 兼容旧调用名（仍被 update 中 autoChestResolveAt 调用） */
-  private autoResolveFirstLevelChestReward() {
-    this.autoResolveEliteChestReward();
   }
 
   private applyChestBuff(id: BuffId) {
