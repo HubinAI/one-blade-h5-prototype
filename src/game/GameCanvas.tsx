@@ -115,6 +115,9 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
       } else if (event.key.toLowerCase() === "c") {
         // V0731008: 调试用触发宝箱开奖流程
         (window as any).__triggerChestFlow?.();
+      } else if (event.key.toLowerCase() === "t") {
+        // V0731010: 调试用授予三锋令
+        (window as any).__grantTripleSlash?.();
       }
     };
 
