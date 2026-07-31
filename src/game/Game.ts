@@ -5509,8 +5509,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   /** 二次打磨：自动切换 battlePhase HUD 显示 */
   private updateBattlePhase() {
     if (this.finished) { this.battlePhase = 'result'; return; }
-    // V0730020: 弹窗期间不覆盖 battlePhase
     if (this.edictRewardState === "modal") return;
+    // V0731006: 新流程精英后怪潮期间保持 edict_burst
+    if (this.edictPostWavesQueued && (!this.allPostChestWavesSpawned || this.subSpawnQueue.length > 0 || this.enemies.some(e => e.alive))) {
+      this.battlePhase = 'edict_burst'; return;
+    }
 
     // P3.5：军令爆发阶段（不再用 chestDone 永久锁死）
     if (
