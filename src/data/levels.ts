@@ -60,6 +60,7 @@ export const LEVELS: LevelConfig[] = [
     pickupChance: 0,
     durationSeconds: 90,
     buffTimes: [],
+    maxChestCount: 1, // V0731005
     eliteSpawnAt: 25,
     eliteKind: "fireRing",
     waves: [

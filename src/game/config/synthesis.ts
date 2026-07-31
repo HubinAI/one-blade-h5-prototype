@@ -545,6 +545,7 @@ function createLevel1Config(): LevelConfig {
     pickupChance: 0.03,
     durationSeconds: 90,
     buffTimes: [],
+    maxChestCount: 1, // V0731005: 教学关永远1个宝箱
     waves: [...LEVEL1_TUTORIAL_WAVES, ...level1PostTutorialWaves],
     eliteSpawnAt: 25, // 三次修正：推迟到 wave 5 之后 (19s + 6s)
     eliteKind: "fireRing" as any,
