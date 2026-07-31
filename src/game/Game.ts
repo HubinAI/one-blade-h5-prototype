@@ -805,6 +805,10 @@ export class Game {
       (window as any).__grantTripleSlash = () => {
         self._activeEdicts.push({ id: "triple_slash", level: 1 });
       };
+      // V0731011: 直接授予燎原令
+      (window as any).__grantScorch = () => {
+        self._activeEdicts.push({ id: "scorch", level: 1 });
+      };
     }
 
     // P3.2：重置精英播报状态，防止上一关残留
@@ -1076,6 +1080,8 @@ export class Game {
     // P4.3A: 战场流动控制
     // V0731010: 更新派生刀痕生命期
     this._tripleSideTrails = this._tripleSideTrails.filter(t => { t.life -= scaledDt; return t.life > 0; });
+    // V0731011: 更新火径生命 + 敌人伤害
+    this._updateScorchTrails(scaledDt);
     if (BATTLEFIELD_FLOW.enabled) {
       this.updateBattlefieldFlow(scaledDt);
     }
@@ -1154,6 +1160,7 @@ export class Game {
     this.drawEdictRewardModal(ctx);
     this._drawChestOpeningFlow(ctx); // V0731008
     this._drawTripleSideTrails(ctx); // V0731010
+    this._drawScorchTrails(ctx); // V0731011
     this.drawMidfieldEventBorder(ctx);
     // P4.2: drawIntroOverlay已删除，由BattleNotice系统替代
     // P2.8：战斗层之后绘制边缘金光和破阵过渡
@@ -1910,6 +1917,18 @@ export class Game {
       this._fireTripleSideTrails(trail);
     }
 
+    // V0731011: 燎原令 — 刀路留下火径
+    if (this._activeEdicts.some(e => e.id === "scorch") && trail.points.length >= 2) {
+      this._scorchTrails.push({
+        points: trail.points.map(p => ({ x: p.x, y: p.y })),
+        life: 2.5,
+        maxLife: 2.5,
+        lastTickTime: 0,
+      });
+      // 最多保留3条
+      while (this._scorchTrails.length > 3) this._scorchTrails.shift();
+    }
+
     // ---- 燎原路线收刀特效：所有点燃敌军额外爆炸 ----
     if (this.hasBuff("scorch")) {
       this.triggerScorchEnd(trail);
@@ -2273,6 +2292,7 @@ export class Game {
     };
     this._activeEdicts = [];
     this._tripleSideTrails = []; // V0731010: 清空派生刀痕
+    this._scorchTrails = []; // V0731011: 清空火径
   }
 
   /** 宝箱进度统一计数入口 */
@@ -2529,7 +2549,42 @@ export class Game {
 
   /** 三锋派生刀痕视觉数据 */
   private _tripleSideTrails: { points: { x: number; y: number; t: number }[]; life: number; maxLife: number }[] = [];
-  // ═══════════════════ V0731010 End ═══════════════════
+  // ═══════════════════ V0731011: 燎原令火径 ═══════════════════
+  private _scorchTrails: { points: { x: number; y: number }[]; life: number; maxLife: number; lastTickTime: number }[] = [];
+  // ═══════════════════ V0731011 End ═══════════════════
+
+  // V0731011: 火径更新 + 敌人伤害
+  private _updateScorchTrails(dt: number) {
+    for (const t of this._scorchTrails) {
+      t.life -= dt;
+      t.lastTickTime += dt;
+      if (t.lastTickTime < 0.35) continue;
+      t.lastTickTime = 0;
+      for (const enemy of this.enemies) {
+        if (!enemy.alive) continue;
+        if ((enemy as any)._scorchTickAt === t) continue;
+        let minDist = Infinity;
+        for (let i = 0; i < t.points.length - 1; i++) {
+          const a = t.points[i], b = t.points[i + 1];
+          const abx = b.x - a.x, aby = b.y - a.y;
+          const eax = a.x - enemy.x, eay = a.y - enemy.y;
+          const dot = abx * abx + aby * aby;
+          const tt = dot > 1e-6 ? clamp(-(eax * abx + eay * aby) / dot, 0, 1) : 0;
+          const cx = a.x + abx * tt, cy = a.y + aby * tt;
+          minDist = Math.min(minDist, Math.hypot(cx - enemy.x, cy - enemy.y));
+        }
+        if (minDist > enemy.radius + 16) continue;
+        (enemy as any)._scorchTickAt = t;
+        const isElite = !!enemy.eliteKind;
+        const dmg = Math.max(1, Math.ceil(isElite ? 2 : 4));
+        this.damageEnemy(enemy, dmg, this.currentSlash ?? { id: "scorch", points: [], kills: 0, active: false } as any, false, "scorch");
+        (enemy as any)._scorchBurning = 0.6;
+      }
+    }
+    for (let i = this._scorchTrails.length - 1; i >= 0; i--) {
+      if (this._scorchTrails[i].life <= 0) this._scorchTrails.splice(i, 1);
+    }
+  }
 
   /** V0730019: L1副刀解锁 — 前三组教学期间不永久解锁，等completed后 */
   private _checkL1SubBladeUnlock(): boolean {
@@ -7235,6 +7290,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.textAlign = "center";
       ctx.fillText("⚔️", cx, cy + 46);
     }
+    // V0731011: 燎原令常驻图标
+    if (this._activeEdicts.some(e => e.id === "scorch")) {
+      ctx.font = '14px "Microsoft YaHei", sans-serif';
+      ctx.fillText("🔥", cx, cy + (this._activeEdicts.some(e => e.id === "triple_slash") ? 62 : 46));
+    }
   }
 
   // V0731008: 宝箱开奖动画
@@ -7325,6 +7385,33 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ctx.lineTo(t.points[i].x, t.points[i].y);
       }
       ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // V0731011: 火径绘制 + 敌人挂火
+  private _drawScorchTrails(ctx: CanvasRenderingContext2D) {
+    for (const t of this._scorchTrails) {
+      if (t.points.length < 2) continue;
+      const a = clamp(t.life / t.maxLife, 0, 1);
+      ctx.save(); ctx.globalAlpha = a * 0.55; ctx.strokeStyle = "#ff6633"; ctx.lineWidth = 8; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(t.points[0].x, t.points[0].y);
+      for (let i = 1; i < t.points.length; i++) ctx.lineTo(t.points[i].x, t.points[i].y);
+      ctx.stroke();
+      ctx.globalAlpha = a * 0.7; ctx.strokeStyle = "#ffcc44"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(t.points[0].x, t.points[0].y);
+      for (let i = 1; i < t.points.length; i++) ctx.lineTo(t.points[i].x, t.points[i].y);
+      ctx.stroke(); ctx.restore();
+    }
+    for (const enemy of this.enemies) {
+      if (!enemy.alive) continue;
+      const burn = (enemy as any)._scorchBurning ?? 0;
+      if (burn <= 0) continue;
+      (enemy as any)._scorchBurning = Math.max(0, burn - 0.02);
+      ctx.save(); ctx.globalAlpha = burn * 0.6; ctx.fillStyle = "#ff6633";
+      ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius + 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#ffcc44";
+      ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius + 1, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
     }
   }
