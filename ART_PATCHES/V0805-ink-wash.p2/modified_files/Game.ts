@@ -5,7 +5,7 @@ import { PICKUP_DEFS } from "../data/pickups";
 import { ELITE_VISUAL_DEFS } from "../data/elites";
 import { BOSS_VISUAL_DEFS } from "../data/bosses";
 import { FORMATIONS } from "../data/formations";
-import { PROGRESS_CHEST_CONFIG, getUnlockedChestCount, type ProgressChestStatus, type ProgressChestRuntime, type EdictId, type EdictInstance } from "./config/progressChest";
+import { DESIGN_HEIGHT, DESIGN_WIDTH, HUD_HEIGHT, WALL_TOP_Y, MAX_ENEMIES_ON_SCREEN, MAX_PARTICLES_ON_SCREEN, MAX_CHAIN_DEPTH, MAX_FLOATING_TEXT } from "./config/constants";
 import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID, BATTLEFIELD_ZONES, ENTRY_PHASE_CONFIG, PERFORMANCE_LIMITS, ENEMY_SOFT_SEPARATION, FLOATING_TEXT_LIMITS, ENTRY_PROFILE_COMMON, ENTRY_PROFILE_EDICT_BURST, ENTRY_PROFILE_ELITE, ENTRY_END_JITTER, BATTLE_SAFE_X, SPLITTER_CONFIG, TRACTOR_CONFIG, BATTLEFIELD_FLOW } from "./config/balance";
 import { AD_CONFIG } from "./config/ads";
 import { RUN_BUFFS, RUN_BUFF_BY_ID, ROUTE_COLORS, ROUTE_NAMES, ROUTE_BUFFS, getNextBuffInRoute, getBuffRoute } from "./config/buffs";
@@ -32,6 +32,8 @@ import { CHASE_CONFIG } from "./config/bossChase";
 import { drawChaseMode, pushBarrageHitVfx, updateBarrageVfx, clearBarrageHitVfx } from "./systems/BossChaseHUD";
 import { logEvent } from "./services/Analytics";
 import { AudioService } from "./services/AudioService";
+import { drawInkWashBackground, drawInkWashMist, drawInkWashMountainCover, drawInkWashFogGradient, drawInkWashHud, INK_HUD_TEXT, INK_HUD_TEXT_MUTED } from "./systems/inkWashBackground";
+import { drawInkWashSlashUnderlay, drawInkWashTipSplash, drawInkWashBladeHighlight } from "./systems/inkWashEffects";
 import { calculateSkillScores } from "./services/SkillTracker";
 import type {
   BattlePhase,
@@ -140,9 +142,6 @@ export class Game {
   private hp: number;
   private maxHp: number;
   private score = 0;
-  // V0731005: 进度宝箱运行时代替旧 score HUD
-  private _chestRuntime: ProgressChestRuntime = { stageIndex: 0, progress: 0, threshold: 30, status: "charging", maxChestCount: 1, lastCountedEnemyId: "", lastKillSource: "" };
-  private _activeEdicts: EdictInstance[] = [];
   private energy: number = 0;
   /** V0723014: Reactive 模式刀势上限（可成长，默认 100） */
   private reactiveBladeMax: number = BLADE_MOMENTUM_CONFIG.baseMax;
@@ -736,41 +735,6 @@ export class Game {
       };
     }
 
-    // V0731005: Debug进度宝箱窗口钩子
-    if (typeof window !== 'undefined') {
-      const self = this;
-      (window as any).__setProgressChestDebug = (opts: { progress?: number; status?: string }) => {
-        if (opts.progress !== undefined) {
-          self._chestRuntime.progress = Math.min(opts.progress, self._chestRuntime.threshold);
-          if (self._chestRuntime.progress >= self._chestRuntime.threshold) {
-            self._chestRuntime.status = "ready";
-          }
-        }
-        if (opts.status === "locked") {
-          self._chestRuntime.stageIndex = 1;
-          self._chestRuntime.threshold = PROGRESS_CHEST_CONFIG.thresholds[1] ?? 60;
-          self._chestRuntime.status = "locked";
-          self._chestRuntime.progress = 0;
-        }
-        if (opts.status === "charging") {
-          self._chestRuntime.status = "charging";
-        }
-      };
-      (window as any).__previewProgressChestState = (state: string) => {
-        if (state === "locked") {
-          self._chestRuntime.stageIndex = 1;
-          self._chestRuntime.threshold = 60;
-          self._chestRuntime.status = "locked";
-          self._chestRuntime.progress = 0;
-        }
-        if (state === "ready") {
-          self._chestRuntime.progress = self._chestRuntime.threshold;
-          self._chestRuntime.status = "ready";
-        }
-      };
-      (window as any).__chestRuntime = () => self._chestRuntime;
-    }
-
     // P3.2：重置精英播报状态，防止上一关残留
     this.elitePreviewShown = false;
     this.eliteSpawnAnnounced = false;
@@ -789,9 +753,6 @@ export class Game {
     if (this.isFirstRun) {
       this.showHint("drag-guide", "按住拖动，松手挥出一刀", DESIGN_WIDTH / 2, 118, 2.5);
     }
-
-    // V0731005: 初始化进度宝箱（Boss模式跳过）
-    this._initProgressChest();
 
     // 初始化副刀（先确保有默认绿刀+2把绿副刀）
     saveDefaultWhiteBlade();
@@ -1099,6 +1060,7 @@ export class Game {
     this.drawTractorLinks(ctx);
     // 远景山间雾气遮罩（敌人从雾后现身）
     this.drawTopMist(ctx);
+    drawInkWashMist(ctx);
     this.drawSlash(ctx);
     this.drawParticles(ctx);
     this.drawDefenseAndWarrior(ctx);
@@ -1331,6 +1293,7 @@ export class Game {
       // 1. 背景层（修复黑屏问题）
       this.drawBackground(ctx);
       this.drawTopMist(ctx);
+      drawInkWashMist(ctx);
       // 2. 弹幕层 + Boss（世界层）
       rc.renderWorld(ctx);
       // 3. 战斗表现层
@@ -1378,6 +1341,7 @@ export class Game {
     // 1. 背景 + Boss世界层（在刀光下方）
     this.drawBackground(ctx);
     this.drawTopMist(ctx);
+    drawInkWashMist(ctx);
     this.bossController?.renderWorld(ctx);
     // 2. 战斗表现层（Boss身体上方）
     this.drawSlash(ctx);
@@ -2200,59 +2164,6 @@ handlePointerUp(reason: string = "收刀") {
   private isLogicalLevel1(): boolean {
     return this.gameMode === "normal" && this.getLogicalFloor() === 1;
   }
-
-  // ═══════════════════ V0731005: 进度宝箱 ═══════════════════
-  private _initProgressChest() {
-    if (this.gameMode !== "normal") { this._chestRuntime = { stageIndex: 0, progress: 0, threshold: 0, status: "complete", maxChestCount: 0, lastCountedEnemyId: "", lastKillSource: "" }; return; }
-    const maxChest = this.level.maxChestCount ?? getUnlockedChestCount(this._readMainlineLevel());
-    this._chestRuntime = {
-      stageIndex: 0,
-      progress: 0,
-      threshold: PROGRESS_CHEST_CONFIG.thresholds[0],
-      status: "charging",
-      maxChestCount: maxChest,
-      lastCountedEnemyId: "",
-      lastKillSource: "",
-    };
-    this._activeEdicts = [];
-  }
-
-  /** 宝箱进度统一计数入口 */
-  registerEnemyKillForProgressChest(enemyId: string, source: string) {
-    const rt = this._chestRuntime;
-    if (rt.status !== "charging") return;
-    if (rt.progress >= rt.threshold) return;
-    if (enemyId === rt.lastCountedEnemyId) return; // 防止重复计数
-    rt.progress = Math.min(rt.progress + 1, rt.threshold);
-    rt.lastCountedEnemyId = enemyId;
-    rt.lastKillSource = source;
-    if (rt.progress >= rt.threshold) {
-      rt.status = "ready";
-    }
-  }
-
-  /** 结算当前宝箱并推进到下一阶段 */
-  resolveCurrentChestAndAdvance() {
-    const rt = this._chestRuntime;
-    const nextIndex = rt.stageIndex + 1;
-    if (nextIndex < PROGRESS_CHEST_CONFIG.thresholds.length && nextIndex < rt.maxChestCount) {
-      rt.stageIndex = nextIndex;
-      rt.progress = 0;
-      rt.threshold = PROGRESS_CHEST_CONFIG.thresholds[nextIndex];
-      rt.status = "charging";
-    } else {
-      rt.status = nextIndex >= rt.maxChestCount ? "complete" : "locked";
-    }
-  }
-
-  /** 读取主线等级 */
-  private _readMainlineLevel(): number {
-    try {
-      const s = window.localStorage.getItem("one_blade_mainline_level");
-      return s ? parseInt(s, 10) : 1;
-    } catch { return 1; }
-  }
-  // ═══════════════════ V0731005 End ═══════════════════
 
   /** V0730019: L1副刀解锁 — 前三组教学期间不永久解锁，等completed后 */
   private _checkL1SubBladeUnlock(): boolean {
@@ -3090,7 +3001,6 @@ handlePointerUp(reason: string = "收刀") {
     if (!chainKill) trail.directMainKills += 1;
     if (chainKill) trail.chain += 1;
     this.stats.kills += 1;
-    this.registerEnemyKillForProgressChest(enemy.id, chainKill ? "chain" : "slash");
     const stage = SWORD_STAGE_BY_ID[trail.tier];
     const chainBonus = chainKill ? BALANCE.score.chainKillBonus * Math.max(1, trail.chain) : 0;
     this.score += enemy.score + chainBonus;
@@ -3110,7 +3020,7 @@ handlePointerUp(reason: string = "收刀") {
           trail.kills += 1;
           this.score += powder.score;
           this.stats.kills += 1;
-          this.registerEnemyKillForProgressChest(powder.id, "powder_chain");
+          this.particles.push(...explosionBurst(powder, 2, ["#ff6a33", "#ffb15c", "#f6e7bd"]));
           this.addText(powder.x, powder.y - 16, "连锁引爆", "#ff6a33", 14, 0.8);
         }
       }
@@ -4851,8 +4761,6 @@ handlePointerUp(reason: string = "收刀") {
       this.pickups.push(this.createPickup(configuredPickup.kind, configuredPickup.x, BALANCE.battlefield.topY + 78 - (configuredPickup.yOffset ?? 0)));
       this.pickupsSpawned += 1;
     } else if (
-      // V0731005: 正常流程屏蔽随机拾取物
-      !this.isLogicalLevel1() &&
       Math.random() < this.getEffectivePickupChance() &&
       this.pickupsSpawned < this.getEffectivePickupLimit()
     ) {
@@ -6738,97 +6646,32 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   }
 
   private drawBackground(ctx: CanvasRenderingContext2D) {
-    const sky = ctx.createLinearGradient(0, 0, 0, DESIGN_HEIGHT);
-    sky.addColorStop(0, "#180f0b");
-    sky.addColorStop(0.42, "#352017");
-    sky.addColorStop(1, "#150e0a");
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
-
-    // 微弱纹理线
-    ctx.globalAlpha = 0.08;
-    ctx.strokeStyle = "#e7c27a";
-    ctx.lineWidth = 1;
-    for (let y = 0; y < DESIGN_HEIGHT; y += 18) {
-      ctx.beginPath();
-      ctx.moveTo(0, y + Math.sin(y * 0.02) * 3);
-      ctx.lineTo(DESIGN_WIDTH, y + Math.cos(y * 0.018) * 4);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-
-    // 远山剪影（无旗帜）
-    ctx.fillStyle = "rgba(12, 9, 8, 0.45)";
-    ctx.beginPath();
-    ctx.moveTo(0, 200);
-    ctx.lineTo(60, 158);
-    ctx.lineTo(130, 200);
-    ctx.lineTo(200, 140);
-    ctx.lineTo(270, 200);
-    ctx.lineTo(330, 152);
-    ctx.lineTo(390, 200);
-    ctx.lineTo(390, 270);
-    ctx.lineTo(0, 270);
-    ctx.closePath();
-    ctx.fill();
+    drawInkWashBackground(ctx);
   }
 
   /** 远景山间雾气遮罩：画在敌人上方，让敌人从雾后现身 */
   private drawTopMist(ctx: CanvasRenderingContext2D) {
-    // 下层：山峦剪影（敌人生成区遮罩）
-    ctx.fillStyle = "rgba(8, 6, 5, 0.50)";
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(28, 72);
-    ctx.lineTo(58, 36);
-    ctx.lineTo(96, 96);
-    ctx.lineTo(128, 28);
-    ctx.lineTo(168, 88);
-    ctx.lineTo(206, 44);
-    ctx.lineTo(244, 102);
-    ctx.lineTo(278, 52);
-    ctx.lineTo(320, 108);
-    ctx.lineTo(356, 62);
-    ctx.lineTo(390, 84);
-    ctx.lineTo(390, 0);
-    ctx.closePath();
-    ctx.fill();
-
-    // 上层：雾气渐变（底部渐淡，与远处融合）
-    const fog = ctx.createLinearGradient(0, 0, 0, 130);
-    fog.addColorStop(0, "rgba(18, 12, 8, 0.65)");
-    fog.addColorStop(0.4, "rgba(18, 12, 8, 0.28)");
-    fog.addColorStop(1, "rgba(18, 12, 8, 0)");
-    ctx.fillStyle = fog;
-    ctx.fillRect(0, 0, DESIGN_WIDTH, 130);
+    drawInkWashMountainCover(ctx);
+    drawInkWashFogGradient(ctx);
   }
 
   private drawHud(ctx: CanvasRenderingContext2D) {
-    // P4.4A.2: Boss模式隐藏标准HUD
     if (this.gameMode === "boss" || this.bossController) return;
 
-    ctx.fillStyle = "rgba(18, 12, 8, 0.78)";
-    ctx.fillRect(0, 0, DESIGN_WIDTH, HUD_HEIGHT);
-    ctx.strokeStyle = "rgba(255, 214, 124, 0.35)";
-    ctx.beginPath();
-    ctx.moveTo(0, HUD_HEIGHT);
-    ctx.lineTo(DESIGN_WIDTH, HUD_HEIGHT);
-    ctx.stroke();
+    drawInkWashHud(ctx, HUD_HEIGHT);
 
     // 中间：关名 + 阶段（二次打磨：按 battlePhase 切换显示）
     ctx.textAlign = "center";
-    ctx.fillStyle = "#f6e7bd";
-    ctx.font = '700 16px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = INK_HUD_TEXT;
+    ctx.font = '700 16px "Noto Serif SC", "Microsoft YaHei", sans-serif';
     const isBossLevel = this.level.id < 10000 && Boolean(this.level.bossId);
     const displayFloor = isBossLevel ? null : (this.level.id >= 10000 ? this.level.id - 10000 : this.level.id);
-    // 防止标题里已含"第X关"前缀造成重复
     const titleText = this.level.title;
     const hasPrefix = displayFloor !== null && titleText.startsWith(`第${displayFloor}关`);
     const displayTitle = hasPrefix ? titleText : (displayFloor !== null ? `第${displayFloor}关 ${titleText}` : titleText);
     ctx.fillText(displayTitle, DESIGN_WIDTH / 2, 28);
-    ctx.font = '11px "Microsoft YaHei", sans-serif';
-    ctx.fillStyle = "rgba(246, 231, 189, 0.72)";
-    // 按 battlePhase 显示不同的阶段文本
+    ctx.font = '11px "Noto Serif SC", "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = INK_HUD_TEXT_MUTED;
     let phaseText = "";
     switch (this.battlePhase) {
       case 'main_waves':
@@ -6855,77 +6698,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
     ctx.fillText(phaseText, DESIGN_WIDTH / 2, 48);
 
-    // V0731005: 宝箱进度HUD 替换旧评分
-    this._drawProgressChestHUD(ctx);
-  }
-
-  // V0731005: 进度宝箱HUD
-  private _drawProgressChestHUD(ctx: CanvasRenderingContext2D) {
-    const rt = this._chestRuntime;
-    const cx = DESIGN_WIDTH - 44;
-    const cy = 36;
-    const ringR = 22;
-    const ringW = 4;
-
-    // 进度环背景
-    ctx.beginPath();
-    ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
-    ctx.lineWidth = ringW;
-    ctx.stroke();
-
-    // 进度环填充
-    const ratio = rt.threshold > 0 ? Math.min(rt.progress / rt.threshold, 1) : 0;
-    if (ratio > 0) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, ringR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
-      const ringColor = rt.status === "ready" ? "#ffd35a" : "#4da6ff";
-      ctx.strokeStyle = ringColor;
-      ctx.lineWidth = ringW;
-      if (rt.status === "ready") {
-        ctx.shadowColor = "#ffd35a";
-        ctx.shadowBlur = 8;
-      }
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-    }
-
-    // 锁定态显示
-    if (rt.status === "locked") {
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
-      ctx.beginPath();
-      ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#999";
-      ctx.font = '12px "Microsoft YaHei", sans-serif';
-      ctx.textAlign = "center";
-      ctx.fillText("🔒", cx, cy + 4);
-      ctx.fillText("第2宝箱", cx + 44, cy - 2);
-      ctx.fillStyle = "#666";
-      ctx.font = '9px "Microsoft YaHei", sans-serif';
-      ctx.fillText("主线6解锁", cx + 44, cy + 12);
-      return;
-    }
-
-    // 宝箱emoji图标
-    ctx.font = '18px "Microsoft YaHei", sans-serif';
-    ctx.textAlign = "center";
-    ctx.fillText("📦", cx, cy + 6);
-
-    // 进度数字
-    if (rt.status === "complete") {
-      ctx.fillStyle = "#666";
-      ctx.font = '11px "Microsoft YaHei", sans-serif';
-      ctx.fillText("完", cx, cy + 30);
-    } else if (rt.status === "ready") {
-      ctx.fillStyle = "#ffd35a";
-      ctx.font = '700 11px "Microsoft YaHei", sans-serif';
-      ctx.fillText("满", cx, cy + 30);
-    } else {
-      ctx.fillStyle = "#fff";
-      ctx.font = '11px "Microsoft YaHei", sans-serif';
-      ctx.fillText(`${rt.progress}/${rt.threshold}`, cx, cy + 30);
-    }
+    // 右侧：分数
+    ctx.textAlign = "right";
+    ctx.fillStyle = INK_HUD_TEXT;
+    ctx.font = '700 14px "Noto Serif SC", "Microsoft YaHei", sans-serif';
+    ctx.fillText(`${Math.floor(this.score)} 分`, DESIGN_WIDTH - 16, 36);
   }
 
   private drawEnemies(ctx: CanvasRenderingContext2D) {
@@ -7519,6 +7296,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // P4.4A.2-R2: 大幅缩短刀光总时长
     const width = effWidth * trail.widthMultiplier * (0.28 + ratio * 0.95) * 0.7;
 
+    // V0805-ink-wash.p2: 水墨飞白底纹（在金色刀光前叠加墨色飞白）
+    const inkVisualLength = effVisualLength * (0.34 + ratio * 0.82) * lowFade * 0.6;
+    drawInkWashSlashUnderlay(ctx, points, ratio, inkVisualLength);
+
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     ctx.lineCap = "round";
@@ -7578,6 +7359,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const angle = prev ? Math.atan2(last.y - prev.y, last.x - prev.x) : this.lastSlashAngle;
     const visualLength = effVisualLength * (0.34 + ratio * 0.82) * lowFade * 0.6;  // 缩短刀尖长度
     this.drawBladeTip(ctx, last, angle, visualLength, width, effColor, ratio);
+    // V0805-ink-wash.p2: 刀锋墨点残响
+    drawInkWashTipSplash(ctx, last.x, last.y, angle, ratio);
     ctx.restore();
   }
   private drawSubBladeVisual(ctx: CanvasRenderingContext2D) {
@@ -8471,14 +8254,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       `enemies: ${this.enemies.length} (alive: ${aliveCount})`,
       `energy: ${this.energy.toFixed(1)}`,
       `stage: ${stage.label}`,
-      `--- V0731005 Chest ---`,
-      `chestStageIndex: ${this._chestRuntime.stageIndex}`,
-      `chestProgress: ${this._chestRuntime.progress}`,
-      `chestThreshold: ${this._chestRuntime.threshold}`,
-      `chestStatus: ${this._chestRuntime.status}`,
-      `maxChestCount: ${this._chestRuntime.maxChestCount}`,
-      `activeEdicts: [${this._activeEdicts.map(e => e.id).join(",")}]`,
-      `lastKillSource: ${this._chestRuntime.lastKillSource}`,
+      `slash stage: ${slash ? SWORD_STAGE_BY_ID[slash.tier].name : "-"}`,
       `--- ${APP_VERSION} Debug ---`,
       `entryEndY: ${z.entryEndY}`,
       `midfieldStartY: ${z.midfieldStartY}`,
@@ -8993,8 +8769,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   /** 第六轮修正：统一精英宝箱掉落入口（主刀/副刀/触底共用） */
   /** P3.6：精英死亡触发宝箱（三重防重复） */
   private triggerEliteChestDrop(enemy: Enemy) {
-    // V0731005: 精英死亡不再触发旧军令弹窗，由进度宝箱接管
-    if (this.gameMode === "normal") return;
     if (this.edictRewardStarted || this.chestDropped || this.chestDone) {
       console.warn("[edict duplicate blocked]", { edictRewardStarted: this.edictRewardStarted, chestDropped: this.chestDropped, chestDone: this.chestDone, time: this.elapsed });
       return;
@@ -9030,7 +8804,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     enemy.alive = false;
     this.score += enemy.score;
     this.stats.kills += 1;
-    this.registerEnemyKillForProgressChest(enemy.id, source);
 
     if (enemy.kind === "elite" && enemy.eliteKind && !this.chestDropped) {
       this.triggerEliteChestDrop(enemy);

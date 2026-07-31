@@ -174,6 +174,8 @@ export type LevelConfig = {
   chestBuffId?: string;
   /** entryPhase 前5关覆写（V0715008 新增） */
   entryOverride?: { multiplier: number; endY: number; maxDuration: number; spawnY: number };
+  /** V0731005: 本关最多几个宝箱（默认1） */
+  maxChestCount?: number;
 };
 
 /** 军令爆发阶段类型（二次打磨新增） */
