@@ -785,6 +785,7 @@ export class Game {
       (window as any).__chestRuntime = () => self._chestRuntime;
       // V0731008: chest opening debug
       (window as any).__triggerChestFlow = () => {
+        if (self._chestOpeningPhase !== "idle") return; // 幂等
         self._chestRuntime.progress = 30;
         self._chestRuntime.status = "ready";
         self._chestOpeningPhase = "warning";
@@ -7110,11 +7111,23 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
   // V0731008: 宝箱开奖动画
   private _drawChestOpeningFlow(ctx: CanvasRenderingContext2D) {
-    if (this._chestOpeningPhase === "idle" || this._chestOpeningPhase === "warning" || this._chestOpeningPhase === "closed") return;
+    if (this._chestOpeningPhase === "idle" || this._chestOpeningPhase === "closed") return;
     const cx = DESIGN_WIDTH / 2;
     const cy = DESIGN_HEIGHT / 2;
 
-    // 暗色遮罩
+    // Warning 阶段：半透明遮罩 + 提示
+    if (this._chestOpeningPhase === "warning") {
+      ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+      ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+      ctx.fillStyle = "#ffd35a";
+      ctx.font = '700 24px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = "center";
+      const pulse = 1 + Math.sin(this.elapsed * 6) * 0.05;
+      ctx.font = `700 ${Math.round(24 * pulse)}px "Microsoft YaHei", sans-serif`;
+      ctx.fillText("军令将至", cx, cy);
+      ctx.shadowBlur = 0;
+      return;
+    }
     ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
     ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
 
