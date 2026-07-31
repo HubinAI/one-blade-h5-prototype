@@ -801,6 +801,10 @@ export class Game {
         self._pendingEdictId = null;
         self._chestRouletteResult = null;
       };
+      // V0731010: 直接授予三锋令
+      (window as any).__grantTripleSlash = () => {
+        self._activeEdicts.push({ id: "triple_slash", level: 1 });
+      };
     }
 
     // P3.2：重置精英播报状态，防止上一关残留
@@ -1070,6 +1074,8 @@ export class Game {
       if (this._activeEventTimer <= 0) this._currentEventType = null;
     }
     // P4.3A: 战场流动控制
+    // V0731010: 更新派生刀痕生命期
+    this._tripleSideTrails = this._tripleSideTrails.filter(t => { t.life -= scaledDt; return t.life > 0; });
     if (BATTLEFIELD_FLOW.enabled) {
       this.updateBattlefieldFlow(scaledDt);
     }
@@ -1147,6 +1153,7 @@ export class Game {
     this.drawChestDrop(ctx);
     this.drawEdictRewardModal(ctx);
     this._drawChestOpeningFlow(ctx); // V0731008
+    this._drawTripleSideTrails(ctx); // V0731010
     this.drawMidfieldEventBorder(ctx);
     // P4.2: drawIntroOverlay已删除，由BattleNotice系统替代
     // P2.8：战斗层之后绘制边缘金光和破阵过渡
@@ -1898,6 +1905,11 @@ export class Game {
     this.resolvePendingSlash(trail);
     const last = trail.points[trail.points.length - 1];
 
+    // V0731010: 三锋令 — 主刀后派生两道平行刀痕
+    if (this._activeEdicts.some(e => e.id === "triple_slash")) {
+      this._fireTripleSideTrails(trail);
+    }
+
     // ---- 燎原路线收刀特效：所有点燃敌军额外爆炸 ----
     if (this.hasBuff("scorch")) {
       this.triggerScorchEnd(trail);
@@ -2424,10 +2436,99 @@ export class Game {
   /** 应用待确认的军令 */
   private _applyPendingEdict() {
     if (!this._pendingEdictId) return;
+    // V0731010: 防止重复添加同名军令
+    if (this._activeEdicts.some(e => e.id === this._pendingEdictId)) { this._pendingEdictId = null; return; }
     this._activeEdicts.push({ id: this._pendingEdictId, level: 1 });
     this._pendingEdictId = null;
   }
-  // ═══════════════════ V0731008 End ═══════════════════
+  // ═══════════════════ V0731010: 三锋令 ═══════════════════
+  /** 主刀后派生两道平行刀痕 */
+  private _fireTripleSideTrails(main: import("./types").SlashTrail) {
+    if (main.points.length < 2) return;
+    const pts = main.points;
+    // 计算主刀方向，派生偏移
+    const dx = pts[pts.length - 1].x - pts[0].x;
+    const dy = pts[pts.length - 1].y - pts[0].y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 10) return; // 刀路太短不派生
+    const nx = -dy / len; // 法线方向
+    const ny = dx / len;
+    const offset = 52; // 偏移量
+
+    const sideOffsets = [-offset, offset]; // 左、右
+    const delay = 0.10; // 延迟秒
+
+    for (const sign of sideOffsets) {
+      // 偏移后的刀路点
+      const offsetPts = pts.map(p => ({
+        x: p.x + nx * sign,
+        y: p.y + ny * sign,
+        t: p.t + delay,
+      }));
+      // 简化的派生刀痕碰撞检测
+      this._checkTripleSideHits(offsetPts, main);
+    }
+
+    // 派生刀痕视觉效果：复用主刀点但加偏移标记
+    this._tripleSideTrails.push({
+      points: pts.map(p => ({
+        x: p.x + nx * (-offset),
+        y: p.y + ny * (-offset),
+        t: p.t + delay,
+      })),
+      life: 0.25,
+      maxLife: 0.25,
+    });
+    this._tripleSideTrails.push({
+      points: pts.map(p => ({
+        x: p.x + nx * offset,
+        y: p.y + ny * offset,
+        t: p.t + delay,
+      })),
+      life: 0.25,
+      maxLife: 0.25,
+    });
+  }
+
+  /** 派生刀痕碰撞检测 */
+  private _checkTripleSideHits(offsetPts: { x: number; y: number }[], main: import("./types").SlashTrail) {
+    const hitIds = new Set<string>(); // 每道派生刀痕对同目标只结算一次
+    for (let i = 0; i < offsetPts.length - 1; i++) {
+      const a = offsetPts[i];
+      const b = offsetPts[i + 1];
+      for (const enemy of this.enemies) {
+        if (!enemy.alive) continue;
+        if (hitIds.has(enemy.id)) continue;
+        // 线段-圆碰撞检测
+        const abx = b.x - a.x, aby = b.y - a.y;
+        const eax = a.x - enemy.x, eay = a.y - enemy.y;
+        const rad = enemy.radius + 12; // 加宽判定
+        const dot = abx * abx + aby * aby;
+        if (dot < 1) continue;
+        const t = clamp(-(eax * abx + eay * aby) / dot, 0, 1);
+        const cx = a.x + abx * t, cy = a.y + aby * t;
+        const dist = Math.sqrt((cx - enemy.x) ** 2 + (cy - enemy.y) ** 2);
+        if (dist > rad) continue;
+
+        hitIds.add(enemy.id);
+        // 伤害：普通兵 100% 主刀伤害，精英 25% 主刀伤害
+        const bm = createBladeMomentumState(this.energy, this.bladeMomentumMax);
+        const pct = bm.band === "high" ? 0.25 : bm.band === "mid" ? 0.20 : 0.15;
+        const isElite = !!enemy.eliteKind;
+        const dmgPct = isElite ? 0.25 : 1.0; // 精英 25%，普通兵 100%
+        const baseDmg = Math.max(1, Math.ceil(enemy.maxHp * pct * dmgPct));
+        this.damageEnemy(enemy, baseDmg, main, false, "triple_side");
+        // 精英去重
+        if (isElite) {
+          this._eliteDamageDedup.add(`triple_${enemy.id}`);
+        }
+      }
+    }
+  }
+
+  /** 三锋派生刀痕视觉数据 */
+  private _tripleSideTrails: { points: { x: number; y: number; t: number }[]; life: number; maxLife: number }[] = [];
+  // ═══════════════════ V0731010 End ═══════════════════
 
   /** V0730019: L1副刀解锁 — 前三组教学期间不永久解锁，等completed后 */
   private _checkL1SubBladeUnlock(): boolean {
@@ -7195,6 +7296,26 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.fillStyle = "#ffd35a";
       ctx.font = '700 20px "Microsoft YaHei", sans-serif';
       ctx.fillText(`获得 [${EDICT_NAMES[this._pendingEdictId]}] !`, cx, cy + 80);
+    }
+  }
+
+  // V0731010: 三锋派生刀痕绘制
+  private _drawTripleSideTrails(ctx: CanvasRenderingContext2D) {
+    for (const t of this._tripleSideTrails) {
+      if (t.points.length < 2) continue;
+      const alpha = t.life / t.maxLife;
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.65;
+      ctx.strokeStyle = "#b8d4ff";
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(t.points[0].x, t.points[0].y);
+      for (let i = 1; i < t.points.length; i++) {
+        ctx.lineTo(t.points[i].x, t.points[i].y);
+      }
+      ctx.stroke();
+      ctx.restore();
     }
   }
 
