@@ -2354,14 +2354,14 @@ export class Game {
   // ═══════════════════ V0731006 End ═══════════════════
 
   // ═══════════════════ V0731008: 宝箱开奖流程 ═══════════════════
+  private _chestFlowClock = 0;
   private _updateChestOpeningFlow(dt: number) {
+    this._chestFlowClock += dt; // V0731008 hotfix: 独立时钟
     switch (this._chestOpeningPhase) {
       case "warning": {
-        // 预警阶段：0.8s 等待
-        if (this._chestWarningAt === 0) this._chestWarningAt = this.elapsed;
-        // 等待当前挥刀结束
+        if (this._chestWarningAt === 0) this._chestWarningAt = this._chestFlowClock;
         if (this.currentSlash?.active) break;
-        if (this.elapsed - this._chestWarningAt < 0.8) break;
+        if (this._chestFlowClock - this._chestWarningAt < 0.8) break;
         this._chestOpeningPhase = "freezing";
         break;
       }
