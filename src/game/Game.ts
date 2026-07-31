@@ -6,6 +6,9 @@ import { ELITE_VISUAL_DEFS } from "../data/elites";
 import { BOSS_VISUAL_DEFS } from "../data/bosses";
 import { FORMATIONS } from "../data/formations";
 import { PROGRESS_CHEST_CONFIG, getUnlockedChestCount, type ProgressChestStatus, type ProgressChestRuntime, type EdictId, type EdictInstance } from "./config/progressChest";
+
+// V0731008: 军令随机池
+const EDICT_POOL: EdictId[] = ["triple_slash", "scorch", "frost"];
 import { DESIGN_HEIGHT, DESIGN_WIDTH, HUD_HEIGHT, WALL_TOP_Y, MAX_ENEMIES_ON_SCREEN, MAX_PARTICLES_ON_SCREEN, MAX_CHAIN_DEPTH, MAX_FLOATING_TEXT } from "./config/constants";
 import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID, BATTLEFIELD_ZONES, ENTRY_PHASE_CONFIG, PERFORMANCE_LIMITS, ENEMY_SOFT_SEPARATION, FLOATING_TEXT_LIMITS, ENTRY_PROFILE_COMMON, ENTRY_PROFILE_EDICT_BURST, ENTRY_PROFILE_ELITE, ENTRY_END_JITTER, BATTLE_SAFE_X, SPLITTER_CONFIG, TRACTOR_CONFIG, BATTLEFIELD_FLOW } from "./config/balance";
 import { AD_CONFIG } from "./config/ads";
@@ -144,6 +147,16 @@ export class Game {
   // V0731005: 进度宝箱运行时代替旧 score HUD
   private _chestRuntime: ProgressChestRuntime = { stageIndex: 0, progress: 0, threshold: 30, status: "charging", maxChestCount: 1, lastCountedEnemyId: "", lastKillSource: "" };
   private _activeEdicts: EdictInstance[] = [];
+  // V0731008: 宝箱开奖框架
+  private _chestOpeningPhase: "idle" | "warning" | "freezing" | "descending" | "roulette" | "revealed" | "closed" = "idle";
+  private _pendingEdictId: EdictId | null = null;
+  private _chestRouletteTimer = 0;
+  private _chestRouletteSpeed = 0;
+  private _chestRouletteIndex = 0;
+  private _chestRouletteResult: EdictId | null = null;
+  private _chestWarningAt = 0;
+  private _chestOpenBlockUntilMs = 0;
+  private _chestOpenAwaitPointerUp = false;
   private energy: number = 0;
   /** V0723014: Reactive 模式刀势上限（可成长，默认 100） */
   private reactiveBladeMax: number = BLADE_MOMENTUM_CONFIG.baseMax;
@@ -770,6 +783,23 @@ export class Game {
         }
       };
       (window as any).__chestRuntime = () => self._chestRuntime;
+      // V0731008: chest opening debug
+      (window as any).__triggerChestFlow = () => {
+        self._chestRuntime.progress = 30;
+        self._chestRuntime.status = "ready";
+        self._chestOpeningPhase = "warning";
+        self._chestWarningAt = 0;
+      };
+      (window as any).__forceEdictResult = (edict: EdictId) => {
+        self._chestRouletteResult = edict;
+      };
+      (window as any).__resetChestFlow = () => {
+        self._chestOpeningPhase = "idle";
+        self._chestRouletteTimer = 0;
+        self._chestRouletteIndex = 0;
+        self._pendingEdictId = null;
+        self._chestRouletteResult = null;
+      };
     }
 
     // P3.2：重置精英播报状态，防止上一关残留
@@ -931,6 +961,8 @@ export class Game {
 
   update(dt: number) {
     const frameDt = Math.min(dt, 0.04);
+    // V0731008: 宝箱开奖期间完全冻结战斗
+    if (this._chestOpeningPhase !== "idle") { this._updateChestOpeningFlow(frameDt); return; }
     // V0730020: edict_modal 期间完全暂停战斗（仅允许弹窗渲染）
     if (this.battlePhase === "edict_modal") { this.updateChestDrop(frameDt); return; }
     const baseDt = frameDt * (this.slowMoTimer > 0 ? 0.58 : 1);
@@ -1113,6 +1145,7 @@ export class Game {
     this.drawWaveProgress(ctx);
     this.drawChestDrop(ctx);
     this.drawEdictRewardModal(ctx);
+    this._drawChestOpeningFlow(ctx); // V0731008
     this.drawMidfieldEventBorder(ctx);
     // P4.2: drawIntroOverlay已删除，由BattleNotice系统替代
     // P2.8：战斗层之后绘制边缘金光和破阵过渡
@@ -1564,9 +1597,18 @@ export class Game {
       this.selectBuffAt(pos);
       return;
     }
+    // V0731008: 宝箱开奖期间输入保护
+    if (this._chestOpeningPhase !== "idle") {
+      if (this._chestOpeningPhase === "warning") return;
+      if (performance.now() < this._chestOpenBlockUntilMs) return;
+      if (this._chestOpenAwaitPointerUp) return;
+      if (this._chestOpeningPhase === "revealed") {
+        this._chestOpeningPhase = "closed";
+      }
+      return;
+    }
     // V0730020: 军令弹窗输入保护
-    // V0730020: 军令弹窗输入保护
-if (this.chestPendingConfirm) {
+    if (this.chestPendingConfirm) {
       if (performance.now() < this._modalUnlockAtMs) return;
       if (this.isPointInChestConfirmButton(pos.x, pos.y)) {
         this.confirmEliteChestReward();
@@ -1618,8 +1660,9 @@ if (this.chestPendingConfirm) {
     this.extendSlash(next);
   }
 
-handlePointerUp(reason: string = "收刀") {
+  handlePointerUp(reason: string = "收刀") {
     if (this._modalAwaitPointerUp) { this._modalAwaitPointerUp = false; return; } // V0731003
+    if (this._chestOpenAwaitPointerUp) { this._chestOpenAwaitPointerUp = false; return; } // V0731008
     this.pointerDown = false;
     this.pendingSlash = null;
     if (this.currentSlash?.active) {
@@ -2309,7 +2352,81 @@ handlePointerUp(reason: string = "收刀") {
   }
   // ═══════════════════ V0731006 End ═══════════════════
 
-  // ═══════════════════ V0731005 End ═══════════════════
+  // ═══════════════════ V0731008: 宝箱开奖流程 ═══════════════════
+  private _updateChestOpeningFlow(dt: number) {
+    switch (this._chestOpeningPhase) {
+      case "warning": {
+        // 预警阶段：0.8s 等待
+        if (this._chestWarningAt === 0) this._chestWarningAt = this.elapsed;
+        // 等待当前挥刀结束
+        if (this.currentSlash?.active) break;
+        if (this.elapsed - this._chestWarningAt < 0.8) break;
+        this._chestOpeningPhase = "freezing";
+        break;
+      }
+      case "freezing": {
+        // 完全冻结战斗 — update() 提前 return，这里只更新开奖
+        this._chestOpeningPhase = "descending";
+        break;
+      }
+      case "descending": {
+        // 宝箱出现（简化：直接进入轮转）
+        this._chestOpeningPhase = "roulette";
+        this._chestRouletteTimer = 0;
+        this._chestRouletteSpeed = 12; // 初始快速轮转
+        this._chestRouletteIndex = Math.floor(Math.random() * EDICT_POOL.length);
+        // V0731008: 真实随机结果
+        this._chestRouletteResult = EDICT_POOL[Math.floor(Math.random() * EDICT_POOL.length)];
+        this._chestOpenBlockUntilMs = performance.now() + 500; // 前500ms不可关闭
+        this._chestOpenAwaitPointerUp = true;
+        break;
+      }
+      case "roulette": {
+        this._chestRouletteTimer += dt;
+        const totalDuration = 1.8; // 总轮转时长
+        const elapsed = this._chestRouletteTimer;
+        const progress = Math.min(elapsed / totalDuration, 1);
+        // 减速曲线：从快→慢
+        this._chestRouletteSpeed = 12 * Math.pow(1 - progress, 2.5) + 0.8;
+        const step = this._chestRouletteSpeed * dt;
+        this._chestRouletteIndex = (this._chestRouletteIndex + step) % EDICT_POOL.length;
+
+        if (progress >= 1) {
+          // 轮转结束，强制定位到结果
+          this._chestRouletteIndex = EDICT_POOL.indexOf(this._chestRouletteResult!);
+          this._chestOpeningPhase = "revealed";
+          this._pendingEdictId = this._chestRouletteResult;
+        }
+        break;
+      }
+      case "revealed": {
+        // 结果展示中，等待 0.5s 确认或自动关闭
+        this._chestRouletteTimer += dt;
+        if (this._chestRouletteTimer > 1.8 + 0.6) {
+          this._chestOpeningPhase = "closed";
+        }
+        break;
+      }
+      case "closed": {
+        // 恢复战斗
+        this._chestOpeningPhase = "idle";
+        this._chestRouletteTimer = 0;
+        this._chestRouletteIndex = 0;
+        // 结算宝箱，分配军令
+        this._applyPendingEdict();
+        this.resolveCurrentChestAndAdvance();
+        break;
+      }
+    }
+  }
+
+  /** 应用待确认的军令 */
+  private _applyPendingEdict() {
+    if (!this._pendingEdictId) return;
+    this._activeEdicts.push({ id: this._pendingEdictId, level: 1 });
+    this._pendingEdictId = null;
+  }
+  // ═══════════════════ V0731008 End ═══════════════════
 
   /** V0730019: L1副刀解锁 — 前三组教学期间不永久解锁，等completed后 */
   private _checkL1SubBladeUnlock(): boolean {
@@ -6988,6 +7105,63 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.fillStyle = "#fff";
       ctx.font = '11px "Microsoft YaHei", sans-serif';
       ctx.fillText(`${rt.progress}/${rt.threshold}`, cx, cy + 30);
+    }
+  }
+
+  // V0731008: 宝箱开奖动画
+  private _drawChestOpeningFlow(ctx: CanvasRenderingContext2D) {
+    if (this._chestOpeningPhase === "idle" || this._chestOpeningPhase === "warning" || this._chestOpeningPhase === "closed") return;
+    const cx = DESIGN_WIDTH / 2;
+    const cy = DESIGN_HEIGHT / 2;
+
+    // 暗色遮罩
+    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+    ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+
+    if (this._chestOpeningPhase === "freezing" || this._chestOpeningPhase === "descending") {
+      // 宝箱下落提示
+      ctx.fillStyle = "#ffd35a";
+      ctx.font = '700 22px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = "center";
+      ctx.fillText("宝箱降临...", cx, cy);
+      return;
+    }
+
+    // 轮转动画
+    const EDICT_NAMES: Record<EdictId, string> = { triple_slash: "三锋令", scorch: "燎原令", frost: "凝霜令" };
+    const EDICT_ICONS: Record<EdictId, string> = { triple_slash: "⚔️", scorch: "🔥", frost: "❄️" };
+
+    // 三个图标横向排列
+    const iconGap = 72;
+    const startX = cx - iconGap;
+    const iconY = cy - 20;
+
+    for (let i = 0; i < EDICT_POOL.length; i++) {
+      const dx = (i - 1) * iconGap;
+      const x = cx + dx;
+      const isActive = Math.floor(this._chestRouletteIndex) % EDICT_POOL.length === i;
+
+      // 高亮当前
+      if (isActive) {
+        ctx.shadowColor = "#ffd35a";
+        ctx.shadowBlur = 16;
+      }
+      ctx.font = '36px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = "center";
+      ctx.fillText(EDICT_ICONS[EDICT_POOL[i]], x, iconY);
+      ctx.shadowBlur = 0;
+
+      // 名称
+      ctx.fillStyle = isActive ? "#ffd35a" : "rgba(255,255,255,0.4)";
+      ctx.font = isActive ? '700 15px "Microsoft YaHei", sans-serif' : '12px "Microsoft YaHei", sans-serif';
+      ctx.fillText(EDICT_NAMES[EDICT_POOL[i]], x, iconY + 44);
+    }
+
+    // 揭示状态：结果放大
+    if (this._chestOpeningPhase === "revealed" && this._pendingEdictId) {
+      ctx.fillStyle = "#ffd35a";
+      ctx.font = '700 20px "Microsoft YaHei", sans-serif';
+      ctx.fillText(`获得 [${EDICT_NAMES[this._pendingEdictId]}] !`, cx, cy + 80);
     }
   }
 
