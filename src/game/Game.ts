@@ -33,9 +33,6 @@ import { CHASE_CONFIG } from "./config/bossChase";
 import { drawChaseMode, pushBarrageHitVfx, updateBarrageVfx, clearBarrageHitVfx } from "./systems/BossChaseHUD";
 import { logEvent } from "./services/Analytics";
 import { AudioService } from "./services/AudioService";
-import { drawInkWashBackground, drawInkWashMist, drawInkWashMountainCover, drawInkWashFogGradient, drawInkWashHud, INK_HUD_TEXT, INK_HUD_TEXT_MUTED } from "./systems/inkWashBackground";
-import { drawInkWashSlashUnderlay, drawInkWashTipSplash } from "./systems/inkWashEffects";
-import { toInkWashEnemyColor } from "./systems/inkWashPalette";
 import { calculateSkillScores } from "./services/SkillTracker";
 import type {
   BattlePhase,
@@ -1103,7 +1100,6 @@ export class Game {
     this.drawTractorLinks(ctx);
     // 远景山间雾气遮罩（敌人从雾后现身）
     this.drawTopMist(ctx);
-    drawInkWashMist(ctx);
     this.drawSlash(ctx);
     this.drawParticles(ctx);
     this.drawDefenseAndWarrior(ctx);
@@ -1336,7 +1332,6 @@ export class Game {
       // 1. 背景层（修复黑屏问题）
       this.drawBackground(ctx);
       this.drawTopMist(ctx);
-      drawInkWashMist(ctx);
       // 2. 弹幕层 + Boss（世界层）
       rc.renderWorld(ctx);
       // 3. 战斗表现层
@@ -1384,7 +1379,6 @@ export class Game {
     // 1. 背景 + Boss世界层（在刀光下方）
     this.drawBackground(ctx);
     this.drawTopMist(ctx);
-    drawInkWashMist(ctx);
     this.bossController?.renderWorld(ctx);
     // 2. 战斗表现层（Boss身体上方）
     this.drawSlash(ctx);
@@ -6811,33 +6805,95 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   }
 
   private drawBackground(ctx: CanvasRenderingContext2D) {
-    drawInkWashBackground(ctx);
+    const sky = ctx.createLinearGradient(0, 0, 0, DESIGN_HEIGHT);
+    sky.addColorStop(0, "#180f0b");
+    sky.addColorStop(0.42, "#352017");
+    sky.addColorStop(1, "#150e0a");
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+
+    // 微弱纹理��
+    ctx.globalAlpha = 0.08;
+    ctx.strokeStyle = "#e7c27a";
+    ctx.lineWidth = 1;
+    for (let y = 0; y < DESIGN_HEIGHT; y += 18) {
+      ctx.beginPath();
+      ctx.moveTo(0, y + Math.sin(y * 0.02) * 3);
+      ctx.lineTo(DESIGN_WIDTH, y + Math.cos(y * 0.018) * 4);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // 远山剪影（无旗帜）
+    ctx.fillStyle = "rgba(12, 9, 8, 0.45)";
+    ctx.beginPath();
+    ctx.moveTo(0, 200);
+    ctx.lineTo(60, 158);
+    ctx.lineTo(130, 200);
+    ctx.lineTo(200, 140);
+    ctx.lineTo(270, 200);
+    ctx.lineTo(330, 152);
+    ctx.lineTo(390, 200);
+    ctx.lineTo(390, 270);
+    ctx.lineTo(0, 270);
+    ctx.closePath();
+    ctx.fill();
   }
 
   /** 远景山间雾气遮罩：画在敌人上方，让敌人从雾后现身 */
   private drawTopMist(ctx: CanvasRenderingContext2D) {
-    drawInkWashMountainCover(ctx);
-    drawInkWashFogGradient(ctx);
+    // 下层：山峦剪影（敌人生成区遮罩）
+    ctx.fillStyle = "rgba(8, 6, 5, 0.50)";
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(28, 72);
+    ctx.lineTo(58, 36);
+    ctx.lineTo(96, 96);
+    ctx.lineTo(128, 28);
+    ctx.lineTo(168, 88);
+    ctx.lineTo(206, 44);
+    ctx.lineTo(244, 102);
+    ctx.lineTo(278, 52);
+    ctx.lineTo(320, 108);
+    ctx.lineTo(356, 62);
+    ctx.lineTo(390, 84);
+    ctx.lineTo(390, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    // 上层：雾气渐变（底部渐淡，与远处融合）
+    const fog = ctx.createLinearGradient(0, 0, 0, 130);
+    fog.addColorStop(0, "rgba(18, 12, 8, 0.65)");
+    fog.addColorStop(0.4, "rgba(18, 12, 8, 0.28)");
+    fog.addColorStop(1, "rgba(18, 12, 8, 0)");
+    ctx.fillStyle = fog;
+    ctx.fillRect(0, 0, DESIGN_WIDTH, 130);
   }
 
   private drawHud(ctx: CanvasRenderingContext2D) {
     // P4.4A.2: Boss模式隐藏标准HUD
     if (this.gameMode === "boss" || this.bossController) return;
 
-    drawInkWashHud(ctx, HUD_HEIGHT);
+    ctx.fillStyle = "rgba(18, 12, 8, 0.78)";
+    ctx.fillRect(0, 0, DESIGN_WIDTH, HUD_HEIGHT);
+    ctx.strokeStyle = "rgba(255, 214, 124, 0.35)";
+    ctx.beginPath();
+    ctx.moveTo(0, HUD_HEIGHT);
+    ctx.lineTo(DESIGN_WIDTH, HUD_HEIGHT);
+    ctx.stroke();
 
     // 中间：关名 + 阶段（二次打磨：按 battlePhase 切换显示）
     ctx.textAlign = "center";
-    ctx.fillStyle = INK_HUD_TEXT;
-    ctx.font = '700 16px "Noto Serif SC", "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = "#f6e7bd";
+    ctx.font = '700 16px "Microsoft YaHei", sans-serif';
     const isBossLevel = this.level.id < 10000 && Boolean(this.level.bossId);
     const displayFloor = isBossLevel ? null : (this.level.id >= 10000 ? this.level.id - 10000 : this.level.id);
     const titleText = this.level.title;
     const hasPrefix = displayFloor !== null && titleText.startsWith(`第${displayFloor}关`);
     const displayTitle = hasPrefix ? titleText : (displayFloor !== null ? `第${displayFloor}关 ${titleText}` : titleText);
     ctx.fillText(displayTitle, DESIGN_WIDTH / 2, 28);
-    ctx.font = '11px "Noto Serif SC", "Microsoft YaHei", sans-serif';
-    ctx.fillStyle = INK_HUD_TEXT_MUTED;
+    ctx.font = '11px "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = "rgba(246, 231, 189, 0.72)";
     // 按 battlePhase 显示不同的阶段文本
     let phaseText = "";
     switch (this.battlePhase) {
@@ -6956,12 +7012,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ctx.globalAlpha = layer === "rear" ? dd.rearAlpha : 1;
       }
       ctx.rotate(Math.sin(enemy.wobble * 2) * 0.04);
-      // V0805-ink-wash: 宣纸白底对比度适配
-      ctx.shadowColor = "rgba(247, 243, 234, 0.82)";
+      ctx.shadowColor = "rgba(0,0,0,0.45)";
       ctx.shadowBlur = 8;
       ctx.shadowOffsetY = 1;
 
-      const baseColor = enemy.flash > 0 ? "#fff1b8" : toInkWashEnemyColor(def.color);
+      const baseColor = enemy.flash > 0 ? "#fff1b8" : def.color;
       const accentColor = def.accent;
 
       // 破绽标记：瞄准准星（4 角括号向内 + 中心十字，区别于盾兵外圈）
@@ -7047,7 +7102,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ctx.textBaseline = "middle";
         ctx.fillText("兵", 0, 0);
         ctx.restore();
-        // 重置shadow (V0805: 匹配外层宣纸阴影)
+        // 重置shadow
         ctx.shadowBlur = 8;
         ctx.shadowOffsetY = 1;
       }
@@ -7532,9 +7587,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // P4.4A.2-R2: 大幅缩短刀光总时长
     const width = effWidth * trail.widthMultiplier * (0.28 + ratio * 0.95) * 0.7;
 
-    // V0805-ink-wash: 水墨飞白底纹
-    const inkVisualLength = effVisualLength * (0.34 + ratio * 0.82) * lowFade * 0.6;
-    drawInkWashSlashUnderlay(ctx, points, ratio, inkVisualLength);
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
@@ -7595,7 +7647,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const angle = prev ? Math.atan2(last.y - prev.y, last.x - prev.x) : this.lastSlashAngle;
     const visualLength = effVisualLength * (0.34 + ratio * 0.82) * lowFade * 0.6;  // 缩短刀尖长度
     this.drawBladeTip(ctx, last, angle, visualLength, width, effColor, ratio);
-    drawInkWashTipSplash(ctx, last.x, last.y, angle, ratio);
     ctx.restore();
   }
   private drawSubBladeVisual(ctx: CanvasRenderingContext2D) {
