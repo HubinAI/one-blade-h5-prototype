@@ -1525,10 +1525,13 @@ export class Game {
     // V0730020: 军令弹窗输入保护
     if (this.chestPendingConfirm) {
       if (this.elapsed < this._modalOpenedAt + 0.5) return; // 前0.5秒忽略
-      if (!this._modalPointerFresh) { this._modalPointerFresh = true; return; } // 忽略打开弹窗的同一次pointerDown
+      // V0730021: 按钮点击直接生效，无需等待"非首次"
       if (this.isPointInChestConfirmButton(pos.x, pos.y)) {
+        this._modalPointerFresh = true; // 标记已激活
         this.confirmEliteChestReward();
+        return;
       }
+      if (!this._modalPointerFresh) { this._modalPointerFresh = true; return; } // 外部首点仅锁定一次
       return;
     }
     if (this.phase !== "playing") return;
