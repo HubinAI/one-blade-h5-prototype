@@ -3493,6 +3493,10 @@ export class Game {
         // P4.3A: 动态flow倍率替代固定harvestSlow
         const flowMul = enemy.flow?.currentSpeedMultiplier ?? 1;
         enemy.y += enemy.speed * entryMultiplier * rushMultiplier * statusSlow * fortressSlow * flowMul * dt;
+        // V0731009: 精英到达防线后不继续下移
+        if (enemy.eliteKind && enemy.y >= BALANCE.battlefield.bottomDefenseY) {
+          enemy.y = BALANCE.battlefield.bottomDefenseY;
+        }
       } else {
         // 蓄力时略微闪红光
         if (Math.sin(this.elapsed * 20) > 0) {
@@ -3512,6 +3516,23 @@ export class Game {
         continue;
       }
       if (enemy.y >= BALANCE.battlefield.bottomDefenseY) {
+        // V0731009: 精英触线不消失，限制在防线、持续对玩家造成伤害并继续技能
+        if (enemy.eliteKind) {
+          enemy.y = BALANCE.battlefield.bottomDefenseY; // 卡在防线
+          const now = this._chestFlowClock; // 用独立时钟避免与 elapsed 混淆
+          const lastHit = (enemy as any)._eliteWallHitAt ?? 0;
+          if (now - lastHit >= 1.5) {
+            (enemy as any)._eliteWallHitAt = now;
+            this.hp -= enemy.hpDamage;
+            this.defenseLineHits += 1;
+            this.screenShake = Math.max(this.screenShake, 0.45);
+            this.flash = Math.max(this.flash, 0.35);
+            AudioService.defenseHit();
+            this.addText(enemy.x, BALANCE.battlefield.bottomDefenseY - 12, `-${enemy.hpDamage}`, "#ff7b6e", 18);
+            this.particles.push(...paperBurst({ x: enemy.x, y: BALANCE.battlefield.bottomDefenseY }, 8, ["#7b241f", "#d8b46e"]));
+          }
+          continue; // 不设 alive=false，继续由 updateEnemies 更新（火环等）
+        }
         // ---- 堅城(fortress)buff：敌军触线后减速1秒，而非立即消失 ----
         if (this.hasBuff("fortress") && enemy.slowedTimer <= 0) {
           enemy.slowedTimer = 1;
