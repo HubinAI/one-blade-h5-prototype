@@ -7229,6 +7229,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.font = '11px "Microsoft YaHei", sans-serif';
       ctx.fillText(`${rt.progress}/${rt.threshold}`, cx, cy + 30);
     }
+    // V0731010: 三锋令常驻图标
+    if (this._activeEdicts.some(e => e.id === "triple_slash")) {
+      ctx.font = '14px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = "center";
+      ctx.fillText("⚔️", cx, cy + 46);
+    }
   }
 
   // V0731008: 宝箱开奖动画
@@ -7305,10 +7311,13 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     for (const t of this._tripleSideTrails) {
       if (t.points.length < 2) continue;
       const alpha = t.life / t.maxLife;
+      const flash = t.life > t.maxLife * 0.92 ? 1.8 : 1.0; // 出现瞬间闪亮
       ctx.save();
-      ctx.globalAlpha = alpha * 0.65;
-      ctx.strokeStyle = "#b8d4ff";
-      ctx.lineWidth = 2.5;
+      ctx.globalAlpha = alpha * 0.75 * flash;
+      ctx.strokeStyle = "#a8d8ff";
+      ctx.lineWidth = 3.2;
+      ctx.shadowColor = "#88bbff";
+      ctx.shadowBlur = 4 * flash;
       ctx.lineCap = "round";
       ctx.beginPath();
       ctx.moveTo(t.points[0].x, t.points[0].y);
