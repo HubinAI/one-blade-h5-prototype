@@ -112,6 +112,9 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
       } else if (event.key.toLowerCase() === "v") {
         // P4.4A.1-R3: 调试用强制触发Boss胜利
         gameRef.current?.debugForceBossVictory();
+      } else if (event.key.toLowerCase() === "c") {
+        // V0731008: 调试用触发宝箱开奖流程
+        (window as any).__triggerChestFlow?.();
       }
     };
 
