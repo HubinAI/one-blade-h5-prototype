@@ -3519,10 +3519,9 @@ export class Game {
         // V0731009: 精英触线不消失，限制在防线、持续对玩家造成伤害并继续技能
         if (enemy.eliteKind) {
           enemy.y = BALANCE.battlefield.bottomDefenseY; // 卡在防线
-          const now = this._chestFlowClock; // 用独立时钟避免与 elapsed 混淆
           const lastHit = (enemy as any)._eliteWallHitAt ?? 0;
-          if (now - lastHit >= 1.5) {
-            (enemy as any)._eliteWallHitAt = now;
+          if (this.elapsed - lastHit >= 1.5) {
+            (enemy as any)._eliteWallHitAt = this.elapsed;
             this.hp -= enemy.hpDamage;
             this.defenseLineHits += 1;
             this.screenShake = Math.max(this.screenShake, 0.45);
