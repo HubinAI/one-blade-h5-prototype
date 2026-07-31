@@ -2259,58 +2259,6 @@ handlePointerUp(reason: string = "收刀") {
       return s ? parseInt(s, 10) : 1;
     } catch { return 1; }
   }
-  // ═══════════════════ V0731006: 精英后流程解耦 ═══════════════════
-  /** 精英被击败后统一推进入口（幂等） */
-  private _eliteDefeatedHandled = false;
-
-  private handleEliteDefeatedAndContinue(enemy: Enemy, source: string) {
-    if (this._eliteDefeatedHandled) return;
-    if (this.gameMode !== "normal") return;
-    this._eliteDefeatedHandled = true;
-
-    const phaseBefore = this.battlePhase;
-
-    // 1. 标记精英已击杀
-    this.eliteKilled = true;
-
-    // 2. 启动后续怪潮（如有）
-    const continuationStarted = this.startPostEliteContinuationOnce();
-
-    const phaseAfter = this.battlePhase;
-    const hasContWaves = (this.level.postChestWaves?.length ?? 0) > 0;
-
-    if (this.debugEnabled) {
-      console.log("[elite defeated]", {
-        source,
-        battlePhaseBefore: phaseBefore,
-        battlePhaseAfter: phaseAfter,
-        eliteKilled: this.eliteKilled,
-        hasContinuationWaves: hasContWaves,
-        continuationStarted,
-        progressChest: this._chestRuntime.progress,
-        chestStatus: this._chestRuntime.status,
-        victoryEligible: this.shouldFinishVictory(),
-      });
-    }
-  }
-
-  /** 启动精英后怪潮（与旧军令奖励解耦） */
-  private startPostEliteContinuationOnce(): boolean {
-    if (this.edictPostWavesQueued) return false;
-    const postWaves = this.getEffectivePostChestWaves();
-    if (postWaves.length <= 0) {
-      this.allPostChestWavesSpawned = true;
-      return false;
-    }
-    this.edictPostWavesQueued = true;
-    this.battlePhase = "edict_burst";
-    this.postChestStartAt = this.elapsed;
-    this.postChestWaveIndex = 0;
-    this.allPostChestWavesSpawned = false;
-    return true;
-  }
-  // ═══════════════════ V0731006 End ═══════════════════
-
   // ═══════════════════ V0731005 End ═══════════════════
 
   /** V0730019: L1副刀解锁 — 前三组教学期间不永久解锁，等completed后 */
@@ -3205,10 +3153,9 @@ handlePointerUp(reason: string = "收刀") {
 
     this.chainKillTotal += chainKill ? 1 : 0;
 
-    // ---- 精英击杀 ----
+    // ---- 精英击杀：掉落军令宝箱 ----
     if (enemy.kind === "elite" && enemy.eliteKind && !this.chestDropped) {
       this.triggerEliteChestDrop(enemy);
-      this.handleEliteDefeatedAndContinue(enemy, "main_slash"); // V0731006
     }
 
     // ---- Boss击杀：追踪图鉴 ----
@@ -4654,8 +4601,7 @@ handlePointerUp(reason: string = "收刀") {
   private updatePostChestWaves(dt: number) {
     const postWaves = this.getEffectivePostChestWaves();
     if (!postWaves || postWaves.length === 0) return;
-    // V0731006: 普通模式允许通过新流程入口推进，不强制要求旧 chestDone
-    if (this.gameMode !== "normal" && !this.chestDone) return;
+    if (!this.chestDone) return;
     if (this.postChestStartAt === null) return;
     if (this.allPostChestWavesSpawned) return;
     const wave = postWaves[this.postChestWaveIndex];
@@ -5288,45 +5234,36 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 禁止在精英阶段/宝箱阶段结算
     if (this.battlePhase === 'elite' || this.battlePhase === 'chest') return false;
 
-    // V0731006: 有精英的关卡，精英必须已击杀
+    // 有精英的关卡：必须已击杀精英
     if (this.level.eliteSpawnAt && this.level.eliteKind) {
       if (!this.eliteKilled) return false;
-      // V0731006: 普通模式不再强制旧军令chestDone
-      if (this.gameMode !== "normal" && this.chestDropped && !this.chestDone) return false;
+      // 第五轮修正：宝箱掉落了就必须 chestDone，避免卡住
+      if (this.chestDropped && !this.chestDone) return false;
     }
 
+    // 第五轮修正：使用 getEffectivePostChestWaves 判断
     const postWaves = this.getEffectivePostChestWaves();
     const hasPostChest = postWaves.length > 0;
     if (hasPostChest) {
-      // V0731006: 普通模式使用新流程状态
-      if (this.gameMode === "normal") {
-        if (!this.edictPostWavesQueued) return false;
-        if (!this.allPostChestWavesSpawned) {
-          if (this.postChestStartAt !== null && this.elapsed - this.postChestStartAt > 35 && this.enemies.filter(e => e.alive).length <= 0 && this.subSpawnQueue.length === 0) {
-            this.allPostChestWavesSpawned = true;
-          } else {
-            return false;
-          }
+      if (!this.chestDone) return false;
+      if (this.postChestStartAt === null) return false;
+      if (!this.allPostChestWavesSpawned) {
+        // 第三轮修正：超时兜底——军令爆发 35s 后仍没刷完，强制完成
+        if (this.elapsed - this.postChestStartAt > 35 && this.enemies.filter(e => e.alive).length <= 0 && this.subSpawnQueue.length === 0) {
+          this.allPostChestWavesSpawned = true;
+        } else {
+          return false;
         }
-      } else {
-        if (!this.chestDone) return false;
-        if (this.postChestStartAt === null) return false;
-        if (!this.allPostChestWavesSpawned) {
-          if (this.elapsed - this.postChestStartAt > 35 && this.enemies.filter(e => e.alive).length <= 0 && this.subSpawnQueue.length === 0) {
-            this.allPostChestWavesSpawned = true;
-          } else {
-            return false;
-          }
-        }
-        if (this.chestDone && this.postChestStartAt === null) {
-          this.postChestStartAt = this.elapsed;
-        }
+      }
+      // 第一轮修正：兜底——chestDone 已 true 但 postChestStartAt 未设置
+      if (this.chestDone && this.postChestStartAt === null) {
+        this.postChestStartAt = this.elapsed;
       }
     }
 
-    // V0731006: 普通模式无宝箱后怪潮时不再强制chestDone
+    // 无宝箱后怪潮：宝箱非强制
     if (!hasPostChest && this.level.eliteSpawnAt && this.chestDropped) {
-      if (this.gameMode !== "normal" && !this.chestDone) return false;
+      if (!this.chestDone) return false;
     }
 
     // 紧急修正：严格清场检查
@@ -9049,7 +8986,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
     if (enemy.kind === "elite" && enemy.eliteKind && !this.chestDropped) {
       this.triggerEliteChestDrop(enemy);
-      this.handleEliteDefeatedAndContinue(enemy, source); // V0731006
     }
 
     // P3.10：分裂怪击杀统一处理
