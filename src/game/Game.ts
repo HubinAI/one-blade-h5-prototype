@@ -6,6 +6,7 @@ import { ELITE_VISUAL_DEFS } from "../data/elites";
 import { BOSS_VISUAL_DEFS } from "../data/bosses";
 import { FORMATIONS } from "../data/formations";
 import { PROGRESS_CHEST_CONFIG, getUnlockedChestCount, type ProgressChestStatus, type ProgressChestRuntime, type EdictId, type EdictInstance } from "./config/progressChest";
+import { DESIGN_HEIGHT, DESIGN_WIDTH, HUD_HEIGHT, WALL_TOP_Y, MAX_ENEMIES_ON_SCREEN, MAX_PARTICLES_ON_SCREEN, MAX_CHAIN_DEPTH, MAX_FLOATING_TEXT } from "./config/constants";
 import { BALANCE, ENEMY_BALANCE, PICKUP_BALANCE, SWORD_STAGE_BY_ID, BATTLEFIELD_ZONES, ENTRY_PHASE_CONFIG, PERFORMANCE_LIMITS, ENEMY_SOFT_SEPARATION, FLOATING_TEXT_LIMITS, ENTRY_PROFILE_COMMON, ENTRY_PROFILE_EDICT_BURST, ENTRY_PROFILE_ELITE, ENTRY_END_JITTER, BATTLE_SAFE_X, SPLITTER_CONFIG, TRACTOR_CONFIG, BATTLEFIELD_FLOW } from "./config/balance";
 import { AD_CONFIG } from "./config/ads";
 import { RUN_BUFFS, RUN_BUFF_BY_ID, ROUTE_COLORS, ROUTE_NAMES, ROUTE_BUFFS, getNextBuffInRoute, getBuffRoute } from "./config/buffs";
