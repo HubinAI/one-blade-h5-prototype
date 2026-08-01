@@ -2411,7 +2411,9 @@ export class Game {
   private _chestFlyFromX = 0; private _chestFlyFromY = 0;
   private _chestFlyProgress = 0; // 0→1 飞入中心
   private _updateChestOpeningFlow(dt: number) {
-    this._chestFlowClock += dt; // V0731008 hotfix: 独立时钟
+    this._chestFlowClock += dt;
+    // V0801003: 全场更新飞行进度直至到达中心
+    if (this._chestFlyProgress < 1) this._chestFlyProgress = Math.min(1, this._chestFlyProgress + dt / 0.35);
     switch (this._chestOpeningPhase) {
       case "warning": {
         if (this._chestWarningAt === 0) this._chestWarningAt = this._chestFlowClock;
@@ -2426,8 +2428,7 @@ export class Game {
       }
       case "entering": {
         this._chestFadeProgress = Math.min(1, this._chestFadeProgress + dt / 0.3);
-        this._chestFlyProgress = Math.min(1, this._chestFlyProgress + dt / 0.35);
-        this.screenShake = Math.max(0, this.screenShake - dt * 8); // V0801003: 快速衰减残留震屏
+        this.screenShake = Math.max(0, this.screenShake - dt * 40);
         if (this._chestFadeProgress >= 1) {
           this._chestOpeningPhase = "descending";
         }
@@ -2455,6 +2456,7 @@ export class Game {
       }
       case "roulette": {
         this._chestRouletteTimer += dt;
+        this.screenShake = Math.max(0, this.screenShake - dt * 40); // V0801003: 轻震~75ms衰减
         const totalDuration = 1.8; // 总轮转时长
         const elapsed = this._chestRouletteTimer;
         const progress = Math.min(elapsed / totalDuration, 1);
@@ -2474,6 +2476,7 @@ export class Game {
       }
       case "revealed": {
         this._chestRouletteTimer += dt;
+        this.screenShake = Math.max(0, this.screenShake - dt * 40);
         if (this._chestRouletteTimer > 1.8 + 0.6) {
           this._chestOpeningPhase = "exiting";
           this._chestExitingProgress = 1;
