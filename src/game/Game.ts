@@ -1166,15 +1166,15 @@ export class Game {
     this.drawHud(ctx);
     this.drawEdictStatusIcon(ctx);
     this.drawSplitFlashes(ctx);
-    this.drawFloatingTexts(ctx);
     if (this._chestOpeningPhase === "roulette" || this._chestOpeningPhase === "revealed") {
       ctx.save(); ctx.globalAlpha = 0.2;
     }
+    this.drawFloatingTexts(ctx);
     this.drawBattleNotice(ctx);
+    this.drawWaveProgress(ctx);
     if (this._chestOpeningPhase === "roulette" || this._chestOpeningPhase === "revealed") {
       ctx.restore();
     }
-    this.drawWaveProgress(ctx);
     this.drawChestDrop(ctx);
     this.drawEdictRewardModal(ctx);
     this._drawChestOpeningFlow(ctx); // V0731008
@@ -7370,6 +7370,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.fillStyle = "#666"; ctx.font = '9px "Microsoft YaHei", sans-serif';
       if (unlockLevel > 0) ctx.fillText(`第${unlockLevel}关解锁`, cx + 28, cy + 12);
       else ctx.fillText("关卡解锁", cx + 28, cy + 12);
+      ctx.textAlign = "center"; // 重置
       // 已获得军令图标栏（左侧）
       this._drawEdictIconBar(ctx, cx - 52, cy, rt.stageIndex);
       return;
