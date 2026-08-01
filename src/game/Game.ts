@@ -7359,9 +7359,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
     // 宝箱卡片
     ctx.fillStyle = "rgba(10,8,5,0.88)";
-    ctx.beginPath(); roundRect(ctx, cardX - cardW / 2, cardY, cardW, cardH, 6); ctx.fill();
+    ctx.beginPath(); roundRect(ctx, Math.round(cardX - cardW / 2), Math.round(cardY), Math.round(cardW), Math.round(cardH), 6); ctx.fill();
     ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 1;
-    ctx.beginPath(); roundRect(ctx, cardX - cardW / 2, cardY, cardW, cardH, 6); ctx.stroke();
+    ctx.beginPath(); roundRect(ctx, Math.round(cardX - cardW / 2), Math.round(cardY), Math.round(cardW), Math.round(cardH), 6); ctx.stroke();
 
     if (rt.status === "locked" || rt.status === "complete") {
       const floor = this.getLogicalFloor();
@@ -7372,11 +7372,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const sub = belowUnlock ? `第${unlockLevel}关解锁` : (hasMoreChests ? "后续关卡可用" : "后续关卡可用");
 
       // 🔒 + 标题 + 副标题（整数坐标）
-      ctx.fillStyle = "rgba(10,8,5,0.88)";
-      ctx.beginPath(); roundRect(ctx, Math.round(cardX - cardW / 2), Math.round(cardY), Math.round(cardW), Math.round(cardH), 6); ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.15)"; ctx.lineWidth = 1;
-      ctx.beginPath(); roundRect(ctx, Math.round(cardX - cardW / 2), Math.round(cardY), Math.round(cardW), Math.round(cardH), 6); ctx.stroke();
-
       const tcx = Math.round(cardX);
       ctx.fillStyle = "#bbb"; ctx.font = '14px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
       ctx.fillText("🔒", tcx, Math.round(cardY + 17));
