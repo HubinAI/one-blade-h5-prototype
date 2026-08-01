@@ -148,7 +148,7 @@ export class Game {
   private _chestRuntime: ProgressChestRuntime = { stageIndex: 0, progress: 0, threshold: 30, status: "charging", maxChestCount: 1, lastCountedEnemyId: "", lastKillSource: "" };
   private _activeEdicts: EdictInstance[] = [];
   // V0731008: 宝箱开奖框架
-  private _chestOpeningPhase: "idle" | "warning" | "entering" | "descending" | "roulette" | "revealed" | "exiting" | "closed" = "idle";
+  private _chestOpeningPhase: "idle" | "warning" | "entering" | "descending" | "settling" | "roulette" | "revealed" | "exiting" | "closed" = "idle";
   private _pendingEdictId: EdictId | null = null;
   private _chestRouletteTimer = 0;
   private _chestRouletteSpeed = 0;
@@ -1093,7 +1093,7 @@ export class Game {
     // V0731011: 更新火径生命 + 敌人伤害
     this._updateScorchTrails(scaledDt);
     this._updateFrostStates(scaledDt); // V0731012
-    this._updateVerifyPhase(); // V0801003
+    this._updateVerifyPhase(scaledDt); // V0801003
     if (BATTLEFIELD_FLOW.enabled) {
       this.updateBattlefieldFlow(scaledDt);
     }
@@ -2405,6 +2405,8 @@ export class Game {
   private _chestFadeProgress = 0;
   private _chestExitingProgress = 0;
   private _chestStampTimer = 0;
+  // V0801003: 落定计时
+  private _chestSettleTimer = 0;
   // V0801003: 宝箱飞行演出
   private _chestFlyFromX = 0; private _chestFlyFromY = 0;
   private _chestFlyProgress = 0; // 0→1 飞入中心
@@ -2425,21 +2427,30 @@ export class Game {
       case "entering": {
         this._chestFadeProgress = Math.min(1, this._chestFadeProgress + dt / 0.3);
         this._chestFlyProgress = Math.min(1, this._chestFlyProgress + dt / 0.35);
+        this.screenShake = Math.max(0, this.screenShake - dt * 8); // V0801003: 快速衰减残留震屏
         if (this._chestFadeProgress >= 1) {
           this._chestOpeningPhase = "descending";
         }
         break;
       }
       case "descending": {
-        // 宝箱出现（简化：直接进入轮转）
-        this._chestOpeningPhase = "roulette";
-        this._chestRouletteTimer = 0;
-        this._chestRouletteSpeed = 12; // 初始快速轮转
-        this._chestRouletteIndex = Math.floor(Math.random() * EDICT_POOL.length);
-        // V0731008: 真实随机结果
-        this._chestRouletteResult = EDICT_POOL[Math.floor(Math.random() * EDICT_POOL.length)];
-        this._chestOpenBlockUntilMs = performance.now() + 500; // 前500ms不可关闭
-        this._chestOpenAwaitPointerUp = true;
+        // V0801003: 增加0.15s落定
+        this._chestOpeningPhase = "settling";
+        this._chestSettleTimer = 0;
+        break;
+      }
+      case "settling": {
+        this._chestSettleTimer += dt;
+        if (this._chestSettleTimer >= 0.15) {
+          this._chestOpeningPhase = "roulette";
+          this._chestRouletteTimer = 0;
+          this._chestRouletteSpeed = 12;
+          this._chestRouletteIndex = Math.floor(Math.random() * EDICT_POOL.length);
+          this._chestRouletteResult = EDICT_POOL[Math.floor(Math.random() * EDICT_POOL.length)];
+          this._chestOpenBlockUntilMs = performance.now() + 500;
+          this._chestOpenAwaitPointerUp = true;
+          this.screenShake = 3;
+        }
         break;
       }
       case "roulette": {
@@ -2457,6 +2468,7 @@ export class Game {
           this._chestRouletteIndex = EDICT_POOL.indexOf(this._chestRouletteResult!);
           this._chestOpeningPhase = "revealed";
           this._pendingEdictId = this._chestRouletteResult;
+          this.screenShake = 3; // V0801003: 揭示轻震 3px
         }
         break;
       }
@@ -2646,20 +2658,20 @@ export class Game {
 
   private _spawnVerifyGroup2() {
     for (let i = 0; i < 4; i++) {
-      this.subSpawnQueue.push({ kind: "infantry", x: 1 + i * 40, yOffset: 360 - BATTLEFIELD_ZONES.midfieldStartY, time: this.elapsed + 0.2 + i * 0.15, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
-      this.subSpawnQueue.push({ kind: "infantry", x: 320 - i * 40, yOffset: 360 - BATTLEFIELD_ZONES.midfieldStartY, time: this.elapsed + 0.2 + i * 0.15, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
-      this.subSpawnQueue.push({ kind: "infantry", x: 130 + i * 38, yOffset: 440 - BATTLEFIELD_ZONES.midfieldStartY, time: this.elapsed + 0.9 + i * 0.15, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
+      this.subSpawnQueue.push({ kind: "infantry", x: 1 + i * 40, yOffset: 360 - BATTLEFIELD_ZONES.midfieldStartY, time: this.elapsed + 0.1 + i * 0.12, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
+      this.subSpawnQueue.push({ kind: "infantry", x: 320 - i * 40, yOffset: 360 - BATTLEFIELD_ZONES.midfieldStartY, time: this.elapsed + 0.1 + i * 0.12, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
+      this.subSpawnQueue.push({ kind: "infantry", x: 130 + i * 38, yOffset: 440 - BATTLEFIELD_ZONES.midfieldStartY, time: this.elapsed + 0.6 + i * 0.12, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
     }
   }
 
-  private _updateVerifyPhase() {
+  private _updateVerifyPhase(dt: number) {
     const aliveVerify = this.enemies.filter(e => e.alive && (e as any)._verifyGroup !== undefined).length;
     const queueVerify = this.subSpawnQueue.filter(q => q.source === "edict").length;
     switch (this._edictVerifyPhase) {
       case "group1":
         if (aliveVerify === 0 && queueVerify === 0) {
-          this._edictVerifyTimer += 0.016;
-          if (this._edictVerifyTimer >= 0.4) {
+          this._edictVerifyTimer += dt;
+          if (this._edictVerifyTimer >= 0.25) {
             this._edictVerifyPhase = "group2";
             this._edictVerifyTimer = 0;
             this._spawnVerifyGroup2();
@@ -2668,8 +2680,8 @@ export class Game {
         break;
       case "group2":
         if (aliveVerify === 0 && queueVerify === 0) {
-          this._edictVerifyTimer += 0.016;
-          if (this._edictVerifyTimer >= 0.5) {
+          this._edictVerifyTimer += dt;
+          if (this._edictVerifyTimer >= 0.4) {
             this._edictVerifyPhase = "done";
             this._edictVerifyTimer = 0;
           }
@@ -7398,16 +7410,16 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
     // V0801002: 遮罩渐入渐出
     let mAlpha = 0.55;
-    if (this._chestOpeningPhase === "warning") mAlpha = 0.35;
-    else if (this._chestOpeningPhase === "entering") mAlpha = 0.35 + this._chestFadeProgress * 0.20;
+    if (this._chestOpeningPhase === "entering") mAlpha = this._chestFadeProgress * 0.55;
     else if (this._chestOpeningPhase === "exiting") mAlpha = this._chestExitingProgress * 0.55;
 
+    // V0801003: warning 无遮罩，仅飘字；entering 开始渐变
     if (this._chestOpeningPhase === "warning") {
-      ctx.fillStyle = `rgba(0,0,0,${mAlpha})`; ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
       ctx.fillStyle = "#ffd35a"; ctx.textAlign = "center";
-      const pulse = 1 + Math.sin(this.elapsed * 6) * 0.05;
+      const pulse = 1 + Math.sin(this._chestFlowClock * 6) * 0.05;
       ctx.font = `700 ${Math.round(24 * pulse)}px "Microsoft YaHei", sans-serif`;
-      ctx.fillText("军令将至", cx, cy); ctx.shadowBlur = 0;
+      ctx.fillText("军令将至", cx, cy);
+      ctx.shadowBlur = 0;
       return;
     }
     ctx.fillStyle = `rgba(0,0,0,${mAlpha})`; ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
@@ -7422,7 +7434,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.fillText("📦", fx, fy);
     }
 
-    if (this._chestOpeningPhase === "entering" || this._chestOpeningPhase === "descending") {
+    if (this._chestOpeningPhase === "entering" || this._chestOpeningPhase === "descending" || this._chestOpeningPhase === "settling") {
       ctx.fillStyle = "#ffd35a"; ctx.font = '700 22px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
       ctx.fillText("宝箱降临...", cx, cy); return;
     }
