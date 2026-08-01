@@ -974,6 +974,12 @@ export class Game {
 
   update(dt: number) {
     const frameDt = Math.min(dt, 0.04);
+    // V0731013: 正式接入 — 30/30时自动触发宝箱开奖
+    if (this._chestRuntime.status === "ready" && this._chestOpeningPhase === "idle" && this.battlePhase !== "edict_modal" && this.phase !== "buffChoice" && !this.currentSlash?.active) {
+      this._chestOpeningPhase = "warning";
+      this._chestWarningAt = 0;
+      this._chestFlowClock = 0;
+    }
     // V0731008: 宝箱开奖期间完全冻结战斗
     if (this._chestOpeningPhase !== "idle") { this._updateChestOpeningFlow(frameDt); return; }
     // V0730020: edict_modal 期间完全暂停战斗（仅允许弹窗渲染）
@@ -2306,6 +2312,8 @@ export class Game {
     this._scorchTrails = []; // V0731011: 清空火径
     // V0731012: 清除所有敌人霜冻状态
     for (const enemy of this.enemies) { (enemy as any)._frostState = undefined; }
+    // V0731013: 重置验证潮标记
+    this._edictVerifyQueued = false;
   }
 
   /** 宝箱进度统一计数入口 */
@@ -2455,13 +2463,13 @@ export class Game {
         break;
       }
       case "closed": {
-        // 恢复战斗
         this._chestOpeningPhase = "idle";
         this._chestRouletteTimer = 0;
         this._chestRouletteIndex = 0;
-        // 结算宝箱，分配军令
         this._applyPendingEdict();
         this.resolveCurrentChestAndAdvance();
+        // V0731013: 宝箱关闭后生成验证怪潮
+        this._queueEdictVerificationWaves();
         break;
       }
     }
@@ -2599,6 +2607,25 @@ export class Game {
       if (fs.frozenLeft > 0) { fs.frozenLeft -= dt; continue; } // 冻结优先消耗
       if (fs.slowLeft > 0) fs.slowLeft -= dt;
       if (fs.slowLeft <= 0 && fs.frozenLeft <= 0) { (enemy as any)._frostState = undefined; }
+    }
+  }
+
+  // V0731013: 验证怪潮 — 宝箱关闭后生成
+  private _edictVerifyQueued = false;
+  private _queueEdictVerificationWaves() {
+    if (this._edictVerifyQueued) return;
+    this._edictVerifyQueued = true;
+    const now = this.elapsed;
+    for (let i = 0; i < 5; i++) {
+      this.subSpawnQueue.push({ kind: "infantry", x: 1 + i * 78, yOffset: 420 - BATTLEFIELD_ZONES.midfieldStartY, time: now + 0.3 + i * 0.1, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
+    }
+    for (let i = 0; i < 5; i++) {
+      this.subSpawnQueue.push({ kind: "infantry", x: 1 + i * 78, yOffset: 470 - BATTLEFIELD_ZONES.midfieldStartY, time: now + 1.1 + i * 0.1, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
+    }
+    for (let i = 0; i < 4; i++) {
+      this.subSpawnQueue.push({ kind: "infantry", x: 1 + i * 40, yOffset: 360 - BATTLEFIELD_ZONES.midfieldStartY, time: now + 8 + i * 0.15, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
+      this.subSpawnQueue.push({ kind: "infantry", x: 320 - i * 40, yOffset: 360 - BATTLEFIELD_ZONES.midfieldStartY, time: now + 8 + i * 0.15, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
+      this.subSpawnQueue.push({ kind: "infantry", x: 130 + i * 38, yOffset: 440 - BATTLEFIELD_ZONES.midfieldStartY, time: now + 8.7 + i * 0.15, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
     }
   }
 
