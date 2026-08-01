@@ -952,8 +952,11 @@ export class Game {
     this._eliteDefeatedHandled = false;
     // 通用战斗
     this.chestDone = false; this.chestDropped = false; this.chestDropX = 0; this.chestDropY = 0;
-    this.finished = false;
-    this.screenShake = 0;
+    this.finished = false; this.phase = "playing"; this.battlePhase = "main_waves";
+    this.enemies = []; this.subSpawnQueue = []; this.particles = [];
+    this.currentSlash = null; this.splitFlashes = [];
+    this.screenShake = 0; this.flash = 0; this.hitStopTimer = 0; this.slowMoTimer = 0;
+    this.pointerDown = false;
     this.wavesSpawned = 0; this.allNormalWavesSpawned = false;
     this._lastWaveElapsed = 0; this.waveAdvanceLockedUntil = 0;
     this.edictRewardState = "none"; this.edictPostWavesQueued = false; this.allPostChestWavesSpawned = false;
