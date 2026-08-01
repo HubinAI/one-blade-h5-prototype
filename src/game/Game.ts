@@ -7370,16 +7370,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const floor = this.getLogicalFloor();
       const unlockLevel = rt.stageIndex === 0 ? PROGRESS_CHEST_CONFIG.secondChestUnlockMainline : 0;
       const belowUnlock = unlockLevel > 0 && floor < unlockLevel;
-      const hasMoreChests = rt.stageIndex + 2 <= rt.maxChestCount;
-      // V0801007: 一行文本
+      const allDone = rt.status === "complete" && rt.stageIndex + 1 >= rt.maxChestCount;
+      // V0801007: 单行文本，优先级: 未解锁>本关已领>后续可用
       let line: string;
       if (belowUnlock) line = `第${unlockLevel}关解锁`;
-      else if (hasMoreChests && rt.status !== "complete") line = `第${rt.stageIndex + 2}宝箱`;
-      else if (rt.status === "complete" || !hasMoreChests) line = "后续关卡可用";
-      else line = "本关已领取";
-      // 当前关卡只配1箱且已领完→统一"后续关卡可用"
-      if (rt.maxChestCount === 1 && rt.status === "complete") line = "后续关卡可用";
-      if (rt.status === "complete" && rt.maxChestCount > 1 && rt.stageIndex + 1 >= rt.maxChestCount) line = "本关已领取";
+      else if (allDone) line = "本关已领取";
+      else line = "后续关卡可用";
 
       const tcx = Math.round(cardX);
       ctx.fillStyle = "#ddd"; ctx.font = '700 13px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
