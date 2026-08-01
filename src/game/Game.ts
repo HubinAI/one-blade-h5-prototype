@@ -2495,6 +2495,7 @@ export class Game {
         break;
       }
       case "exiting": {
+        this.screenShake = 0; // V0801005: 禁止退出期震屏
         this._chestStampTimer -= dt;
         this._chestExitingProgress = Math.max(0, this._chestExitingProgress - dt / 0.3);
         if (this._chestExitingProgress <= 0 && this._chestStampTimer <= 0) {
@@ -7337,6 +7338,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const ringR = 22;
     const ringW = 4;
 
+    // V0801005: 军令图标栏在环上方独立行
+    if (this._activeEdicts.length > 0) {
+      this._drawEdictIconBar(ctx, cx - 60, cy - 28, rt.stageIndex);
+    }
+
     // 进度环背景
     ctx.beginPath();
     ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
@@ -7370,8 +7376,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.fillStyle = "#666"; ctx.font = '9px "Microsoft YaHei", sans-serif';
       if (unlockLevel > 0) ctx.fillText(`第${unlockLevel}关解锁`, cx, cy + 18);
       else ctx.fillText("关卡解锁", cx, cy + 18);
-      // 已获得军令图标栏（左侧）
-      this._drawEdictIconBar(ctx, cx - 64, cy, rt.stageIndex);
       return;
     }
 
@@ -7387,8 +7391,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.fillStyle = "#fff"; ctx.font = '11px "Microsoft YaHei", sans-serif';
       ctx.fillText(`${rt.progress}/${rt.threshold}`, cx, cy + 30);
     }
-    // 已获得军令图标栏
-    if (this._activeEdicts.length > 0) this._drawEdictIconBar(ctx, cx - 64, cy, rt.stageIndex);
   }
 
   // V0801004: 已获军令小图标栏
