@@ -141,7 +141,7 @@ export function ResultScreen({
         </div>
       )}
 
-      {/* 唯一按钮：看广告 */}
+      {/* 按钮区 */}
       <div className="result-actions-section" onClick={stop}>
         {result.win ? (
           result.canDoubleReward && !result.rewards.doubled && (
@@ -154,22 +154,38 @@ export function ResultScreen({
             </button>
           )
         ) : (
-          !extraSlashUsed && (
+          <>
+            {!extraSlashUsed && (
+              <button
+                className="result-btn ad-btn single-btn"
+                onClick={handleReviveSlash}
+                disabled={adState === "playing"}
+              >
+                📺 看广告·补一刀
+              </button>
+            )}
             <button
-              className="result-btn ad-btn single-btn"
-              onClick={handleReviveSlash}
-              disabled={adState === "playing"}
+              className="result-btn retry-btn"
+              onClick={onRetry}
             >
-              📺 看广告·补一刀
+              🔄 重新挑战
             </button>
-          )
+            <button
+              className="result-btn home-btn"
+              onClick={onHome}
+            >
+              返回主页
+            </button>
+          </>
         )}
       </div>
 
       {/* 底部提示：点击空白返回 */}
-      <div className="result-tap-tip" onClick={stop}>
-        · 点击空白处返回 ·
-      </div>
+      {result.win && (
+        <div className="result-tap-tip" onClick={stop}>
+          · 点击空白处返回 ·
+        </div>
+      )}
     </section>
   );
 }

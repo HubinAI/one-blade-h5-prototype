@@ -7125,6 +7125,23 @@ h1 {
   padding: 10px 0;
 }
 
+/* V0801010: 重新挑战按钮 */
+.result-btn.retry-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #eee;
+  font-size: 15px;
+}
+
+/* V0801010: 返回主页按钮 */
+.result-btn.home-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 13px;
+  padding: 10px 0;
+}
+
 .result-back-section {
   width: 100%;
   max-width: 320px;
