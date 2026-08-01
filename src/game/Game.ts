@@ -2388,6 +2388,11 @@ export class Game {
     // 1. 标记精英已击杀
     this.eliteKilled = true;
     this.allPostChestWavesSpawned = true;
+    // V0801008: 清理火环精英状态
+    this._eliteBattleActive = false;
+    this._eliteInvuln = false;
+    this._eliteFireRings = [];
+    this._eliteGuardSpawned = false;
 
     if (this.debugEnabled) {
       console.log("[elite defeated]", {
@@ -3041,10 +3046,21 @@ export class Game {
           this.stats.coreHits += 1;
           this.score += 6;
           this.addText(enemy.x, enemy.y - 20, "阵眼自崩", "#9b6dff", 14);
-          this.particles.push(ringParticle(enemy, "#9b6dff", 34));
+        this.particles.push(ringParticle(enemy, "#9b6dff", 34));
         }
+    }
+    // V0801008: 火环切除
+    for (const fr of this._eliteFireRings) {
+      if (!fr.alive) continue;
+      if (segmentHitCircle(a, b, { x: fr.x, y: fr.y }, fr.r + 8)) {
+        fr.alive = false;
+        this.particles.push(...sparkBurst({ x: fr.x, y: fr.y }, 8, "#f39c12"));
+        this.particles.push(...sparkBurst({ x: fr.x, y: fr.y }, 4, "#fff"));
+        this.addText(fr.x, fr.y - 12, "斩焰", "#f39c12", 14);
+        AudioService.armorHit();
       }
     }
+  }
   }
 
   /** P0: Reactive Boss弹幕/护甲检测 */
@@ -7887,6 +7903,16 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ctx.arc(0, 0, enemy.radius + 4 + ringT * 20, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
+        // V0801008: 无敌保护金色光罩
+        if (this._eliteInvuln && enemy.eliteKind === "fireRing") {
+          ctx.save(); ctx.translate(enemy.x, enemy.y);
+          const shieldPulse = 0.7 + 0.3 * Math.sin(this.elapsed * 5);
+          ctx.beginPath(); ctx.arc(0, 0, enemy.radius + 14, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,200,50,${0.15 * shieldPulse})`; ctx.fill();
+          ctx.strokeStyle = `rgba(255,180,30,${0.6 * shieldPulse})`; ctx.lineWidth = 3;
+          ctx.setLineDash([8, 4]); ctx.stroke(); ctx.setLineDash([]);
+          ctx.restore();
+        }
         ctx.fillStyle = enemy.flash > 0 ? "#fff1b8" : visDef.color;
         ctx.strokeStyle = visDef.accent;
         ctx.lineWidth = 3;
