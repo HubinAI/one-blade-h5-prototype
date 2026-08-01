@@ -7367,10 +7367,13 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.fillStyle = "#999"; ctx.font = '12px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
       ctx.fillText("🔒", cardX, cardY + 18);
       ctx.fillStyle = "#aaa"; ctx.font = '10px "Microsoft YaHei", sans-serif';
-      ctx.fillText(`第${rt.stageIndex + 2}宝箱`, cardX, cardY + 34);
+      const nextNum = rt.stageIndex + 2;
+      const label = nextNum <= rt.maxChestCount ? `第${nextNum}宝箱` : "已集齐";
+      ctx.fillText(label, cardX, cardY + 34);
       const unlockLevel = rt.stageIndex === 0 ? PROGRESS_CHEST_CONFIG.secondChestUnlockMainline : 0;
       ctx.fillStyle = "#777"; ctx.font = '9px "Microsoft YaHei", sans-serif';
-      if (unlockLevel > 0) ctx.fillText(`第${unlockLevel}关解锁`, cardX, cardY + 48);
+      if (unlockLevel > 0 && rt.stageIndex + 2 <= rt.maxChestCount) ctx.fillText(`第${unlockLevel}关解锁`, cardX, cardY + 48);
+      else if (rt.stageIndex + 2 > rt.maxChestCount) ctx.fillText("已全部解锁", cardX, cardY + 48);
       else ctx.fillText("关卡解锁", cardX, cardY + 48);
     } else {
       const ringR = 12, rcy = cardY + 18;
