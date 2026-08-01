@@ -976,8 +976,9 @@ export class Game {
     const frameDt = Math.min(dt, 0.04);
     // V0731013: 正式接入 — 30/30时自动触发宝箱开奖
     if (this._chestRuntime.status === "ready" && this._chestOpeningPhase === "idle" && this.battlePhase !== "edict_modal" && this.phase !== "buffChoice" && !this.currentSlash?.active) {
-      this._chestOpeningPhase = "warning";
-      this._chestWarningAt = 0;
+        this._chestOpeningPhase = "warning";
+        this._chestWarningAt = 0;
+        this.activeBattleNotice = null; // V0801005: 清旧播报
       this._chestFlowClock = 0;
     }
     // V0731008: 宝箱开奖期间完全冻结战斗
@@ -6984,6 +6985,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (now < cooldownUntil) return;
     if (this.activeBattleNotice?.dedupeKey === input.dedupeKey) return;
     if (this.battleNoticeQueue.some(n => n.dedupeKey === input.dedupeKey)) return;
+    // V0801005: 军令流程中阻止战斗主标题
+    if (this._chestOpeningPhase !== "idle" && this._chestOpeningPhase !== "closed") return;
     const cfg = Game.BATTLE_NOTICE_CONFIG;
     const notice: BattleNotice = {
       ...input,
@@ -7333,82 +7336,58 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   // V0731005: 进度宝箱HUD
   private _drawProgressChestHUD(ctx: CanvasRenderingContext2D) {
     const rt = this._chestRuntime;
-    const cx = DESIGN_WIDTH - 44;
-    const cy = 36;
-    const ringR = 22;
-    const ringW = 4;
+    // V0801005: 两区块 — 军令槽位(左) + 宝箱卡片(右)
+    const cardX = DESIGN_WIDTH - 56; const cardW = 52; const cardH = 56; const cardY = 4;
+    const slotR = 11; const slotGap = 26; const slotY = 13;
 
-    // V0801005: 军令图标栏（exiting时也显示pending）
-    if (this._activeEdicts.length > 0 || (!!this._pendingEdictId && this._chestOpeningPhase === "exiting")) {
-      this._drawEdictIconBar(ctx, cx - 60, cy - 28, rt.stageIndex);
-    }
-
-    // 进度环背景
-    ctx.beginPath();
-    ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
-    ctx.lineWidth = ringW;
-    ctx.stroke();
-
-    // 进度环填充
-    const ratio = rt.threshold > 0 ? Math.min(rt.progress / rt.threshold, 1) : 0;
-    if (ratio > 0 && rt.status !== "complete" && rt.status !== "locked") {
-      ctx.beginPath();
-      ctx.arc(cx, cy, ringR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
-      ctx.strokeStyle = rt.status === "ready" ? "#ffd35a" : "#4da6ff";
-      ctx.lineWidth = ringW;
-      if (rt.status === "ready") { ctx.shadowColor = "#ffd35a"; ctx.shadowBlur = 8; }
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-    }
-
-    // V0801004: 已完成/锁定态统一显示锁定+目标
-    if (rt.status === "locked" || rt.status === "complete") {
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
-      ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#999";
-      ctx.font = '12px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
-      ctx.fillText("🔒", cx, cy + 4);
-      const nextIdx = rt.stageIndex + 1;
-      const unlockLevel = rt.stageIndex === 0 ? PROGRESS_CHEST_CONFIG.secondChestUnlockMainline : 0;
-      ctx.font = '10px "Microsoft YaHei", sans-serif';
-      ctx.fillText(`第${nextIdx + 1}宝箱`, cx, cy - 18);
-      ctx.fillStyle = "#666"; ctx.font = '9px "Microsoft YaHei", sans-serif';
-      if (unlockLevel > 0) ctx.fillText(`第${unlockLevel}关解锁`, cx, cy + 18);
-      else ctx.fillText("关卡解锁", cx, cy + 18);
-      return;
-    }
-
-    // 宝箱emoji
-    ctx.font = '18px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
-    ctx.fillText("📦", cx, cy + 6);
-
-    // 进度数字
-    if (rt.status === "ready") {
-      ctx.fillStyle = "#ffd35a"; ctx.font = '700 11px "Microsoft YaHei", sans-serif';
-      ctx.fillText("满", cx, cy + 30);
-    } else {
-      ctx.fillStyle = "#fff"; ctx.font = '11px "Microsoft YaHei", sans-serif';
-      ctx.fillText(`${rt.progress}/${rt.threshold}`, cx, cy + 30);
-    }
-  }
-
-  // V0801004: 已获军令小图标栏
-  private _drawEdictIconBar(ctx: CanvasRenderingContext2D, x: number, y: number, _stage: number) {
+    // 军令槽位（右→左）
     const ICONS: Record<EdictId, string> = { triple_slash: "⚔️", scorch: "🔥", frost: "❄️" };
     const COLORS: Record<EdictId, string> = { triple_slash: "#88bbff", scorch: "#ff8833", frost: "#aaddff" };
-    ctx.font = '12px "Microsoft YaHei", sans-serif'; ctx.textAlign = "right";
-    let px = x;
-    const flash = this._edictArrivalTimer > 0 ? 1 + (this._edictArrivalTimer / 0.35) * 0.3 : 1;
     const displayEdicts = [...this._activeEdicts];
-    if (this._pendingEdictId && this._chestOpeningPhase === "exiting") {
-      displayEdicts.unshift({ id: this._pendingEdictId, level: 1 });
-    }
+    if (!!this._pendingEdictId && this._chestOpeningPhase === "exiting") displayEdicts.unshift({ id: this._pendingEdictId, level: 1 });
+    const flash = this._edictArrivalTimer > 0 ? 1 + (this._edictArrivalTimer / 0.35) * 0.2 : 1;
+    const startX = cardX - cardW / 2 - 8;  // 卡片左边留8px间距
+    let px = startX - (displayEdicts.length - 1) * slotGap;
     for (const e of displayEdicts) {
-      ctx.fillStyle = COLORS[e.id] || "#ccc";
-      ctx.font = `${Math.round(12 * flash)}px "Microsoft YaHei", sans-serif`;
-      ctx.fillText(ICONS[e.id] || "?", px, y + 6);
-      px -= 18;
+      ctx.beginPath(); ctx.arc(px, slotY, slotR, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(10,8,5,0.88)"; ctx.fill();
+      ctx.strokeStyle = COLORS[e.id] || "#555"; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.font = `${Math.round(14 * flash)}px "Microsoft YaHei", sans-serif`; ctx.textAlign = "center";
+      ctx.fillText(ICONS[e.id] || "?", px, slotY + 5);
+      px += slotGap;
+    }
+
+    // 宝箱卡片
+    ctx.fillStyle = "rgba(10,8,5,0.88)";
+    ctx.beginPath(); roundRect(ctx, cardX - cardW / 2, cardY, cardW, cardH, 6); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 1;
+    ctx.beginPath(); roundRect(ctx, cardX - cardW / 2, cardY, cardW, cardH, 6); ctx.stroke();
+
+    if (rt.status === "locked" || rt.status === "complete") {
+      ctx.fillStyle = "#999"; ctx.font = '12px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
+      ctx.fillText("🔒", cardX, cardY + 18);
+      ctx.fillStyle = "#aaa"; ctx.font = '10px "Microsoft YaHei", sans-serif';
+      ctx.fillText(`第${rt.stageIndex + 2}宝箱`, cardX, cardY + 34);
+      const unlockLevel = rt.stageIndex === 0 ? PROGRESS_CHEST_CONFIG.secondChestUnlockMainline : 0;
+      ctx.fillStyle = "#777"; ctx.font = '9px "Microsoft YaHei", sans-serif';
+      if (unlockLevel > 0) ctx.fillText(`第${unlockLevel}关解锁`, cardX, cardY + 48);
+      else ctx.fillText("关卡解锁", cardX, cardY + 48);
+    } else {
+      const ringR = 12, rcy = cardY + 18;
+      ctx.beginPath(); ctx.arc(cardX, rcy, ringR, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.lineWidth = 2.5; ctx.stroke();
+      const ratio = rt.threshold > 0 ? Math.min(rt.progress / rt.threshold, 1) : 0;
+      if (ratio > 0) {
+        ctx.beginPath(); ctx.arc(cardX, rcy, ringR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
+        ctx.strokeStyle = rt.status === "ready" ? "#ffd35a" : "#4da6ff"; ctx.lineWidth = 2.5;
+        if (rt.status === "ready") { ctx.shadowColor = "#ffd35a"; ctx.shadowBlur = 6; }
+        ctx.stroke(); ctx.shadowBlur = 0;
+      }
+      ctx.font = '12px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
+      ctx.fillText("📦", cardX, rcy + 4);
+      ctx.fillStyle = rt.status === "ready" ? "#ffd35a" : "#fff";
+      ctx.font = `700 9px "Microsoft YaHei", sans-serif`;
+      ctx.fillText(rt.status === "ready" ? "满" : `${rt.progress}/${rt.threshold}`, cardX, cardY + 48);
     }
   }
 
@@ -7425,11 +7404,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
     // V0801003: warning 无遮罩，仅飘字；entering 开始渐变
     if (this._chestOpeningPhase === "warning") {
-      ctx.fillStyle = "#ffd35a"; ctx.textAlign = "center";
-      const pulse = 1 + Math.sin(this._chestFlowClock * 6) * 0.05;
-      ctx.font = `700 ${Math.round(24 * pulse)}px "Microsoft YaHei", sans-serif`;
-      ctx.fillText("军令将至", cx, cy);
-      ctx.shadowBlur = 0;
+      ctx.fillStyle = "rgba(255,211,90,0.7)"; ctx.font = '700 16px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = "center";
+      ctx.fillText("军令将至", cx, cy + 20);
       return;
     }
     ctx.fillStyle = `rgba(0,0,0,${mAlpha})`; ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
