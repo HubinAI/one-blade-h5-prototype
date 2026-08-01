@@ -7385,8 +7385,15 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const COLORS: Record<EdictId, string> = { triple_slash: "#88bbff", scorch: "#ff8833", frost: "#aaddff" };
     ctx.font = '12px "Microsoft YaHei", sans-serif'; ctx.textAlign = "right";
     let px = x;
-    for (const e of this._activeEdicts) {
+    // V0801004: exiting期间暂显pendingEdictId
+    const displayEdicts = [...this._activeEdicts];
+    if (this._pendingEdictId && this._chestOpeningPhase === "exiting") {
+      displayEdicts.unshift({ id: this._pendingEdictId, level: 1 });
+    }
+    for (const e of displayEdicts) {
       ctx.fillStyle = COLORS[e.id] || "#ccc";
+      const scale = (this._pendingEdictId === e.id && this._chestOpeningPhase === "exiting") ? 1.4 : 1;
+      ctx.font = `${Math.round(12 * scale)}px "Microsoft YaHei", sans-serif`;
       ctx.fillText(ICONS[e.id] || "?", px, y + 6);
       px -= 18;
     }
