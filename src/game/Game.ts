@@ -148,7 +148,7 @@ export class Game {
   private _chestRuntime: ProgressChestRuntime = { stageIndex: 0, progress: 0, threshold: 30, status: "charging", maxChestCount: 1, lastCountedEnemyId: "", lastKillSource: "" };
   private _activeEdicts: EdictInstance[] = [];
   // V0731008: 宝箱开奖框架
-  private _chestOpeningPhase: "idle" | "warning" | "freezing" | "descending" | "roulette" | "revealed" | "closed" = "idle";
+  private _chestOpeningPhase: "idle" | "warning" | "entering" | "descending" | "roulette" | "revealed" | "exiting" | "closed" = "idle";
   private _pendingEdictId: EdictId | null = null;
   private _chestRouletteTimer = 0;
   private _chestRouletteSpeed = 0;
@@ -2366,16 +2366,7 @@ export class Game {
 
     // 1. 标记精英已击杀
     this.eliteKilled = true;
-
-    // V0731007: 第1关不再启动旧军令爆发怪潮，直接离开elite，场上清空即胜利
-    if (this.isLogicalLevel1()) {
-      this.allPostChestWavesSpawned = true; // 标记为完成，跳过旧波次生成
-    } else {
-      this.startPostEliteContinuationOnce();
-    }
-
-    const phaseAfter = this.battlePhase;
-    const hasContWaves = (this.level.postChestWaves?.length ?? 0) > 0;
+    this.allPostChestWavesSpawned = true;
 
     if (this.debugEnabled) {
       console.log("[elite defeated]", {
@@ -2409,6 +2400,9 @@ export class Game {
 
   // ═══════════════════ V0731008: 宝箱开奖流程 ═══════════════════
   private _chestFlowClock = 0;
+  private _chestFadeProgress = 0;
+  private _chestExitingProgress = 0;
+  private _chestStampTimer = 0;
   private _updateChestOpeningFlow(dt: number) {
     this._chestFlowClock += dt; // V0731008 hotfix: 独立时钟
     switch (this._chestOpeningPhase) {
@@ -2416,12 +2410,15 @@ export class Game {
         if (this._chestWarningAt === 0) this._chestWarningAt = this._chestFlowClock;
         if (this.currentSlash?.active) break;
         if (this._chestFlowClock - this._chestWarningAt < 0.8) break;
-        this._chestOpeningPhase = "freezing";
+        this._chestOpeningPhase = "entering";
+        this._chestFadeProgress = 0;
         break;
       }
-      case "freezing": {
-        // 完全冻结战斗 — update() 提前 return，这里只更新开奖
-        this._chestOpeningPhase = "descending";
+      case "entering": {
+        this._chestFadeProgress = Math.min(1, this._chestFadeProgress + dt / 0.3);
+        if (this._chestFadeProgress >= 1) {
+          this._chestOpeningPhase = "descending";
+        }
         break;
       }
       case "descending": {
@@ -2455,9 +2452,18 @@ export class Game {
         break;
       }
       case "revealed": {
-        // 结果展示中，等待 0.5s 确认或自动关闭
         this._chestRouletteTimer += dt;
         if (this._chestRouletteTimer > 1.8 + 0.6) {
+          this._chestOpeningPhase = "exiting";
+          this._chestExitingProgress = 1;
+          this._chestStampTimer = 0.25; // 盖章反馈
+        }
+        break;
+      }
+      case "exiting": {
+        this._chestStampTimer -= dt;
+        this._chestExitingProgress = Math.max(0, this._chestExitingProgress - dt / 0.3);
+        if (this._chestExitingProgress <= 0 && this._chestStampTimer <= 0) {
           this._chestOpeningPhase = "closed";
         }
         break;
@@ -5658,67 +5664,16 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private shouldFinishVictory(): boolean {
     if (this.gameMode === "boss") return false;
     const allWavesDone = this.wavesSpawned >= this.level.waves.length;
-    const notResolving = !this.currentSlash;
-    if (!allWavesDone || !notResolving) return false;
+    if (!allWavesDone || this.currentSlash) return false;
 
-    // V0731007: 第1关普通模式彻底跳过旧军令链，精英死后清空即胜利
-    if (this.isLogicalLevel1()) {
-      if (this.battlePhase === 'elite') return false;
-      if (this.level.eliteSpawnAt && this.level.eliteKind && !this.eliteKilled) return false;
-      this.cleanupOutOfBattleEnemiesForVictoryCheck();
-      if (this.subSpawnQueue.length > 0) return false;
-      if (this.enemies.some(e => e.alive)) return false;
-      if (this.currentSlash) return false;
-      return true;
-    }
-
-    // ═══ 非L1关卡：保留原有军令链检查 ═══
-    const noAliveEnemies = !this.enemies.some(e => e.alive);
-
-    if (this.battlePhase === 'elite' || this.battlePhase === 'chest') return false;
-
+    // V0801002: 通用精英结算 — 所有以final_elite_defeat结尾的关卡
     if (this.level.eliteSpawnAt && this.level.eliteKind) {
       if (!this.eliteKilled) return false;
-      if (this.gameMode !== "normal" && this.chestDropped && !this.chestDone) return false;
-    }
-
-    const postWaves = this.getEffectivePostChestWaves();
-    const hasPostChest = postWaves.length > 0;
-    if (hasPostChest) {
-      if (this.gameMode === "normal") {
-        if (!this.edictPostWavesQueued) return false;
-        if (!this.allPostChestWavesSpawned) {
-          if (this.postChestStartAt !== null && this.elapsed - this.postChestStartAt > 35 && this.enemies.filter(e => e.alive).length <= 0 && this.subSpawnQueue.length === 0) {
-            this.allPostChestWavesSpawned = true;
-          } else {
-            return false;
-          }
-        }
-      } else {
-        if (!this.chestDone) return false;
-        if (this.postChestStartAt === null) return false;
-        if (!this.allPostChestWavesSpawned) {
-          if (this.elapsed - this.postChestStartAt > 35 && this.enemies.filter(e => e.alive).length <= 0 && this.subSpawnQueue.length === 0) {
-            this.allPostChestWavesSpawned = true;
-          } else {
-            return false;
-          }
-        }
-        if (this.chestDone && this.postChestStartAt === null) {
-          this.postChestStartAt = this.elapsed;
-        }
-      }
-    }
-
-    if (!hasPostChest && this.level.eliteSpawnAt && this.chestDropped) {
-      if (this.gameMode !== "normal" && !this.chestDone) return false;
     }
 
     this.cleanupOutOfBattleEnemiesForVictoryCheck();
     if (this.subSpawnQueue.length > 0) return false;
-    if (this.enemies.filter(e => e.alive).length > 0) return false;
-    if (this.chestPendingConfirm || this.edictIconFlying || this.edictRewardState === "modal" || this.edictRewardState === "flying") return false;
-    if (this.currentSlash) return false;
+    if (this.enemies.some(e => e.alive)) return false;
     return true;
   }
 
@@ -7397,29 +7352,25 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const cx = DESIGN_WIDTH / 2;
     const cy = DESIGN_HEIGHT / 2;
 
-    // Warning 阶段：半透明遮罩 + 提示
+    // V0801002: 遮罩渐入渐出
+    let mAlpha = 0.55;
+    if (this._chestOpeningPhase === "warning") mAlpha = 0.35;
+    else if (this._chestOpeningPhase === "entering") mAlpha = 0.35 + this._chestFadeProgress * 0.20;
+    else if (this._chestOpeningPhase === "exiting") mAlpha = this._chestExitingProgress * 0.55;
+
     if (this._chestOpeningPhase === "warning") {
-      ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
-      ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
-      ctx.fillStyle = "#ffd35a";
-      ctx.font = '700 24px "Microsoft YaHei", sans-serif';
-      ctx.textAlign = "center";
+      ctx.fillStyle = `rgba(0,0,0,${mAlpha})`; ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+      ctx.fillStyle = "#ffd35a"; ctx.textAlign = "center";
       const pulse = 1 + Math.sin(this.elapsed * 6) * 0.05;
       ctx.font = `700 ${Math.round(24 * pulse)}px "Microsoft YaHei", sans-serif`;
-      ctx.fillText("军令将至", cx, cy);
-      ctx.shadowBlur = 0;
+      ctx.fillText("军令将至", cx, cy); ctx.shadowBlur = 0;
       return;
     }
-    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
-    ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+    ctx.fillStyle = `rgba(0,0,0,${mAlpha})`; ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
 
-    if (this._chestOpeningPhase === "freezing" || this._chestOpeningPhase === "descending") {
-      // 宝箱下落提示
-      ctx.fillStyle = "#ffd35a";
-      ctx.font = '700 22px "Microsoft YaHei", sans-serif';
-      ctx.textAlign = "center";
-      ctx.fillText("宝箱降临...", cx, cy);
-      return;
+    if (this._chestOpeningPhase === "entering" || this._chestOpeningPhase === "descending") {
+      ctx.fillStyle = "#ffd35a"; ctx.font = '700 22px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
+      ctx.fillText("宝箱降临...", cx, cy); return;
     }
 
     // 轮转动画
