@@ -4430,7 +4430,10 @@ export class Game {
     const tooLow = activeThreat <= 3;
     const noNearThreat = pressure.proj.projected.front < 0.8;
     const lockExpired = this.elapsed >= this.waveAdvanceLockedUntil;
-    const enoughGap = this.elapsed - this._lastWaveElapsed >= 0.60;
+    const enoughGap = this.elapsed - this._lastWaveElapsed >= 0.35;
+    // V0801007: 清场即刻推进
+    const allDead = activeThreat <= 0 && this.enemies.filter(e => e.alive).length === 0 && this.subSpawnQueue.length === 0;
+    if (allDead && lockExpired && enoughGap) return true;
     if (!tooLow || !noNearThreat || !lockExpired || !enoughGap) return false;
     if (this.chestPendingConfirm || this.phase !== "playing") return false;
     if (this.wavesSpawned >= this.level.waves.length) return false;
@@ -7337,7 +7340,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private _drawProgressChestHUD(ctx: CanvasRenderingContext2D) {
     const rt = this._chestRuntime;
     // V0801005: 两区块 — 军令槽位(左) + 宝箱卡片(右)
-    const cardX = DESIGN_WIDTH - 58; const cardW = 66; const cardH = 52; const cardY = 6;
+    const cardX = DESIGN_WIDTH - 58; const cardW = 66; const cardH = 40; const cardY = 8;
     const slotR = 11; const slotGap = 26; const slotY = 13;
 
     // 军令槽位（右→左）
@@ -7366,19 +7369,21 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (rt.status === "locked" || rt.status === "complete") {
       const floor = this.getLogicalFloor();
       const unlockLevel = rt.stageIndex === 0 ? PROGRESS_CHEST_CONFIG.secondChestUnlockMainline : 0;
+      const belowUnlock = unlockLevel > 0 && floor < unlockLevel;
       const hasMoreChests = rt.stageIndex + 2 <= rt.maxChestCount;
-      const belowUnlock = unlockLevel > 0 && floor < unlockLevel; // 主线未到解锁关
-      const title = belowUnlock ? `第${rt.stageIndex + 2}宝箱` : (hasMoreChests ? `第${rt.stageIndex + 2}宝箱` : "本关已领取");
-      const sub = belowUnlock ? `第${unlockLevel}关解锁` : (hasMoreChests ? "后续关卡可用" : "后续关卡可用");
+      // V0801007: 一行文本
+      let line: string;
+      if (belowUnlock) line = `第${unlockLevel}关解锁`;
+      else if (hasMoreChests && rt.status !== "complete") line = `第${rt.stageIndex + 2}宝箱`;
+      else if (rt.status === "complete" || !hasMoreChests) line = "后续关卡可用";
+      else line = "本关已领取";
+      // 当前关卡只配1箱且已领完→统一"后续关卡可用"
+      if (rt.maxChestCount === 1 && rt.status === "complete") line = "后续关卡可用";
+      if (rt.status === "complete" && rt.maxChestCount > 1 && rt.stageIndex + 1 >= rt.maxChestCount) line = "本关已领取";
 
-      // 🔒 + 标题 + 副标题（整数坐标）
       const tcx = Math.round(cardX);
-      ctx.fillStyle = "#bbb"; ctx.font = '14px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
-      ctx.fillText("🔒", tcx, Math.round(cardY + 17));
-      ctx.fillStyle = "#ddd"; ctx.font = '700 12px "Microsoft YaHei", sans-serif';
-      ctx.fillText(title, tcx, Math.round(cardY + 34));
-      ctx.fillStyle = "#888"; ctx.font = '11px "Microsoft YaHei", sans-serif';
-      ctx.fillText(sub, tcx, Math.round(cardY + 49));
+      ctx.fillStyle = "#ddd"; ctx.font = '700 13px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
+      ctx.fillText(line, tcx, Math.round(cardY + 32));
     } else {
       const tcx = Math.round(cardX);
       const rcy = Math.round(cardY + 20);
