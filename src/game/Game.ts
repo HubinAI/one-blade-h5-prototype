@@ -7335,73 +7335,60 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
     // 进度环填充
     const ratio = rt.threshold > 0 ? Math.min(rt.progress / rt.threshold, 1) : 0;
-    if (ratio > 0) {
+    if (ratio > 0 && rt.status !== "complete" && rt.status !== "locked") {
       ctx.beginPath();
       ctx.arc(cx, cy, ringR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
-      const ringColor = rt.status === "ready" ? "#ffd35a" : "#4da6ff";
-      ctx.strokeStyle = ringColor;
+      ctx.strokeStyle = rt.status === "ready" ? "#ffd35a" : "#4da6ff";
       ctx.lineWidth = ringW;
-      if (rt.status === "ready") {
-        ctx.shadowColor = "#ffd35a";
-        ctx.shadowBlur = 8;
-      }
+      if (rt.status === "ready") { ctx.shadowColor = "#ffd35a"; ctx.shadowBlur = 8; }
       ctx.stroke();
       ctx.shadowBlur = 0;
     }
 
-    // 锁定态显示
-    if (rt.status === "locked") {
+    // V0801004: 已完成/锁定态统一显示锁定+目标
+    if (rt.status === "locked" || rt.status === "complete") {
       ctx.fillStyle = "rgba(0,0,0,0.55)";
-      ctx.beginPath();
-      ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = "#999";
-      ctx.font = '12px "Microsoft YaHei", sans-serif';
-      ctx.textAlign = "center";
+      ctx.font = '12px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
       ctx.fillText("🔒", cx, cy + 4);
-      ctx.fillText("第2宝箱", cx + 44, cy - 2);
-      ctx.fillStyle = "#666";
-      ctx.font = '9px "Microsoft YaHei", sans-serif';
-      ctx.fillText("主线6解锁", cx + 44, cy + 12);
+      const nextIdx = rt.stageIndex + 1;
+      const unlockLevel = rt.stageIndex === 0 ? PROGRESS_CHEST_CONFIG.secondChestUnlockMainline : 0;
+      ctx.fillText(`第${nextIdx + 1}宝箱`, cx + 44, cy - 2);
+      ctx.fillStyle = "#666"; ctx.font = '9px "Microsoft YaHei", sans-serif';
+      if (unlockLevel > 0) ctx.fillText(`主线${unlockLevel}解锁`, cx + 44, cy + 12);
+      else ctx.fillText("关卡解锁", cx + 44, cy + 12);
+      // 已获得军令图标栏（左侧）
+      this._drawEdictIconBar(ctx, cx - 52, cy, rt.stageIndex);
       return;
     }
 
-    // 宝箱emoji图标
-    ctx.font = '18px "Microsoft YaHei", sans-serif';
-    ctx.textAlign = "center";
+    // 宝箱emoji
+    ctx.font = '18px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
     ctx.fillText("📦", cx, cy + 6);
 
     // 进度数字
-    if (rt.status === "complete") {
-      ctx.fillStyle = "#666";
-      ctx.font = '11px "Microsoft YaHei", sans-serif';
-      ctx.fillText("完", cx, cy + 30);
-    } else if (rt.status === "ready") {
-      ctx.fillStyle = "#ffd35a";
-      ctx.font = '700 11px "Microsoft YaHei", sans-serif';
+    if (rt.status === "ready") {
+      ctx.fillStyle = "#ffd35a"; ctx.font = '700 11px "Microsoft YaHei", sans-serif';
       ctx.fillText("满", cx, cy + 30);
     } else {
-      ctx.fillStyle = "#fff";
-      ctx.font = '11px "Microsoft YaHei", sans-serif';
+      ctx.fillStyle = "#fff"; ctx.font = '11px "Microsoft YaHei", sans-serif';
       ctx.fillText(`${rt.progress}/${rt.threshold}`, cx, cy + 30);
     }
-    // V0731010: 三锋令常驻图标
-    if (this._activeEdicts.some(e => e.id === "triple_slash")) {
-      ctx.font = '14px "Microsoft YaHei", sans-serif';
-      ctx.textAlign = "center";
-      ctx.fillText("⚔️", cx, cy + 46);
-    }
-    // V0731011: 燎原令常驻图标
-    if (this._activeEdicts.some(e => e.id === "scorch")) {
-      const yOff = this._activeEdicts.some(e => e.id === "triple_slash") ? 62 : 46;
-      ctx.fillText("🔥", cx, cy + yOff);
-    }
-    // V0731012: 凝霜令常驻图标
-    if (this._activeEdicts.some(e => e.id === "frost")) {
-      let yOff = 46;
-      if (this._activeEdicts.some(e => e.id === "triple_slash")) yOff += 16;
-      if (this._activeEdicts.some(e => e.id === "scorch")) yOff += 16;
-      ctx.fillText("❄️", cx, cy + yOff);
+    // 已获得军令图标栏
+    if (this._activeEdicts.length > 0) this._drawEdictIconBar(ctx, cx - 52, cy, rt.stageIndex);
+  }
+
+  // V0801004: 已获军令小图标栏
+  private _drawEdictIconBar(ctx: CanvasRenderingContext2D, x: number, y: number, _stage: number) {
+    const ICONS: Record<EdictId, string> = { triple_slash: "⚔️", scorch: "🔥", frost: "❄️" };
+    const COLORS: Record<EdictId, string> = { triple_slash: "#88bbff", scorch: "#ff8833", frost: "#aaddff" };
+    ctx.font = '12px "Microsoft YaHei", sans-serif'; ctx.textAlign = "right";
+    let px = x;
+    for (const e of this._activeEdicts) {
+      ctx.fillStyle = COLORS[e.id] || "#ccc";
+      ctx.fillText(ICONS[e.id] || "?", px, y + 6);
+      px -= 18;
     }
   }
 
@@ -7442,59 +7429,49 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.fillText("宝箱降临...", cx, cy); return;
     }
 
-    // 轮转动画
-    const EDICT_NAMES: Record<EdictId, string> = { triple_slash: "三锋令", scorch: "燎原令", frost: "凝霜令" };
-    const EDICT_ICONS: Record<EdictId, string> = { triple_slash: "⚔️", scorch: "🔥", frost: "❄️" };
-
-    // 三个图标横向排列（exiting阶段隐藏）
-    const iconGap = 72;
+    // 轮转+揭示（exiting阶段隐藏原始轮转）
+    const EDICT_META: Record<EdictId, { name: string; icon: string; desc: string; color: string; glow: string }> = {
+      triple_slash: { name: "三锋令", icon: "⚔️", desc: "一刀化三锋", color: "#88bbff", glow: "#4488dd" },
+      scorch: { name: "燎原令", icon: "🔥", desc: "刀过留火径", color: "#ff8833", glow: "#dd4400" },
+      frost: { name: "凝霜令", icon: "❄️", desc: "命中附凝霜", color: "#aaddff", glow: "#6699cc" },
+    };
     const iconY = cy - 20;
+
     if (this._chestOpeningPhase !== "exiting") {
+      const isRevealed = this._chestOpeningPhase === "revealed";
+      for (let i = 0; i < EDICT_POOL.length; i++) {
+        const eid = EDICT_POOL[i];
+        const dx = (i - 1) * 72;
+        const x = cx + dx;
+        const isSelected = isRevealed && eid === this._pendingEdictId;
+        const isActive = !isRevealed && Math.floor(this._chestRouletteIndex) % EDICT_POOL.length === i;
+        const dim = isRevealed && !isSelected ? 0.25 : 1;
+        const scale = isSelected ? 1.5 : 1;
+        const meta = EDICT_META[eid];
 
-    for (let i = 0; i < EDICT_POOL.length; i++) {
-      const dx = (i - 1) * iconGap;
-      const x = cx + dx;
-      const isActive = Math.floor(this._chestRouletteIndex) % EDICT_POOL.length === i;
-
-      // 高亮当前
-      if (isActive) {
-        ctx.shadowColor = "#ffd35a";
-        ctx.shadowBlur = 16;
+        ctx.save();
+        if (dim < 1) { ctx.globalAlpha = dim; }
+        if (isSelected) {
+          ctx.shadowColor = meta.glow; ctx.shadowBlur = 20;
+        } else if (isActive) {
+          ctx.shadowColor = "#ffd35a"; ctx.shadowBlur = 16;
+        }
+        ctx.font = `${Math.round(36 * scale)}px "Microsoft YaHei", sans-serif`;
+        ctx.textAlign = "center";
+        ctx.fillText(meta.icon, x, iconY);
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = isActive || isSelected ? "#ffd35a" : "rgba(255,255,255,0.4)";
+        ctx.font = isActive || isSelected ? `700 ${Math.round(15 * scale)}px "Microsoft YaHei", sans-serif` : '12px "Microsoft YaHei", sans-serif';
+        ctx.fillText(meta.name, x, iconY + 44);
+        ctx.restore();
       }
-      ctx.font = '36px "Microsoft YaHei", sans-serif';
-      ctx.textAlign = "center";
-      ctx.fillText(EDICT_ICONS[EDICT_POOL[i]], x, iconY);
-      ctx.shadowBlur = 0;
-
-      // 名称
-      ctx.fillStyle = isActive ? "#ffd35a" : "rgba(255,255,255,0.4)";
-      ctx.font = isActive ? '700 15px "Microsoft YaHei", sans-serif' : '12px "Microsoft YaHei", sans-serif';
-      ctx.fillText(EDICT_NAMES[EDICT_POOL[i]], x, iconY + 44);
     }
-    } // end if (!exiting)
-
-    // 揭示状态：结果放大
+    // 结果文案（名称+效果说明）
     if ((this._chestOpeningPhase === "revealed" || this._chestOpeningPhase === "exiting") && this._pendingEdictId) {
-      const isExiting = this._chestOpeningPhase === "exiting";
-      const stampScale = isExiting ? 1 + Math.max(0, this._chestStampTimer / 0.25) * 0.5 : 1;
-      // 宝箱锚在底部
-      ctx.font = '22px sans-serif'; ctx.textAlign = "center";
-      ctx.fillText("📦", cx, cy + 36);
-      ctx.save();
-      if (isExiting && this._chestStampTimer > 0) {
-        ctx.translate(cx, iconY);
-        ctx.scale(stampScale, stampScale);
-        ctx.translate(-cx, -iconY);
-      }
-      // 大图标
-      ctx.font = `${Math.round(48 * stampScale)}px "Microsoft YaHei", sans-serif`;
-      ctx.textAlign = "center";
-      ctx.fillText(EDICT_ICONS[this._pendingEdictId]!, cx, iconY - 10);
-      // 名称盖章
-      ctx.fillStyle = "#ffd35a";
-      ctx.font = `700 ${Math.round(22 * stampScale)}px "Microsoft YaHei", sans-serif`;
-      ctx.fillText(`获得 [${EDICT_NAMES[this._pendingEdictId]}] !`, cx, cy + 80);
-      ctx.restore();
+      const meta = EDICT_META[this._pendingEdictId];
+      ctx.fillStyle = meta.color;
+      ctx.font = '700 22px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
+      ctx.fillText(meta.desc, cx, cy + 80);
     }
   }
 
