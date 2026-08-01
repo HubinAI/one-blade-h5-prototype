@@ -2628,7 +2628,6 @@ export class Game {
   // V0801003: 事件驱动验证怪潮
   private _edictVerifyPhase: "none" | "group1" | "group1_cleared" | "group2" | "group2_cleared" | "done" = "none";
   private _edictVerifyTimer = 0;
-  private _edictVerifySpawned = new Set<number>(); // 防止重复生成
 
   private _queueEdictVerificationWaves() {
     if (this._edictVerifyPhase !== "none") return;
@@ -5410,6 +5409,7 @@ export class Game {
     // P2.7：安全区约束
     const safeX = this.clampSpawnXByPhaseAndKind(item.x, item.kind as EnemyKind, phase);
     const enemy = this.createEnemy(item.kind as any, safeX, spawnY, item.speedMultiplier, profile);
+    if (item.source === "edict") (enemy as any)._verifyGroup = this._edictVerifyPhase === "group1" ? 1 : 2;
     if (this._currentWaveEvent) {
       enemy.spawnedWithEvent = this._currentWaveEvent;
     }
