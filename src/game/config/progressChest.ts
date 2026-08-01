@@ -14,6 +14,8 @@ export const PROGRESS_CHEST_CONFIG = {
   thresholds: [30, 60, 100],
   /** 主线达到多少级解锁第2个宝箱 */
   secondChestUnlockMainline: 6,
+  /** V0801007: 宝箱解锁阶梯（第2/第3/第4箱分别在哪个主线等级解锁） */
+  chestUnlockLevels: [6, 16, 41],
   /** 第3宝箱暂不设主线解锁节点 */
 } as const;
 

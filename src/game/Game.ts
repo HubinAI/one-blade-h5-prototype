@@ -7368,18 +7368,15 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
     if (rt.status === "locked" || rt.status === "complete") {
       const floor = this.getLogicalFloor();
-      const unlockLevel = rt.stageIndex === 0 ? PROGRESS_CHEST_CONFIG.secondChestUnlockMainline : 0;
-      const belowUnlock = unlockLevel > 0 && floor < unlockLevel;
-      const allDone = rt.status === "complete" && rt.stageIndex + 1 >= rt.maxChestCount;
-      // V0801007: 单行文本，优先级: 未解锁>本关已领>后续可用
-      let line: string;
-      if (belowUnlock) line = `第${unlockLevel}关解锁`;
-      else if (allDone) line = "本关已领取";
-      else line = "后续关卡可用";
-
-      const tcx = Math.round(cardX);
-      ctx.fillStyle = "#ddd"; ctx.font = '700 13px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
-      ctx.fillText(line, tcx, Math.round(cardY + 32));
+      const tiers = PROGRESS_CHEST_CONFIG.chestUnlockLevels;
+      const nextTier = tiers.find(t => t > floor);
+      if (nextTier) {
+        const tcx = Math.round(cardX);
+        ctx.fillStyle = "#bbb"; ctx.font = '12px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
+        ctx.fillText("🔒", tcx - 18, Math.round(cardY + 24));
+        ctx.fillStyle = "#ddd"; ctx.font = '700 12px "Microsoft YaHei", sans-serif'; ctx.textAlign = "left";
+        ctx.fillText(`第${nextTier}关解锁`, tcx - 10, Math.round(cardY + 25));
+      }
     } else {
       const tcx = Math.round(cardX);
       const rcy = Math.round(cardY + 20);
