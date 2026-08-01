@@ -7346,7 +7346,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const displayEdicts = [...this._activeEdicts];
     if (!!this._pendingEdictId && this._chestOpeningPhase === "exiting") displayEdicts.unshift({ id: this._pendingEdictId, level: 1 });
     const flash = this._edictArrivalTimer > 0 ? 1 + (this._edictArrivalTimer / 0.35) * 0.2 : 1;
-    const startX = cardX - cardW / 2 - 8;  // 卡片左边留8px间距
+    const startX = cardX - cardW / 2 - 14;  // 与卡片保持间距
     let px = startX - (displayEdicts.length - 1) * slotGap;
     for (const e of displayEdicts) {
       ctx.beginPath(); ctx.arc(px, slotY, slotR, 0, Math.PI * 2);
