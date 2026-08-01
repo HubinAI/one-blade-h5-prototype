@@ -7368,14 +7368,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
     if (rt.status === "locked" || rt.status === "complete") {
       const floor = this.getLogicalFloor();
-      const tiers = PROGRESS_CHEST_CONFIG.chestUnlockLevels;
-      const nextTier = tiers.find(t => t > floor);
-      if (nextTier) {
+      // V0801007收口: 仅第1-5关显示第6关解锁，第6关起隐藏
+      if (floor < 6) {
         const tcx = Math.round(cardX);
-        ctx.fillStyle = "#bbb"; ctx.font = '12px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
-        ctx.fillText("🔒", tcx - 18, Math.round(cardY + 24));
-        ctx.fillStyle = "#ddd"; ctx.font = '700 12px "Microsoft YaHei", sans-serif'; ctx.textAlign = "left";
-        ctx.fillText(`第${nextTier}关解锁`, tcx - 10, Math.round(cardY + 25));
+        const tcy = Math.round(cardY);
+        ctx.fillStyle = "#ccc"; ctx.font = '13px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
+        ctx.fillText("🔒", tcx, tcy + 14);
+        ctx.fillStyle = "#ddd"; ctx.font = '700 12px "Microsoft YaHei", sans-serif';
+        ctx.fillText("第6关解锁", tcx, tcy + 32);
       }
     } else {
       const tcx = Math.round(cardX);
