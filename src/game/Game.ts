@@ -7337,7 +7337,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private _drawProgressChestHUD(ctx: CanvasRenderingContext2D) {
     const rt = this._chestRuntime;
     // V0801005: 两区块 — 军令槽位(左) + 宝箱卡片(右)
-    const cardX = DESIGN_WIDTH - 56; const cardW = 52; const cardH = 56; const cardY = 4;
+    const cardX = DESIGN_WIDTH - 58; const cardW = 66; const cardH = 52; const cardY = 6;
     const slotR = 11; const slotGap = 26; const slotY = 13;
 
     // 军令槽位（右→左）
@@ -7346,14 +7346,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const displayEdicts = [...this._activeEdicts];
     if (!!this._pendingEdictId && this._chestOpeningPhase === "exiting") displayEdicts.unshift({ id: this._pendingEdictId, level: 1 });
     const flash = this._edictArrivalTimer > 0 ? 1 + (this._edictArrivalTimer / 0.35) * 0.2 : 1;
-    const startX = cardX - cardW / 2 - 14;  // 与卡片保持间距
+    const startX = cardX - cardW / 2 - 16;
     let px = startX - (displayEdicts.length - 1) * slotGap;
     for (const e of displayEdicts) {
-      ctx.beginPath(); ctx.arc(px, slotY, slotR, 0, Math.PI * 2);
+      ctx.beginPath(); ctx.arc(Math.round(px), Math.round(slotY), slotR, 0, Math.PI * 2);
       ctx.fillStyle = "rgba(10,8,5,0.88)"; ctx.fill();
       ctx.strokeStyle = COLORS[e.id] || "#555"; ctx.lineWidth = 1.5; ctx.stroke();
       ctx.font = `${Math.round(14 * flash)}px "Microsoft YaHei", sans-serif`; ctx.textAlign = "center";
-      ctx.fillText(ICONS[e.id] || "?", px, slotY + 5);
+      ctx.fillText(ICONS[e.id] || "?", Math.round(px), Math.round(slotY + 5));
       px += slotGap;
     }
 
@@ -7364,33 +7364,43 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.beginPath(); roundRect(ctx, cardX - cardW / 2, cardY, cardW, cardH, 6); ctx.stroke();
 
     if (rt.status === "locked" || rt.status === "complete") {
-      ctx.fillStyle = "#999"; ctx.font = '12px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
-      ctx.fillText("🔒", cardX, cardY + 18);
-      ctx.fillStyle = "#aaa"; ctx.font = '10px "Microsoft YaHei", sans-serif';
-      const nextNum = rt.stageIndex + 2;
-      const label = nextNum <= rt.maxChestCount ? `第${nextNum}宝箱` : "已集齐";
-      ctx.fillText(label, cardX, cardY + 34);
+      const floor = this.getLogicalFloor();
       const unlockLevel = rt.stageIndex === 0 ? PROGRESS_CHEST_CONFIG.secondChestUnlockMainline : 0;
-      ctx.fillStyle = "#777"; ctx.font = '9px "Microsoft YaHei", sans-serif';
-      if (unlockLevel > 0 && rt.stageIndex + 2 <= rt.maxChestCount) ctx.fillText(`第${unlockLevel}关解锁`, cardX, cardY + 48);
-      else if (rt.stageIndex + 2 > rt.maxChestCount) ctx.fillText("已全部解锁", cardX, cardY + 48);
-      else ctx.fillText("关卡解锁", cardX, cardY + 48);
+      const hasMoreChests = rt.stageIndex + 2 <= rt.maxChestCount;
+      const belowUnlock = unlockLevel > 0 && floor < unlockLevel; // 主线未到解锁关
+      const title = belowUnlock ? `第${rt.stageIndex + 2}宝箱` : (hasMoreChests ? `第${rt.stageIndex + 2}宝箱` : "本关已领取");
+      const sub = belowUnlock ? `第${unlockLevel}关解锁` : (hasMoreChests ? "后续关卡可用" : "后续关卡可用");
+
+      // 🔒 + 标题 + 副标题（整数坐标）
+      ctx.fillStyle = "rgba(10,8,5,0.88)";
+      ctx.beginPath(); roundRect(ctx, Math.round(cardX - cardW / 2), Math.round(cardY), Math.round(cardW), Math.round(cardH), 6); ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.15)"; ctx.lineWidth = 1;
+      ctx.beginPath(); roundRect(ctx, Math.round(cardX - cardW / 2), Math.round(cardY), Math.round(cardW), Math.round(cardH), 6); ctx.stroke();
+
+      const tcx = Math.round(cardX);
+      ctx.fillStyle = "#bbb"; ctx.font = '14px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
+      ctx.fillText("🔒", tcx, Math.round(cardY + 17));
+      ctx.fillStyle = "#ddd"; ctx.font = '700 12px "Microsoft YaHei", sans-serif';
+      ctx.fillText(title, tcx, Math.round(cardY + 34));
+      ctx.fillStyle = "#888"; ctx.font = '11px "Microsoft YaHei", sans-serif';
+      ctx.fillText(sub, tcx, Math.round(cardY + 49));
     } else {
-      const ringR = 12, rcy = cardY + 18;
-      ctx.beginPath(); ctx.arc(cardX, rcy, ringR, 0, Math.PI * 2);
+      const tcx = Math.round(cardX);
+      const rcy = Math.round(cardY + 20);
+      const ringR = 11;
+      ctx.beginPath(); ctx.arc(tcx, rcy, ringR, 0, Math.PI * 2);
       ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.lineWidth = 2.5; ctx.stroke();
       const ratio = rt.threshold > 0 ? Math.min(rt.progress / rt.threshold, 1) : 0;
       if (ratio > 0) {
-        ctx.beginPath(); ctx.arc(cardX, rcy, ringR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
-        ctx.strokeStyle = rt.status === "ready" ? "#ffd35a" : "#4da6ff"; ctx.lineWidth = 2.5;
-        if (rt.status === "ready") { ctx.shadowColor = "#ffd35a"; ctx.shadowBlur = 6; }
-        ctx.stroke(); ctx.shadowBlur = 0;
+        ctx.beginPath(); ctx.arc(tcx, rcy, ringR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio);
+        ctx.strokeStyle = rt.status === "ready" ? "#ffd35a" : "#4da6ff"; ctx.lineWidth = 2.5; ctx.stroke();
+        ctx.shadowBlur = 0;
       }
       ctx.font = '12px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
-      ctx.fillText("📦", cardX, rcy + 4);
+      ctx.fillText("📦", tcx, rcy + 4);
       ctx.fillStyle = rt.status === "ready" ? "#ffd35a" : "#fff";
-      ctx.font = `700 9px "Microsoft YaHei", sans-serif`;
-      ctx.fillText(rt.status === "ready" ? "满" : `${rt.progress}/${rt.threshold}`, cardX, cardY + 48);
+      ctx.font = `700 10px "Microsoft YaHei", sans-serif`;
+      ctx.fillText(rt.status === "ready" ? "满" : `${rt.progress}/${rt.threshold}`, tcx, Math.round(cardY + 48));
     }
   }
 
