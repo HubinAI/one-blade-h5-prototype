@@ -7338,8 +7338,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const ringR = 22;
     const ringW = 4;
 
-    // V0801005: 军令图标栏在环上方独立行
-    if (this._activeEdicts.length > 0) {
+    // V0801005: 军令图标栏（exiting时也显示pending）
+    if (this._activeEdicts.length > 0 || (!!this._pendingEdictId && this._chestOpeningPhase === "exiting")) {
       this._drawEdictIconBar(ctx, cx - 60, cy - 28, rt.stageIndex);
     }
 
