@@ -7437,7 +7437,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     };
     const iconY = cy - 20;
 
-    if (this._chestOpeningPhase !== "exiting" && this._chestOpeningPhase !== "revealed") {
+    if (this._chestOpeningPhase !== "exiting") {
       const isRevealed = this._chestOpeningPhase === "revealed";
       for (let i = 0; i < EDICT_POOL.length; i++) {
         const eid = EDICT_POOL[i];
