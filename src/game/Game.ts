@@ -7365,14 +7365,13 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.fillText("🔒", cx, cy + 4);
       const nextIdx = rt.stageIndex + 1;
       const unlockLevel = rt.stageIndex === 0 ? PROGRESS_CHEST_CONFIG.secondChestUnlockMainline : 0;
-      ctx.textAlign = "left";
-      ctx.fillText(`第${nextIdx + 1}宝箱`, cx + 28, cy - 2);
+      ctx.font = '10px "Microsoft YaHei", sans-serif';
+      ctx.fillText(`第${nextIdx + 1}宝箱`, cx, cy - 18);
       ctx.fillStyle = "#666"; ctx.font = '9px "Microsoft YaHei", sans-serif';
-      if (unlockLevel > 0) ctx.fillText(`第${unlockLevel}关解锁`, cx + 28, cy + 12);
-      else ctx.fillText("关卡解锁", cx + 28, cy + 12);
-      ctx.textAlign = "center"; // 重置
+      if (unlockLevel > 0) ctx.fillText(`第${unlockLevel}关解锁`, cx, cy + 18);
+      else ctx.fillText("关卡解锁", cx, cy + 18);
       // 已获得军令图标栏（左侧）
-      this._drawEdictIconBar(ctx, cx - 52, cy, rt.stageIndex);
+      this._drawEdictIconBar(ctx, cx - 64, cy, rt.stageIndex);
       return;
     }
 
@@ -7389,7 +7388,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.fillText(`${rt.progress}/${rt.threshold}`, cx, cy + 30);
     }
     // 已获得军令图标栏
-    if (this._activeEdicts.length > 0) this._drawEdictIconBar(ctx, cx - 52, cy, rt.stageIndex);
+    if (this._activeEdicts.length > 0) this._drawEdictIconBar(ctx, cx - 64, cy, rt.stageIndex);
   }
 
   // V0801004: 已获军令小图标栏
