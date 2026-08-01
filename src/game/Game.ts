@@ -9385,7 +9385,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         const gx = elite.x;
         for (let side = -1; side <= 1; side += 2) {
           for (let i = 0; i < 2; i++) {
-            this.subSpawnQueue.push({ kind: "infantry", x: gx + side * (40 + i * 30), yOffset: 20 + i * 15, time: this.elapsed + i * 0.15, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
+            this.subSpawnQueue.push({ kind: "infantry", x: gx + side * (40 + i * 30), yOffset: 20 + i * 15, time: this.elapsed + i * 0.15, source: "normal", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
           }
         }
       }

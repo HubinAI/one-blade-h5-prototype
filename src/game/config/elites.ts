@@ -28,8 +28,8 @@ export const ELITE_CONFIG: Record<EliteKind, EliteConfig> = {
   fireRing: {
     kind: "fireRing",
     name: "火环将",
-    maxHp: 50, // V0730020: 6-10s战斗时长
-    speed: 36,
+    maxHp: 120, // V0801008: 8-12s战斗时长
+    speed: 28,
     radius: 42,
     defenseDamage: 2,
     score: 180,
