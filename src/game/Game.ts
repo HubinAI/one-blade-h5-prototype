@@ -7412,16 +7412,17 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
     ctx.fillStyle = `rgba(0,0,0,${mAlpha})`; ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
 
+    // 宝箱飞行/锚定（warning 已 return）
+    if (this._chestFlyProgress > 0) {
+      const t = Math.min(this._chestFlyProgress, 1);
+      const ease = 1 - Math.pow(1 - t, 3);
+      const fx = this._chestFlyFromX + (cx - this._chestFlyFromX) * ease;
+      const fy = this._chestFlyFromY + (cy - 50 - this._chestFlyFromY) * ease;
+      ctx.font = `${Math.round(26 + 2 * ease)}px sans-serif`; ctx.textAlign = "center";
+      ctx.fillText("📦", fx, fy);
+    }
+
     if (this._chestOpeningPhase === "entering" || this._chestOpeningPhase === "descending") {
-      // 宝箱飞入动画
-      if (this._chestFlyProgress < 1) {
-        const t = this._chestFlyProgress;
-        const ease = 1 - Math.pow(1 - t, 3);
-        const fx = this._chestFlyFromX + (cx - this._chestFlyFromX) * ease;
-        const fy = this._chestFlyFromY + (cy - 40 - this._chestFlyFromY) * ease;
-        ctx.font = '28px sans-serif'; ctx.textAlign = "center";
-        ctx.fillText("📦", fx, fy);
-      }
       ctx.fillStyle = "#ffd35a"; ctx.font = '700 22px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
       ctx.fillText("宝箱降临...", cx, cy); return;
     }
@@ -7432,7 +7433,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
     // 三个图标横向排列（exiting阶段隐藏）
     const iconGap = 72;
-    const startX = cx - iconGap;
     const iconY = cy - 20;
     if (this._chestOpeningPhase !== "exiting") {
 
@@ -7462,6 +7462,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if ((this._chestOpeningPhase === "revealed" || this._chestOpeningPhase === "exiting") && this._pendingEdictId) {
       const isExiting = this._chestOpeningPhase === "exiting";
       const stampScale = isExiting ? 1 + Math.max(0, this._chestStampTimer / 0.25) * 0.5 : 1;
+      // 宝箱锚在底部
+      ctx.font = '22px sans-serif'; ctx.textAlign = "center";
+      ctx.fillText("📦", cx, cy + 36);
       ctx.save();
       if (isExiting && this._chestStampTimer > 0) {
         ctx.translate(cx, iconY);
