@@ -550,6 +550,8 @@ export class Game {
       this.initializeThunderGeneralBoss();
     }
 
+    this.resetRunState(); // V0801009: 统一单局重置
+
     // P4.4A.3: E2E 测试桥（仅 e2e 构建期开启，生产构建零残留）。
     // __E2E_BRIDGE__ 由 vite define 注入：e2e 模式=true，其余=false。
     // 生产构建下整段被静态消除（纯内联代码、无动态导入副作用），
@@ -930,6 +932,39 @@ export class Game {
   }
 
   /** P4.4A.4: 失败后重试——重置Boss到execution_intro */
+  /** V0801009: 统一单局状态重置——重试/退出/新局均从此入口清理 */
+  private resetRunState(): void {
+    // 宝箱与开奖
+    this._chestRuntime = { stageIndex: 0, progress: 0, threshold: 30, status: "charging", maxChestCount: 1, lastCountedEnemyId: "", lastKillSource: "" };
+    this._chestOpeningPhase = "idle";
+    this._pendingEdictId = null;
+    this._chestRouletteTimer = 0; this._chestRouletteSpeed = 0; this._chestRouletteIndex = 0; this._chestRouletteResult = null;
+    this._chestWarningAt = 0; this._chestOpenBlockUntilMs = 0; this._chestFlowClock = 0;
+    this._edictArrivalTimer = 0; this._chestStampTimer = 0;
+    // 军令与效果
+    this._activeEdicts = []; this._scorchTrails = []; this._tripleSideTrails = [];
+    // 精英与战斗
+    this.eliteSpawned = false; this.eliteKilled = false; this.elitePreviewShown = false; this.eliteSpawnAnnounced = false;
+    this._eliteClearanceAt = 0; this._elitePreviewAt = 0;
+    this._eliteBattleActive = false; this._eliteInvuln = false; this._eliteGuardSpawned = false;
+    this._eliteCyclesDone = 0; this._eliteCyclePhase = "telegraph"; this._eliteCycleTimer = 0;
+    this._eliteFireRings = [];
+    this._eliteDefeatedHandled = false;
+    // 通用战斗
+    this.chestDone = false; this.chestDropped = false; this.chestDropX = 0; this.chestDropY = 0;
+    this.finished = false;
+    this.screenShake = 0;
+    this.wavesSpawned = 0; this.allNormalWavesSpawned = false;
+    this._lastWaveElapsed = 0; this.waveAdvanceLockedUntil = 0;
+    this.edictRewardState = "none"; this.edictPostWavesQueued = false; this.allPostChestWavesSpawned = false;
+    this.postChestStartAt = null;
+    // 验证潮
+    this._edictVerifyPhase = "none"; this._edictVerifyTimer = 0;
+    // 播报
+    this.activeBattleNotice = null; this.battleNoticeQueue = [];
+    this.battleNoticeCooldowns = new Map();
+  }
+
   retryExecution(): void {
     if (!this.bossController) return;
     this.bossController.enterExecutionRetryState();
