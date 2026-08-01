@@ -7430,10 +7430,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const EDICT_NAMES: Record<EdictId, string> = { triple_slash: "三锋令", scorch: "燎原令", frost: "凝霜令" };
     const EDICT_ICONS: Record<EdictId, string> = { triple_slash: "⚔️", scorch: "🔥", frost: "❄️" };
 
-    // 三个图标横向排列
+    // 三个图标横向排列（exiting阶段隐藏）
     const iconGap = 72;
     const startX = cx - iconGap;
     const iconY = cy - 20;
+    if (this._chestOpeningPhase !== "exiting") {
 
     for (let i = 0; i < EDICT_POOL.length; i++) {
       const dx = (i - 1) * iconGap;
@@ -7455,12 +7456,27 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.font = isActive ? '700 15px "Microsoft YaHei", sans-serif' : '12px "Microsoft YaHei", sans-serif';
       ctx.fillText(EDICT_NAMES[EDICT_POOL[i]], x, iconY + 44);
     }
+    } // end if (!exiting)
 
     // 揭示状态：结果放大
-    if (this._chestOpeningPhase === "revealed" && this._pendingEdictId) {
+    if ((this._chestOpeningPhase === "revealed" || this._chestOpeningPhase === "exiting") && this._pendingEdictId) {
+      const isExiting = this._chestOpeningPhase === "exiting";
+      const stampScale = isExiting ? 1 + Math.max(0, this._chestStampTimer / 0.25) * 0.5 : 1;
+      ctx.save();
+      if (isExiting && this._chestStampTimer > 0) {
+        ctx.translate(cx, iconY);
+        ctx.scale(stampScale, stampScale);
+        ctx.translate(-cx, -iconY);
+      }
+      // 大图标
+      ctx.font = `${Math.round(48 * stampScale)}px "Microsoft YaHei", sans-serif`;
+      ctx.textAlign = "center";
+      ctx.fillText(EDICT_ICONS[this._pendingEdictId]!, cx, iconY - 10);
+      // 名称盖章
       ctx.fillStyle = "#ffd35a";
-      ctx.font = '700 20px "Microsoft YaHei", sans-serif';
+      ctx.font = `700 ${Math.round(22 * stampScale)}px "Microsoft YaHei", sans-serif`;
       ctx.fillText(`获得 [${EDICT_NAMES[this._pendingEdictId]}] !`, cx, cy + 80);
+      ctx.restore();
     }
   }
 
