@@ -26,6 +26,7 @@ export function ResultScreen({
   result,
   onHome,
   onDoubleReward,
+  onRetry,
   restartCurrentLevel,
 }: ResultScreenProps) {
   const displayId = result.levelId >= 10000 ? result.levelId - 10000 : result.levelId;
