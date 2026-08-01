@@ -1093,6 +1093,7 @@ export class Game {
     // V0731011: 更新火径生命 + 敌人伤害
     this._updateScorchTrails(scaledDt);
     this._updateFrostStates(scaledDt); // V0731012
+    this._updateVerifyPhase(); // V0801003
     if (BATTLEFIELD_FLOW.enabled) {
       this.updateBattlefieldFlow(scaledDt);
     }
@@ -2313,7 +2314,8 @@ export class Game {
     // V0731012: 清除所有敌人霜冻状态
     for (const enemy of this.enemies) { (enemy as any)._frostState = undefined; }
     // V0731013: 重置验证潮标记
-    this._edictVerifyQueued = false;
+    this._edictVerifyPhase = "none";
+    this._edictVerifyTimer = 0;
   }
 
   /** 宝箱进度统一计数入口 */
@@ -2403,6 +2405,9 @@ export class Game {
   private _chestFadeProgress = 0;
   private _chestExitingProgress = 0;
   private _chestStampTimer = 0;
+  // V0801003: 宝箱飞行演出
+  private _chestFlyFromX = 0; private _chestFlyFromY = 0;
+  private _chestFlyProgress = 0; // 0→1 飞入中心
   private _updateChestOpeningFlow(dt: number) {
     this._chestFlowClock += dt; // V0731008 hotfix: 独立时钟
     switch (this._chestOpeningPhase) {
@@ -2412,10 +2417,14 @@ export class Game {
         if (this._chestFlowClock - this._chestWarningAt < 0.8) break;
         this._chestOpeningPhase = "entering";
         this._chestFadeProgress = 0;
+        this._chestFlyProgress = 0;
+        this._chestFlyFromX = DESIGN_WIDTH - 44; // HUD宝箱位置
+        this._chestFlyFromY = 36;
         break;
       }
       case "entering": {
         this._chestFadeProgress = Math.min(1, this._chestFadeProgress + dt / 0.3);
+        this._chestFlyProgress = Math.min(1, this._chestFlyProgress + dt / 0.35);
         if (this._chestFadeProgress >= 1) {
           this._chestOpeningPhase = "descending";
         }
@@ -2616,22 +2625,57 @@ export class Game {
     }
   }
 
-  // V0731013: 验证怪潮 — 宝箱关闭后生成
-  private _edictVerifyQueued = false;
+  // V0801003: 事件驱动验证怪潮
+  private _edictVerifyPhase: "none" | "group1" | "group1_cleared" | "group2" | "group2_cleared" | "done" = "none";
+  private _edictVerifyTimer = 0;
+  private _edictVerifySpawned = new Set<number>(); // 防止重复生成
+
   private _queueEdictVerificationWaves() {
-    if (this._edictVerifyQueued) return;
-    this._edictVerifyQueued = true;
-    const now = this.elapsed;
+    if (this._edictVerifyPhase !== "none") return;
+    this._edictVerifyPhase = "group1";
+    this._spawnVerifyGroup1();
+  }
+
+  private _spawnVerifyGroup1() {
     for (let i = 0; i < 5; i++) {
-      this.subSpawnQueue.push({ kind: "infantry", x: 1 + i * 78, yOffset: 420 - BATTLEFIELD_ZONES.midfieldStartY, time: now + 0.3 + i * 0.1, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
+      this.subSpawnQueue.push({ kind: "infantry", x: 1 + i * 78, yOffset: 420 - BATTLEFIELD_ZONES.midfieldStartY, time: this.elapsed + 0.3 + i * 0.1, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
     }
     for (let i = 0; i < 5; i++) {
-      this.subSpawnQueue.push({ kind: "infantry", x: 1 + i * 78, yOffset: 470 - BATTLEFIELD_ZONES.midfieldStartY, time: now + 1.1 + i * 0.1, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
+      this.subSpawnQueue.push({ kind: "infantry", x: 1 + i * 78, yOffset: 470 - BATTLEFIELD_ZONES.midfieldStartY, time: this.elapsed + 1.1 + i * 0.1, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
     }
+  }
+
+  private _spawnVerifyGroup2() {
     for (let i = 0; i < 4; i++) {
-      this.subSpawnQueue.push({ kind: "infantry", x: 1 + i * 40, yOffset: 360 - BATTLEFIELD_ZONES.midfieldStartY, time: now + 8 + i * 0.15, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
-      this.subSpawnQueue.push({ kind: "infantry", x: 320 - i * 40, yOffset: 360 - BATTLEFIELD_ZONES.midfieldStartY, time: now + 8 + i * 0.15, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
-      this.subSpawnQueue.push({ kind: "infantry", x: 130 + i * 38, yOffset: 440 - BATTLEFIELD_ZONES.midfieldStartY, time: now + 8.7 + i * 0.15, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
+      this.subSpawnQueue.push({ kind: "infantry", x: 1 + i * 40, yOffset: 360 - BATTLEFIELD_ZONES.midfieldStartY, time: this.elapsed + 0.2 + i * 0.15, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
+      this.subSpawnQueue.push({ kind: "infantry", x: 320 - i * 40, yOffset: 360 - BATTLEFIELD_ZONES.midfieldStartY, time: this.elapsed + 0.2 + i * 0.15, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
+      this.subSpawnQueue.push({ kind: "infantry", x: 130 + i * 38, yOffset: 440 - BATTLEFIELD_ZONES.midfieldStartY, time: this.elapsed + 0.9 + i * 0.15, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
+    }
+  }
+
+  private _updateVerifyPhase() {
+    const aliveVerify = this.enemies.filter(e => e.alive && (e as any)._verifyGroup !== undefined).length;
+    const queueVerify = this.subSpawnQueue.filter(q => q.source === "edict").length;
+    switch (this._edictVerifyPhase) {
+      case "group1":
+        if (aliveVerify === 0 && queueVerify === 0) {
+          this._edictVerifyTimer += 0.016;
+          if (this._edictVerifyTimer >= 0.4) {
+            this._edictVerifyPhase = "group2";
+            this._edictVerifyTimer = 0;
+            this._spawnVerifyGroup2();
+          }
+        }
+        break;
+      case "group2":
+        if (aliveVerify === 0 && queueVerify === 0) {
+          this._edictVerifyTimer += 0.016;
+          if (this._edictVerifyTimer >= 0.5) {
+            this._edictVerifyPhase = "done";
+            this._edictVerifyTimer = 0;
+          }
+        }
+        break;
     }
   }
 
