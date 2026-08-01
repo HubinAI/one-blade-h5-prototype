@@ -316,7 +316,7 @@ export class Game {
   private elitePreviewShown = false;
   private eliteSpawnAnnounced = false;
   /** V0801008: 火环精英战斗状态 */
-  private _eliteFireRings: Array<{ x: number; y: number; r: number; speed: number; alive: boolean }> = [];
+  private _eliteFireRings: Array<{ x: number; y: number; r: number; speed: number; alive: boolean; hasHit: boolean }> = [];
   private _eliteBattleActive = false;
   private _eliteInvuln = false;
   private _eliteGuardSpawned = false;
@@ -9434,7 +9434,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
           // 生成1-2个火环
           const count = this._eliteCyclesDone >= 1 ? 2 : 1;
           for (let i = 0; i < count; i++) {
-            this._eliteFireRings.push({ x: elite.x + (i - 0.5) * 60, y: elite.y + 10, r: 16, speed: 70 + Math.random() * 20, alive: true });
+            this._eliteFireRings.push({ x: elite.x + (i - 0.5) * 60, y: elite.y + 10, r: 16, speed: 70 + Math.random() * 20, alive: true, hasHit: false });
           }
         }
         break;
@@ -9461,10 +9461,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       if (!fr.alive) continue;
       fr.y += fr.speed * dt;
       if (fr.y >= BALANCE.battlefield.bottomDefenseY) {
-        fr.alive = false;
-        this.hp -= 1;
-        this.screenShake = Math.max(this.screenShake, 0.2);
-        this.flash = Math.max(this.flash, 0.15);
+        if (!fr.hasHit) {
+          fr.hasHit = true;
+          this.hp -= 20;
+          this.screenShake = Math.max(this.screenShake, 0.3);
+          this.flash = Math.max(this.flash, 0.25);
+          this.particles.push(...sparkBurst({ x: fr.x, y: BALANCE.battlefield.bottomDefenseY }, 10, "#e67e22"));
+        }
+        fr.alive = false; // 触线后立即销毁
       }
     }
     // 清理死火环（延迟清理避免闪烁）

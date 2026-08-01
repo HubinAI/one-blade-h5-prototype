@@ -22,6 +22,8 @@ export type EliteConfig = {
   skillCooldown: number;
   /** 技能描述 */
   skillDescription: string;
+  /** V0801008-v3: 火环触线单次伤害 */
+  fireRingDamage?: number;
 };
 
 export const ELITE_CONFIG: Record<EliteKind, EliteConfig> = {
@@ -40,7 +42,8 @@ export const ELITE_CONFIG: Record<EliteKind, EliteConfig> = {
     noticeTitle: "火环将·现身",
     skillName: "烈焰三环",
     skillCooldown: 0,
-    skillDescription: "自身60px半径三团火焰旋转，触碰刀芒损耗50%刀势"
+    skillDescription: "自身60px半径三团火焰旋转，触碰刀芒损耗50%刀势",
+    fireRingDamage: 20, // V0801008-v3: 单枚火环触线伤害
   },
   heal: {
     kind: "heal",
