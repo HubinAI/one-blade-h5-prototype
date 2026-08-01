@@ -315,6 +315,14 @@ export class Game {
   /** P3.2：精英预告/出场播报防重复 */
   private elitePreviewShown = false;
   private eliteSpawnAnnounced = false;
+  /** V0801008: 火环精英战斗状态 */
+  private _eliteFireRings: Array<{ x: number; y: number; r: number; speed: number; alive: boolean }> = [];
+  private _eliteBattleActive = false;
+  private _eliteInvuln = false;
+  private _eliteGuardSpawned = false;
+  private _eliteCyclesDone = 0;
+  private _eliteCyclePhase: "telegraph" | "fire" | "cooldown" = "telegraph";
+  private _eliteCycleTimer = 0;
   /** V0730002: 第1关精英预告时间戳（用于清场衔接计时） */
   private _elitePreviewAt = 0;
   private _eliteClearanceAt = 0;
@@ -1112,6 +1120,8 @@ export class Game {
     this.updateWaves(scaledDt);
     this.updateSubSpawnQueue();
     this.updateEliteSpawn();
+    this._updateEliteBattle(scaledDt); // V0801008
+    this._eliteFireRings = this._eliteFireRings.filter(fr => fr.alive || fr.y < BALANCE.battlefield.bottomDefenseY + 40);
     this.updateSubBlades(scaledDt);
     this.updateBossSpawn();
     this.updateEliteSkills(scaledDt);
@@ -1156,6 +1166,7 @@ export class Game {
     this.drawBackground(ctx);
     this.drawPickups(ctx);
     this.drawEnemies(ctx);
+    this._drawFireRings(ctx); // V0801008
     this.drawTractorLinks(ctx);
     // 远景山间雾气遮罩（敌人从雾后现身）
     this.drawTopMist(ctx);
@@ -9281,7 +9292,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   // 新系统：精英怪 / Boss / 军令宝箱 / HP成长
   // ═══════════════════════════════════════════
 
-  /** 精英怪生成 */
+  /** 精英怪生成 — V0801008: 全关卡事件驱动 */
   private updateEliteSpawn() {
     if (this.eliteSpawned || !this.level.eliteSpawnAt || !this.level.eliteKind) return;
     // 三次修正：等所有主波次全部刷完后才出精英（避免精英乱入）
@@ -9289,39 +9300,29 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
     const isLevel1 = this.isLogicalLevel1();
 
-    // V0730002: 第1关清场衔接 — 等普通敌人清零 + subSpawnQueue 空
-    if (isLevel1) {
-      const aliveEnemies = this.enemies.filter(e => e.alive).length;
-      const queueEmpty = this.subSpawnQueue.length === 0;
-      if (aliveEnemies > 0 || !queueEmpty) return;
-
-      // 记录清场时间点
-      if (this._eliteClearanceAt === 0) {
-        this._eliteClearanceAt = this.elapsed;
-        return;
-      }
-
-      // 第一阶段：清场后 0.5 秒显示预告"火环将·现身"
+    // V0801008: 统一清场后0.6s精英入场（全关卡）
+    const aliveEnemies = this.enemies.filter(e => e.alive).length;
+    const queueEmpty = this.subSpawnQueue.length === 0;
+    if (aliveEnemies > 0 || !queueEmpty) return;
+    if (this._eliteClearanceAt === 0) { this._eliteClearanceAt = this.elapsed; return; }
+    if (this.elapsed - this._eliteClearanceAt < 0.6) {
       if (!this.elitePreviewShown) {
-        if (this.elapsed < this._eliteClearanceAt + 0.5) return;
         this.elitePreviewShown = true;
-        this._elitePreviewAt = this.elapsed;
-        this.showBattleNotice({ text: "火环将·现身", priority: "A", category: "elite", style: "purple", duration: 0.85, dedupeKey: "elite:fireRing:preview", cooldown: 3, interrupt: false });
-        return;
+        this.showBattleNotice({ text: "火环精英", priority: "A", category: "elite", style: "danger", duration: 0.8, dedupeKey: "elite:fireRing:preview", cooldown: 3, interrupt: true });
       }
+      return;
+    }
 
-      // 第二阶段：清场后 1.0 秒精英进入画面
-      if (this.elapsed < this._eliteClearanceAt + 1.0) return;
-    } else {
-      // 原逻辑：固定时间点精英生成
-      // P3.2：精英预告（出场前 0.75 秒）
+    // V0801008: 保留L1教程逻辑，其他直接用spawnAt
+    if (!isLevel1 && this.elapsed < this.level.eliteSpawnAt) return;
+    // V0801008: 入场前0.75s预告（非L1）已在上方统一处理，此处直接跳过
+    if (!isLevel1) {
       if (!this.elitePreviewShown) {
         const previewLead = 0.75;
         if (this.elapsed >= this.level.eliteSpawnAt - previewLead && this.elapsed < this.level.eliteSpawnAt) {
           this.elitePreviewShown = true;
         }
       }
-
       if (this.elapsed < this.level.eliteSpawnAt) return;
     }
 
@@ -9354,10 +9355,106 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
     // 向外扩散的光圈
     this.particles.push(ringParticle({ x: lane, y: BALANCE.battlefield.enemySpawnY + 14 }, conf.color, 75));
+    // V0801008: 激活火环战斗 + 入场保护
+    this._eliteBattleActive = true;
+    this._eliteInvuln = true;
+    this._eliteGuardSpawned = false;
+    this._eliteCyclesDone = 0;
+    this._eliteCycleTimer = 0;
+    this._eliteCyclePhase = "telegraph";
+    this._eliteFireRings = [];
     logEvent("elite_spawn", { levelId: this.level.id, eliteKind: ek, time: this.elapsed });
   }
 
-  /** P4.4A.2: Boss构造期初始化玄甲雷将（不等待0.5秒） */
+  /** V0801008: 火环渲染 + telegraph 预警圈 */
+  private _drawFireRings(ctx: CanvasRenderingContext2D) {
+    for (const fr of this._eliteFireRings) {
+      if (!fr.alive) continue;
+      ctx.beginPath(); ctx.arc(fr.x, fr.y, fr.r, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(230,126,34,0.5)"; ctx.fill();
+      ctx.strokeStyle = "#f39c12"; ctx.lineWidth = 2.5; ctx.stroke();
+    }
+    if (this._eliteBattleActive && this._eliteCyclePhase === "telegraph") {
+      const elite = this.enemies.find(e => e.kind === "elite" && e.eliteKind === "fireRing" && e.alive);
+      if (elite) {
+        const alpha = 0.3 + 0.3 * Math.sin(this.elapsed * 8);
+        ctx.beginPath(); ctx.arc(elite.x, elite.y + 20, 35 * (1 + this._eliteCycleTimer / 0.5), 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(230,126,34,${alpha})`; ctx.lineWidth = 3; ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]);
+      }
+    }
+  }
+
+  /** V0801008: 火环精英入场+技能循环+守卫 */
+  private _updateEliteBattle(dt: number) {
+    if (!this._eliteBattleActive) return;
+    const elite = this.enemies.find(e => e.kind === "elite" && e.eliteKind === "fireRing" && e.alive);
+    if (!elite) return;
+
+    // 入场保护：精英到达midfield后才开放伤害
+    if (this._eliteInvuln) {
+      if (elite.y <= BATTLEFIELD_ZONES.midfieldStartY + 40) {
+        this._eliteInvuln = false;
+        this.showBattleNotice({ text: "火环将·开战", priority: "A", category: "elite", style: "danger", duration: 0.7, dedupeKey: "elite:fireRing:battle", cooldown: 3, interrupt: false });
+      }
+      // 入场期间孵化守卫
+      if (!this._eliteGuardSpawned && elite.y <= BATTLEFIELD_ZONES.midfieldStartY + 60) {
+        this._eliteGuardSpawned = true;
+        const gx = elite.x;
+        for (let side = -1; side <= 1; side += 2) {
+          for (let i = 0; i < 2; i++) {
+            this.subSpawnQueue.push({ kind: "infantry", x: gx + side * (40 + i * 30), yOffset: 20 + i * 15, time: this.elapsed + i * 0.15, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
+          }
+        }
+      }
+      return;
+    }
+
+    // 技能循环: telegraph → fire → cooldown
+    this._eliteCycleTimer += dt;
+    switch (this._eliteCyclePhase) {
+      case "telegraph": {
+        if (this._eliteCycleTimer >= 0.5) {
+          this._eliteCyclePhase = "fire";
+          this._eliteCycleTimer = 0;
+          // 生成1-2个火环
+          const count = this._eliteCyclesDone >= 1 ? 2 : 1;
+          for (let i = 0; i < count; i++) {
+            this._eliteFireRings.push({ x: elite.x + (i - 0.5) * 60, y: elite.y + 10, r: 16, speed: 70 + Math.random() * 20, alive: true });
+          }
+        }
+        break;
+      }
+      case "fire": {
+        if (this._eliteCycleTimer >= 1.0) {
+          this._eliteCyclePhase = "cooldown";
+          this._eliteCycleTimer = 0;
+          this._eliteCyclesDone++;
+        }
+        break;
+      }
+      case "cooldown": {
+        if (this._eliteCycleTimer >= 1.5) {
+          this._eliteCyclePhase = "telegraph";
+          this._eliteCycleTimer = 0;
+        }
+        break;
+      }
+    }
+
+    // 火环移动 & 防线碰撞
+    for (const fr of this._eliteFireRings) {
+      if (!fr.alive) continue;
+      fr.y += fr.speed * dt;
+      if (fr.y >= BALANCE.battlefield.bottomDefenseY) {
+        fr.alive = false;
+        this.hp -= 1;
+        this.screenShake = Math.max(this.screenShake, 0.2);
+        this.flash = Math.max(this.flash, 0.15);
+      }
+    }
+    // 清理死火环（延迟清理避免闪烁）
+    this._eliteFireRings = this._eliteFireRings.filter(fr => fr.alive || fr.y < BALANCE.battlefield.bottomDefenseY + 40);
+  }
   private initializeThunderGeneralBoss(): void {
     if (this.bossSpawned) return; // 防重复初始化
     this.bossSpawned = true;
