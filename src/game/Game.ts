@@ -954,7 +954,7 @@ export class Game {
     this.chestDone = false; this.chestDropped = false; this.chestDropX = 0; this.chestDropY = 0;
     this.finished = false; this.phase = "playing"; this.battlePhase = "main_waves";
     this.enemies = []; this.subSpawnQueue = []; this.particles = [];
-    this.currentSlash = null; this.splitFlashes = [];
+    this.currentSlash = undefined; this.splitFlashes = [];
     this.screenShake = 0; this.flash = 0; this.hitStopTimer = 0; this.slowMoTimer = 0;
     this.pointerDown = false;
     this.wavesSpawned = 0; this.allNormalWavesSpawned = false;
