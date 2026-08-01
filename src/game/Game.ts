@@ -1094,6 +1094,7 @@ export class Game {
     this._updateScorchTrails(scaledDt);
     this._updateFrostStates(scaledDt); // V0731012
     this._updateVerifyPhase(scaledDt); // V0801003
+    this._edictArrivalTimer = Math.max(0, this._edictArrivalTimer - scaledDt); // V0801004
     if (BATTLEFIELD_FLOW.enabled) {
       this.updateBattlefieldFlow(scaledDt);
     }
@@ -1166,7 +1167,13 @@ export class Game {
     this.drawEdictStatusIcon(ctx);
     this.drawSplitFlashes(ctx);
     this.drawFloatingTexts(ctx);
+    if (this._chestOpeningPhase === "roulette" || this._chestOpeningPhase === "revealed") {
+      ctx.save(); ctx.globalAlpha = 0.2;
+    }
     this.drawBattleNotice(ctx);
+    if (this._chestOpeningPhase === "roulette" || this._chestOpeningPhase === "revealed") {
+      ctx.restore();
+    }
     this.drawWaveProgress(ctx);
     this.drawChestDrop(ctx);
     this.drawEdictRewardModal(ctx);
@@ -2316,6 +2323,7 @@ export class Game {
     // V0731013: 重置验证潮标记
     this._edictVerifyPhase = "none";
     this._edictVerifyTimer = 0;
+    this._edictArrivalTimer = 0;
   }
 
   /** 宝箱进度统一计数入口 */
@@ -2407,6 +2415,8 @@ export class Game {
   private _chestStampTimer = 0;
   // V0801003: 落定计时
   private _chestSettleTimer = 0;
+  // V0801004: HUD 落点闪亮计时
+  private _edictArrivalTimer = 0;
   // V0801003: 宝箱飞行演出
   private _chestFlyFromX = 0; private _chestFlyFromY = 0;
   private _chestFlyProgress = 0; // 0→1 飞入中心
@@ -2477,7 +2487,7 @@ export class Game {
       case "revealed": {
         this._chestRouletteTimer += dt;
         this.screenShake = Math.max(0, this.screenShake - dt * 40);
-        if (this._chestRouletteTimer > 1.8 + 0.6) {
+        if (this._chestRouletteTimer > 1.8 + 0.9) {
           this._chestOpeningPhase = "exiting";
           this._chestExitingProgress = 1;
           this._chestStampTimer = 0.25; // 盖章反馈
@@ -2496,6 +2506,7 @@ export class Game {
         this._chestOpeningPhase = "idle";
         this._chestRouletteTimer = 0;
         this._chestRouletteIndex = 0;
+        this._edictArrivalTimer = 0.35; // V0801004: 飞入落点闪亮
         this._applyPendingEdict();
         this.resolveCurrentChestAndAdvance();
         // V0731013: 宝箱关闭后生成验证怪潮
@@ -7354,10 +7365,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.fillText("🔒", cx, cy + 4);
       const nextIdx = rt.stageIndex + 1;
       const unlockLevel = rt.stageIndex === 0 ? PROGRESS_CHEST_CONFIG.secondChestUnlockMainline : 0;
-      ctx.fillText(`第${nextIdx + 1}宝箱`, cx + 44, cy - 2);
+      ctx.textAlign = "left";
+      ctx.fillText(`第${nextIdx + 1}宝箱`, cx + 28, cy - 2);
       ctx.fillStyle = "#666"; ctx.font = '9px "Microsoft YaHei", sans-serif';
-      if (unlockLevel > 0) ctx.fillText(`主线${unlockLevel}解锁`, cx + 44, cy + 12);
-      else ctx.fillText("关卡解锁", cx + 44, cy + 12);
+      if (unlockLevel > 0) ctx.fillText(`第${unlockLevel}关解锁`, cx + 28, cy + 12);
+      else ctx.fillText("关卡解锁", cx + 28, cy + 12);
       // 已获得军令图标栏（左侧）
       this._drawEdictIconBar(ctx, cx - 52, cy, rt.stageIndex);
       return;
@@ -7385,15 +7397,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const COLORS: Record<EdictId, string> = { triple_slash: "#88bbff", scorch: "#ff8833", frost: "#aaddff" };
     ctx.font = '12px "Microsoft YaHei", sans-serif'; ctx.textAlign = "right";
     let px = x;
-    // V0801004: exiting期间暂显pendingEdictId
+    const flash = this._edictArrivalTimer > 0 ? 1 + (this._edictArrivalTimer / 0.35) * 0.3 : 1;
     const displayEdicts = [...this._activeEdicts];
     if (this._pendingEdictId && this._chestOpeningPhase === "exiting") {
       displayEdicts.unshift({ id: this._pendingEdictId, level: 1 });
     }
     for (const e of displayEdicts) {
       ctx.fillStyle = COLORS[e.id] || "#ccc";
-      const scale = (this._pendingEdictId === e.id && this._chestOpeningPhase === "exiting") ? 1.4 : 1;
-      ctx.font = `${Math.round(12 * scale)}px "Microsoft YaHei", sans-serif`;
+      ctx.font = `${Math.round(12 * flash)}px "Microsoft YaHei", sans-serif`;
       ctx.fillText(ICONS[e.id] || "?", px, y + 6);
       px -= 18;
     }
@@ -7454,7 +7465,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         const x = cx + dx;
         const isSelected = isRevealed && eid === this._pendingEdictId;
         const isActive = !isRevealed && Math.floor(this._chestRouletteIndex) % EDICT_POOL.length === i;
-        const dim = isRevealed && !isSelected ? 0.25 : 1;
+        const dim = isRevealed && !isSelected ? 0.12 : 1;
         const scale = isSelected ? 1.5 : 1;
         const meta = EDICT_META[eid];
 
