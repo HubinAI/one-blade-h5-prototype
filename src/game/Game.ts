@@ -7466,13 +7466,17 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ctx.restore();
       }
     }
-    // 结果文案
-    if ((this._chestOpeningPhase === "revealed" || this._chestOpeningPhase === "exiting") && this._pendingEdictId) {
+    // 结果文案：revealed 由 row 画图标此处仅补文案；exiting 画图标+文案
+    if (this._chestOpeningPhase === "revealed" && this._pendingEdictId) {
       const meta = EDICT_META[this._pendingEdictId];
-      const isExiting = this._chestOpeningPhase === "exiting";
-      const scale = isExiting ? 1 + Math.max(0, this._chestExitingProgress) * 0.5 : 1.5;
-      const a = isExiting ? this._chestExitingProgress : 1;
-      // 选中图标（exiting 阶段也可见）
+      ctx.fillStyle = meta.color;
+      ctx.font = '700 22px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
+      ctx.fillText(meta.desc, cx, cy + 80);
+    }
+    if (this._chestOpeningPhase === "exiting" && this._pendingEdictId) {
+      const meta = EDICT_META[this._pendingEdictId];
+      const scale = 1 + Math.max(0, this._chestExitingProgress) * 0.5;
+      const a = this._chestExitingProgress;
       ctx.save();
       ctx.globalAlpha = a;
       ctx.shadowColor = meta.glow; ctx.shadowBlur = 20;
@@ -7480,7 +7484,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.textAlign = "center";
       ctx.fillText(meta.icon, cx, iconY);
       ctx.shadowBlur = 0;
-      // 说明文字
       ctx.fillStyle = meta.color;
       ctx.font = '700 22px "Microsoft YaHei", sans-serif';
       ctx.fillText(meta.desc, cx, cy + 80);
