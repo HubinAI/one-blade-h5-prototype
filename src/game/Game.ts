@@ -1121,7 +1121,6 @@ export class Game {
     this.updateSubSpawnQueue();
     this.updateEliteSpawn();
     this._updateEliteBattle(scaledDt); // V0801008
-    this._eliteFireRings = this._eliteFireRings.filter(fr => fr.alive || fr.y < BALANCE.battlefield.bottomDefenseY + 40);
     this.updateSubBlades(scaledDt);
     this.updateBossSpawn();
     this.updateEliteSkills(scaledDt);
@@ -9298,12 +9297,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 三次修正：等所有主波次全部刷完后才出精英（避免精英乱入）
     if (!this.allNormalWavesSpawned) return;
 
-    const isLevel1 = this.isLogicalLevel1();
-
-    // V0801008: 统一清场后0.6s精英入场（全关卡）
+    // V0801008: 统一清场后0.6s精英入场（全关卡，覆盖spawnAt）
     const aliveEnemies = this.enemies.filter(e => e.alive).length;
-    const queueEmpty = this.subSpawnQueue.length === 0;
-    if (aliveEnemies > 0 || !queueEmpty) return;
+    if (aliveEnemies > 0 || this.subSpawnQueue.length > 0) return;
     if (this._eliteClearanceAt === 0) { this._eliteClearanceAt = this.elapsed; return; }
     if (this.elapsed - this._eliteClearanceAt < 0.6) {
       if (!this.elitePreviewShown) {
@@ -9311,19 +9307,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         this.showBattleNotice({ text: "火环精英", priority: "A", category: "elite", style: "danger", duration: 0.8, dedupeKey: "elite:fireRing:preview", cooldown: 3, interrupt: true });
       }
       return;
-    }
-
-    // V0801008: 保留L1教程逻辑，其他直接用spawnAt
-    if (!isLevel1 && this.elapsed < this.level.eliteSpawnAt) return;
-    // V0801008: 入场前0.75s预告（非L1）已在上方统一处理，此处直接跳过
-    if (!isLevel1) {
-      if (!this.elitePreviewShown) {
-        const previewLead = 0.75;
-        if (this.elapsed >= this.level.eliteSpawnAt - previewLead && this.elapsed < this.level.eliteSpawnAt) {
-          this.elitePreviewShown = true;
-        }
-      }
-      if (this.elapsed < this.level.eliteSpawnAt) return;
     }
 
     this.eliteSpawned = true;
