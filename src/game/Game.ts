@@ -7428,7 +7428,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const fx = this._chestFlyFromX + (cx - this._chestFlyFromX) * ease;
       const fy = this._chestFlyFromY + (cy - 50 - this._chestFlyFromY) * ease;
       ctx.font = `${Math.round(26 + 2 * ease)}px sans-serif`; ctx.textAlign = "center";
+      if (this._chestOpeningPhase === "exiting") ctx.globalAlpha = this._chestExitingProgress;
       ctx.fillText("📦", fx, fy);
+      ctx.globalAlpha = 1;
     }
 
     if (this._chestOpeningPhase === "entering" || this._chestOpeningPhase === "descending" || this._chestOpeningPhase === "settling") {
