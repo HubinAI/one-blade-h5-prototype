@@ -7413,6 +7413,15 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.fillStyle = `rgba(0,0,0,${mAlpha})`; ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
 
     if (this._chestOpeningPhase === "entering" || this._chestOpeningPhase === "descending") {
+      // 宝箱飞入动画
+      if (this._chestFlyProgress < 1) {
+        const t = this._chestFlyProgress;
+        const ease = 1 - Math.pow(1 - t, 3);
+        const fx = this._chestFlyFromX + (cx - this._chestFlyFromX) * ease;
+        const fy = this._chestFlyFromY + (cy - 40 - this._chestFlyFromY) * ease;
+        ctx.font = '28px sans-serif'; ctx.textAlign = "center";
+        ctx.fillText("📦", fx, fy);
+      }
       ctx.fillStyle = "#ffd35a"; ctx.font = '700 22px "Microsoft YaHei", sans-serif'; ctx.textAlign = "center";
       ctx.fillText("宝箱降临...", cx, cy); return;
     }
