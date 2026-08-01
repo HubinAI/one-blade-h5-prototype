@@ -3251,6 +3251,12 @@ export class Game {
   private handleEnemyHit(enemy: Enemy, trail: SlashTrail) {
     // V0730014: 教学组ready前不接受主刀伤害
     if (this._tutorialGroupEnemyIds.has(enemy.id) && !this._tutorialGroupReady) return;
+    // V0801008: 精英无敌期格挡
+    if (this._eliteInvuln && enemy.eliteKind === "fireRing") {
+      this.particles.push(...sparkBurst({ x: enemy.x, y: enemy.y }, 6, "#ffd35a"));
+      AudioService.armorHit();
+      return;
+    }
     // P4.4A.2: 防御性断言——thunderGeneral 不得进入普通伤害链路
     if (enemy.bossId === "thunderGeneral") {
       throw new Error("ThunderGeneral must not enter normal damage pipeline");
