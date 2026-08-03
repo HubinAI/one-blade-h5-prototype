@@ -349,6 +349,7 @@ export class Game {
   private _lastDamageResult: DamageResult | null = null;
   /** Debug数值测试模式 */
   private _numericalTestMode = false;
+  private _debugShowDetail = false;
   private _numericalTestTarget: Enemy | null = null;
   private _numericalTestPaused = false;
   /** 火环威胁验证追踪 */
@@ -948,6 +949,12 @@ export class Game {
   toggleDebugPanel() {
     this.debugEnabled = !this.debugEnabled;
   }
+  /** D 键：debug off→紧凑→详细→off */
+  toggleDebugDetail(): void {
+    if (!this.debugEnabled) { this.debugEnabled = true; this._debugShowDetail = false; }
+    else if (!this._debugShowDetail) { this._debugShowDetail = true; }
+    else { this.debugEnabled = false; this._debugShowDetail = false; }
+  }
 
   /** 调试用：强制给所有存活敌人加破绽标记（按 W 触发） */
   debugForceWeakpoint() {
@@ -1301,7 +1308,8 @@ export class Game {
     if (this._numericalTestMode) {
       this._drawNumericalTestHUD(ctx);
     } else if (this.debugEnabled) {
-      this.drawDebugPanel(ctx);
+      if (this._debugShowDetail) { this.drawDebugPanel(ctx); }
+      else { this._drawDebugCompact(ctx); }
     }
     if (this.debugEnabled) this._drawThreatVerificationCard(ctx);
     // P4.4A.2-R2: 调试十字准星——显示系统记录的触摸位置
@@ -10025,6 +10033,44 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.font = '13px "Microsoft YaHei", sans-serif';
     ctx.fillStyle = "rgba(246, 231, 189, 0.78)";
     ctx.fillText("看广告复活，立即释放强锋反击", DESIGN_WIDTH / 2, 272);
+    ctx.restore();
+  }
+
+  private _drawDebugCompact(ctx: CanvasRenderingContext2D): void {
+    const cardW = 148; const cardH = 102;
+    const x = 6; const topY = 10;
+    ctx.save();
+    ctx.fillStyle = 'rgba(13, 16, 17, 0.78)';
+    ctx.beginPath(); ctx.roundRect(x, topY, cardW, cardH, 6); ctx.fill();
+    ctx.fillStyle = '#ffd35a';
+    ctx.font = 'bold 10px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Debug', x + cardW / 2, topY + 14);
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.beginPath(); ctx.moveTo(x + 8, topY + 19); ctx.lineTo(x + cardW - 8, topY + 19); ctx.stroke();
+    const aliveCount = this.enemies.filter(e => e.alive).length;
+    const tier = getBladeTier(this.energy);
+    const stage = getTierConfig(tier);
+    const levelId = typeof this.level.id === 'number' ? this.level.id : parseInt(String(this.level.id), 10) || 1;
+    const rowData = [
+      { l: 'level', v: `${levelId}`, c: '#fff' },
+      { l: 'phase', v: `${this.phase}`, c: '#fff' },
+      { l: 'wave', v: `${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`, c: '#fff' },
+      { l: 'enemies', v: `${aliveCount}`, c: '#fff' },
+      { l: 'playerHP', v: `${this.hp}`, c: '#e74c3c' },
+      { l: 'bladeMomentum', v: `${this.energy.toFixed(0)} (${stage.label})`, c: '#ffd35a' },
+    ];
+    if (this._lastDamageResult?.resolvedDamage) {
+      rowData.push({ l: 'lastHit', v: `${this._lastDamageResult.resolvedDamage}`, c: '#f39c12' });
+    }
+    ctx.font = '10px "Consolas", monospace';
+    const lx = x + 8; const vx = x + cardW - 8; const rh = 15;
+    [6, 5, 5, 4, 4, 4, 4].forEach((cap, i) => {
+      const row = rowData[i] ?? { l: '', v: '', c: '#888' };
+      const ry = topY + 30 + i * rh;
+      ctx.textAlign = 'left'; ctx.fillStyle = '#888'; ctx.fillText(row.l.slice(0, cap), lx, ry);
+      ctx.textAlign = 'right'; ctx.fillStyle = row.c; ctx.fillText(row.v, vx, ry);
+    });
     ctx.restore();
   }
 

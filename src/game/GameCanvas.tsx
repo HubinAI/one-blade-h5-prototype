@@ -102,7 +102,7 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() === "d") {
-        gameRef.current?.toggleDebugPanel();
+        gameRef.current?.toggleDebugDetail();
       } else if (event.key.toLowerCase() === "w") {
         // 调试用：强制给所有敌人加破绽标记
         gameRef.current?.debugForceWeakpoint();
