@@ -3281,7 +3281,7 @@ export class Game {
     ctx.fillStyle = '#f39c12';
     ctx.font = 'bold 10px "Microsoft YaHei", sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('火环威胁验证', x + cardW / 2, topY + 13);
+    ctx.fillText('火环威胁验证 SAFE', x + cardW / 2, topY + 13);
     ctx.strokeStyle = 'rgba(255,255,255,0.15)';
     ctx.beginPath(); ctx.moveTo(x + 8, topY + 18); ctx.lineTo(x + cardW - 8, topY + 18); ctx.stroke();
     const rows = [
@@ -3549,7 +3549,7 @@ export class Game {
     // V0801008: 火环切除
     for (const fr of this._eliteFireRings) {
       if (!fr.alive) continue;
-      if (segmentHitCircle(a, b, { x: fr.x, y: fr.y }, fr.r + 8)) {
+      if (segmentHitCircle(a, b, { x: fr.x, y: fr.y }, fr.r + bladeReach + 6)) {
         // 0807-11B-1: 威胁物统一伤害
         const stats = trail._damageSnapshot ?? this.captureDamageSnapshot();
         const req: DamageRequest = {
@@ -10235,9 +10235,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       if (fr.y >= BALANCE.battlefield.bottomDefenseY) {
         if (!fr.hasHit) {
           fr.hasHit = true;
-          this.hp -= 20;
-          this.screenShake = Math.max(this.screenShake, 0.3);
-          this.flash = Math.max(this.flash, 0.25);
+          // 0807-11B-1: SAFE VERIFY — Debug火环验证时不扣玩家HP
+          if (!this.debugEnabled) {
+            this.hp -= 20;
+            this.screenShake = Math.max(this.screenShake, 0.3);
+            this.flash = Math.max(this.flash, 0.25);
+          }
           this.particles.push(...sparkBurst({ x: fr.x, y: BALANCE.battlefield.bottomDefenseY }, 10, "#e67e22"));
         }
         fr.alive = false; // 触线后立即销毁
