@@ -1250,6 +1250,7 @@ export class Game {
     this.drawBackground(ctx);
     this.drawPickups(ctx);
     this.drawEnemies(ctx);
+    if (this._numericalTestMode) this._drawNumericalTest(ctx); // 0807-11B-1
     this._drawFireRings(ctx); // V0801008
     this.drawTractorLinks(ctx);
     this._drawSwipeTutorial(ctx); // 0807-11A: 教学覆盖层
@@ -1289,6 +1290,7 @@ export class Game {
       this.bossController.render(ctx);
     }
     // chaseFlash 模式有自己的 FSM 诊断面板，无需旧通用调试
+    if (this._numericalTestMode) this._drawNumericalTestHUD(ctx);
     if (this.debugEnabled) this.drawDebugPanel(ctx);
     // P4.4A.2-R2: 调试十字准星——显示系统记录的触摸位置
     if (this.debugEnabled && this.pointerPos) {
@@ -2370,12 +2372,8 @@ export class Game {
 
     switch (kind) {
       case "infantry": return Math.round(levelBaseHp * 0.75 * nodeMultiplier); // 75
-      case "shield":   return Math.round(levelBaseHp * 1.20 * nodeMultiplier); // 120 (盾兵更硬)
-      case "powder":   return Math.round(levelBaseHp * 0.85 * nodeMultiplier); // 85
-      case "core":     return Math.round(levelBaseHp * 1.00 * nodeMultiplier); // 100
-      case "splitter": return Math.round(levelBaseHp * 1.60 * nodeMultiplier); // 160 (韧性兵)
-      case "tractor":  return Math.round(levelBaseHp * 0.90 * nodeMultiplier); // 90
-      default:         return oldHp; // elite/boss 保持原值
+      // 以下类型伤害公式尚未迁移，暂保持旧HP（第1关仅出现infantry）
+      default:         return oldHp;
     }
   }
 
@@ -3145,6 +3143,69 @@ export class Game {
     this._numericalTestPaused = false;
   }
 
+  /** 绘制105HP测试目标 */
+  private _drawNumericalTest(ctx: CanvasRenderingContext2D): void {
+    const t = this._numericalTestTarget;
+    if (!t || !t.alive) return;
+    ctx.save();
+    // 测试目标外圈（紫色标记）
+    ctx.strokeStyle = t.flash > 0 ? '#fff' : '#9b59b6';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, t.radius + 6, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // 血量条
+    const barW = 60;
+    const barH = 6;
+    const barX = t.x - barW / 2;
+    const barY = t.y - t.radius - 16;
+    const hpRatio = t.hp / t.maxHp;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.fillStyle = hpRatio > 0.5 ? '#2ecc71' : hpRatio > 0.2 ? '#f39c12' : '#e74c3c';
+    ctx.fillRect(barX, barY, barW * hpRatio, barH);
+    // HP文字
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px "Consolas", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${t.hp}/${t.maxHp}`, t.x, barY - 4);
+    ctx.restore();
+  }
+
+  /** Debug数值数据显示面板 */
+  private _drawNumericalTestHUD(ctx: CanvasRenderingContext2D): void {
+    const stats = this._playerStats;
+    const band = this.getBladeBand();
+    const bonus = this.getBladeDamageBonus();
+    const currentAtk = getCurrentAttack(stats);
+    const last = this._lastDamageResult;
+    const x = 10, startY = 86;
+    const lh = 16;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(x - 2, startY - 14, 220, lh * 6 + 8);
+    ctx.font = '11px "Consolas", monospace';
+    ctx.textAlign = 'left';
+    let y = startY;
+    const ln = (label: string, val: string, c = '#5bc0ff') => {
+      ctx.fillStyle = '#888'; ctx.fillText(label, x, y);
+      ctx.fillStyle = c; ctx.fillText(val, x + 130, y);
+      y += lh;
+    };
+    ln('entryAttack', `${stats.entryAttack}`, '#fff');
+    ln('currentAttack', `${currentAtk.toFixed(0)}`, '#fff');
+    ln('bladeBand', `${band} (${(bonus*100).toFixed(0)}%)`, '#ffd35a');
+    if (last?.resolvedDamage) {
+      ln('lastDmg', `${last.resolvedDamage}`, '#e74c3c');
+      ln('effectiveHP', `${last.effectiveHpLoss}`, '#f39c12');
+    }
+    const tgt = this._numericalTestTarget;
+    if (tgt) ln('targetHP', `${tgt.hp}/${tgt.maxHp}`, '#2ecc71');
+    ctx.restore();
+  }
+
   // ═══════════════════════════════════════════════════════
 
   /** P3.8：军令弹窗是否正在暂停战斗 */
@@ -3420,6 +3481,36 @@ export class Game {
         this.particles.push(...sparkBurst({ x: fr.x, y: fr.y }, 4, "#fff"));
         this.addText(fr.x, fr.y - 12, "斩焰", "#f39c12", 14);
         AudioService.armorHit();
+      }
+    }
+    // 0807-11B-1: Debug数值测试目标碰撞
+    if (this._numericalTestMode && this._numericalTestTarget?.alive) {
+      const tgt = this._numericalTestTarget;
+      if (segmentHitCircle(a, b, tgt, tgt.radius + bladeReach)) {
+        const stats = trail._damageSnapshot ?? this.captureDamageSnapshot();
+        const req: DamageRequest = {
+          actionId: this.nextId("dmg"),
+          parentActionId: trail.id,
+          sourceType: "MAIN_SLASH",
+          sourceConfig: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH,
+          attackerId: "player",
+          targetId: tgt.id,
+          targetCategory: "ENEMY",
+          skillCoefficient: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient,
+          stats,
+          bladeBand: stats.bladeDamageBonus >= 0.25 ? "high" : stats.bladeDamageBonus >= 0.10 ? "mid" : "low",
+          tags: ["main", "player", "debug"],
+          hitPos: { x: tgt.x, y: tgt.y },
+          timestamp: this.elapsed,
+        };
+        const result = resolveDamage(req, tgt.hp, tgt.maxHp, tgt.alive, false);
+        if (result && result.isAccepted && result.effectiveHpLoss > 0) {
+          this._lastDamageResult = result;
+          tgt.hp = result.hpAfter;
+          if (result.isKill) tgt.alive = false;
+          tgt.flash = 0.25;
+          this.particles.push(...sparkBurst({ x: tgt.x, y: tgt.y }, 6, "#9b59b6"));
+        }
       }
     }
   }
