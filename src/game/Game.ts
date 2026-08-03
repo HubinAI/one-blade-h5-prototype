@@ -7559,14 +7559,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       x, y: y - 6, text, color, size: fontSize, duration: tier.duration,
       category: 'damage',
       priority: priority === FloatPriority.P0 ? 'A' : priority === FloatPriority.P1 ? 'A' : priority === FloatPriority.P2 ? 'B' : 'C',
-      mergeKey: options?.sourceType ?? 'MAIN_SLASH',
+      mergeKey: `main_${this.texts.filter(t => t.category === 'damage').length}_${Date.now()}`,
     });
     // D3+ 额外发光
     if (ratioR >= 1.15) {
       this.addCombatFloat({
         x: x + 1, y: y - 8, text, color, size: fontSize, duration: tier.duration * 0.75,
-        category: 'damage', priority: 'C',
-        mergeKey: `glow_${options?.sourceType ?? 'MAIN_SLASH'}`,
+        category: undefined as any, priority: 'C',
+        mergeKey: `glow_${this.texts.length}_${Date.now()}`,
       });
     }
   }
@@ -7633,7 +7633,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       duration: tier.duration,
       category: 'damage',
       priority,
-      mergeKey: `agg_${agg.sourceType}`,
+      mergeKey: `agg_${agg.sourceType}_${Date.now()}`,
     });
   }
 
@@ -7922,9 +7922,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         return;
       }
     }
-    // P4.2A.2: 淘汰规则修正——A计入总量，淘汰顺序C→B→A
+    // P4.2A.2: 淘汰规则——A计入总量，淘汰顺序C→B→A
+    // V0803021: 上限 6→14，主刀高并发场景
     const worldFloats = this.texts.filter(t => t.category !== undefined);
-    if (worldFloats.length >= 6) {
+    if (worldFloats.length >= 14) {
       const cFloats = worldFloats.filter(t => t.priority === "C");
       const bFloats = worldFloats.filter(t => t.priority === "B");
       const aFloats = worldFloats.filter(t => t.priority === "A");
