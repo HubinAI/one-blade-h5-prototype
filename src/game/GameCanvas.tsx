@@ -127,6 +127,17 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
       } else if (event.key.toLowerCase() === "s") {
         // 0807-11A: 调试跳过新手教学
         gameRef.current?.skipSwipeTutorial();
+      } else if (event.key.toLowerCase() === "n") {
+        // 0807-11B-1: 调试数值测试模式
+        gameRef.current?.toggleNumericalTestMode();
+      } else if (event.key === "1") {
+        gameRef.current?.setDebugBladeBand("low");
+      } else if (event.key === "2") {
+        gameRef.current?.setDebugBladeBand("mid");
+      } else if (event.key === "3") {
+        gameRef.current?.setDebugBladeBand("high");
+      } else if (event.key.toLowerCase() === "r") {
+        gameRef.current?.resetNumericalTestTarget();
       }
     };
 

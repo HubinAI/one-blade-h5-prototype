@@ -318,6 +318,8 @@ export type SlashTrail = {
    *  起刀瞬间用 rc.getBladeEffect(lockedEnergy) 计算，整刀使用此快照，
    *  不随实时刀势跳变（"一刀一象"）。 */
   reactiveBladeEffect?: BladeContinuousEffect;
+  /** 0807-11B-1: 伤害快照（同一次挥刀的派生伤害共享） */
+  _damageSnapshot?: import("./systems/damageSystem").PlayerRunStats;
 };
 
 export type ParticleKind = "paper" | "spark" | "ring" | "rune" | "smoke" | "slash";

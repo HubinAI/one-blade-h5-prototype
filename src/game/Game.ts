@@ -25,6 +25,7 @@ import { drawEnergyBar, drawHpBar, drawArmorIndicators } from "./systems/bossRea
 import { BLADE_MOMENTUM_CONFIG, DEFAULT_BLADE_RUN_MODIFIERS, type BladeMomentumState, type BladeRunModifiers, type BladeMomentumBand, type BladeMomentumEffect } from "./config/bladeMomentum";
 import { createBladeMomentumState, applyBladeMaxChangePreserveRatio, resolveBladeMomentumBand, resolveBladeMomentumRatio, resolveBladeMomentumEffect, resolveBladeGainMultiplier, resolveBladePassiveRecovery, resolveBladeMomentumAfterSlash, spendBladeMomentum, gainBladeMomentum, changeBladeMomentumMaxPreserveRatio, resolveMultiSlashBonus, type BladeMomentumSettleInput, type BladeMomentumSettleOutput } from "./systems/bladeMomentum";
 import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles";
+import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, resolveDamage, resolveThreatDamage, type PlayerRunStats, type DamageRequest, type DamageResult, type DamageSourceType } from "./systems/damageSystem";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
@@ -316,7 +317,7 @@ export class Game {
   private elitePreviewShown = false;
   private eliteSpawnAnnounced = false;
   /** V0801008: 火环精英战斗状态 */
-  private _eliteFireRings: Array<{ x: number; y: number; r: number; speed: number; alive: boolean; hasHit: boolean }> = [];
+  private _eliteFireRings: Array<{ x: number; y: number; r: number; speed: number; alive: boolean; hasHit: boolean; hp: number }> = [];
   private _eliteBattleActive = false;
   private _eliteInvuln = false;
   private _eliteGuardSpawned = false;
@@ -341,6 +342,15 @@ export class Game {
 
   // 0807-11A: 新手挥刀教学
   private _swipeTutorialPhase: 'idle' | 'waiting_stable' | 'active' | 'success' = 'idle';
+
+  // 0807-11B-1: 统一伤害系统
+  private _playerStats: PlayerRunStats = createDefaultPlayerStats(100);
+  private _bladeDamageSnapshot: number = 0;
+  private _lastDamageResult: DamageResult | null = null;
+  /** Debug数值测试模式 */
+  private _numericalTestMode = false;
+  private _numericalTestTarget: Enemy | null = null;
+  private _numericalTestPaused = false; // 当前挥刀锁定的刀势增伤快照
   private _swipeTutorialFingerTime = 0;
   private _swipeTutorialPath: { start: Vec2; end: Vec2 } | null = null;
   private _swipeTutorialErrorCount = 0;
@@ -1902,6 +1912,8 @@ export class Game {
       reactiveBladeEffect: isReactiveMode && this.reactiveController
         ? this.reactiveController.getBladeEffect(lockedMomentum!)
         : undefined,
+      // 0807-11B-1: 锁定伤害快照（同一次挥刀的派生伤害共享）
+      _damageSnapshot: this.captureDamageSnapshot(),
     };
 
     // P4.1A.15: SlashTrail创建后再消耗全局状态
@@ -2315,6 +2327,56 @@ export class Game {
     const q = this.mainBladeQuality;
     const bladeBonus = q ? (BLADE_BASE_STATS[q]?.bladeMultiplier ?? 1) : 1;
     return this.progressionModifiers.pathLength * bladeBonus;
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // 0807-11B-1: 统一伤害系统 — 刀势增伤 + 快照
+  // ═══════════════════════════════════════════════════════
+
+  /** 根据当前刀势档位返回增伤倍率（低0%/中10%/高25%） */
+  private getBladeDamageBonus(): number {
+    const ratio = resolveBladeMomentumRatio(this.energy, this.bladeMomentumMax);
+    if (ratio >= 0.70) return 0.25;   // 高刀势
+    if (ratio >= 0.40) return 0.10;   // 中刀势
+    return 0;                          // 低刀势
+  }
+
+  /** 获取刀势档位标签 */
+  private getBladeBand(): "low" | "mid" | "high" {
+    const ratio = resolveBladeMomentumRatio(this.energy, this.bladeMomentumMax);
+    if (ratio >= 0.70) return "high";
+    if (ratio >= 0.40) return "mid";
+    return "low";
+  }
+
+  /** 锁定当前玩家属性为挥刀快照 */
+  private captureDamageSnapshot(): PlayerRunStats {
+    const bonus = this.getBladeDamageBonus();
+    this._bladeDamageSnapshot = bonus;
+    return {
+      ...this._playerStats,
+      bladeDamageBonus: bonus,
+    };
+  }
+
+  /** 0807-11B-1: 计算敌人基础HP（关卡基础值 × 类型倍率 × 节点倍率） */
+  private getEnemyBaseHp(kind: EnemyKind, oldHp: number): number {
+    if (this.gameMode !== "normal") return oldHp; // Boss模式保持旧值
+    if (!this.isLogicalLevel1()) return oldHp;     // 非第1关保持旧值
+
+    // 第1关：基础HP=100
+    const levelBaseHp = 100;
+    const nodeMultiplier = 1.00; // 当前节点倍率（后续0807-11B-3扩展）
+
+    switch (kind) {
+      case "infantry": return Math.round(levelBaseHp * 0.75 * nodeMultiplier); // 75
+      case "shield":   return Math.round(levelBaseHp * 1.20 * nodeMultiplier); // 120 (盾兵更硬)
+      case "powder":   return Math.round(levelBaseHp * 0.85 * nodeMultiplier); // 85
+      case "core":     return Math.round(levelBaseHp * 1.00 * nodeMultiplier); // 100
+      case "splitter": return Math.round(levelBaseHp * 1.60 * nodeMultiplier); // 160 (韧性兵)
+      case "tractor":  return Math.round(levelBaseHp * 0.90 * nodeMultiplier); // 90
+      default:         return oldHp; // elite/boss 保持原值
+    }
   }
 
   private getMainBladeDamageMultiplier(): number {
@@ -3018,6 +3080,72 @@ export class Game {
   }
 
   // ═══════════════════════════════════════════════════════
+  // 0807-11B-1: Debug 数值测试模式
+  // ═══════════════════════════════════════════════════════
+
+  /** 进入数值测试模式 */
+  toggleNumericalTestMode(): void {
+    if (!this.debugEnabled) return;
+    this._numericalTestMode = !this._numericalTestMode;
+    if (this._numericalTestMode) {
+      this._spawnNumericalTestTarget();
+    } else {
+      this._cleanupNumericalTest();
+    }
+  }
+
+  /** 设置刀势档位（测试用） */
+  setDebugBladeBand(band: "low" | "mid" | "high"): void {
+    if (!this.debugEnabled || !this._numericalTestMode) return;
+    const max = this.bladeMomentumMax;
+    if (band === "low")  this.energy = Math.round(max * 0.20);
+    if (band === "mid")  this.energy = Math.round(max * 0.55);
+    if (band === "high") this.energy = Math.round(max * 0.85);
+  }
+
+  /** 重置105HP测试目标 */
+  resetNumericalTestTarget(): void {
+    if (!this.debugEnabled || !this._numericalTestMode) return;
+    if (this._numericalTestTarget) {
+      this._numericalTestTarget.hp = 105;
+      this._numericalTestTarget.maxHp = 105;
+      this._numericalTestTarget.alive = true;
+      this._numericalTestTarget.flash = 0;
+    }
+  }
+
+  private _spawnNumericalTestTarget(): void {
+    if (!this.debugEnabled) return;
+    this._numericalTestPaused = true;
+    this._numericalTestTarget = {
+      id: "debug_test_target",
+      kind: "infantry",
+      x: DESIGN_WIDTH / 2,
+      homeX: DESIGN_WIDTH / 2,
+      y: 500,
+      radius: 22,
+      hp: 105,
+      maxHp: 105,
+      speed: 0,
+      hpDamage: 0,
+      score: 0,
+      energyGain: 0,
+      alive: true,
+      ignited: false,
+      marked: false,
+      shieldCrack: 0,
+      flash: 0,
+      wobble: 0,
+      slowedTimer: 0,
+    };
+  }
+
+  private _cleanupNumericalTest(): void {
+    this._numericalTestTarget = null;
+    this._numericalTestPaused = false;
+  }
+
+  // ═══════════════════════════════════════════════════════
 
   /** P3.8：军令弹窗是否正在暂停战斗 */
   private isEdictModalBlocking(): boolean {
@@ -3264,7 +3392,30 @@ export class Game {
     for (const fr of this._eliteFireRings) {
       if (!fr.alive) continue;
       if (segmentHitCircle(a, b, { x: fr.x, y: fr.y }, fr.r + 8)) {
-        fr.alive = false;
+        // 0807-11B-1: 威胁物统一伤害
+        const stats = trail._damageSnapshot ?? this.captureDamageSnapshot();
+        const req: DamageRequest = {
+          actionId: this.nextId("dmg"),
+          parentActionId: trail.id,
+          sourceType: "MAIN_SLASH",
+          sourceConfig: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH,
+          attackerId: "player",
+          targetId: `fireRing_${fr.x}_${fr.y}`,
+          targetCategory: "THREAT",
+          skillCoefficient: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient,
+          stats,
+          bladeBand: stats.bladeDamageBonus >= 0.25 ? "high" : stats.bladeDamageBonus >= 0.10 ? "mid" : "low",
+          tags: ["main", "player"],
+          hitPos: { x: fr.x, y: fr.y },
+          timestamp: this.elapsed,
+        };
+        const result = resolveThreatDamage(req, fr.hp, fr.hp, fr.alive, false);
+        if (result && result.isAccepted && result.effectiveHpLoss > 0) {
+          fr.hp -= result.effectiveHpLoss;
+          if (fr.hp <= 0) {
+            fr.alive = false;
+          }
+        }
         this.particles.push(...sparkBurst({ x: fr.x, y: fr.y }, 8, "#f39c12"));
         this.particles.push(...sparkBurst({ x: fr.x, y: fr.y }, 4, "#fff"));
         this.addText(fr.x, fr.y - 12, "斩焰", "#f39c12", 14);
@@ -3487,8 +3638,30 @@ export class Game {
     const canBreakAll = oneBladeMul > 1 ? true : stage.canBreakShield;
 
     if (enemy.kind === "infantry") {
-      this.killEnemy(enemy, trail, false, "paper");
+      // 0807-11B-1: 统一伤害 — 真实HP结算
+      const stats = trail._damageSnapshot ?? this.captureDamageSnapshot();
+      const req: DamageRequest = {
+        actionId: this.nextId("dmg"),
+        parentActionId: trail.id,
+        sourceType: "MAIN_SLASH",
+        sourceConfig: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH,
+        attackerId: "player",
+        targetId: enemy.id,
+        targetCategory: "ENEMY",
+        skillCoefficient: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient,
+        stats,
+        bladeBand: stats.bladeDamageBonus >= 0.25 ? "high" : stats.bladeDamageBonus >= 0.10 ? "mid" : "low",
+        tags: ["main", "player"],
+        hitPos: { x: enemy.x, y: enemy.y },
+        timestamp: this.elapsed,
+      };
+      const result = resolveDamage(req, enemy.hp, enemy.maxHp, enemy.alive, false);
+      if (result && result.isAccepted && result.effectiveHpLoss > 0) {
+        this._lastDamageResult = result;
+        this.damageEnemy(enemy, result.effectiveHpLoss, trail, false, "paper");
+      }
       AudioService.slashHit();
+      return;
     }
 
     if (enemy.kind === "shield") {
@@ -3617,19 +3790,36 @@ export class Game {
           this.triggerEliteShieldBreak(enemy);
         }
       }
-      // V0730020: L1精英百分比伤害（按刀势档位）
+      // V0730020: L1精英百分比伤害 → 0807-11B-1 迁移到统一公式
       const dedupKey = `elite_${enemy.id}`;
       if (this._eliteDamageDedup.has(dedupKey)) return;
       this._eliteDamageDedup.add(dedupKey);
       let eliteDmg: number;
       if (this.isLogicalLevel1()) {
-        const bm = createBladeMomentumState(this.energy, this.bladeMomentumMax);
-        const pct = bm.band === "high" ? 0.10 : bm.band === "mid" ? 0.08 : 0.06;
-        eliteDmg = Math.max(1, Math.ceil(enemy.maxHp * pct));
+        // 统一伤害公式：currentAttack × skillCoefficient × (1+bladeBonus)
+        const stats = trail._damageSnapshot ?? this.captureDamageSnapshot();
+        const req: DamageRequest = {
+          actionId: this.nextId("dmg"),
+          parentActionId: trail.id,
+          sourceType: "MAIN_SLASH",
+          sourceConfig: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH,
+          attackerId: "player",
+          targetId: enemy.id,
+          targetCategory: "ENEMY",
+          skillCoefficient: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient,
+          stats,
+          bladeBand: stats.bladeDamageBonus >= 0.25 ? "high" : stats.bladeDamageBonus >= 0.10 ? "mid" : "low",
+          tags: ["main", "player"],
+          hitPos: { x: enemy.x, y: enemy.y },
+          timestamp: this.elapsed,
+        };
+        const result = resolveDamage(req, enemy.hp, enemy.maxHp, enemy.alive, false);
+        eliteDmg = result ? result.effectiveHpLoss : 0;
+        if (result) this._lastDamageResult = result;
       } else {
         eliteDmg = stage.damage * bladeDmg;
       }
-      this.damageEnemy(enemy, eliteDmg, trail, false, "elite");
+      if (eliteDmg > 0) this.damageEnemy(enemy, eliteDmg, trail, false, "elite");
       // P2：精英受击反馈
       this.triggerEliteHitFeedback(enemy);
       if (trail.tier === "strong" || trail.tier === "burst") {
@@ -7020,6 +7210,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const epEndY = this.getPersonalizedEntryEndY(kind, profile.entryEndY);
     const epMul = profile.entryMultiplier * this.getEntrySpeedFactorByKind(kind);
     const epMaxDur = profile.entryMaxDuration;
+    // 0807-11B-1: 真实HP — 普通敌人按公式计算
+    const baseHp = this.getEnemyBaseHp(kind, balance.hp);
+    const realHp = baseHp + dailyShieldBonus + hpBonus;
     return {
       id: this.nextId("enemy"),
       kind,
@@ -7027,8 +7220,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       homeX: x,
       y,
       radius: balance.radius,
-      hp: balance.hp + dailyShieldBonus + hpBonus,
-      maxHp: balance.hp + dailyShieldBonus + hpBonus,
+      hp: realHp,
+      maxHp: realHp,
       speed: balance.speed * this.level.enemySpeed * speedMultiplier * randomRange(0.94, 1.08),
       hpDamage: balance.defenseDamage,
       score: balance.score,
@@ -9820,7 +10013,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
           // 生成1-2个火环
           const count = this._eliteCyclesDone >= 1 ? 2 : 1;
           for (let i = 0; i < count; i++) {
-            this._eliteFireRings.push({ x: elite.x + (i - 0.5) * 60, y: elite.y + 10, r: 16, speed: 70 + Math.random() * 20, alive: true, hasHit: false });
+            this._eliteFireRings.push({ x: elite.x + (i - 0.5) * 60, y: elite.y + 10, r: 16, speed: 70 + Math.random() * 20, alive: true, hasHit: false, hp: 80 });
           }
         }
         break;
