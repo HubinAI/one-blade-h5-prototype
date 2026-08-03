@@ -354,6 +354,9 @@ export class Game {
   /** 0807-11B-1: 同刀去重 */
   private _slashDedupTestTarget: string | null = null;
   private _slashDedupFireRings: Set<string> = new Set();
+  /** 0807-11B-2: 聚合缓冲区 */
+  private _aggBuffer: Map<string, { damage: number; segments: number; hpLoss: number; pos: Vec2; lastTime: number; sourceType: string; targetType: string; killed: boolean; }> = new Map();
+  private _aggTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private _numericalTestTarget: Enemy | null = null;
   private _numericalTestPaused = false;
   /** 火环威胁验证追踪 */
@@ -1023,6 +1026,7 @@ export class Game {
     // 播报
     this.activeBattleNotice = null; this.battleNoticeQueue = [];
     this.battleNoticeCooldowns = new Map();
+    this.clearAggTimers();
   }
 
   retryExecution(): void {
@@ -2800,6 +2804,10 @@ export class Game {
         const dmgPct = isElite ? 0.25 : 1.0; // 精英 25%，普通兵 100%
         const baseDmg = Math.max(1, Math.ceil(enemy.maxHp * pct * dmgPct));
         this.damageEnemy(enemy, baseDmg, main, false, "triple_side");
+        // 0807-11B-2: 三锋聚合
+        const aggKey = `${main.id}_${enemy.id}`;
+        const refAtk = 100; // 开局攻击基准
+        this.aggregateAndMaybeFlush(aggKey, baseDmg, { x: enemy.x, y: enemy.y }, 'TRIPLE_SIDE', isElite ? 'ELITE' : 'NORMAL', 100, refAtk, !enemy.alive, false);
         // 精英去重
         if (isElite) {
           this._eliteDamageDedup.add(`triple_${enemy.id}`);
@@ -2929,6 +2937,9 @@ export class Game {
         const dmg = Math.max(1, Math.ceil(isElite ? 2 : 4));
         const safeTrail = this.currentSlash ?? { kills: 0, chain: 0, directMainKills: 0, tier: "weak", energyBank: 0, id: "scorch", points: [], active: false, explosionCount: 0, coreCollapseCount: 0 } as any;
         this.damageEnemy(enemy, dmg, safeTrail, false, "scorch");
+        // 0807-11B-2: 燎原聚合
+        const sKey = `scorch_${enemy.id}`;
+        this.aggregateAndMaybeFlush(sKey, dmg, { x: enemy.x, y: enemy.y }, 'SCORCH', isElite ? 'ELITE' : 'NORMAL', 600, 100, !enemy.alive, true);
         (enemy as any)._scorchBurning = 0.6;
       }
     }
@@ -7555,6 +7566,73 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         mergeKey: `glow_${options?.sourceType ?? 'MAIN_SLASH'}`,
       });
     }
+  }
+
+  /** 聚合伤害推入缓冲区 */
+  aggregateAndMaybeFlush(
+    key: string, damage: number, pos: Vec2,
+    sourceType: string, targetType: string, windowMs: number,
+    referenceAttack: number, isKill: boolean, isDot: boolean,
+  ): void {
+    const now = Date.now();
+    const existing = this._aggBuffer.get(key);
+    if (existing && now - existing.lastTime < windowMs) {
+      existing.damage += damage;
+      existing.hpLoss = Math.max(existing.hpLoss, damage);
+      existing.segments += 1;
+      existing.lastTime = now;
+      existing.pos = pos;
+      existing.killed = existing.killed || isKill;
+      return; // 仍在窗口内，聚合
+    }
+    // 超出窗口或新目标：flush 旧值
+    if (existing) this._flushAgg(key, existing, referenceAttack);
+    // 开始新窗口
+    const tm = this._aggTimers.get(key);
+    if (tm) clearTimeout(tm);
+    this._aggBuffer.set(key, { damage, segments: 1, hpLoss: damage, pos, lastTime: now, sourceType, targetType, killed: isKill });
+    // 设置窗口到期刷新
+    if (!isKill) {
+      const timer = setTimeout(() => {
+        const agg = this._aggBuffer.get(key);
+        if (agg) { this._flushAgg(key, agg, referenceAttack); this._aggBuffer.delete(key); this._aggTimers.delete(key); }
+      }, windowMs);
+      this._aggTimers.set(key, timer);
+    }
+    // 击杀立即刷新
+    if (isKill) {
+      const agg = this._aggBuffer.get(key);
+      if (agg) { this._flushAgg(key, agg, referenceAttack); this._aggBuffer.delete(key); this._aggTimers.delete(key); }
+    }
+  }
+
+  /** 刷新聚合 */
+  private _flushAgg(key: string, agg: { damage: number; segments: number; pos: Vec2; killed: boolean; sourceType: string; targetType: string; }, referenceAttack: number): void {
+    const tgtType = (agg.targetType === 'ELITE' || agg.targetType === 'BOSS' ? 'ELITE' : 'NORMAL') as 'NORMAL' | 'ELITE' | 'BOSS' | 'MECHANIC';
+    const textExtra = (tgtType === 'ELITE' || tgtType === 'BOSS') ? ` x${agg.segments}` : '';
+    const displayDamage = agg.damage;
+    const isDerived = agg.sourceType !== 'MAIN_SLASH';
+    // 使用 addCombatFloat 显示聚合数字
+    const ratioR = referenceAttack > 0 ? displayDamage / referenceAttack : 0;
+    const tier = resolveDamageTier(ratioR);
+    const priority = ratioR >= 2.0 || agg.killed ? 'A' : ratioR >= 1.5 ? 'A' : 'B';
+    this.addCombatFloat({
+      x: agg.pos.x, y: agg.pos.y - 6,
+      text: `${displayDamage}${textExtra}`,
+      color: tier.baseColor,
+      size: tier.fontSize * (isDerived ? 0.85 : 1.0),
+      duration: tier.duration,
+      category: 'damage',
+      priority,
+      mergeKey: `agg_${agg.sourceType}`,
+    });
+  }
+
+  /** 清理聚合计时器（resetRunState 调用） */
+  clearAggTimers(): void {
+    for (const [k, t] of this._aggTimers) { clearTimeout(t); }
+    this._aggTimers.clear();
+    this._aggBuffer.clear();
   }
 
   private addText(
