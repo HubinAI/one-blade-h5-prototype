@@ -346,6 +346,7 @@ export class Game {
   private _swipeTutorialErrorCount = 0;
   private _swipeTutorialHintTimer = 0;
   private _swipeTutorialStableAt = 0;
+  private _swipeTutorialErrorFlashTimer = 0; // 错误后路径增强计时器
   static readonly SWIPE_TUTORIAL_DONE_KEY = "one_blade_swipe_tutorial_done";
 
   /** V0730016: 刀势审计 — 前12秒每帧记录energy delta */
@@ -855,6 +856,7 @@ export class Game {
           this._swipeTutorialFingerTime = 0;
           this._swipeTutorialPath = null;
           this._swipeTutorialErrorCount = 0;
+          this._swipeTutorialErrorFlashTimer = 0;
           this._swipeTutorialHintTimer = 0;
           this._swipeTutorialStableAt = 0;
         }
@@ -1186,6 +1188,7 @@ export class Game {
     this.updateParticles(scaledDt);
     this.updateTexts(scaledDt);
     this._updateL1TutorialGroups();
+    this._updateSwipeTutorial(scaledDt); // 0807-11A: 稳定检测需在正常循环中运行
     this.updateWaves(scaledDt);
     this.updateSubSpawnQueue();
     this.updateEliteSpawn();
@@ -2926,6 +2929,9 @@ export class Game {
         if (this._swipeTutorialHintTimer > 0) {
           this._swipeTutorialHintTimer -= dt;
         }
+        if (this._swipeTutorialErrorFlashTimer > 0) {
+          this._swipeTutorialErrorFlashTimer -= dt;
+        }
         break;
       }
       case 'success': {
@@ -2954,10 +2960,11 @@ export class Game {
     this._swipeTutorialPhase = 'active';
     this._swipeTutorialFingerTime = 0;
     this._swipeTutorialErrorCount = 0;
+    this._swipeTutorialErrorFlashTimer = 0;
     this._generateTutorialPath();
   }
 
-  /** 生成穿过所有教学敌人的推荐刀路 */
+  /** 生成穿过所有教学敌人的推荐刀路（偏移到敌人上方，避免遮挡） */
   private _generateTutorialPath(): void {
     const enemies = this.enemies.filter(
       e => this._tutorialGroupEnemyIds.has(e.id) && e.alive
@@ -2965,9 +2972,11 @@ export class Game {
     if (enemies.length < 2) { this._swipeTutorialPath = null; return; }
     const sorted = [...enemies].sort((a, b) => a.x - b.x);
     const midY = sorted.reduce((s, e) => s + e.y, 0) / sorted.length;
+    // 偏移到敌人上方 28px（敌人半径 18 + 10px 间隙），避免手指和路线遮住敌人主体
+    const pathY = midY - 28;
     this._swipeTutorialPath = {
-      start: { x: sorted[0].x - 36, y: midY },
-      end: { x: sorted[sorted.length - 1].x + 36, y: midY },
+      start: { x: sorted[0].x - 36, y: pathY },
+      end: { x: sorted[sorted.length - 1].x + 36, y: pathY },
     };
   }
 
@@ -2993,7 +3002,7 @@ export class Game {
     return hit.size >= 2;
   }
 
-  /** 教学挥刀失败：退还刀势、增强推荐线 */
+  /** 教学挥刀失败：退还刀势、短暂增强推荐线 */
   private _handleTutorialMiss(): void {
     this.energy = clamp(
       this.energy + BLADE_MOMENTUM_CONFIG.slash.baseCost,
@@ -3001,6 +3010,7 @@ export class Game {
       this.bladeMomentumMax
     );
     this._swipeTutorialErrorCount++;
+    this._swipeTutorialErrorFlashTimer = 0.8; // 0.8s短暂增强
     this._swipeTutorialFingerTime = 0; // 重置手指动画
   }
 
@@ -3008,7 +3018,7 @@ export class Game {
   private _handleTutorialSuccess(): void {
     this._swipeTutorialPhase = 'success';
     this._swipeTutorialHintTimer = 1.2;
-    this.addText(DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2 - 30, "一刀多斩，刀势涨得更快", "#ffd35a", 16, 1.2);
+    this.addText(DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2 - 30, "一刀多斩，刀势涨得更快", "#ffd35a", 13, 1.2);
     try {
       window.localStorage.setItem(Game.SWIPE_TUTORIAL_DONE_KEY, "1");
     } catch (_) { /* localStorage unavailable */ }
@@ -7889,14 +7899,15 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
 
     // ─ 推荐刀路 ─
-    const alpha = 0.5 + this._swipeTutorialErrorCount * 0.15; // 错误后增强可见度
-    const glowAlpha = Math.min(0.35, this._swipeTutorialErrorCount * 0.08);
+    const flashIntensity = this._swipeTutorialErrorFlashTimer > 0 ? this._swipeTutorialErrorFlashTimer / 0.8 : 0;
+    const baseAlpha = 0.5 + flashIntensity * 0.35; // 错误后短暂增强（0.8s衰减）
+    const glowAlpha = flashIntensity * 0.3;
     const glowColor = `rgba(255, 211, 90, ${glowAlpha})`;
-    const lineColor = `rgba(255, 211, 90, ${alpha})`;
+    const lineColor = `rgba(255, 211, 90, ${Math.min(1, baseAlpha)})`;
 
     // 发光外圈
     ctx.strokeStyle = glowColor;
-    ctx.lineWidth = 6 + this._swipeTutorialErrorCount * 1.5;
+    ctx.lineWidth = 6 + flashIntensity * 4;
     ctx.beginPath();
     ctx.setLineDash([8, 6]);
     ctx.moveTo(path.start.x, path.start.y);

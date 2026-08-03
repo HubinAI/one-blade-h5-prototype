@@ -287,9 +287,9 @@ describe("SwipeTutorial - 路径生成 (_generateTutorialPath)", () => {
     // 路径应覆盖所有敌人X范围
     expect(path.start.x).toBeLessThanOrEqual(120);
     expect(path.end.x).toBeGreaterThanOrEqual(260);
-    // Y应大致为敌人Y的平均
+    // Y应为敌人Y平均减偏移量（28px，避免手指遮挡敌人）
     const avgY = (500 + 510 + 505) / 3;
-    expect(Math.abs(path.start.y - avgY)).toBeLessThan(5);
+    expect(Math.abs(path.start.y - (avgY - 28))).toBeLessThan(5);
   });
 
   it("敌人少于2时不生成路径", () => {
