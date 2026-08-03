@@ -7693,13 +7693,20 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       this._burstTimers.push(t);
     });
 
-    // 连斩总结（≥4）
+    // 连斩总结（≥4，分级差异化）
     if (hits.length >= 4) {
       const last = groups[groups.length - 1];
       const delay = (groups.length - 1) * iv + 50;
-      const label = hits.length >= 10 ? `一刀十斩 x${hits.length}` : hits.length >= 6 ? `连斩 x${hits.length}` : `连斩 x${hits.length}`;
+      let label: string; let labelSize: number; let labelColor: string;
+      if (hits.length >= 10) {
+        label = `一刀十斩 \u00d7${hits.length}`; labelSize = 28; labelColor = '#ff6a33';
+      } else if (hits.length >= 6) {
+        label = `连斩 \u00d7${hits.length}`; labelSize = 24; labelColor = '#ffd35a';
+      } else {
+        label = `连斩 \u00d7${hits.length}`; labelSize = 20; labelColor = '#e8e0d0';
+      }
       const t = setTimeout(() => {
-        this.addCombatFloat({ x: last.x, y: last.y - 20, text: label, color: '#ffd35a', size: hits.length >= 10 ? 26 : 22, duration: 0.65, category: 'blade-tier', priority: 'A', mergeKey: `summary_${slashId}` });
+        this.addCombatFloat({ x: last.x, y: last.y - 20, text: label, color: labelColor, size: labelSize, duration: 0.65, category: 'blade-tier', priority: 'A', mergeKey: `summary_${slashId}` });
       }, delay);
       this._burstTimers.push(t);
     }
