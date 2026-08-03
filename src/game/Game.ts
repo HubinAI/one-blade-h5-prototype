@@ -350,7 +350,12 @@ export class Game {
   /** Debug数值测试模式 */
   private _numericalTestMode = false;
   private _numericalTestTarget: Enemy | null = null;
-  private _numericalTestPaused = false; // 当前挥刀锁定的刀势增伤快照
+  private _numericalTestPaused = false;
+  /** 火环威胁验证追踪 */
+  private _threatVerifyAliveRings = 0;
+  private _threatVerifyLastHpBefore = 0;
+  private _threatVerifyLastHpAfter = 0;
+  private _threatVerifyLastResult: 'DAMAGED' | 'DESTROYED' | null = null; // 当前挥刀锁定的刀势增伤快照
   private _swipeTutorialFingerTime = 0;
   private _swipeTutorialPath: { start: Vec2; end: Vec2 } | null = null;
   private _swipeTutorialErrorCount = 0;
@@ -1290,8 +1295,12 @@ export class Game {
       this.bossController.render(ctx);
     }
     // chaseFlash 模式有自己的 FSM 诊断面板，无需旧通用调试
-    if (this._numericalTestMode) this._drawNumericalTestHUD(ctx);
-    if (this.debugEnabled) this.drawDebugPanel(ctx);
+    if (this._numericalTestMode) {
+      this._drawNumericalTestHUD(ctx);
+    } else if (this.debugEnabled) {
+      this.drawDebugPanel(ctx);
+    }
+    if (this.debugEnabled) this._drawThreatVerificationCard(ctx);
     // P4.4A.2-R2: 调试十字准星——显示系统记录的触摸位置
     if (this.debugEnabled && this.pointerPos) {
       ctx.save();
@@ -3146,63 +3155,151 @@ export class Game {
   /** 绘制105HP测试目标 */
   private _drawNumericalTest(ctx: CanvasRenderingContext2D): void {
     const t = this._numericalTestTarget;
-    if (!t || !t.alive) return;
+    if (!t) return;
     ctx.save();
-    // 测试目标外圈（紫色标记）
-    ctx.strokeStyle = t.flash > 0 ? '#fff' : '#9b59b6';
-    ctx.lineWidth = 3;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.arc(t.x, t.y, t.radius + 6, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    // 血量条
-    const barW = 60;
-    const barH = 6;
-    const barX = t.x - barW / 2;
-    const barY = t.y - t.radius - 16;
-    const hpRatio = t.hp / t.maxHp;
-    ctx.fillStyle = '#333';
-    ctx.fillRect(barX, barY, barW, barH);
-    ctx.fillStyle = hpRatio > 0.5 ? '#2ecc71' : hpRatio > 0.2 ? '#f39c12' : '#e74c3c';
-    ctx.fillRect(barX, barY, barW * hpRatio, barH);
-    // HP文字
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 11px "Consolas", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(`${t.hp}/${t.maxHp}`, t.x, barY - 4);
+    if (t.alive) {
+      // 紫色虚线外圈
+      ctx.strokeStyle = t.flash > 0 ? '#fff' : '#9b59b6';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(t.x, t.y, t.radius + 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // HP条
+      const barW = 80; const barH = 8;
+      const barX = t.x - barW / 2; const barY = t.y - t.radius - 20;
+      const hpRatio = t.hp / t.maxHp;
+      ctx.fillStyle = '#222';
+      ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
+      ctx.fillStyle = hpRatio > 0.5 ? '#2ecc71' : hpRatio > 0.2 ? '#f39c12' : '#e74c3c';
+      ctx.fillRect(barX, barY, barW * hpRatio, barH);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 12px "Consolas", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`HP ${t.hp}/${t.maxHp}`, t.x, barY - 5);
+    } else {
+      // 已击杀状态
+      ctx.fillStyle = '#e74c3c';
+      ctx.font = 'bold 14px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('已击杀', t.x, t.y);
+    }
     ctx.restore();
   }
 
-  /** Debug数值数据显示面板 */
+  /** 紧凑数值卡片（宽≤40%，高≤22%，顶部居中） */
   private _drawNumericalTestHUD(ctx: CanvasRenderingContext2D): void {
     const stats = this._playerStats;
     const band = this.getBladeBand();
     const bonus = this.getBladeDamageBonus();
     const currentAtk = getCurrentAttack(stats);
     const last = this._lastDamageResult;
-    const x = 10, startY = 86;
-    const lh = 16;
+    const cardW = 150; const cardH = 150;
+    const cx = DESIGN_WIDTH / 2;  // 195
+    const topY = 14;
+    const x = cx - cardW / 2;
     ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,0.75)';
-    ctx.fillRect(x - 2, startY - 14, 220, lh * 6 + 8);
-    ctx.font = '11px "Consolas", monospace';
-    ctx.textAlign = 'left';
-    let y = startY;
-    const ln = (label: string, val: string, c = '#5bc0ff') => {
-      ctx.fillStyle = '#888'; ctx.fillText(label, x, y);
-      ctx.fillStyle = c; ctx.fillText(val, x + 130, y);
-      y += lh;
-    };
-    ln('entryAttack', `${stats.entryAttack}`, '#fff');
-    ln('currentAttack', `${currentAtk.toFixed(0)}`, '#fff');
-    ln('bladeBand', `${band} (${(bonus*100).toFixed(0)}%)`, '#ffd35a');
+    // 卡片背景
+    ctx.fillStyle = 'rgba(0,0,0,0.82)';
+    const r = 6;
+    ctx.beginPath();
+    ctx.moveTo(x + r, topY); ctx.lineTo(x + cardW - r, topY);
+    ctx.arcTo(x + cardW, topY, x + cardW, topY + r, r);
+    ctx.lineTo(x + cardW, topY + cardH - r);
+    ctx.arcTo(x + cardW, topY + cardH, x + cardW - r, topY + cardH, r);
+    ctx.lineTo(x + r, topY + cardH);
+    ctx.arcTo(x, topY + cardH, x, topY + cardH - r, r);
+    ctx.lineTo(x, topY + r);
+    ctx.arcTo(x, topY, x + r, topY, r);
+    ctx.fill();
+    // 标题
+    ctx.fillStyle = '#ffd35a';
+    ctx.font = 'bold 11px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('数值测试', cx, topY + 14);
+    // 分隔线
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x + 8, topY + 20); ctx.lineTo(x + cardW - 8, topY + 20); ctx.stroke();
+    // 数据行
+    const rows = [
+      { label: '刀势', val: `${band}`, color: '#ffd35a' },
+      { label: 'entryAttack', val: `${stats.entryAttack}`, color: '#fff' },
+      { label: 'currentAttack', val: `${currentAtk.toFixed(0)}`, color: '#fff' },
+      { label: 'bladeBonus', val: `${(bonus*100).toFixed(0)}%`, color: '#5bc0ff' },
+      { label: 'skillCoeff', val: '1.00', color: '#888' },
+    ];
     if (last?.resolvedDamage) {
-      ln('lastDmg', `${last.resolvedDamage}`, '#e74c3c');
-      ln('effectiveHP', `${last.effectiveHpLoss}`, '#f39c12');
+      rows.push({ label: 'resolvedDmg', val: `${last.resolvedDamage}`, color: '#e74c3c' });
+      rows.push({ label: 'effHpLoss', val: `${last.effectiveHpLoss}`, color: '#f39c12' });
     }
     const tgt = this._numericalTestTarget;
-    if (tgt) ln('targetHP', `${tgt.hp}/${tgt.maxHp}`, '#2ecc71');
+    if (tgt) rows.push({ label: 'targetHP', val: `${tgt.hp}/${tgt.maxHp}`, color: '#2ecc71' });
+    ctx.font = '10px "Consolas", monospace';
+    const startRowY = topY + 32;
+    const rowH = 15;
+    const labelX = x + 10;
+    const valX = x + cardW - 10;
+    rows.forEach((row, i) => {
+      const ry = startRowY + i * rowH;
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#888';
+      ctx.fillText(row.label, labelX, ry);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = row.color;
+      ctx.fillText(row.val, valX, ry);
+    });
+    ctx.restore();
+  }
+
+  /** 火环威胁验证卡片（紧凑，debug=1 + 火环精英阶段） */
+  private _drawThreatVerificationCard(ctx: CanvasRenderingContext2D): void {
+    if (!this.debugEnabled) return;
+    const isElitePhase = this._eliteFireRings.length > 0 ||
+      this.enemies.some(e => e.kind === "elite" && e.eliteKind === "fireRing" && e.alive);
+    if (!isElitePhase && !this._threatVerifyLastResult) return;
+    const aliveRings = this._eliteFireRings.filter(fr => fr.alive).length;
+    if (aliveRings !== this._threatVerifyAliveRings) {
+      this._threatVerifyAliveRings = aliveRings;
+    }
+    const cardW = 148; const cardH = 106;
+    const x = 6; const topY = 160;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.82)';
+    const r = 6;
+    ctx.beginPath();
+    ctx.moveTo(x + r, topY); ctx.lineTo(x + cardW - r, topY);
+    ctx.arcTo(x + cardW, topY, x + cardW, topY + r, r);
+    ctx.lineTo(x + cardW, topY + cardH - r);
+    ctx.arcTo(x + cardW, topY + cardH, x + cardW - r, topY + cardH, r);
+    ctx.lineTo(x + r, topY + cardH);
+    ctx.arcTo(x, topY + cardH, x, topY + cardH - r, r);
+    ctx.lineTo(x, topY + r);
+    ctx.arcTo(x, topY, x + r, topY, r);
+    ctx.fill();
+    ctx.fillStyle = '#f39c12';
+    ctx.font = 'bold 10px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('火环威胁验证', x + cardW / 2, topY + 13);
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.beginPath(); ctx.moveTo(x + 8, topY + 18); ctx.lineTo(x + cardW - 8, topY + 18); ctx.stroke();
+    const rows = [
+      { l: '存活火环', v: `${this._threatVerifyAliveRings}`, c: '#f39c12' },
+    ];
+    if (this._threatVerifyLastResult) {
+      rows.push({ l: '火环HP', v: `${this._threatVerifyLastHpBefore}→${this._threatVerifyLastHpAfter}`, c: '#fff' });
+      rows.push({ l: '结果', v: this._threatVerifyLastResult, c: this._threatVerifyLastResult === 'DESTROYED' ? '#e74c3c' : '#f39c12' });
+    }
+    rows.push({ l: '击杀数', v: `${this.stats.kills}`, c: '#fff' });
+    rows.push({ l: '宝箱进度', v: `${this._chestRuntime?.progress ?? 0}`, c: '#5bc0ff' });
+    ctx.font = '10px "Consolas", monospace';
+    const sx = x + 8; const vx = x + cardW - 8; const rh = 15;
+    rows.forEach((row, i) => {
+      const ry = topY + 30 + i * rh;
+      ctx.textAlign = 'left'; ctx.fillStyle = '#888'; ctx.fillText(row.l, sx, ry);
+      ctx.textAlign = 'right'; ctx.fillStyle = row.c; ctx.fillText(row.v, vx, ry);
+    });
     ctx.restore();
   }
 
@@ -3472,7 +3569,12 @@ export class Game {
         };
         const result = resolveThreatDamage(req, fr.hp, fr.hp, fr.alive, false);
         if (result && result.isAccepted && result.effectiveHpLoss > 0) {
+          const hpBefore = fr.hp;
           fr.hp -= result.effectiveHpLoss;
+          // 0807-11B-1: 威胁验证追踪
+          this._threatVerifyLastHpBefore = hpBefore;
+          this._threatVerifyLastHpAfter = fr.hp;
+          this._threatVerifyLastResult = fr.hp <= 0 ? 'DESTROYED' : 'DAMAGED';
           if (fr.hp <= 0) {
             fr.alive = false;
           }
