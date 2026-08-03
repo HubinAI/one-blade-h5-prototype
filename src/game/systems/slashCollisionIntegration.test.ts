@@ -4,7 +4,7 @@ import { LEVELS } from "../../data/levels";
 import { segmentHitCircle } from "./collisionSystem";
 
 function makeGame() {
-  const game = new Game(LEVELS[0], false, "", []);
+  const game = new Game(LEVELS[0], (() => {}) as any);
   (game as any).debugEnabled = true;
   (game as any)._numericalTestMode = true;
   (game as any)._spawnNumericalTestTarget();
