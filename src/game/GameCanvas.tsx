@@ -124,6 +124,9 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
       } else if (event.key.toLowerCase() === "u") {
         // V0731012: 调试用授予凝霜令
         (window as any).__grantFrost?.();
+      } else if (event.key.toLowerCase() === "s") {
+        // 0807-11A: 调试跳过新手教学
+        gameRef.current?.skipSwipeTutorial();
       }
     };
 

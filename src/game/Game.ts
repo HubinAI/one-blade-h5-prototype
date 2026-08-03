@@ -339,6 +339,15 @@ export class Game {
   private _tutorialGroupEnemyIds = new Set<string>();
   private _tutorialGroupReady = false;
 
+  // 0807-11A: 新手挥刀教学
+  private _swipeTutorialPhase: 'idle' | 'waiting_stable' | 'active' | 'success' | 'skipped' = 'idle';
+  private _swipeTutorialFingerTime = 0;
+  private _swipeTutorialPath: { start: Vec2; end: Vec2 } | null = null;
+  private _swipeTutorialErrorCount = 0;
+  private _swipeTutorialHintTimer = 0;
+  private _swipeTutorialStableAt = 0;
+  static readonly SWIPE_TUTORIAL_DONE_KEY = "one_blade_swipe_tutorial_done";
+
   /** V0730016: 刀势审计 — 前12秒每帧记录energy delta */
   private _energyAuditStart = 0;
   private _energyAuditPrev = 0;
@@ -838,6 +847,20 @@ export class Game {
     this._tutorialGroupEnemyIds = new Set();
     this._tutorialGroupReady = false;
 
+    // 0807-11A: 初始化新手挥刀教学（独立于resetRunState，persist到localStorage）
+    if (this.gameMode === "normal" && this.isLogicalLevel1()) {
+      try {
+        if (!window.localStorage.getItem(Game.SWIPE_TUTORIAL_DONE_KEY)) {
+          this._swipeTutorialPhase = 'waiting_stable';
+          this._swipeTutorialFingerTime = 0;
+          this._swipeTutorialPath = null;
+          this._swipeTutorialErrorCount = 0;
+          this._swipeTutorialHintTimer = 0;
+          this._swipeTutorialStableAt = 0;
+        }
+      } catch (_) { /* localStorage unavailable */ }
+    }
+
     // 首局教学检测（Boss模式不触发）
     this.isFirstRun = (this.gameMode !== "boss" && this.gameMode !== "chaseFlash") && this.isLogicalLevel1() && !window.localStorage.getItem("one_blade_first_run_done");
     if (this.isFirstRun) {
@@ -1082,6 +1105,14 @@ export class Game {
       return;
     }
 
+    // 0807-11A: 教学暂停 — 冻结战斗（enemies/计时/伤害暂停），保留渲染与输入
+    if (this._swipeTutorialPhase === 'active') {
+      this._updateSwipeTutorial(frameDt);
+      this.updateParticles(frameDt);
+      this.updateTexts(frameDt);
+      return;
+    }
+
     this.elapsed += scaledDt;
     this.regenDelayTimer = Math.max(0, this.regenDelayTimer - scaledDt);
     this.chestMomentumTimer = Math.max(0, this.chestMomentumTimer - scaledDt);
@@ -1205,6 +1236,7 @@ export class Game {
     this.drawEnemies(ctx);
     this._drawFireRings(ctx); // V0801008
     this.drawTractorLinks(ctx);
+    this._drawSwipeTutorial(ctx); // 0807-11A: 教学覆盖层
     // 远景山间雾气遮罩（敌人从雾后现身）
     this.drawTopMist(ctx);
     this.drawSlash(ctx);
@@ -1699,6 +1731,8 @@ export class Game {
       }
       return;
     }
+    // 0807-11A: 教学触发前锁定挥刀（不生成真实刀光）
+    if (this._swipeTutorialPhase === 'waiting_stable') return;
     if (this.phase !== "playing") return;
     // V0730001: 0刀势也能挥刀，不再检查 canSlash。
     // 仅以下情况允许输入锁定：弹窗、暂停、结算、Boss演出或不可交互状态、明确的状态机输入锁。
@@ -1978,6 +2012,17 @@ export class Game {
       this.finalizeBossSlashCommon(trail);
       return;
     }
+
+    // 0807-11A: 教学挥刀检测（在结算前，避免miss时产生副作用）
+    if (this._swipeTutorialPhase === 'active') {
+      const tutHits = [...trail.hitEnemyIds].filter(id => this._tutorialGroupEnemyIds.has(id));
+      if (tutHits.length < 2) {
+        this._handleTutorialMiss();
+        this.currentSlash = undefined;
+        return;
+      }
+    }
+
     this.resolvePendingSlash(trail);
     const last = trail.points[trail.points.length - 1];
 
@@ -2218,6 +2263,11 @@ export class Game {
       triggeredExplosive: trail.explosionCount > 0,
       triggeredCore: trail.coreCollapseCount > 0
     });
+
+    // 0807-11A: 教学挥刀成功（真实结算已完成，标记完成）
+    if (this._swipeTutorialPhase === 'active') {
+      this._handleTutorialSuccess();
+    }
 
     this.currentSlash = undefined;
   }
@@ -2848,6 +2898,133 @@ export class Game {
     }
   }
 
+  // ═══════════════════════════════════════════════════════
+  // 0807-11A: 新手挥刀教学状态机
+  // ═══════════════════════════════════════════════════════
+
+  /** 教学状态机：waiting_stable → active → success/skipped → idle */
+  private _updateSwipeTutorial(dt: number): void {
+    switch (this._swipeTutorialPhase) {
+      case 'waiting_stable': {
+        // 等待G1全部敌人完成入场并稳定
+        const tutorialEnemies = this.enemies.filter(
+          e => this._tutorialGroupEnemyIds.has(e.id) && e.alive
+        );
+        const allStable = tutorialEnemies.length >= 3 &&
+          tutorialEnemies.every(e => !e.entryPhase?.active && e.entryPhase?.completed);
+        if (allStable) {
+          if (this._swipeTutorialStableAt === 0) {
+            this._swipeTutorialStableAt = this.elapsed + 0.25; // 短暂稳定延迟
+          } else if (this.elapsed >= this._swipeTutorialStableAt) {
+            this._enterSwipeTutorialActive();
+          }
+        }
+        break;
+      }
+      case 'active': {
+        this._swipeTutorialFingerTime += dt;
+        if (this._swipeTutorialHintTimer > 0) {
+          this._swipeTutorialHintTimer -= dt;
+        }
+        break;
+      }
+      case 'success': {
+        // 提示显示计时
+        if (this._swipeTutorialHintTimer > 0) {
+          this._swipeTutorialHintTimer -= dt;
+        } else {
+          this._swipeTutorialPhase = 'idle';
+          this._swipeTutorialErrorCount = 0;
+          this._swipeTutorialPath = null;
+        }
+        break;
+      }
+      case 'skipped': {
+        // 跳过后立即清理
+        this._swipeTutorialPhase = 'idle';
+        this._swipeTutorialPath = null;
+        this._swipeTutorialErrorCount = 0;
+        break;
+      }
+    }
+  }
+
+  /** 进入教学active：暂停战斗、生成推荐路径 */
+  private _enterSwipeTutorialActive(): void {
+    this._swipeTutorialPhase = 'active';
+    this._swipeTutorialFingerTime = 0;
+    this._swipeTutorialErrorCount = 0;
+    this._generateTutorialPath();
+  }
+
+  /** 生成穿过所有教学敌人的推荐刀路 */
+  private _generateTutorialPath(): void {
+    const enemies = this.enemies.filter(
+      e => this._tutorialGroupEnemyIds.has(e.id) && e.alive
+    );
+    if (enemies.length < 2) { this._swipeTutorialPath = null; return; }
+    const sorted = [...enemies].sort((a, b) => a.x - b.x);
+    const midY = sorted.reduce((s, e) => s + e.y, 0) / sorted.length;
+    this._swipeTutorialPath = {
+      start: { x: sorted[0].x - 36, y: midY },
+      end: { x: sorted[sorted.length - 1].x + 36, y: midY },
+    };
+  }
+
+  /** 检测教学挥刀是否命中足够数量的敌人（宽松判定） */
+  private _checkTutorialSlashHit(trail: SlashTrail): boolean {
+    if (!trail || trail.points.length < 2) return false;
+    const enemies = this.enemies.filter(
+      e => this._tutorialGroupEnemyIds.has(e.id) && e.alive
+    );
+    if (enemies.length < 2) return false;
+    // 教学宽容半径（比普通命中大）
+    const expandedR = 35;
+    const hit = new Set<string>();
+    for (let i = 1; i < trail.points.length; i++) {
+      const a = trail.points[i - 1];
+      const b = trail.points[i];
+      for (const e of enemies) {
+        if (!hit.has(e.id) && segmentHitCircle(a, b, e, expandedR)) {
+          hit.add(e.id);
+        }
+      }
+    }
+    return hit.size >= 2;
+  }
+
+  /** 教学挥刀失败：退还刀势、增强推荐线 */
+  private _handleTutorialMiss(): void {
+    this.energy = clamp(
+      this.energy + BLADE_MOMENTUM_CONFIG.slash.baseCost,
+      0,
+      this.bladeMomentumMax
+    );
+    this._swipeTutorialErrorCount++;
+    this._swipeTutorialFingerTime = 0; // 重置手指动画
+  }
+
+  /** 教学挥刀成功：标记完成、显示提示 */
+  private _handleTutorialSuccess(): void {
+    this._swipeTutorialPhase = 'success';
+    this._swipeTutorialHintTimer = 1.2;
+    this.addText(DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2 - 30, "一刀多斩，刀势涨得更快", "#ffd35a", 16, 1.2);
+    try {
+      window.localStorage.setItem(Game.SWIPE_TUTORIAL_DONE_KEY, "1");
+    } catch (_) { /* localStorage unavailable */ }
+  }
+
+  /** 调试跳过教学 */
+  skipSwipeTutorial(): void {
+    if (this._swipeTutorialPhase === 'active' || this._swipeTutorialPhase === 'waiting_stable') {
+      this._swipeTutorialPhase = 'idle';
+      this._swipeTutorialPath = null;
+      this._swipeTutorialErrorCount = 0;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════
+
   /** P3.8：军令弹窗是否正在暂停战斗 */
   private isEdictModalBlocking(): boolean {
     return this.edictRewardState === "modal" && this.chestPendingConfirm;
@@ -3050,7 +3227,9 @@ export class Game {
         continue; // 跳过默认碰撞检测
       }
 
-      if (segmentHitCircle(a, b, enemy, enemy.radius + bladeReach)) {
+      // 0807-11A: 教学宽容判定 — 临时扩大命中范围
+      const tutorialPad = (this._swipeTutorialPhase === 'active' && this._tutorialGroupEnemyIds.has(enemy.id)) ? 17 : 0;
+      if (segmentHitCircle(a, b, enemy, enemy.radius + bladeReach + tutorialPad)) {
         trail.hitEnemyIds.add(enemy.id);
         this.handleEnemyHit(enemy, trail);
         // 破绽检测：主刀命中带破绽标记的敌人
@@ -7692,6 +7871,110 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       }
       ctx.restore();
     }
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // 0807-11A: 新手教学覆盖层渲染
+  // ═══════════════════════════════════════════════════════
+
+  private _drawSwipeTutorial(ctx: CanvasRenderingContext2D): void {
+    if (this._swipeTutorialPhase !== 'active') return;
+    const path = this._swipeTutorialPath;
+    if (!path) return;
+
+    ctx.save();
+
+    // ─ 半透明遮罩（压暗非教学区域） ─
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+    ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+
+    // ─ 推荐刀路 ─
+    const alpha = 0.5 + this._swipeTutorialErrorCount * 0.15; // 错误后增强可见度
+    const glowAlpha = Math.min(0.35, this._swipeTutorialErrorCount * 0.08);
+    const glowColor = `rgba(255, 211, 90, ${glowAlpha})`;
+    const lineColor = `rgba(255, 211, 90, ${alpha})`;
+
+    // 发光外圈
+    ctx.strokeStyle = glowColor;
+    ctx.lineWidth = 6 + this._swipeTutorialErrorCount * 1.5;
+    ctx.beginPath();
+    ctx.setLineDash([8, 6]);
+    ctx.moveTo(path.start.x, path.start.y);
+    ctx.lineTo(path.end.x, path.end.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 主线
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(path.start.x, path.start.y);
+    ctx.lineTo(path.end.x, path.end.y);
+    ctx.stroke();
+
+    // 端点箭头标记
+    const arrowR = 5;
+    [path.start, path.end].forEach(pt => {
+      ctx.fillStyle = lineColor;
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, arrowR, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // ─ 循环手指动画 ─
+    const cycleTime = 1.8; // 完整循环周期
+    const t = (this._swipeTutorialFingerTime % cycleTime) / cycleTime; // 0→1 循环
+
+    // 手指位置沿路径往返
+    let posOnPath: number;
+    if (t < 0.5) {
+      posOnPath = t * 2; // 0→1 去程
+    } else {
+      posOnPath = (1 - t) * 2; // 1→0 回程
+    }
+    const fx = path.start.x + (path.end.x - path.start.x) * posOnPath;
+    const fy = path.start.y + (path.end.y - path.start.y) * posOnPath;
+
+    // 手指圆形
+    const fingerR = 12;
+    const pulseR = fingerR + 4 + Math.sin(this._swipeTutorialFingerTime * 6) * 2;
+    ctx.fillStyle = 'rgba(255, 211, 90, 0.85)';
+    ctx.beginPath();
+    ctx.arc(fx, fy, fingerR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 脉冲光环
+    ctx.strokeStyle = 'rgba(255, 211, 90, 0.4)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(fx, fy, pulseR, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // 手指方向指示（小三角）
+    const dir = posOnPath < 0.02 ? 0 : (path.end.x - path.start.x) / Math.abs(path.end.x - path.start.x || 1);
+    const arrowX = fx + dir * 16;
+    ctx.fillStyle = 'rgba(255, 211, 90, 0.9)';
+    ctx.beginPath();
+    ctx.moveTo(arrowX, fy);
+    ctx.lineTo(arrowX - dir * 10, fy - 7);
+    ctx.lineTo(arrowX - dir * 10, fy + 7);
+    ctx.closePath();
+    ctx.fill();
+
+    // ─ "滑动挥刀" 文字 ─
+    const textY = Math.min(path.start.y, path.end.y) - 36;
+    const textX = (path.start.x + path.end.x) / 2;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.font = 'bold 18px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('滑动挥刀', textX, textY);
+
+    // 文字阴影增强可读性
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillText('滑动挥刀', textX + 1, textY + 1);
+
+    ctx.restore();
   }
 
   private drawEnemies(ctx: CanvasRenderingContext2D) {
