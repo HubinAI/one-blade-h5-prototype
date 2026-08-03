@@ -360,6 +360,7 @@ export class Game {
   private _aggDebugTarget: { x: number; y: number; radius: number; hp: number; maxHp: number; alive: boolean; id: string; flash: number } | null = null;
   private _aggDebugTriple: { actionId: string; segments: number; damage: number } | null = null;
   private _aggDebugScorch: { ticks: number; pending: number; flushReason: string } | null = null;
+  private _burstTimers: ReturnType<typeof setTimeout>[] = [];
   private _numericalTestTarget: Enemy | null = null;
   private _numericalTestPaused = false;
   /** 火环威胁验证追踪 */
@@ -7532,7 +7533,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     x: number, y: number,
     targetType: 'NORMAL' | 'ELITE' | 'BOSS' | 'MECHANIC',
     isKill: boolean,
-    options?: { sourceType?: string; isDot?: boolean; isDerived?: boolean; sizeMultiplier?: number; priorityOverlay?: FloatPriority; }
+    options?: { sourceType?: string; isDot?: boolean; isDerived?: boolean; sizeMultiplier?: number; priorityOverlay?: FloatPriority; duration?: number; }
   ): void {
     const ratioR = referenceAttack > 0 ? damage / referenceAttack : 0;
     const tier = resolveDamageTier(ratioR);
@@ -7556,7 +7557,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const color = tier.baseColor;
 
     this.addCombatFloat({
-      x, y: y - 6, text, color, size: fontSize, duration: tier.duration,
+      x, y: y - 6, text, color, size: fontSize, duration: options?.duration ?? tier.duration,
       category: 'damage',
       priority: priority === FloatPriority.P0 ? 'A' : priority === FloatPriority.P1 ? 'A' : priority === FloatPriority.P2 ? 'B' : 'C',
       mergeKey: `main_${this.texts.filter(t => t.category === 'damage').length}_${Date.now()}`,
@@ -7642,6 +7643,34 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     for (const [k, t] of this._aggTimers) { clearTimeout(t); }
     this._aggTimers.clear();
     this._aggBuffer.clear();
+    for (const t of this._burstTimers) { clearTimeout(t); }
+    this._burstTimers = [];
+  }
+
+  burstSlashFloats(hits: { damage: number; x: number; y: number; isKill: boolean }[], refAtk: number, slashId: string): void {
+    if (hits.length === 0) return;
+    const sorted = [...hits].sort((a, b) => a.x - b.x);
+    const mainIndices = sorted.length <= 3 ? sorted.map((_, i) => i) : [0, Math.floor(sorted.length / 2), sorted.length - 1];
+    const mainSet = new Set(mainIndices);
+    const iv = Math.min(25, Math.max(18, 200 / sorted.length));
+    sorted.forEach((hit, i) => {
+      const isMain = mainSet.has(i);
+      const dur = isMain ? 0.60 : 0.40; const szMul = isMain ? 1.0 : 0.78;
+      const off = (i % 2 === 0 ? -12 : 12);
+      const t = setTimeout(() => {
+        this.emitDamageFloat(hit.damage, refAtk, hit.x, hit.y + off, 'NORMAL', hit.isKill, { sourceType: 'MAIN_SLASH', sizeMultiplier: szMul, duration: dur });
+      }, i * iv);
+      this._burstTimers.push(t);
+    });
+    if (sorted.length >= 6) {
+      const lh = sorted[sorted.length - 1];
+      const delay = (sorted.length - 1) * iv + 50;
+      const label = sorted.length >= 10 ? `一刀十斩 x${sorted.length}` : `连斩 x${sorted.length}`;
+      const t = setTimeout(() => {
+        this.addCombatFloat({ x: lh.x, y: lh.y - 20, text: label, color: '#ffd35a', size: 22, duration: 0.80, category: 'blade-tier', priority: 'A', mergeKey: `summary_${slashId}` });
+      }, delay);
+      this._burstTimers.push(t);
+    }
   }
 
   private addText(
