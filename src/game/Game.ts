@@ -340,7 +340,7 @@ export class Game {
   private _tutorialGroupReady = false;
 
   // 0807-11A: 新手挥刀教学
-  private _swipeTutorialPhase: 'idle' | 'waiting_stable' | 'active' | 'success' | 'skipped' = 'idle';
+  private _swipeTutorialPhase: 'idle' | 'waiting_stable' | 'active' | 'success' = 'idle';
   private _swipeTutorialFingerTime = 0;
   private _swipeTutorialPath: { start: Vec2; end: Vec2 } | null = null;
   private _swipeTutorialErrorCount = 0;
@@ -2905,7 +2905,7 @@ export class Game {
   // 0807-11A: 新手挥刀教学状态机
   // ═══════════════════════════════════════════════════════
 
-  /** 教学状态机：waiting_stable → active → success/skipped → idle */
+  /** 教学状态机：waiting_stable → active → success → idle */
   private _updateSwipeTutorial(dt: number): void {
     switch (this._swipeTutorialPhase) {
       case 'waiting_stable': {
@@ -2945,13 +2945,6 @@ export class Game {
         }
         break;
       }
-      case 'skipped': {
-        // 跳过后立即清理
-        this._swipeTutorialPhase = 'idle';
-        this._swipeTutorialPath = null;
-        this._swipeTutorialErrorCount = 0;
-        break;
-      }
     }
   }
 
@@ -2981,27 +2974,6 @@ export class Game {
   }
 
   /** 检测教学挥刀是否命中足够数量的敌人（宽松判定） */
-  private _checkTutorialSlashHit(trail: SlashTrail): boolean {
-    if (!trail || trail.points.length < 2) return false;
-    const enemies = this.enemies.filter(
-      e => this._tutorialGroupEnemyIds.has(e.id) && e.alive
-    );
-    if (enemies.length < 2) return false;
-    // 教学宽容半径（比普通命中大）
-    const expandedR = 35;
-    const hit = new Set<string>();
-    for (let i = 1; i < trail.points.length; i++) {
-      const a = trail.points[i - 1];
-      const b = trail.points[i];
-      for (const e of enemies) {
-        if (!hit.has(e.id) && segmentHitCircle(a, b, e, expandedR)) {
-          hit.add(e.id);
-        }
-      }
-    }
-    return hit.size >= 2;
-  }
-
   /** 教学挥刀失败：退还刀势、短暂增强推荐线 */
   private _handleTutorialMiss(): void {
     this.energy = clamp(
