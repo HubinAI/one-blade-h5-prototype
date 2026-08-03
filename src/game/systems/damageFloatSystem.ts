@@ -48,7 +48,7 @@ export enum FloatPriority {
   P3 = 'P3', // 低
 }
 
-export const FLOAT_PRIORITY_ORDER: FloatPriority[] = ['P0', 'P1', 'P2', 'P3'];
+export const FLOAT_PRIORITY_ORDER: readonly FloatPriority[] = [FloatPriority.P0, FloatPriority.P1, FloatPriority.P2, FloatPriority.P3];
 
 // ══════════════════════════════════════════════
 // 同屏上限配置

@@ -3537,7 +3537,7 @@ export class Game {
           if (r.isKill) t.alive = false;
           t.flash = 0.25;
           this.particles.push(...sparkBurst({ x: t.x, y: t.y }, 6, "#9b59b6"));
-          const curAttack = getCurrentAttack(s, DAMAGE_SOURCE_REGISTRY.MAIN_SLASH);
+          const curAttack = getCurrentAttack(s);
           this.emitDamageFloat(r.resolvedDamage, curAttack, t.x, t.y - 14, 'NORMAL', r.isKill ?? false, { sourceType: 'MAIN_SLASH' });
         }
       }
@@ -3869,7 +3869,7 @@ export class Game {
       if (result && result.isAccepted && result.effectiveHpLoss > 0) {
         this._lastDamageResult = result;
         this.damageEnemy(enemy, result.effectiveHpLoss, trail, false, "paper");
-        const curAttack = getCurrentAttack(stats, DAMAGE_SOURCE_REGISTRY.MAIN_SLASH);
+        const curAttack = getCurrentAttack(stats);
         this.emitDamageFloat(result.resolvedDamage, curAttack, enemy.x, enemy.y - 14, 'NORMAL', result.isKill ?? false, { sourceType: 'MAIN_SLASH' });
       }
       AudioService.slashHit();
@@ -7541,10 +7541,19 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const text = `${damage}`;
     const color = tier.baseColor;
 
-    this.addText(x, y, text, color, fontSize, tier.duration);
-    // 大伤害添加 extra glow
+    this.addCombatFloat({
+      x, y: y - 6, text, color, size: fontSize, duration: tier.duration,
+      category: 'damage',
+      priority: priority === FloatPriority.P0 ? 'A' : priority === FloatPriority.P1 ? 'A' : priority === FloatPriority.P2 ? 'B' : 'C',
+      mergeKey: options?.sourceType ?? 'MAIN_SLASH',
+    });
+    // D3+ 额外发光
     if (ratioR >= 1.15) {
-      this.addText(x + 1, y - 1, text, color, fontSize, tier.duration * 0.8);
+      this.addCombatFloat({
+        x: x + 1, y: y - 8, text, color, size: fontSize, duration: tier.duration * 0.75,
+        category: 'damage', priority: 'C',
+        mergeKey: `glow_${options?.sourceType ?? 'MAIN_SLASH'}`,
+      });
     }
   }
 
