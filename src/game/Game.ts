@@ -26,6 +26,7 @@ import { BLADE_MOMENTUM_CONFIG, DEFAULT_BLADE_RUN_MODIFIERS, type BladeMomentumS
 import { createBladeMomentumState, applyBladeMaxChangePreserveRatio, resolveBladeMomentumBand, resolveBladeMomentumRatio, resolveBladeMomentumEffect, resolveBladeGainMultiplier, resolveBladePassiveRecovery, resolveBladeMomentumAfterSlash, spendBladeMomentum, gainBladeMomentum, changeBladeMomentumMaxPreserveRatio, resolveMultiSlashBonus, type BladeMomentumSettleInput, type BladeMomentumSettleOutput } from "./systems/bladeMomentum";
 import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles";
 import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, resolveDamage, resolveThreatDamage, type PlayerRunStats, type DamageRequest, type DamageResult, type DamageSourceType } from "./systems/damageSystem";
+import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
@@ -3536,6 +3537,8 @@ export class Game {
           if (r.isKill) t.alive = false;
           t.flash = 0.25;
           this.particles.push(...sparkBurst({ x: t.x, y: t.y }, 6, "#9b59b6"));
+          const curAttack = getCurrentAttack(s, DAMAGE_SOURCE_REGISTRY.MAIN_SLASH);
+          this.emitDamageFloat(r.resolvedDamage, curAttack, t.x, t.y - 14, 'NORMAL', r.isKill ?? false, { sourceType: 'MAIN_SLASH' });
         }
       }
     }
@@ -3866,6 +3869,8 @@ export class Game {
       if (result && result.isAccepted && result.effectiveHpLoss > 0) {
         this._lastDamageResult = result;
         this.damageEnemy(enemy, result.effectiveHpLoss, trail, false, "paper");
+        const curAttack = getCurrentAttack(stats, DAMAGE_SOURCE_REGISTRY.MAIN_SLASH);
+        this.emitDamageFloat(result.resolvedDamage, curAttack, enemy.x, enemy.y - 14, 'NORMAL', result.isKill ?? false, { sourceType: 'MAIN_SLASH' });
       }
       AudioService.slashHit();
       return;
@@ -7505,6 +7510,42 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.hintSeen.add(id);
     this.persistSeenHints();
     this.addText(clamp(x, 72, DESIGN_WIDTH - 72), clamp(y, 104, 668), text, "#fff0ba", 16, life);
+  }
+
+  emitDamageFloat(
+    damage: number,
+    referenceAttack: number,
+    x: number, y: number,
+    targetType: 'NORMAL' | 'ELITE' | 'BOSS' | 'MECHANIC',
+    isKill: boolean,
+    options?: { sourceType?: string; isDot?: boolean; isDerived?: boolean; sizeMultiplier?: number; priorityOverlay?: FloatPriority; }
+  ): void {
+    const ratioR = referenceAttack > 0 ? damage / referenceAttack : 0;
+    const tier = resolveDamageTier(ratioR);
+    let priority: FloatPriority;
+    if (ratioR >= 2.0 || isKill && (targetType === 'ELITE' || targetType === 'BOSS')) priority = FloatPriority.P0;
+    else if (ratioR >= 1.5 || targetType === 'ELITE') priority = FloatPriority.P1;
+    else if (isKill) priority = FloatPriority.P2;
+    else priority = FloatPriority.P3;
+
+    if (options?.priorityOverlay) {
+      const overlay = FloatPriority;
+      const priOrder = [FloatPriority.P0, FloatPriority.P1, FloatPriority.P2, FloatPriority.P3];
+      if (priOrder.indexOf(priority) > priOrder.indexOf(options.priorityOverlay)) {
+        priority = options.priorityOverlay;
+      }
+    }
+
+    const sizeMul = options?.sizeMultiplier ?? 1.0;
+    const fontSize = tier.fontSize * sizeMul;
+    const text = `${damage}`;
+    const color = tier.baseColor;
+
+    this.addText(x, y, text, color, fontSize, tier.duration);
+    // 大伤害添加 extra glow
+    if (ratioR >= 1.15) {
+      this.addText(x + 1, y - 1, text, color, fontSize, tier.duration * 0.8);
+    }
   }
 
   private addText(
