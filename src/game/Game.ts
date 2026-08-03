@@ -7647,27 +7647,59 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._burstTimers = [];
   }
 
-  burstSlashFloats(hits: { damage: number; x: number; y: number; isKill: boolean }[], refAtk: number, slashId: string): void {
+  burstSlashFloats(hits: { damage: number; x: number; y: number; isKill: boolean; isElite?: boolean }[], refAtk: number, slashId: string): void {
+    this.clusterSlashFloats(hits, refAtk, slashId);
+  }
+
+  clusterSlashFloats(hits: { damage: number; x: number; y: number; isKill: boolean; isElite?: boolean }[], refAtk: number, slashId: string): void {
     if (hits.length === 0) return;
     const sorted = [...hits].sort((a, b) => a.x - b.x);
-    const mainIndices = sorted.length <= 3 ? sorted.map((_, i) => i) : [0, Math.floor(sorted.length / 2), sorted.length - 1];
-    const mainSet = new Set(mainIndices);
-    const iv = Math.min(25, Math.max(18, 200 / sorted.length));
-    sorted.forEach((hit, i) => {
-      const isMain = mainSet.has(i);
-      const dur = isMain ? 0.60 : 0.40; const szMul = isMain ? 1.0 : 0.78;
-      const off = (i % 2 === 0 ? -12 : 12);
+    const elites = sorted.filter(h => h.isElite);
+    const norms = sorted.filter(h => !h.isElite);
+    const groups: { damage: number; x: number; y: number; count: number }[] = [];
+
+    // 精英独立显示
+    for (const e of elites) {
+      groups.push({ damage: e.damage, x: e.x, y: e.y, count: 1 });
+    }
+
+    // 普通目标聚类
+    const n = norms.length;
+    let maxGroups: number;
+    if (n <= 3) maxGroups = n;
+    else if (n <= 6) maxGroups = 3;
+    else if (n <= 9) maxGroups = 4;
+    else maxGroups = 5;
+
+    if (n > 0 && maxGroups > 0) {
+      const groupSize = Math.max(1, Math.ceil(n / maxGroups));
+      for (let g = 0; g < maxGroups && g * groupSize < n; g++) {
+        const slice = norms.slice(g * groupSize, (g + 1) * groupSize);
+        if (slice.length === 0) break;
+        const cx = slice.reduce((s, h) => s + h.x, 0) / slice.length;
+        const cy = slice.reduce((s, h) => s + h.y, 0) / slice.length;
+        const totalDmg = slice.reduce((s, h) => s + h.damage, 0);
+        groups.push({ damage: totalDmg, x: cx, y: cy, count: slice.length });
+      }
+    }
+
+    const iv = 35;
+    groups.forEach((grp, i) => {
+      const dur = 0.45; const szMul = 0.85;
+      const text = grp.count >= 2 ? `${grp.damage} x${grp.count}` : `${grp.damage}`;
       const t = setTimeout(() => {
-        this.emitDamageFloat(hit.damage, refAtk, hit.x, hit.y + off, 'NORMAL', hit.isKill, { sourceType: 'MAIN_SLASH', sizeMultiplier: szMul, duration: dur });
+        this.addCombatFloat({ x: grp.x, y: grp.y - 6, text, color: '#ffffff', size: 18 * szMul, duration: dur, category: 'damage', priority: 'A', mergeKey: `cluster_${slashId}_${i}` });
       }, i * iv);
       this._burstTimers.push(t);
     });
-    if (sorted.length >= 6) {
-      const lh = sorted[sorted.length - 1];
-      const delay = (sorted.length - 1) * iv + 50;
-      const label = sorted.length >= 10 ? `一刀十斩 x${sorted.length}` : `连斩 x${sorted.length}`;
+
+    // 连斩总结（≥4）
+    if (hits.length >= 4) {
+      const last = groups[groups.length - 1];
+      const delay = (groups.length - 1) * iv + 50;
+      const label = hits.length >= 10 ? `一刀十斩 x${hits.length}` : hits.length >= 6 ? `连斩 x${hits.length}` : `连斩 x${hits.length}`;
       const t = setTimeout(() => {
-        this.addCombatFloat({ x: lh.x, y: lh.y - 20, text: label, color: '#ffd35a', size: 22, duration: 0.80, category: 'blade-tier', priority: 'A', mergeKey: `summary_${slashId}` });
+        this.addCombatFloat({ x: last.x, y: last.y - 20, text: label, color: '#ffd35a', size: hits.length >= 10 ? 26 : 22, duration: 0.65, category: 'blade-tier', priority: 'A', mergeKey: `summary_${slashId}` });
       }, delay);
       this._burstTimers.push(t);
     }

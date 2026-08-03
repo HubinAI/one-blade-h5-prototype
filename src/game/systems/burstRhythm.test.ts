@@ -7,29 +7,27 @@ describe('爆发节奏', () => {
     return new Game(LEVELS[0], (() => {}) as any);
   }
 
-  it('3 目标 → 3 个主数字', () => {
+  it('3 目标 → 3 组独立显示', () => {
     const game = makeGame();
-    (game as any).burstSlashFloats([
+    (game as any).clusterSlashFloats([
       { damage: 125, x: 50, y: 400, isKill: false },
       { damage: 125, x: 150, y: 400, isKill: false },
       { damage: 125, x: 250, y: 400, isKill: false },
     ], 100, 's1');
-    // 定时器已排队，验证无崩溃
     expect((game as any)._burstTimers.length).toBeGreaterThanOrEqual(3);
   });
 
-  it('6 目标 → 6 个数字 + 连斩', () => {
+  it('6 目标 → 3 组 + 连斩 >= 4', () => {
     const game = makeGame();
     const hits = Array.from({ length: 6 }, (_, i) => ({ damage: 125, x: 50 + i * 30, y: 400, isKill: false }));
-    (game as any).burstSlashFloats(hits, 100, 's2');
-    // 6 floats + 1 summary = 7 timers
-    expect((game as any)._burstTimers.length).toBeGreaterThanOrEqual(7);
+    (game as any).clusterSlashFloats(hits, 100, 's2');
+    expect((game as any)._burstTimers.length).toBeGreaterThanOrEqual(4);
   });
 
-  it('10 目标 → 10 个数字 + 一刀十斩', () => {
+  it('10 目标 → 5 组 + 一刀十斩 >= 6', () => {
     const game = makeGame();
     const hits = Array.from({ length: 10 }, (_, i) => ({ damage: 125, x: 50 + i * 25, y: 400, isKill: false }));
-    (game as any).burstSlashFloats(hits, 100, 's3');
-    expect((game as any)._burstTimers.length).toBeGreaterThanOrEqual(11);
+    (game as any).clusterSlashFloats(hits, 100, 's3');
+    expect((game as any)._burstTimers.length).toBeGreaterThanOrEqual(6);
   });
 });
