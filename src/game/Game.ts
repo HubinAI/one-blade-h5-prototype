@@ -355,7 +355,10 @@ export class Game {
   private _threatVerifyAliveRings = 0;
   private _threatVerifyLastHpBefore = 0;
   private _threatVerifyLastHpAfter = 0;
-  private _threatVerifyLastResult: 'DAMAGED' | 'DESTROYED' | null = null; // 当前挥刀锁定的刀势增伤快照
+  private _threatVerifyLastResult: 'DAMAGED' | 'DESTROYED' | null = null;
+  /** Debug碰撞命中计数 */
+  private _debugTestTargetHits = 0;
+  private _debugFireRingHits = 0; // 当前挥刀锁定的刀势增伤快照
   private _swipeTutorialFingerTime = 0;
   private _swipeTutorialPath: { start: Vec2; end: Vec2 } | null = null;
   private _swipeTutorialErrorCount = 0;
@@ -3096,6 +3099,7 @@ export class Game {
     this._numericalTestMode = !this._numericalTestMode;
     if (this._numericalTestMode) {
       this._spawnNumericalTestTarget();
+      this._debugTestTargetHits = 0;
     } else {
       this._cleanupNumericalTest();
     }
@@ -3118,6 +3122,7 @@ export class Game {
       this._numericalTestTarget.maxHp = 105;
       this._numericalTestTarget.alive = true;
       this._numericalTestTarget.flash = 0;
+      this._debugTestTargetHits = 0;
     }
   }
 
@@ -3236,6 +3241,7 @@ export class Game {
     }
     const tgt = this._numericalTestTarget;
     if (tgt) rows.push({ label: 'targetHP', val: `${tgt.hp}/${tgt.maxHp}`, color: '#2ecc71' });
+    rows.push({ label: 'hitCount', val: `${this._debugTestTargetHits}`, color: '#888' });
     ctx.font = '10px "Consolas", monospace';
     const startRowY = topY + 32;
     const rowH = 15;
@@ -3293,6 +3299,7 @@ export class Game {
     }
     rows.push({ l: '击杀数', v: `${this.stats.kills}`, c: '#fff' });
     rows.push({ l: '宝箱进度', v: `${this._chestRuntime?.progress ?? 0}`, c: '#5bc0ff' });
+    rows.push({ l: 'hitCount', v: `${this._debugFireRingHits}`, c: '#888' });
     ctx.font = '10px "Consolas", monospace';
     const sx = x + 8; const vx = x + cardW - 8; const rh = 15;
     rows.forEach((row, i) => {
@@ -3569,6 +3576,7 @@ export class Game {
         };
         const result = resolveThreatDamage(req, fr.hp, fr.hp, fr.alive, false);
         if (result && result.isAccepted && result.effectiveHpLoss > 0) {
+          this._debugFireRingHits = (this._debugFireRingHits ?? 0) + 1;
           const hpBefore = fr.hp;
           fr.hp -= result.effectiveHpLoss;
           // 0807-11B-1: 威胁验证追踪
@@ -3585,10 +3593,11 @@ export class Game {
         AudioService.armorHit();
       }
     }
-    // 0807-11B-1: Debug数值测试目标碰撞
+    // 0807-11B-1: Debug数值测试目标碰撞（半径加大便于稳定命中）
     if (this._numericalTestMode && this._numericalTestTarget?.alive) {
       const tgt = this._numericalTestTarget;
-      if (segmentHitCircle(a, b, tgt, tgt.radius + bladeReach)) {
+      if (segmentHitCircle(a, b, tgt, tgt.radius + bladeReach + 12)) {
+        this._debugTestTargetHits = (this._debugTestTargetHits ?? 0) + 1;
         const stats = trail._damageSnapshot ?? this.captureDamageSnapshot();
         const req: DamageRequest = {
           actionId: this.nextId("dmg"),
