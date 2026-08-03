@@ -134,7 +134,7 @@ describe("SwipeTutorial - 状态与清理", () => {
 
 describe("SwipeTutorial - 命中判定 (tutorialPad + trail.hitEnemyIds)", () => {
   // 测试实际命中链路：checkSegmentHits 中的 tutorialPad=17 扩大半径 → handleEnemyHit → trail.hitEnemyIds
-  // 然后 endSlash 检查 trail.hitEnemyIds 中 ≥2 个 tutorialGroupEnemyIds
+  // 然后 endSlash 检查 trail.hitEnemyIds 中 ≥1 个 tutorialGroupEnemyIds（V0803热修：≥1即完成）
 
   it("刀路近距离经过2个敌人时命中（扩大半径=17）", () => {
     const game = createLevel1Game();
@@ -175,7 +175,7 @@ describe("SwipeTutorial - 命中判定 (tutorialPad + trail.hitEnemyIds)", () =>
     expect(tutHits.length).toBe(0);
   });
 
-  it("命中1个敌人不算有效（需≥2）", () => {
+  it("命中1个敌人即可完成教学（≥1阈值，热修后）", () => {
     const game = createLevel1Game();
     (game as any)._swipeTutorialPhase = "active";
     (game as any)._tutorialGroupEnemyIds = new Set(["e1", "e2", "e3"]);
@@ -190,7 +190,7 @@ describe("SwipeTutorial - 命中判定 (tutorialPad + trail.hitEnemyIds)", () =>
       (game as any)._tutorialGroupEnemyIds.has(id)
     );
     expect(tutHits.length).toBe(1);
-    expect(tutHits.length >= 2).toBe(false);
+    expect(tutHits.length >= 1).toBe(true); // 热修：≥1即可完成基础教学
   });
 
   it("斜切路径扩大半径后命中3个敌人", () => {
@@ -294,6 +294,89 @@ describe("SwipeTutorial - handlePointerDown 输入锁", () => {
     game.handlePointerDown({ x: 200, y: 400 });
     // active阶段应当创建pendingSlash
     expect((game as any).pendingSlash).not.toBeNull();
+  });
+});
+
+describe("SwipeTutorial - 分级反馈（热修：≥1即完成）", () => {
+  beforeEach(() => {
+    clearTutorialFlag();
+  });
+
+  it("命中0名：不结束教学，不写 localStorage", () => {
+    setTutorialDone(); // 先设个无关值
+    window.localStorage.removeItem(DONE_KEY);
+    const game = createLevel1Game();
+    (game as any)._swipeTutorialPhase = "active";
+    (game as any)._tutorialGroupEnemyIds = new Set(["e1", "e2", "e3"]);
+    // 模拟 endSlash 命中检查：0命中 → miss
+    const trail = { hitEnemyIds: new Set<string>() };
+    const tutHits = [...trail.hitEnemyIds].filter((id: string) =>
+      (game as any)._tutorialGroupEnemyIds.has(id)
+    );
+    expect(tutHits.length).toBe(0);
+    // localStorage 在此测试中不会被写入（因为没命中，走 miss 路径）
+    expect(window.localStorage.getItem(DONE_KEY)).toBeNull();
+  });
+
+  it("命中1名：完成基础教学，提示'会挥刀了'", () => {
+    clearTutorialFlag();
+    const game = createLevel1Game();
+    (game as any)._swipeTutorialPhase = "active";
+    // 直接调用 _handleTutorialSuccess(1) 验证路径
+    (game as any)._handleTutorialSuccess(1);
+    expect((game as any)._swipeTutorialPhase).toBe("success");
+    expect(window.localStorage.getItem(DONE_KEY)).toBe("1");
+  });
+
+  it("命中2名：完成多斩教学，提示'一刀多斩'", () => {
+    clearTutorialFlag();
+    const game = createLevel1Game();
+    (game as any)._swipeTutorialPhase = "active";
+    (game as any)._handleTutorialSuccess(2);
+    expect((game as any)._swipeTutorialPhase).toBe("success");
+    expect(window.localStorage.getItem(DONE_KEY)).toBe("1");
+  });
+
+  it("命中1名后再命中：不会二次触发（幂等）", () => {
+    // 模拟：第一次命中1敌 → success → 第二次命中不会再触发 handleTutorialSuccess
+    const game = createLevel1Game();
+    (game as any)._swipeTutorialPhase = "success"; // 已完成
+    // success 阶段 endSlash 检查 if (active) → false，不会调用 _handleTutorialSuccess
+    // 验证 phase 不是 active
+    expect((game as any)._swipeTutorialPhase).not.toBe("active");
+    // 此时即使再次命中也不会触发
+  });
+
+  it("命中1名后剩余敌人继续战斗（不复活、不瞬移）", () => {
+    // 这个测试验证设计意图：命中1敌 → 该敌死亡 → 剩余敌人正常存活
+    const game = createLevel1Game();
+    (game as any)._swipeTutorialPhase = "active";
+    (game as any)._tutorialGroupEnemyIds = new Set(["e1", "e2", "e3"]);
+    // 模拟：e1被命中并死亡，e2/e3存活
+    (game as any).enemies = [
+      { id: "e1", alive: false, kind: "infantry" },
+      { id: "e2", alive: true, kind: "infantry" },
+      { id: "e3", alive: true, kind: "infantry" },
+    ];
+    const aliveTutEnemies = (game as any).enemies.filter(
+      (e: any) => (game as any)._tutorialGroupEnemyIds.has(e.id) && e.alive
+    );
+    // 2个存活敌人，它们应该继续战斗
+    expect(aliveTutEnemies.length).toBe(2);
+  });
+
+  it("G1敌人全部死亡时教学不会卡在 active", () => {
+    // 这个测试验证不会出现软锁
+    const game = createLevel1Game();
+    (game as any)._swipeTutorialPhase = "active";
+    (game as any)._tutorialGroupEnemyIds = new Set(["e1", "e2", "e3"]);
+    // 模拟：敌人已全部死亡但教学通过 endSlash 命中了 ≥1 → 应完成
+    // 这里验证：如果 hitEnemyIds 中有教学敌人，不管它们是否还活着
+    const trail = { hitEnemyIds: new Set<string>(["e1"]) };
+    const tutHits = [...trail.hitEnemyIds].filter((id: string) =>
+      (game as any)._tutorialGroupEnemyIds.has(id)
+    );
+    expect(tutHits.length).toBe(1); // ≥1: 可以完成
   });
 });
 

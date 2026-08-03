@@ -2019,7 +2019,7 @@ export class Game {
     // 0807-11A: 教学挥刀检测（在结算前，避免miss时产生副作用）
     if (this._swipeTutorialPhase === 'active') {
       const tutHits = [...trail.hitEnemyIds].filter(id => this._tutorialGroupEnemyIds.has(id));
-      if (tutHits.length < 2) {
+      if (tutHits.length < 1) {
         this._handleTutorialMiss();
         this.currentSlash = undefined;
         return;
@@ -2269,7 +2269,8 @@ export class Game {
 
     // 0807-11A: 教学挥刀成功（真实结算已完成，标记完成）
     if (this._swipeTutorialPhase === 'active') {
-      this._handleTutorialSuccess();
+      const hitCount = [...trail.hitEnemyIds].filter(id => this._tutorialGroupEnemyIds.has(id)).length;
+      this._handleTutorialSuccess(hitCount);
     }
 
     this.currentSlash = undefined;
@@ -2986,11 +2987,14 @@ export class Game {
     this._swipeTutorialFingerTime = 0; // 重置手指动画
   }
 
-  /** 教学挥刀成功：标记完成、显示提示 */
-  private _handleTutorialSuccess(): void {
+  /** 教学挥刀成功：标记完成、显示分级提示 */
+  private _handleTutorialSuccess(hitCount: number): void {
     this._swipeTutorialPhase = 'success';
     this._swipeTutorialHintTimer = 1.2;
-    this.addText(DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2 - 30, "一刀多斩，刀势涨得更快", "#ffd35a", 13, 1.2);
+    const msg = hitCount >= 2
+      ? "一刀多斩，刀势涨得更快"
+      : "会挥刀了，试试一刀多斩";
+    this.addText(DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2 - 30, msg, "#ffd35a", 13, 1.2);
     try {
       window.localStorage.setItem(Game.SWIPE_TUTORIAL_DONE_KEY, "1");
     } catch (_) { /* localStorage unavailable */ }
