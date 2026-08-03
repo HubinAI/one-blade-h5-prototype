@@ -350,6 +350,9 @@ export class Game {
   /** Debug数值测试模式 */
   private _numericalTestMode = false;
   private _debugShowDetail = false;
+  /** 0807-11B-1: 同刀去重 */
+  private _slashDedupTestTarget: string | null = null;
+  private _slashDedupFireRings: Set<string> = new Set();
   private _numericalTestTarget: Enemy | null = null;
   private _numericalTestPaused = false;
   /** 火环威胁验证追踪 */
@@ -1963,6 +1966,8 @@ export class Game {
     }
     this.regenDelayTimer = BALANCE.swordEnergy.regenDelayAfterSlash;
     this._eliteDamageDedup.clear(); // V0731003: 每刀开始时清除去重
+    this._slashDedupTestTarget = null;
+    this._slashDedupFireRings.clear();
     this.nextSoul = false;
     this.nextOil = false;
     this.stats.slashes += 1;
@@ -3487,6 +3492,8 @@ export class Game {
     // ══ 0807-11B-1: 火环威胁物 + 数值测试目标（提前执行，保证命中） ══
     for (const fr of this._eliteFireRings) {
       if (!fr.alive) continue;
+      const frKey = `${trail.id}_${fr.x}_${fr.y}`;
+      if (this._slashDedupFireRings.has(frKey)) continue;
       if (segmentHitCircle(a, b, { x: fr.x, y: fr.y }, fr.r + bladeReach + 6)) {
         const s = trail._damageSnapshot ?? this.captureDamageSnapshot();
         const r = resolveThreatDamage({
@@ -3498,6 +3505,7 @@ export class Game {
           tags: ["main"], hitPos: { x: fr.x, y: fr.y }, timestamp: this.elapsed,
         }, fr.hp, fr.hp, fr.alive, false);
         if (r && r.isAccepted && r.effectiveHpLoss > 0) {
+          this._slashDedupFireRings.add(frKey);
           this._debugFireRingHits = (this._debugFireRingHits ?? 0) + 1;
           this._threatVerifyLastHpBefore = fr.hp; fr.hp -= r.effectiveHpLoss;
           this._threatVerifyLastHpAfter = fr.hp;
@@ -3510,8 +3518,8 @@ export class Game {
     }
     if (this._numericalTestMode && this._numericalTestTarget?.alive) {
       const t = this._numericalTestTarget;
+      if (this._slashDedupTestTarget === trail.id) { /* 同刀已结算 */ } else
       if (segmentHitCircle(a, b, t, t.radius + bladeReach + 12)) {
-        this._debugTestTargetHits = (this._debugTestTargetHits ?? 0) + 1;
         const s = trail._damageSnapshot ?? this.captureDamageSnapshot();
         const r = resolveDamage({
           actionId: this.nextId("dmg"), parentActionId: trail.id, sourceType: "MAIN_SLASH",
@@ -3522,6 +3530,8 @@ export class Game {
           tags: ["main", "debug"], hitPos: { x: t.x, y: t.y }, timestamp: this.elapsed,
         }, t.hp, t.maxHp, t.alive, false);
         if (r && r.isAccepted && r.effectiveHpLoss > 0) {
+          this._slashDedupTestTarget = trail.id;
+          this._debugTestTargetHits = (this._debugTestTargetHits ?? 0) + 1;
           this._lastDamageResult = r; t.hp = r.hpAfter;
           if (r.isKill) t.alive = false;
           t.flash = 0.25;
@@ -3618,77 +3628,6 @@ export class Game {
           this.addText(enemy.x, enemy.y - 20, "阵眼自崩", "#9b6dff", 14);
         this.particles.push(ringParticle(enemy, "#9b6dff", 34));
         }
-    }
-    // V0801008: 火环切除
-    for (const fr of this._eliteFireRings) {
-      if (!fr.alive) continue;
-      if (segmentHitCircle(a, b, { x: fr.x, y: fr.y }, fr.r + bladeReach + 6)) {
-        // 0807-11B-1: 威胁物统一伤害
-        const stats = trail._damageSnapshot ?? this.captureDamageSnapshot();
-        const req: DamageRequest = {
-          actionId: this.nextId("dmg"),
-          parentActionId: trail.id,
-          sourceType: "MAIN_SLASH",
-          sourceConfig: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH,
-          attackerId: "player",
-          targetId: `fireRing_${fr.x}_${fr.y}`,
-          targetCategory: "THREAT",
-          skillCoefficient: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient,
-          stats,
-          bladeBand: stats.bladeDamageBonus >= 0.25 ? "high" : stats.bladeDamageBonus >= 0.10 ? "mid" : "low",
-          tags: ["main", "player"],
-          hitPos: { x: fr.x, y: fr.y },
-          timestamp: this.elapsed,
-        };
-        const result = resolveThreatDamage(req, fr.hp, fr.hp, fr.alive, false);
-        if (result && result.isAccepted && result.effectiveHpLoss > 0) {
-          this._debugFireRingHits = (this._debugFireRingHits ?? 0) + 1;
-          const hpBefore = fr.hp;
-          fr.hp -= result.effectiveHpLoss;
-          // 0807-11B-1: 威胁验证追踪
-          this._threatVerifyLastHpBefore = hpBefore;
-          this._threatVerifyLastHpAfter = fr.hp;
-          this._threatVerifyLastResult = fr.hp <= 0 ? 'DESTROYED' : 'DAMAGED';
-          if (fr.hp <= 0) {
-            fr.alive = false;
-          }
-        }
-        this.particles.push(...sparkBurst({ x: fr.x, y: fr.y }, 8, "#f39c12"));
-        this.particles.push(...sparkBurst({ x: fr.x, y: fr.y }, 4, "#fff"));
-        this.addText(fr.x, fr.y - 12, "斩焰", "#f39c12", 14);
-        AudioService.armorHit();
-      }
-    }
-    // 0807-11B-1: Debug数值测试目标碰撞（半径加大便于稳定命中）
-    if (this._numericalTestMode && this._numericalTestTarget?.alive) {
-      const tgt = this._numericalTestTarget;
-      if (segmentHitCircle(a, b, tgt, tgt.radius + bladeReach + 12)) {
-        this._debugTestTargetHits = (this._debugTestTargetHits ?? 0) + 1;
-        const stats = trail._damageSnapshot ?? this.captureDamageSnapshot();
-        const req: DamageRequest = {
-          actionId: this.nextId("dmg"),
-          parentActionId: trail.id,
-          sourceType: "MAIN_SLASH",
-          sourceConfig: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH,
-          attackerId: "player",
-          targetId: tgt.id,
-          targetCategory: "ENEMY",
-          skillCoefficient: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient,
-          stats,
-          bladeBand: stats.bladeDamageBonus >= 0.25 ? "high" : stats.bladeDamageBonus >= 0.10 ? "mid" : "low",
-          tags: ["main", "player", "debug"],
-          hitPos: { x: tgt.x, y: tgt.y },
-          timestamp: this.elapsed,
-        };
-        const result = resolveDamage(req, tgt.hp, tgt.maxHp, tgt.alive, false);
-        if (result && result.isAccepted && result.effectiveHpLoss > 0) {
-          this._lastDamageResult = result;
-          tgt.hp = result.hpAfter;
-          if (result.isKill) tgt.alive = false;
-          tgt.flash = 0.25;
-          this.particles.push(...sparkBurst({ x: tgt.x, y: tgt.y }, 6, "#9b59b6"));
-        }
-      }
     }
   }
   }
