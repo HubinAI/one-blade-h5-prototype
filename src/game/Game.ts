@@ -2948,11 +2948,12 @@ export class Game {
           this._swipeTutorialErrorCount = 0;
           this._swipeTutorialPath = null;
         }
-        if (this._swipeTutorialPromptTimer > 0) {
-          this._swipeTutorialPromptTimer -= dt;
-        }
         break;
       }
+    }
+    // promptTimer 独立倒数（不受 phase 变化影响，确保淡出动画完整播放）
+    if (this._swipeTutorialPromptTimer > 0) {
+      this._swipeTutorialPromptTimer -= dt;
     }
   }
 
@@ -2997,11 +2998,11 @@ export class Game {
   /** 教学挥刀成功：标记完成、独立渲染高可读提示 */
   private _handleTutorialSuccess(hitCount: number): void {
     this._swipeTutorialPhase = 'success';
-    this._swipeTutorialHintTimer = 1.5;
+    this._swipeTutorialHintTimer = 1.8;
     this._swipeTutorialPromptText = hitCount >= 2
       ? "\u4e00\u5200\u591a\u65a9\uff0c\u5200\u52bf\u6da8\u5f97\u66f4\u5feb"
       : "\u4f1a\u6325\u5200\u4e86\uff0c\u8bd5\u8bd5\u4e00\u5200\u591a\u65a9";
-    this._swipeTutorialPromptTimer = 1.5;
+    this._swipeTutorialPromptTimer = 1.8;
     try {
       window.localStorage.setItem(Game.SWIPE_TUTORIAL_DONE_KEY, "1");
     } catch (_) { /* localStorage unavailable */ }
