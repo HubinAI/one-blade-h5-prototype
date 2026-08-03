@@ -3476,6 +3476,52 @@ export class Game {
     const ratio = Math.max(0.06, this.getSlashRatio(trail));
     const bladeReach = BALANCE.slash.touchHitPadding + stage.width * trail.widthMultiplier * (0.75 + ratio);
 
+    // ══ 0807-11B-1: 火环威胁物 + 数值测试目标（提前执行，保证命中） ══
+    for (const fr of this._eliteFireRings) {
+      if (!fr.alive) continue;
+      if (segmentHitCircle(a, b, { x: fr.x, y: fr.y }, fr.r + bladeReach + 6)) {
+        const s = trail._damageSnapshot ?? this.captureDamageSnapshot();
+        const r = resolveThreatDamage({
+          actionId: this.nextId("dmg"), parentActionId: trail.id, sourceType: "MAIN_SLASH",
+          sourceConfig: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH, attackerId: "player",
+          targetId: `fr_${fr.x}_${fr.y}`, targetCategory: "THREAT",
+          skillCoefficient: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient, stats: s,
+          bladeBand: s.bladeDamageBonus >= 0.25 ? "high" : s.bladeDamageBonus >= 0.10 ? "mid" : "low",
+          tags: ["main"], hitPos: { x: fr.x, y: fr.y }, timestamp: this.elapsed,
+        }, fr.hp, fr.hp, fr.alive, false);
+        if (r && r.isAccepted && r.effectiveHpLoss > 0) {
+          this._debugFireRingHits = (this._debugFireRingHits ?? 0) + 1;
+          this._threatVerifyLastHpBefore = fr.hp; fr.hp -= r.effectiveHpLoss;
+          this._threatVerifyLastHpAfter = fr.hp;
+          this._threatVerifyLastResult = fr.hp <= 0 ? 'DESTROYED' : 'DAMAGED';
+          if (fr.hp <= 0) fr.alive = false;
+        }
+        this.particles.push(...sparkBurst({ x: fr.x, y: fr.y }, 8, "#f39c12"), ...sparkBurst({ x: fr.x, y: fr.y }, 4, "#fff"));
+        this.addText(fr.x, fr.y - 12, "斩焰", "#f39c12", 14); AudioService.armorHit();
+      }
+    }
+    if (this._numericalTestMode && this._numericalTestTarget?.alive) {
+      const t = this._numericalTestTarget;
+      if (segmentHitCircle(a, b, t, t.radius + bladeReach + 12)) {
+        this._debugTestTargetHits = (this._debugTestTargetHits ?? 0) + 1;
+        const s = trail._damageSnapshot ?? this.captureDamageSnapshot();
+        const r = resolveDamage({
+          actionId: this.nextId("dmg"), parentActionId: trail.id, sourceType: "MAIN_SLASH",
+          sourceConfig: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH, attackerId: "player",
+          targetId: t.id, targetCategory: "ENEMY",
+          skillCoefficient: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient, stats: s,
+          bladeBand: s.bladeDamageBonus >= 0.25 ? "high" : s.bladeDamageBonus >= 0.10 ? "mid" : "low",
+          tags: ["main", "debug"], hitPos: { x: t.x, y: t.y }, timestamp: this.elapsed,
+        }, t.hp, t.maxHp, t.alive, false);
+        if (r && r.isAccepted && r.effectiveHpLoss > 0) {
+          this._lastDamageResult = r; t.hp = r.hpAfter;
+          if (r.isKill) t.alive = false;
+          t.flash = 0.25;
+          this.particles.push(...sparkBurst({ x: t.x, y: t.y }, 6, "#9b59b6"));
+        }
+      }
+    }
+
     for (const pickup of this.pickups) {
       if (!pickup.active || trail.hitPickupIds.has(pickup.id)) continue;
       if (segmentHitCircle(a, b, pickup, pickup.radius + bladeReach)) {
