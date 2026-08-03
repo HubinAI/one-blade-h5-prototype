@@ -303,8 +303,7 @@ describe("SwipeTutorial - 分级反馈（热修：≥1即完成）", () => {
   });
 
   it("命中0名：不结束教学，不写 localStorage", () => {
-    setTutorialDone(); // 先设个无关值
-    window.localStorage.removeItem(DONE_KEY);
+    clearTutorialFlag();
     const game = createLevel1Game();
     (game as any)._swipeTutorialPhase = "active";
     (game as any)._tutorialGroupEnemyIds = new Set(["e1", "e2", "e3"]);
