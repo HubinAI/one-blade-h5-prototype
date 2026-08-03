@@ -357,6 +357,9 @@ export class Game {
   /** 0807-11B-2: 聚合缓冲区 */
   private _aggBuffer: Map<string, { damage: number; segments: number; hpLoss: number; pos: Vec2; lastTime: number; sourceType: string; targetType: string; killed: boolean; }> = new Map();
   private _aggTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  private _aggDebugTarget: { x: number; y: number; radius: number; hp: number; maxHp: number; alive: boolean; id: string; flash: number } | null = null;
+  private _aggDebugTriple: { actionId: string; segments: number; damage: number } | null = null;
+  private _aggDebugScorch: { ticks: number; pending: number; flushReason: string } | null = null;
   private _numericalTestTarget: Enemy | null = null;
   private _numericalTestPaused = false;
   /** 火环威胁验证追踪 */
@@ -7575,6 +7578,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     referenceAttack: number, isKill: boolean, isDot: boolean,
   ): void {
     const now = Date.now();
+    // debug 追踪
+    if (this._aggDebugTarget && key.includes(this._aggDebugTarget.id)) {
+      if (sourceType === 'TRIPLE_SIDE') this._aggDebugTriple = { actionId: key, segments: (this._aggDebugTriple?.segments ?? 0) + 1, damage: (this._aggDebugTriple?.damage ?? 0) + damage };
+      if (isDot) this._aggDebugScorch = { ticks: (this._aggDebugScorch?.ticks ?? 0) + 1, pending: (this._aggDebugScorch?.pending ?? 0) + damage, flushReason: isKill ? 'KILL' : 'ticking' };
+    }
     const existing = this._aggBuffer.get(key);
     if (existing && now - existing.lastTime < windowMs) {
       existing.damage += damage;
@@ -7598,6 +7606,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         if (agg) { this._flushAgg(key, agg, referenceAttack); this._aggBuffer.delete(key); this._aggTimers.delete(key); }
       }, windowMs);
       this._aggTimers.set(key, timer);
+      if (isDot && this._aggDebugTarget) this._aggDebugScorch!.flushReason = '600MS';
     }
     // 击杀立即刷新
     if (isKill) {
@@ -7609,7 +7618,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   /** 刷新聚合 */
   private _flushAgg(key: string, agg: { damage: number; segments: number; pos: Vec2; killed: boolean; sourceType: string; targetType: string; }, referenceAttack: number): void {
     const tgtType = (agg.targetType === 'ELITE' || agg.targetType === 'BOSS' ? 'ELITE' : 'NORMAL') as 'NORMAL' | 'ELITE' | 'BOSS' | 'MECHANIC';
-    const textExtra = (tgtType === 'ELITE' || tgtType === 'BOSS') ? ` x${agg.segments}` : '';
+    const textExtra = (agg.segments >= 2 && (tgtType === 'ELITE' || tgtType === 'BOSS')) ? ` x${agg.segments}` : '';
     const displayDamage = agg.damage;
     const isDerived = agg.sourceType !== 'MAIN_SLASH';
     // 使用 addCombatFloat 显示聚合数字
@@ -10129,6 +10138,13 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ];
     if (this._lastDamageResult?.resolvedDamage) {
       rowData.push({ l: 'lastHit', v: `${this._lastDamageResult.resolvedDamage}`, c: '#f39c12' });
+    }
+    // 聚合 debug 信息
+    if (this._aggDebugTarget?.alive) {
+      const t = this._aggDebugTriple;
+      if (t) rowData.push({ l: 'triple', v: `${t.actionId.slice(-6)} s${t.segments} d${t.damage}`, c: '#9b6dff' });
+      const s = this._aggDebugScorch;
+      if (s) rowData.push({ l: 'scorch', v: `t${s.ticks} p${s.pending} ${s.flushReason}`, c: '#f39c12' });
     }
     ctx.font = '10px "Consolas", monospace';
     const lx = x + 8; const vx = x + cardW - 8; const rh = 15;
