@@ -3134,8 +3134,8 @@ export class Game {
       kind: "infantry",
       x: DESIGN_WIDTH / 2,
       homeX: DESIGN_WIDTH / 2,
-      y: 500,
-      radius: 22,
+      y: 600, // 下移到玩家挥刀区（玩家经常在 y=500~700 挥刀）
+      radius: 30, // 半径加大，视觉/碰撞统一为 30
       hp: 105,
       maxHp: 105,
       speed: 0,
@@ -3163,7 +3163,19 @@ export class Game {
     if (!t) return;
     ctx.save();
     if (t.alive) {
-      // 紫色虚线外圈
+      // 碰撞区外圈（淡紫色虚线，可视化真实命中区）
+      ctx.strokeStyle = 'rgba(155, 89, 182, 0.25)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 6]);
+      const stage = SWORD_STAGE_BY_ID["normal"];
+      const ratio = 1.0;
+      const bladeReach = BALANCE.slash.touchHitPadding + stage.width * (0.75 + ratio);
+      const hitRadius = t.radius + bladeReach + 12;
+      ctx.beginPath();
+      ctx.arc(t.x, t.y, hitRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // 紫色虚线内圈
       ctx.strokeStyle = t.flash > 0 ? '#fff' : '#9b59b6';
       ctx.lineWidth = 3;
       ctx.setLineDash([4, 4]);
