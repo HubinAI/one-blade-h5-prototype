@@ -347,6 +347,9 @@ export class Game {
   private _swipeTutorialHintTimer = 0;
   private _swipeTutorialStableAt = 0;
   private _swipeTutorialErrorFlashTimer = 0; // 错误后路径增强计时器
+  /** 教学成功提示独立渲染 */
+  private _swipeTutorialPromptText = '';
+  private _swipeTutorialPromptTimer = 0;
   static readonly SWIPE_TUTORIAL_DONE_KEY = "one_blade_swipe_tutorial_done";
 
   /** V0730016: 刀势审计 — 前12秒每帧记录energy delta */
@@ -1243,6 +1246,7 @@ export class Game {
     // 远景山间雾气遮罩（敌人从雾后现身）
     this.drawTopMist(ctx);
     this.drawSlash(ctx);
+    this._drawTutorialPrompt(ctx); // 0807-11A: 教学成功提示（独立渲染，不受P4.2限制）
     this.drawParticles(ctx);
     this.drawDefenseAndWarrior(ctx);
     this.drawSubBladeVisual(ctx);
@@ -2944,6 +2948,9 @@ export class Game {
           this._swipeTutorialErrorCount = 0;
           this._swipeTutorialPath = null;
         }
+        if (this._swipeTutorialPromptTimer > 0) {
+          this._swipeTutorialPromptTimer -= dt;
+        }
         break;
       }
     }
@@ -2987,14 +2994,14 @@ export class Game {
     this._swipeTutorialFingerTime = 0; // 重置手指动画
   }
 
-  /** 教学挥刀成功：标记完成、显示分级提示 */
+  /** 教学挥刀成功：标记完成、独立渲染高可读提示 */
   private _handleTutorialSuccess(hitCount: number): void {
     this._swipeTutorialPhase = 'success';
-    this._swipeTutorialHintTimer = 1.2;
-    const msg = hitCount >= 2
-      ? "一刀多斩，刀势涨得更快"
-      : "会挥刀了，试试一刀多斩";
-    this.addText(DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2 - 30, msg, "#ffd35a", 13, 1.2);
+    this._swipeTutorialHintTimer = 1.5;
+    this._swipeTutorialPromptText = hitCount >= 2
+      ? "\u4e00\u5200\u591a\u65a9\uff0c\u5200\u52bf\u6da8\u5f97\u66f4\u5feb"
+      : "\u4f1a\u6325\u5200\u4e86\uff0c\u8bd5\u8bd5\u4e00\u5200\u591a\u65a9";
+    this._swipeTutorialPromptTimer = 1.5;
     try {
       window.localStorage.setItem(Game.SWIPE_TUTORIAL_DONE_KEY, "1");
     } catch (_) { /* localStorage unavailable */ }
@@ -7960,6 +7967,76 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 文字阴影增强可读性
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.fillText('滑动挥刀', textX + 1, textY + 1);
+
+    ctx.restore();
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // 0807-11A: 教学成功提示独立渲染（高可读，不受P4.2限制）
+  // ═══════════════════════════════════════════════════════
+
+  private _drawTutorialPrompt(ctx: CanvasRenderingContext2D): void {
+    if (this._swipeTutorialPromptTimer <= 0 || !this._swipeTutorialPromptText) return;
+
+    const totalDuration = 1.8;
+    const elapsed = totalDuration - this._swipeTutorialPromptTimer;
+    const fadeIn = 0.10;   // 100ms 快速淡入
+    const fadeOut = 0.30;  // 300ms 平滑淡出
+
+    let alpha = 1;
+    let scale = 1;
+    if (elapsed < fadeIn) {
+      const t = elapsed / fadeIn;
+      alpha = t;
+      scale = 0.78 + 0.22 * t; // 78%→100% 放大进场
+    } else if (this._swipeTutorialPromptTimer < fadeOut) {
+      alpha = this._swipeTutorialPromptTimer / fadeOut;
+    }
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // 居中偏上：画面中上部（敌人 y=250~350 中下方），远离 HUD（y≥720）
+    const cx = DESIGN_WIDTH / 2;      // 195px (390px 设计宽度)
+    const cy = 420;                    // 中下部可视核心区，高于玩家+HUD
+
+    ctx.translate(cx, cy);
+    ctx.scale(scale, scale);
+
+    const fontSize = 28;
+    ctx.font = `800 ${fontSize}px "Microsoft YaHei", "SimHei", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const text = this._swipeTutorialPromptText;
+    const textMetrics = ctx.measureText(text);
+    const textW = textMetrics.width;
+    const padX = 20;
+    const padY = 12;
+    const cardW = textW + padX * 2;
+    const cardH = fontSize + padY * 2;
+
+    // 背景卡片（深色半透明，确保在任何背景上可读）
+    ctx.fillStyle = 'rgba(20, 14, 8, 0.88)';
+    ctx.beginPath();
+    ctx.roundRect(-cardW / 2, -cardH / 2, cardW, cardH, 12);
+    ctx.fill();
+
+    // 金色细边框
+    ctx.strokeStyle = 'rgba(255, 211, 90, 0.45)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(-cardW / 2, -cardH / 2, cardW, cardH, 12);
+    ctx.stroke();
+
+    // 主体文字：金黄 + 深色底层阴影
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetY = 2;
+    ctx.fillStyle = '#ffd35a';
+    ctx.fillText(text, 0, 0);
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
 
     ctx.restore();
   }
