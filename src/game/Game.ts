@@ -361,6 +361,9 @@ export class Game {
   private _aggDebugTriple: { actionId: string; segments: number; damage: number } | null = null;
   private _aggDebugScorch: { ticks: number; pending: number; flushReason: string } | null = null;
   private _burstTimers: ReturnType<typeof setTimeout>[] = [];
+  /** V0803025: 主刀伤害收集 buffer */
+  private _currentMainSlashHits: { damage: number; x: number; y: number; isKill: boolean; isElite: boolean }[] | null = null;
+  private _mainSlashBurstTimer: ReturnType<typeof setTimeout> | null = null;
   private _numericalTestTarget: Enemy | null = null;
   private _numericalTestPaused = false;
   /** 火环威胁验证追踪 */
@@ -7535,6 +7538,21 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     isKill: boolean,
     options?: { sourceType?: string; isDot?: boolean; isDerived?: boolean; sizeMultiplier?: number; priorityOverlay?: FloatPriority; duration?: number; }
   ): void {
+    // V0803025: MAIN_SLASH 收集到 burst buffer，延迟触发聚类爆发
+    if (options?.sourceType === 'MAIN_SLASH' && !options?.isDot && !options?.isDerived) {
+      if (!this._currentMainSlashHits) this._currentMainSlashHits = [];
+      const slashId = `m${Date.now()}`;
+      this._currentMainSlashHits.push({ damage, x, y, isKill, isElite: targetType === 'ELITE' || targetType === 'BOSS' });
+      if (!this._mainSlashBurstTimer) {
+        this._mainSlashBurstTimer = setTimeout(() => {
+          const hits = this._currentMainSlashHits ?? [];
+          this._currentMainSlashHits = [];
+          this._mainSlashBurstTimer = null;
+          if (hits.length > 0) this.clusterSlashFloats(hits, referenceAttack, slashId);
+        }, 80);
+      }
+      return; // 不直接显示，由聚类爆发统一处理
+    }
     const ratioR = referenceAttack > 0 ? damage / referenceAttack : 0;
     const tier = resolveDamageTier(ratioR);
     let priority: FloatPriority;
@@ -7645,6 +7663,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._aggBuffer.clear();
     for (const t of this._burstTimers) { clearTimeout(t); }
     this._burstTimers = [];
+    if (this._mainSlashBurstTimer) { clearTimeout(this._mainSlashBurstTimer); this._mainSlashBurstTimer = null; }
+    this._currentMainSlashHits = null;
   }
 
   burstSlashFloats(hits: { damage: number; x: number; y: number; isKill: boolean; isElite?: boolean }[], refAtk: number, slashId: string): void {
