@@ -2781,7 +2781,7 @@ export class Game {
     this._pendingEdictId = null;
   }
   // ═══════════════════ V0731010: 三刀流 ═══════════════════
-  /** 主刀后派生两道平行副刀，扩大空间覆盖 */
+  /** 主刀后派生两道扇形副刀，扩大空间覆盖 */
   private _fireTripleSideTrails(main: SlashTrail) {
     if (main.points.length < 2) return;
     const pts = main.points;
@@ -2791,14 +2791,17 @@ export class Game {
     if (len < 10) return;
     const nx = -dy / len;
     const ny = dx / len;
-    const offset = 56; // 三刀流间距
+
+    const startOffset = 24;
+    const endOffset = 88;
+    const n = pts.length - 1;
+    const totalLife = 0.40; // 峰值 0.14s + 残影 0.26s
 
     // 建立本次挥刀的去重集合（包含主刀已命中敌人）
     this._tripleSlashHitEnemyIds.clear();
     for (const id of main.hitEnemyIds) {
       this._tripleSlashHitEnemyIds.add(id);
     }
-    const sideOffsets = [-offset, offset];
 
     // 副刀伤害取主刀快照
     const mainDmg = main._damageSnapshot ?? this.captureDamageSnapshot();
@@ -2809,27 +2812,29 @@ export class Game {
     const effColor = rEff ? rEff.color : stage.color;
     const effWidth = rEff ? rEff.width : stage.width;
     const effBrightness = rEff ? rEff.brightness : stage.brightness;
-    const trailLife = 0.55; // 匹配 drawSlash 的峰值+消退总时长
 
-    for (const sign of sideOffsets) {
-      const offsetPts = pts.map(p => ({
-        x: p.x + nx * sign,
-        y: p.y + ny * sign,
-        t: p.t, // 同步：不添加延迟
-      }));
-      this._checkTripleSideHits(offsetPts, mainDmg, main.id);
-    }
-
-    // 副刀视觉轨迹：完整平移 + 母刀渲染参数
-    for (const sign of sideOffsets) {
+    for (const sign of [-1, 1]) {
+      // 扇形偏移：easeOut 插值
+      const fanPts = pts.map((p, i) => {
+        const t = n === 0 ? 0 : i / n;
+        const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        const offset = startOffset + (endOffset - startOffset) * ease;
+        return {
+          x: p.x + nx * sign * offset,
+          y: p.y + ny * sign * offset,
+          er: (p as any).energyRatio ?? 1.0, // 复制主刀能量比
+        };
+      });
+      // 碰撞检测（与视觉共用同一套扇形几何）
+      this._checkTripleSideHits(
+        fanPts.map(p => ({ x: p.x, y: p.y, t: pts[0].t })),
+        mainDmg, main.id);
+      // 视觉轨迹
       this._tripleSideTrails.push({
-        points: pts.map(p => ({
-          x: p.x + nx * sign,
-          y: p.y + ny * sign,
-          t: p.t,
-        })),
-        life: trailLife,
-        maxLife: trailLife,
+        points: fanPts.map(p => ({ x: p.x, y: p.y, t: pts[0].t })),
+        energyRatios: fanPts.map(p => p.er),
+        life: totalLife,
+        maxLife: totalLife,
         effColor,
         effWidth,
         effBrightness,
@@ -2874,7 +2879,7 @@ export class Game {
   }
 
   /** 三刀流副刀视觉数据 */
-  private _tripleSideTrails: { points: { x: number; y: number; t: number }[]; life: number; maxLife: number; effColor: string; effWidth: number; effBrightness: number }[] = [];
+  private _tripleSideTrails: { points: { x: number; y: number; t: number }[]; energyRatios: number[]; life: number; maxLife: number; effColor: string; effWidth: number; effBrightness: number }[] = [];
   private _tripleSlashHitEnemyIds: Set<string> = new Set();
   // ═══════════════════ V0731011: 燎原令火径 ═══════════════════
   private _scorchTrails: { points: { x: number; y: number }[]; life: number; maxLife: number; lastTickTime: number }[] = [];
@@ -8586,17 +8591,21 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
   }
 
-  // V0731010: 三刀流副刀绘制 — 复用主刀渲染管线
+  // V0731010: 三刀流副刀绘制 — 扇形锋刃 + 峰值/残影双阶段
   private _drawTripleSideTrails(ctx: CanvasRenderingContext2D) {
-    const W_SCALE = 0.85; // 副刀宽度比例
-    const B_SCALE = 0.90; // 副刀亮度比例
+    const CORE_B = 1.00;   // 核心亮度：与主刀一致
+    const CORE_W = 0.92;   // 核心宽度：主刀 92%
+    const OUTER_W = 0.78;  // 外焰宽度：主刀 78%
     for (const t of this._tripleSideTrails) {
       if (t.points.length < 2) continue;
-      const alpha = t.life / t.maxLife;
-      const flash = t.life > t.maxLife * 0.92 ? 1.8 : 1.0;
-      const fade = clamp(alpha * B_SCALE, 0.03, 0.55);
-      const sideWidth = t.effWidth * W_SCALE * 0.7;
+      const age = 1 - t.life / t.maxLife; // 0=刚创建 1=即将消失
+      const isPeak = age < 0.35; // 前 0.14s 为峰值
+      const peakBoost = isPeak ? 1 + (0.35 - age) / 0.35 * 0.5 : 0.55;
+      const fade = isPeak
+        ? clamp(peakBoost * CORE_B, 0.55, 1.05)
+        : clamp((1 - ((age - 0.35) / 0.65)) * 0.55, 0.02, 0.55);
 
+      const sideWidth = t.effWidth * 0.7;
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       ctx.lineCap = "round";
@@ -8605,27 +8614,30 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       for (let i = 1; i < t.points.length; i++) {
         const a = t.points[i - 1];
         const b = t.points[i];
-        const age = i / Math.max(1, t.points.length - 1);
-        const segAlpha = clamp(age * fade * flash, 0.03, 0.55);
+        const segProgress = i / Math.max(1, t.points.length - 1);
+        const er = (t.energyRatios && t.energyRatios[i]) ?? 1.0;
+        const segAlpha = clamp(fade * (0.6 + segProgress * 0.4) * er, 0.02, 0.8);
 
-        // 外层 glow（金白，略低于主刀）
-        ctx.strokeStyle = `rgba(255, 213, 112, ${segAlpha * 0.45})`;
+        // 外层金白光焰
+        ctx.strokeStyle = `rgba(255, 213, 112, ${segAlpha * 0.52})`;
         ctx.shadowColor = t.effColor;
-        ctx.shadowBlur = (6 + t.effWidth * 0.25);
-        ctx.lineWidth = sideWidth * 0.95;
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
+        ctx.shadowBlur = 4 + t.effWidth * 0.22;
+        ctx.lineWidth = sideWidth * OUTER_W * (0.85 + er * 0.15);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
 
-        // 内层核心（亮白）
-        ctx.strokeStyle = `rgba(255, 255, 238, ${segAlpha * 0.80})`;
-        ctx.shadowBlur = 3;
-        ctx.lineWidth = Math.max(1.2, sideWidth * 0.28);
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
+        // 白热核心锋刃（与主刀同级亮度）
+        const coreAlpha = isPeak ? clamp(segAlpha * 1.15, 0.1, 0.95) : segAlpha * 0.6;
+        ctx.strokeStyle = `rgba(255, 255, 238, ${coreAlpha})`;
+        ctx.shadowBlur = 2;
+        ctx.lineWidth = Math.max(1.0, sideWidth * CORE_W * 0.55 * er);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+
+        // 命中爆点（峰值阶段在刀尖/高能段短暂闪亮）
+        if (isPeak && segProgress > 0.6 && er > 0.7) {
+          ctx.strokeStyle = `rgba(255, 255, 255, ${segAlpha * 0.35})`;
+          ctx.lineWidth = Math.max(0.6, sideWidth * 0.22);
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        }
       }
       ctx.restore();
     }
