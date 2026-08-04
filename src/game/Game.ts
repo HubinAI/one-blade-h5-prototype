@@ -7763,107 +7763,107 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private _drawComboPresentation(ctx: CanvasRenderingContext2D): void {
     if (this._comboCount <= 0) { this._comboSparks = []; this._comboBaseLife = 0; return; }
     const phase = this._comboResetDelay - this._comboResetTimer;
-    const fadeAlpha = phase < 0.3 ? Math.max(0, phase / 0.3) : 1.0;
+    const fadeAlpha = phase < 0.4 ? Math.max(0, phase / 0.4) : 1.0;
     if (fadeAlpha <= 0) { this._comboCount = 0; this._comboScale = 1.0; this._comboSparks = []; return; }
 
-    const x = 340, y = 130;
+    const x = 345, y = 130;
     const tier = this._comboCount >= 30 ? 3 : this._comboCount >= 10 ? 2 : 1;
-    const numSize = tier >= 3 ? 52 : tier >= 2 ? 44 : 36;
-    const numColor = '#ffffff';
-    const labelColor = '#ffd35a';
-    const hitGlow = this._comboHitFlash > 0 ? 0.4 * this._comboHitFlash : 0;
+    const numSize = tier >= 3 ? 48 : tier >= 2 ? 40 : 34;
+    const labelSize = tier >= 3 ? 16 : 12;
+    const hitGlow = this._comboHitFlash; // 0→0.15→0
 
-    // 底座入场进度（0→1，约150ms刷出）
-    if (this._comboBaseLife < 1.0) this._comboBaseLife = Math.min(1.0, this._comboBaseLife + 0.08);
-    const baseProg = this._comboBaseLife;
+    // 底座宽度随位数适配
+    const digits = String(this._comboCount).length;
+    const baseW = digits === 1 ? 80 : digits === 2 ? 100 : 120;
+    const baseH = tier >= 3 ? 42 : tier >= 2 ? 38 : 34;
+
+    // 入场进度 140-180ms
+    if (this._comboBaseLife < 1.0) this._comboBaseLife = Math.min(1.0, this._comboBaseLife + 0.07);
+    const bp = this._comboBaseLife;
 
     ctx.save();
     ctx.globalAlpha = fadeAlpha;
     ctx.translate(x, y);
-
     const s = this._comboScale;
 
-    // ──────────── 底座三层 ────────────
-    const slashDir = -0.55; // 左下→右上（屏幕坐标y轴向下）
+    const slashDir = -0.55;
 
-    // L1: 暗红墨刷底（最深层，最大范围）
+    // ── L1: 暗红墨刷底（核心轮廓）──
     ctx.save();
     ctx.rotate(slashDir);
-    const w1 = 42 + tier * 10;
-    const progL1 = Math.min(1, baseProg * 1.2);
-    ctx.globalAlpha = (0.25 + hitGlow) * fadeAlpha;
-    ctx.fillStyle = `rgba(60,12,8,1)`;
-    this._drawSlashShape(ctx, -40 - (tier >= 2 ? 10 : 0), -12, w1 + 6, 24, progL1);
+    const l1w = baseW * bp;
+    ctx.fillStyle = 'rgba(48,8,4,1)';
+    ctx.beginPath();
+    ctx.moveTo(-8, -baseH/2 + 2);
+    ctx.lineTo(-8 + l1w - 8, -baseH/2 - 4);
+    ctx.lineTo(-4 + l1w, -baseH/4);
+    ctx.lineTo(-6 + l1w - 2, baseH/2);
+    ctx.lineTo(-4, baseH/2 - 4);
+    ctx.closePath();
+    ctx.fill();
+    // L1 描边
+    ctx.strokeStyle = `rgba(120,30,15,0.6)`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
     ctx.restore();
 
-    // L2: 红橙刀气拖尾（中层，收窄）
+    // ── L2: 红橙刀气拖尾（主痕+副痕）──
     ctx.save();
-    ctx.rotate(slashDir - 0.08);
-    const w2 = 32 + tier * 8;
-    const minW2 = 22;
-    ctx.globalAlpha = (0.40 + hitGlow * 2) * fadeAlpha;
-    const grad = ctx.createLinearGradient(-40, 0, -40 + w2, 0);
-    grad.addColorStop(0, 'rgba(255,140,30,0)');
-    grad.addColorStop(0.3, `rgba(255,100,20,${0.6 + hitGlow})`);
-    grad.addColorStop(0.7, `rgba(255,80,15,${0.7 + hitGlow})`);
-    grad.addColorStop(1, `rgba(200,40,10,${0.3 + hitGlow * 0.5})`);
-    ctx.fillStyle = grad;
-    this._drawSlashShape(ctx, -36, -8, w2, 16, Math.min(1, baseProg * 1.1));
+    ctx.rotate(slashDir - 0.04);
+    const l2w = (baseW * 0.78) * bp;
+    // 主斜痕
+    ctx.strokeStyle = `rgba(220,80,20,${0.75 + hitGlow})`;
+    ctx.lineWidth = 4 + hitGlow * 6;
+    ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(-6 + l2w, -2); ctx.stroke();
+    // 副斜痕（稍窄、偏移）
+    ctx.strokeStyle = `rgba(255,140,40,${0.45 + hitGlow * 1.5})`;
+    ctx.lineWidth = 2 + hitGlow * 3;
+    ctx.beginPath(); ctx.moveTo(-4, baseH/4 - 2); ctx.lineTo(-4 + l2w * 0.9, baseH/4 - 4); ctx.stroke();
     ctx.restore();
 
-    // L3: 亮白刀切高光（最窄）
+    // ── L3: 短亮锋线 ──
     ctx.save();
-    ctx.rotate(slashDir - 0.02);
-    ctx.globalAlpha = (0.35 + hitGlow) * fadeAlpha;
-    ctx.fillStyle = `rgba(255,220,180,${0.4 + hitGlow})`;
-    this._drawSlashShape(ctx, -32, -2, 20 + tier * 4, 4, Math.min(1, baseProg));
+    ctx.rotate(slashDir + 0.02);
+    ctx.strokeStyle = `rgba(255,235,190,${0.55 + hitGlow * 2})`;
+    ctx.lineWidth = 1.5;
+    const l3w = (baseW * 0.5) * bp;
+    ctx.beginPath(); ctx.moveTo(-2, -baseH/4 + 2); ctx.lineTo(-2 + l3w, -baseH/4); ctx.stroke();
     ctx.restore();
 
-    // 火星点缀 + 破边标记（需要旋转，完成后还原）
-    ctx.save();
-    ctx.globalAlpha = fadeAlpha;
-    ctx.rotate(slashDir);
-    for (let i = 0; i < (3 + tier * 2); i++) {
-      const t = (this.elapsed * (800 + i * 200) + i * 345) % 1;
-      const sx = -38 + t * (w1 - 4);
-      const sy = -8 + Math.sin(t * 20 + i) * 10;
-      const alpha = 0.5 * (1 - t) * fadeAlpha + hitGlow;
-      ctx.fillStyle = `rgba(255,${180 + i * 25},${50 + i * 20},${alpha})`;
-      ctx.beginPath();
-      ctx.arc(sx, sy, 1.5 + (1 - t) * 1, 0, Math.PI * 2);
-      ctx.fill();
+    // ── 火星（精简4颗）──
+    for (let i = 0; i < 4; i++) {
+      const p = (this.elapsed * (600 + i * 200) + i * 400) % 1;
+      const sx = -6 + bp * baseW * (0.3 + p * 0.6);
+      const sy = -baseH/3 + Math.sin(p * 30 + i) * 8;
+      const a = (1 - p) * 0.35 * fadeAlpha + hitGlow * 0.2;
+      if (a > 0.01) {
+        ctx.fillStyle = `rgba(255,180,60,${a})`;
+        ctx.beginPath(); ctx.arc(sx, sy, 1.2, 0, Math.PI * 2); ctx.fill();
+      }
     }
 
-    // 断裂/破边标记（不规则边缘）
-    ctx.strokeStyle = `rgba(255,120,30,${0.15 * fadeAlpha})`;
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(-42, -10); ctx.lineTo(-20, -7); ctx.lineTo(-8, -11); ctx.lineTo(10, -6); ctx.stroke();
-    ctx.restore(); // restore mars+edges rotation
-
-    // ──────────── 数字（白色主角） ────────────
+    // ── 数字（白色主角）──
+    ctx.save();
     ctx.scale(s, s);
-
     ctx.font = `bold ${numSize}px "Microsoft YaHei", sans-serif`;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
-    // 阴影/描边
     if (tier >= 2) {
-      ctx.strokeStyle = `rgba(10,8,4,${0.9 * fadeAlpha})`;
-      ctx.lineWidth = tier >= 3 ? 5 : 3;
-      ctx.strokeText(`${this._comboCount}`, 0, -2);
+      ctx.strokeStyle = `rgba(10,8,4,0.9)`;
+      ctx.lineWidth = tier >= 3 ? 4 : 3;
+      ctx.strokeText(`${this._comboCount}`, 0, -3);
     }
-    ctx.fillStyle = numColor;
-    ctx.fillText(`${this._comboCount}`, 0, -2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(`${this._comboCount}`, 0, -3);
 
     // "连击!" 标签
-    ctx.font = `bold ${tier >= 3 ? 18 : 14}px "Microsoft YaHei", sans-serif`;
+    ctx.font = `bold ${labelSize}px "Microsoft YaHei", sans-serif`;
     ctx.textAlign = 'left';
-    ctx.fillStyle = labelColor;
-    ctx.fillText('连击!', 6, 2);
+    ctx.fillStyle = '#ffd35a';
+    ctx.fillText('连击!', 6, 0);
+    ctx.restore();
 
-    ctx.restore();
-    // 最后恢复外层 save
-    ctx.restore();
+    ctx.restore(); // outer
   }
 
   /** 斜切刀痕形状：不规则梯形/桨形 */
