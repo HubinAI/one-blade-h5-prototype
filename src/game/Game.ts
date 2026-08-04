@@ -1262,11 +1262,11 @@ export class Game {
     }
     // P4.3A: 战场流动控制
     // V0731010: 更新派生刀痕生命期
-    // 副刀时间推进 + 碰撞 (center 纯视觉跳过)
+    // 副刀生命周期（碰撞已在松手当帧一次性完成）
     this._updateTripleTrails(scaledDt);
-    if (this._tripleCenterVisualTrail?.active) this._advanceTripleTrailVisualOnly(this._tripleCenterVisualTrail);
-    if (this._tripleLeftTrail?.active) this._advanceTripleTrail(this._tripleLeftTrail, this._tripleLeftDelay);
-    if (this._tripleRightTrail?.active) this._advanceTripleTrail(this._tripleRightTrail, this._tripleRightDelay);
+    if (this._tripleCenterVisualTrail?.active) this._updateTripleTrailLife(this._tripleCenterVisualTrail);
+    if (this._tripleLeftTrail?.active) this._updateTripleTrailLife(this._tripleLeftTrail);
+    if (this._tripleRightTrail?.active) this._updateTripleTrailLife(this._tripleRightTrail);
     // V0731011: 更新火径生命 + 敌人伤害
     this._updateScorchTrails(scaledDt);
     this._updateFrostStates(scaledDt); // V0731012
@@ -2848,28 +2848,17 @@ export class Game {
     const baseWidth = effWidth * trail.widthMultiplier;
     const outerWidth = baseWidth * 0.80;
     const coreWidth = baseWidth * 0.42;
-    const startAt = ((trail as any)._startAt as number) ?? this._tripleTrailStartTime;
-    const age = this.elapsed - startAt;
-    const holdEnd = this._tripleTrailTravelDuration + this._tripleTrailHoldDuration;
-    const alpha = clamp(age < holdEnd ? 1 : 1 - (age - holdEnd) / this._tripleTrailFadeDuration, 0.02, 1) * alphaMul;
-    const maxIdx = Math.min(((trail as any)._visibleEnd as number) ?? -1, pts.length - 1);
-    if (maxIdx < 0) return;
+    const age = this.elapsed - this._tripleTrailStartTime;
+    const isPeak = age < this._tripleTrailPeakDuration;
+    const alpha = clamp(isPeak ? 1 : 1 - (age - this._tripleTrailPeakDuration) / this._tripleTrailFadeDuration, 0.02, 1) * alphaMul;
+    const maxIdx = pts.length - 1;
     ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.lineCap = "round"; ctx.lineJoin = "round";
-    // 外焰 — 单次连续 path
     ctx.strokeStyle = `rgba(255,213,112,${alpha*0.5})`; ctx.shadowColor = effColor;
     ctx.lineWidth = outerWidth; ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
     for (let i = 1; i <= maxIdx; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
-    // 白热核心
-    ctx.strokeStyle = `rgba(255,255,238,${alpha*0.8})`; ctx.shadowBlur = 2;
+    ctx.strokeStyle = `rgba(255,255,238,${alpha*0.85})`; ctx.shadowBlur = 2;
     ctx.lineWidth = coreWidth; ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
     for (let i = 1; i <= maxIdx; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
-    // 活动刀头 — travel阶段最后3-5段
-    if (age < this._tripleTrailTravelDuration && maxIdx >= 3) {
-      const tipStart = Math.max(1, maxIdx - 4);
-      ctx.strokeStyle = `rgba(255,255,255,${alpha*0.45})`; ctx.shadowColor = "#fff";
-      ctx.lineWidth = coreWidth * 1.3; ctx.beginPath(); ctx.moveTo(pts[tipStart].x, pts[tipStart].y);
-      for (let i = tipStart + 1; i <= maxIdx; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
-    }
     ctx.restore();
   }
 
@@ -2904,20 +2893,22 @@ export class Game {
       return { x: p.x+nx*sign*off, y: p.y+ny*sign*off };
     });
     const baseTime = this.elapsed;
-    // center: 纯视觉，无碰撞
+    // center: 纯视觉
     this._tripleCenterVisualTrail = this._createTripleSubTrail(gen(0), main, '_cv');
     this._tripleLeftTrail = this._createTripleSubTrail(gen(-1), main, '_l');
     this._tripleRightTrail = this._createTripleSubTrail(gen(1), main, '_r');
     this._tripleTrailStartTime = baseTime;
-    (this._tripleCenterVisualTrail as any)._startAt = baseTime + this._tripleCenterDelay;
-    (this._tripleLeftTrail as any)._startAt = baseTime + this._tripleLeftDelay;
-    (this._tripleRightTrail as any)._startAt = baseTime + this._tripleRightDelay;
-    const totalLife = this._tripleTrailTravelDuration + this._tripleTrailHoldDuration + this._tripleTrailFadeDuration;
+    const totalLife = this._tripleTrailPeakDuration + this._tripleTrailFadeDuration;
     for (const t of [this._tripleCenterVisualTrail, this._tripleLeftTrail, this._tripleRightTrail]) {
       t.remainingDuration = totalLife;
-      (t as any)._prevIdx = -1; (t as any)._visibleEnd = -1;
+      (t as any)._startAt = baseTime;
+      (t as any)._visibleEnd = t.points.length - 1; // 首帧完整
     }
-    // 松手后快速结束旧主刀视觉
+    // 左右副刀一次性扩面碰撞
+    for (const st of [this._tripleLeftTrail, this._tripleRightTrail]) {
+      this._checkTripleTrailCollision(st, -1, st.points.length - 1);
+    }
+    // 快速结束旧主刀
     if (this.currentSlash) this.currentSlash.active = false;
   }
 
@@ -2928,37 +2919,13 @@ export class Game {
   private _tripleRightTrail: SlashTrail | null = null;
   private _tripleTrailStartTime = 0;
   private _tripleCenterDelay = 0;
-  private _tripleLeftDelay = 0.02;
-  private _tripleRightDelay = 0.04;
-  private _tripleTrailTravelDuration = 0.16;
-  private _tripleTrailHoldDuration = 0.05;
-  private _tripleTrailFadeDuration = 0.12;
-  private _advanceTripleTrailVisualOnly(trail: SlashTrail) {
-    const startAt = ((trail as any)._startAt as number) ?? this._tripleTrailStartTime;
-    const age = this.elapsed - startAt; if (age < 0) return;
-    const progress = clamp(age / this._tripleTrailTravelDuration, 0, 1);
-    const newIdx = Math.min(Math.floor(progress * trail.points.length), trail.points.length - 1);
-    (trail as any)._prevIdx = newIdx; (trail as any)._visibleEnd = newIdx;
-    if (age >= this._tripleTrailTravelDuration + this._tripleTrailHoldDuration + this._tripleTrailFadeDuration) trail.active = false;
-  }
-
-  private _advanceTripleTrail(trail: SlashTrail, _delay: number) {
-    const startAt = ((trail as any)._startAt as number) ?? this._tripleTrailStartTime;
-    const age = this.elapsed - startAt;
-    if (age < 0) return;
-    const travel = this._tripleTrailTravelDuration;
-    const progress = clamp(age / travel, 0, 1);
-    const nPts = trail.points.length;
-    const newIdx = Math.min(Math.floor(progress * nPts), nPts - 1);
-    const prevIdx = ((trail as any)._prevIdx as number) ?? -1;
-    if (newIdx > prevIdx) {
-      this._checkTripleTrailCollision(trail, Math.max(-1, prevIdx), newIdx);
-      (trail as any)._prevIdx = newIdx;
-      (trail as any)._visibleEnd = newIdx;
-    }
-    if (age >= travel + this._tripleTrailHoldDuration + this._tripleTrailFadeDuration) {
-      trail.active = false;
-    }
+  private _tripleLeftDelay = 0;
+  private _tripleRightDelay = 0;
+  private _tripleTrailPeakDuration = 0.07;
+  private _tripleTrailFadeDuration = 0.15;
+  private _updateTripleTrailLife(trail: SlashTrail) {
+    const age = this.elapsed - this._tripleTrailStartTime;
+    if (age >= this._tripleTrailPeakDuration + this._tripleTrailFadeDuration) trail.active = false;
   }
 
   // ═══════════════════ V0731011: 燎原令火径 ═══════════════════
