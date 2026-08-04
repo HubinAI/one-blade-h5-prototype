@@ -213,7 +213,7 @@ export class Game {
     attackEndPos: Vec2;
   }[] = [];
   // 多波多次刷新队列：每个子刷新有时间戳，到时间就spawn
-  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number; isTailCatchup?: boolean }[] = [];
+  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; stageNode?: string; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number; isTailCatchup?: boolean }[] = [];
 
   private pointerDown = false;
   private pointerPos?: Vec2;
@@ -458,7 +458,6 @@ export class Game {
   private _resetCallCount = 0;
   private _lastEliteGateBlocked = true;
   private _eliteGateReason = '-';
-  private _eliteGateLogCounter = 0;
   private _stateRecoveryCount = 0;
   /** V0803037: 生成批次追踪 */
   private _spawnBatchId = 0;
@@ -5764,14 +5763,14 @@ export class Game {
     // V0731006: 普通模式允许通过新流程入口推进，不强制要求旧 chestDone
     if (this.gameMode !== "normal" && !this.chestDone) return;
     if (this.postChestStartAt === null) return;
-    if (this.allPostChestWavesSpawned) return;
-    const wave = postWaves[this.postChestWaveIndex];
-    if (!wave) { this.allPostChestWavesSpawned = true; return; }
     const total = postWaves.length;
     this.edictBurstRoundTotal = total;
+    if (!this.allPostChestWavesSpawned) {
+      const wave = postWaves[this.postChestWaveIndex];
+      if (!wave) { this.allPostChestWavesSpawned = true; } else {
 
-    const postElapsed = this.elapsed - this.postChestStartAt;
-    const scheduledTime = wave.spawnAt ?? 0;
+      const postElapsed = this.elapsed - this.postChestStartAt;
+      const scheduledTime = wave.spawnAt ?? 0;
     const pressure = this.getCombatPressure("edict");
     const enoughTimeSinceLast = this.elapsed - this.postChestLastWaveQueuedAt >= 1.35;
     const lockExpired = this.elapsed >= this.postChestAdvanceLockedUntil;
@@ -5826,10 +5825,11 @@ export class Game {
       this.allPostChestWavesSpawned = true;
       this.edictBurstRoundIndex = total;
     }
+    } /* end else wave */ } /* end if !allPostChestWavesSpawned */
     // 完成检查：全部生成 + 无存活敌人 + 无排队 = complete
     if (this.allPostChestWavesSpawned && this.postChestSequenceState === 'fighting') {
       if (!this.enemies.some(e => e.alive) && this.subSpawnQueue.length === 0) {
-        this.setPostChestSequenceState('complete', 'all_waves_done+clear');
+        this.setPostChestSequenceState('complete', 'all_batches_spawned_and_cleared');
       }
     }
   }
@@ -6099,7 +6099,11 @@ export class Game {
     const spawnY = profile.spawnY - (item.yOffset ?? 0);
     // P2.7：安全区约束
     const safeX = this.clampSpawnXByPhaseAndKind(item.x, item.kind as EnemyKind, phase);
+    // 使用队列快照节点（如有），避免被当前全局 stageNode 覆盖
+    const savedNode = this._currentStageNode;
+    if (item.stageNode) { this._currentStageNode = item.stageNode as StageNode; }
     const enemy = this.createEnemy(item.kind as any, safeX, spawnY, item.speedMultiplier, profile);
+    this._currentStageNode = savedNode;
     if (this._currentWaveEvent) {
       enemy.spawnedWithEvent = this._currentWaveEvent;
     }
@@ -7407,8 +7411,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._spawnBatchId += 1;
     const bid = `P${roundIndex}`;
     this._lastSpawnSource = `post_chest_wave_${roundIndex}`;
+    // 每组节点快照：P1=release/75, P2=understand/83, P3=adapt/86
+    const snapNode = roundIndex <= 1 ? 'post_edict_release' : roundIndex <= 2 ? 'post_edict_understand' : 'post_edict_adapt';
     if (this.debugEnabled && this.postChestSequenceState !== 'inactive') {
-      console.warn(`[SPAWN-QUEUE] batch=${bid} pci=${this.postChestWaveIndex} node=${this._currentStageNode} planned=${wave.enemies.length}`);
+      console.warn(`[SPAWN-QUEUE] batch=${bid} pci=${this.postChestWaveIndex} node=${snapNode} planned=${wave.enemies.length}`);
     }
     const totalSpawns = wave.enemies;
     let localDelay = 0;
@@ -7437,6 +7443,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
             speedMultiplier: 1,
             yOffset: rowYOffset,
             battlePhase: "edict_burst",
+            stageNode: snapNode,
             flowRole: batch < 1 ? "vanguard" : batch < 2 ? "main" : "reserve",
             spawnGroupId: `edict:${roundIndex}:${roundIndex}`,
             spawnOrder: i,
@@ -10598,19 +10605,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // V0803036+0803039: 军令后验证潮 — inactive/complete 仅在实际不要求验证潮时放行
     const hasPostWaves = this.getEffectivePostChestWaves().length > 0;
     if (this.postChestSequenceState === 'inactive' && hasPostWaves) {
-      // 本关有军令后怪潮但未启动 → BLOCK
-      this._eliteGateLogCounter += 1;
-      this._eliteGateReason = 'no(inactive+hasPostWaves)'; this._lastEliteGateBlocked = true;
-      if (this.debugEnabled && this._eliteGateLogCounter % 30 === 0) console.warn(`[ELITE-GATE] BLOCK x${this._eliteGateLogCounter} | state=inactive hasPost`);
-      return;
+      this._eliteGateReason = 'no(inactive+hasPostWaves)'; this._lastEliteGateBlocked = true; return;
     }
     if (this.postChestSequenceState !== 'inactive' && this.postChestSequenceState !== 'complete') {
-      this._eliteGateLogCounter += 1;
-      if (this.debugEnabled && this._eliteGateLogCounter % 30 === 0) console.warn(`[ELITE-GATE] BLOCK x${this._eliteGateLogCounter} | state=${this.postChestSequenceState} | alive=${this.enemies.filter(e=>e.alive).length} | q=${this.subSpawnQueue.length}`);
       this._eliteGateReason = `no(state=${this.postChestSequenceState})`; this._lastEliteGateBlocked = true; return;
     }
-    this._eliteGateLogCounter = 0;
-    if (this.debugEnabled && this._lastEliteGateBlocked) console.warn(`[ELITE-GATE] ALLOW | state=${this.postChestSequenceState} | alive=${this.enemies.filter(e=>e.alive).length}`);
     this._eliteGateReason = `yes(state=${this.postChestSequenceState})`; this._lastEliteGateBlocked = false;
 
     // V0801008: 统一清场后0.6s精英入场（全关卡，覆盖spawnAt）
@@ -10626,7 +10625,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
 
     this.eliteSpawned = true;
-    if (this.debugEnabled) console.warn(`[ELITE-SPAWN] state=${this.postChestSequenceState} | pci=${this.postChestWaveIndex} | alive=${this.enemies.filter(e=>e.alive).length}`);
     const ek = this.level.eliteKind;
     const conf = ELITE_CONFIG[ek];
     // 在随机列生成

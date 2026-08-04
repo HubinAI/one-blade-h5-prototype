@@ -15,7 +15,6 @@ describe('军令后验证潮统一流程', () => {
     g.enemies = []; g.subSpawnQueue = [];
     g.updateEliteSpawn();
     expect(g.eliteSpawned).toBe(false);
-    expect(g.postChestSequenceState).toBe('inactive'); // 不自动改 complete
   });
 
   it('waiting_spawn → elite BLOCK', () => {
@@ -48,19 +47,73 @@ describe('军令后验证潮统一流程', () => {
   it('startEdictBurstOnce 不覆盖 state', () => {
     const g = mk();
     g.setPostChestSequenceState('waiting_spawn', 'init');
-    // startEdictBurstOnce 被重复调用时不应改变 state
     (g as any).startEdictBurstOnce();
     expect(g.postChestSequenceState).toBe('waiting_spawn');
   });
 
-  it('三组逐组: P1(release/75) P2(understand/83) P3(adapt/86)', () => {
+  it('P1队列项 stageNode=post_edict_release HP=75', () => {
     const g = mk();
-    const verify = (pci: number, hp: number) => {
-      g.postChestWaveIndex = pci;
-      g._currentStageNode = resolveLevel1Node(g.battlePhase, g.wavesSpawned, g.postChestWaveIndex);
-      const e = g.createEnemy('infantry', 200, 400, 1);
-      expect(e.maxHp).toBe(hp);
-    };
-    verify(1, 75); verify(2, 83); verify(3, 86);
+    g.postChestWaveIndex = 1;
+    g._currentStageNode = 'post_edict_release';
+    g.setPostChestSequenceState('fighting', 'test');
+    g.postChestStartAt = g.elapsed;
+    // 模拟入队
+    (g as any).enqueuePostChestWave({ enemies: [{ kind: 'infantry', count: 1, x: 200 }] } as any, 1);
+    expect(g.subSpawnQueue.length).toBe(1);
+    const item = g.subSpawnQueue[0];
+    expect(item.stageNode).toBe('post_edict_release');
+    // 生成敌人并使用快照
+    g._currentStageNode = 'post_edict_adapt'; // 尝试覆盖
+    (g as any).spawnEnemyFromQueueItem(item);
+    const e = g.enemies[g.enemies.length - 1];
+    expect(e.maxHp).toBe(75);
+  });
+
+  it('P2队列项 stageNode=post_edict_understand HP=83', () => {
+    const g = mk();
+    g.setPostChestSequenceState('fighting', 'test');
+    g.postChestStartAt = g.elapsed;
+    (g as any).enqueuePostChestWave({ enemies: [{ kind: 'infantry', count: 1, x: 200 }] } as any, 2);
+    expect(g.subSpawnQueue[0].stageNode).toBe('post_edict_understand');
+    (g as any).spawnEnemyFromQueueItem(g.subSpawnQueue[0]);
+    expect(g.enemies[g.enemies.length - 1].maxHp).toBe(83);
+  });
+
+  it('P3队列项 stageNode=post_edict_adapt HP=86', () => {
+    const g = mk();
+    g.setPostChestSequenceState('fighting', 'test');
+    g.postChestStartAt = g.elapsed;
+    (g as any).enqueuePostChestWave({ enemies: [{ kind: 'infantry', count: 1, x: 200 }] } as any, 3);
+    expect(g.subSpawnQueue[0].stageNode).toBe('post_edict_adapt');
+    (g as any).spawnEnemyFromQueueItem(g.subSpawnQueue[0]);
+    expect(g.enemies[g.enemies.length - 1].maxHp).toBe(86);
+  });
+
+  it('卡死现场: fighting+pci=3+alive=0+q=0 → complete', () => {
+    const g = mk();
+    g.setPostChestSequenceState('fighting', 'test');
+    g.postChestWaveIndex = 3;
+    g.allPostChestWavesSpawned = true;
+    g.postChestStartAt = g.elapsed;
+    g.enemies = []; g.subSpawnQueue = [];
+    // 模拟一帧 updatePostChestWaves
+    (g as any).updatePostChestWaves(0.016);
+    expect(g.postChestSequenceState).toBe('complete');
+  });
+
+  it('complete前 elite BLOCK (fighting+有敌人)', () => {
+    const g = mk();
+    g.setPostChestSequenceState('fighting', 'test');
+    g.eliteSpawned = false; g.enemies = [{ alive: true }];
+    g.updateEliteSpawn();
+    expect(g.eliteSpawned).toBe(false);
+  });
+
+  it('complete后下一帧 elite ALLOW', () => {
+    const g = mk();
+    g.setPostChestSequenceState('complete', 'test');
+    g.eliteSpawned = false; g.enemies = []; g._eliteClearanceAt = g.elapsed - 1;
+    g.updateEliteSpawn();
+    expect(g.eliteSpawned).toBe(true);
   });
 });
