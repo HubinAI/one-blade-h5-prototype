@@ -904,7 +904,8 @@ export class Game {
         }
         // 清理三刀流
         self._tripleSlashHitEnemyIds.clear();
-        self._tripleStrikePlaybacks = [];
+        self._tripleLeftTrail = null;
+        self._tripleRightTrail = null;
       };
     }
 
@@ -1053,7 +1054,7 @@ export class Game {
     this._chestWarningAt = 0; this._chestOpenBlockUntilMs = 0; this._chestFlowClock = 0;
     this._edictArrivalTimer = 0; this._chestStampTimer = 0;
     // 军令与效果
-    this._activeEdicts = []; this._scorchTrails = []; this._tripleStrikePlaybacks = []; this._tripleSlashHitEnemyIds.clear();
+    this._activeEdicts = []; this._scorchTrails = []; this._tripleLeftTrail = null; this._tripleRightTrail = null; this._tripleSlashHitEnemyIds.clear();
     // 精英与战斗
     this.eliteSpawned = false; this.eliteKilled = false; this.elitePreviewShown = false; this.eliteSpawnAnnounced = false;
     this._eliteClearanceAt = 0; this._elitePreviewAt = 0;
@@ -1260,10 +1261,10 @@ export class Game {
     }
     // P4.3A: 战场流动控制
     // V0731010: 更新派生刀痕生命期
-    this._tripleStrikePlaybacks = this._tripleStrikePlaybacks.filter(p => p.playhead < p.points.length);
-    if (this._tripleStrikePlaybacks.length > 0) {
-      this._advanceTripleStrikePlaybacks();
-    }
+    // 副刀时间推进 + 碰撞
+    this._updateTripleTrails(scaledDt);
+    if (this._tripleLeftTrail?.active) this._advanceTripleTrail(this._tripleLeftTrail, this._tripleLeftDelay);
+    if (this._tripleRightTrail?.active) this._advanceTripleTrail(this._tripleRightTrail, this._tripleRightDelay);
     // V0731011: 更新火径生命 + 敌人伤害
     this._updateScorchTrails(scaledDt);
     this._updateFrostStates(scaledDt); // V0731012
@@ -2570,7 +2571,7 @@ export class Game {
       lastKillSource: "",
     };
     this._activeEdicts = [];
-    this._tripleStrikePlaybacks = []; // V0731010: 清空派生刀痕
+    this._tripleLeftTrail = null; this._tripleRightTrail = null; // V0731010: 清空副刀
     this._tripleSlashHitEnemyIds.clear();
     this._scorchTrails = []; // V0731011: 清空火径
     // V0731012: 清除所有敌人霜冻状态
@@ -2786,37 +2787,71 @@ export class Game {
     this._pendingEdictId = null;
   }
   // ═══════════════════ V0731010: 三刀流 ═══════════════════
-  private _advanceTripleStrikePlaybacks() {
-    for (const p of this._tripleStrikePlaybacks) {
-      if (p.playhead >= p.points.length) continue;
-      p.playhead = Math.min(p.playhead + p.speed, p.points.length);
-      const i = Math.floor(p.playhead);
-      if (i >= 1) this._applyTripleStrikeHit(p.points[i - 1], p.points[Math.min(i, p.points.length - 1)], p);
+  private _sampledPath(pts: { x: number; y: number }[], n: number) {
+    if (pts.length <= 1) return [...pts];
+    let total = 0; const segs: number[] = [0];
+    for (let i = 1; i < pts.length; i++) { total += Math.sqrt((pts[i].x-pts[i-1].x)**2+(pts[i].y-pts[i-1].y)**2); segs.push(total); }
+    if (total < 1) return [pts[0], pts[pts.length-1]];
+    const out: {x:number;y:number}[] = [];
+    for (let j = 0; j < n; j++) { const dist = (j/(n-1))*total; let k=0; while(k<segs.length-1&&segs[k+1]<dist)k++; const t=(dist-segs[k])/(segs[k+1]-segs[k]||1); out.push({x:pts[k].x+(pts[k+1].x-pts[k].x)*t,y:pts[k].y+(pts[k+1].y-pts[k].y)*t}); }
+    return out;
+  }
+
+  private _createTripleSubTrail(pts: {x:number;y:number}[], main: SlashTrail, idSuffix: string): SlashTrail {
+    const stage = SWORD_STAGE_BY_ID[main.tier]; const rEff = main.reactiveBladeEffect;
+    return {
+      id: main.id + idSuffix, tier: main.tier, lockedEnergy: main.lockedEnergy, lockedMomentum: main.lockedMomentum,
+      maxPower: main.maxPower, remainingPower: main.maxPower, maxDuration: 0, remainingDuration: 0,
+      maxPathLength: main.maxPathLength, remainingPathLength: main.maxPathLength, pathUsed: 0,
+      widthMultiplier: main.widthMultiplier, energyBank: 0, explosionCount: 0, coreCollapseCount: 0,
+      points: pts.map(p => ({ x: p.x, y: p.y, t: this.elapsed, energyRatio: 1 } as SlashPoint)),
+      hitEnemyIds: this._tripleSlashHitEnemyIds, hitPickupIds: new Set(), pendingExplosionIds: new Set(),
+      pendingCoreIds: new Set(), oilTriggeredIds: new Set(), hasOil: false,
+      kills: 0, directMainKills: 0, chain: 0, active: true,
+      reactiveBladeEffect: rEff ? rEff : undefined,
+      _damageSnapshot: main._damageSnapshot ?? this.captureDamageSnapshot(),
+    } as SlashTrail;
+  }
+
+  private _checkTripleTrailCollision(trail: SlashTrail, prevIdx: number, newIdx: number) {
+    for (let i = prevIdx + 1; i <= newIdx && i < trail.points.length - 1; i++) {
+      const a = trail.points[i], b = trail.points[i + 1];
+      for (const enemy of this.enemies) {
+        if (!enemy.alive || this._tripleSlashHitEnemyIds.has(enemy.id)) continue;
+        const abx = b.x-a.x, aby = b.y-a.y, eax = a.x-enemy.x, eay = a.y-enemy.y, rad = enemy.radius+12;
+        const dot = abx*abx+aby*aby; if (dot<1) continue;
+        const t = clamp(-(eax*abx+eay*aby)/dot,0,1);
+        if (Math.sqrt((a.x+abx*t-enemy.x)**2+(a.y+aby*t-enemy.y)**2)>rad) continue;
+        this._tripleSlashHitEnemyIds.add(enemy.id);
+        const r = resolveDamage({ actionId: this.nextId("dmg"), parentActionId: trail.id, sourceType: "TRIPLE_DERIVED_1", sourceConfig: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH, attackerId: "player", targetId: enemy.id, targetCategory: "ENEMY", skillCoefficient: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient, stats: trail._damageSnapshot!, bladeBand: "mid", tags: ["triple"], hitPos: { x: enemy.x, y: enemy.y }, timestamp: this.elapsed }, enemy.hp, enemy.maxHp, enemy.alive, !!enemy.eliteKind);
+        if (r?.isAccepted && r.resolvedDamage > 0) {
+          this.damageEnemy(enemy, r.resolvedDamage, trail, false, "triple");
+          this.aggregateAndMaybeFlush(`${trail.id}_${enemy.id}`, r.resolvedDamage, { x: enemy.x, y: enemy.y }, 'TRIPLE_DERIVED_1', 'ENEMY', 100, trail._damageSnapshot!.entryAttack, false, false);
+        }
+      }
     }
   }
 
-  private _applyTripleStrikeHit(a: { x: number; y: number }, b: { x: number; y: number }, pb: typeof this._tripleStrikePlaybacks[0]) {
-    for (const enemy of this.enemies) {
-      if (!enemy.alive || this._tripleSlashHitEnemyIds.has(enemy.id)) continue;
-      const abx = b.x-a.x, aby = b.y-a.y, eax = a.x-enemy.x, eay = a.y-enemy.y;
-      const rad = enemy.radius+12, dot = abx*abx+aby*aby;
-      if (dot<1) continue;
-      const t = clamp(-(eax*abx+eay*aby)/dot, 0, 1);
-      if (Math.sqrt((a.x+abx*t-enemy.x)**2+(a.y+aby*t-enemy.y)**2) > rad) continue;
-      this._tripleSlashHitEnemyIds.add(enemy.id);
-      const r = resolveDamage({
-        actionId: this.nextId("dmg"), parentActionId: pb.trailId, sourceType: "TRIPLE_DERIVED_1",
-        sourceConfig: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH, attackerId: "player", targetId: enemy.id,
-        targetCategory: "ENEMY", skillCoefficient: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient,
-        stats: pb.damageSnapshot, bladeBand: "mid", tags: ["triple"],
-        hitPos: { x: enemy.x, y: enemy.y }, timestamp: this.elapsed,
-      }, enemy.hp, enemy.maxHp, enemy.alive, !!enemy.eliteKind);
-      if (r?.isAccepted && r.resolvedDamage > 0) {
-        if (this.currentSlash?.active) this.damageEnemy(enemy, r.resolvedDamage, this.currentSlash, false, "triple");
-        else { enemy.hp -= r.resolvedDamage; enemy.flash = 0.25; if (enemy.hp <= 0) { enemy.alive = false; this.stats.kills += 1; this.particles.push(...paperBurst(enemy, 12, paperColors)); } else this.particles.push(...sparkBurst(enemy, 8, "#ffd67c")); }
-        this.aggregateAndMaybeFlush(`${pb.trailId}_${enemy.id}`, r.resolvedDamage, { x: enemy.x, y: enemy.y }, 'TRIPLE_DERIVED_1', 'ENEMY', 100, pb.damageSnapshot.entryAttack, false, false);
-      }
+  private _updateTripleTrails(scaledDt: number) {
+    for (const t of [this._tripleLeftTrail, this._tripleRightTrail]) { if (!t || !t.active) continue; t.remainingDuration = Math.max(0, t.remainingDuration - scaledDt); }
+  }
+
+  private _drawTripleTrail(ctx: CanvasRenderingContext2D, trail: SlashTrail, alphaMul: number) {
+    if (!trail.active || trail.points.length < 2) return;
+    const pts = trail.points, stage = SWORD_STAGE_BY_ID[trail.tier], rEff = trail.reactiveBladeEffect;
+    const effColor = rEff?.color ?? stage.color, effWidth = rEff?.width ?? stage.width;
+    const width = effWidth * trail.widthMultiplier * 0.28 * 0.85 * alphaMul;
+    const age = this.elapsed - this._tripleTrailStartTime;
+    const alpha = clamp(1 - Math.max(0, age - 0.22) / 0.12, 0.02, 1) * alphaMul;
+    ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i-1], b = pts[i], segAlpha = clamp(alpha*(0.6+(i/pts.length)*0.4), 0.03, 0.8);
+      ctx.strokeStyle = `rgba(255,213,112,${segAlpha*0.5})`; ctx.shadowColor = effColor; ctx.lineWidth = width*0.9;
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+      ctx.strokeStyle = `rgba(255,255,238,${segAlpha*0.8})`; ctx.shadowBlur = 2; ctx.lineWidth = Math.max(1,width*0.5);
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
     }
+    ctx.restore();
   }
 
   private _startTripleSlashSequence(main: SlashTrail) {
@@ -2824,33 +2859,46 @@ export class Game {
     this._tripleSlashHitEnemyIds.clear();
     for (const id of main.hitEnemyIds) this._tripleSlashHitEnemyIds.add(id);
     const pts = main.points; if (pts.length < 2) return;
-    const dx = pts[pts.length-1].x-pts[0].x, dy = pts[pts.length-1].y-pts[0].y;
-    const len = Math.sqrt(dx*dx+dy*dy); if (len < 10) return;
-    const nx = -dy/len, ny = dx/len;
-    const dmg = main._damageSnapshot ?? this.captureDamageSnapshot();
-    const stage = SWORD_STAGE_BY_ID[main.tier];
-    const color = ((main.reactiveBladeEffect as any)?.color) ?? stage.color;
-    const width = ((main.reactiveBladeEffect as any)?.width) ?? stage.width;
-    const startOff = 24, endOff = 88, n = pts.length-1;
-    const genPath = (sign: number) => pts.map((p, i) => {
-      const t = n===0?0:i/n, ease = t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
-      const off = startOff+(endOff-startOff)*ease;
-      return { x: p.x+nx*sign*off, y: p.y+ny*sign*off };
-    });
-    this._tripleStrikePlaybacks = [
-      { points: pts, playhead: 0, speed: 3, mainColor: color, mainWidth: width, trailId: main.id+'_c', damageSnapshot: dmg },
-      { points: genPath(-1), playhead: 0, speed: 3, mainColor: color, mainWidth: width, trailId: main.id+'_l', damageSnapshot: dmg },
-      { points: genPath(1), playhead: 0, speed: 3, mainColor: color, mainWidth: width, trailId: main.id+'_r', damageSnapshot: dmg },
-    ];
-    if (this.debugEnabled) console.warn(`[TRIPLE] start: center=${pts.length} left=${genPath(-1).length} right=${genPath(1).length} color=${color} width=${width}`);
+    const sampled = this._sampledPath(pts, 32);
+    const dxLeft = sampled.map((p,i)=>{ const pi_1=i>0?sampled[i-1]:p, pi1=i<sampled.length-1?sampled[i+1]:p; return {dx:pi1.x-pi_1.x,dy:pi1.y-pi_1.y}; });
+    const startOff=24,endOff=88,n=sampled.length-1;
+    const gen = (sign:number) => sampled.map((p,i)=>{ const t=n===0?0:i/n,ease=t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2; const off=startOff+(endOff-startOff)*ease; let {dx,dy}=dxLeft[i]; const L=Math.sqrt(dx*dx+dy*dy)||1; return {x:p.x+(-dy/L)*sign*off,y:p.y+(dx/L)*sign*off}; });
+    this._tripleLeftTrail = this._createTripleSubTrail(gen(-1), main, '_l');
+    this._tripleRightTrail = this._createTripleSubTrail(gen(1), main, '_r');
+    this._tripleTrailStartTime = this.elapsed;
+    const totalLife = this._tripleTrailTravelDuration + this._tripleTrailHoldDuration + this._tripleTrailFadeDuration;
+    this._tripleLeftTrail.remainingDuration = totalLife;
+    this._tripleRightTrail.remainingDuration = totalLife;
+    (this._tripleLeftTrail as any)._prevIdx = -1; (this._tripleRightTrail as any)._prevIdx = -1;
   }
 
-  /** 三刀流共享去重与播放序列 */
+  /** 三刀流共享去重 + 副刀 SlashTrail */
   private _tripleSlashHitEnemyIds: Set<string> = new Set();
-  private _tripleStrikePlaybacks: { points: { x: number; y: number }[]; playhead: number; speed: number; mainColor: string; mainWidth: number; trailId: string; damageSnapshot: PlayerRunStats }[] = [];
-  private _tripleStrikeTimer = 0;
-  private _tripleStrikePhase = 0; // 0=center 1=left 2=right 3=done
-  private _tripleStrikeCenterDone = false;
+  private _tripleLeftTrail: SlashTrail | null = null;
+  private _tripleRightTrail: SlashTrail | null = null;
+  private _tripleTrailStartTime = 0;
+  private _tripleLeftDelay = 0.03;
+  private _tripleRightDelay = 0.06;
+  private _tripleTrailTravelDuration = 0.16;
+  private _tripleTrailHoldDuration = 0.05;
+  private _tripleTrailFadeDuration = 0.12;
+  private _advanceTripleTrail(trail: SlashTrail, delay: number) {
+    const age = this.elapsed - this._tripleTrailStartTime - delay;
+    if (age < 0) return;
+    const travel = this._tripleTrailTravelDuration;
+    const progress = clamp(age / travel, 0, 1);
+    const nPts = trail.points.length;
+    const newIdx = Math.min(Math.floor(progress * nPts), nPts - 1);
+    const prevIdx = ((trail as any)._prevIdx as number) ?? -1;
+    if (newIdx > prevIdx) {
+      this._checkTripleTrailCollision(trail, Math.max(-1, prevIdx), newIdx);
+      (trail as any)._prevIdx = newIdx;
+    }
+    if (age >= travel + this._tripleTrailHoldDuration + this._tripleTrailFadeDuration) {
+      trail.active = false;
+    }
+  }
+
   // ═══════════════════ V0731011: 燎原令火径 ═══════════════════
   private _scorchTrails: { points: { x: number; y: number }[]; life: number; maxLife: number; lastTickTime: number }[] = [];
   // ═══════════════════ V0731011 End ═══════════════════
@@ -9512,30 +9560,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.drawBladeTip(ctx, last, angle, visualLength, width, effColor, ratio);
     ctx.restore();
 
-    // 三刀流追斩播放渲染
-    for (const pb of this._tripleStrikePlaybacks) {
-      if (pb.playhead <= 1 || pb.points.length < 2) continue;
-      const end = Math.min(Math.floor(pb.playhead), pb.points.length - 1);
-      if (end < 1) continue;
-      const alpha = clamp(pb.playhead / pb.points.length, 0.15, 1) * 0.65;
-      ctx.save();
-      ctx.globalCompositeOperation = "lighter";
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      for (let i = 1; i <= end; i++) {
-        const a = pb.points[i - 1], b = pb.points[i];
-        const segAlpha = clamp(alpha * (0.5 + (i/pb.points.length)*0.5), 0.08, 0.78);
-        ctx.strokeStyle = `rgba(255,213,112,${segAlpha*0.5})`;
-        ctx.shadowColor = pb.mainColor;
-        ctx.lineWidth = pb.mainWidth * 0.7 * 0.85;
-        ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
-        ctx.strokeStyle = `rgba(255,255,238,${segAlpha*0.82})`;
-        ctx.shadowBlur = 2;
-        ctx.lineWidth = Math.max(1, pb.mainWidth * 0.4);
-        ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
-      }
-      ctx.restore();
-    }
+    // 三刀流副刀渲染
+    if (this._tripleLeftTrail?.active) this._drawTripleTrail(ctx, this._tripleLeftTrail, 1);
+    if (this._tripleRightTrail?.active) this._drawTripleTrail(ctx, this._tripleRightTrail, 1);
   }
   private drawSubBladeVisual(ctx: CanvasRenderingContext2D) {
     const warriorY = BALANCE.battlefield.warriorY;
