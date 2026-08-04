@@ -7313,6 +7313,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (this.chestDone || this.edictRewardApplied) return;
     if (this.edictRewardState !== "flying") return;
 
+    // 启动验证潮序列（在 startEdictBurstOnce 之前，保证状态一定转移）
+    this.postChestWaveIndex = 0;
+    this.setPostChestSequenceState('waiting_spawn', 'edict_confirmed');
+
     this.phase = "playing";
     this.edictIconFlying = false;
     this.edictIconFlyT = 1;
@@ -7356,7 +7360,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.allPostChestWavesSpawned = false;
     this.edictBurstRoundIndex = 1;
     this.edictBurstRoundTotal = postWaves.length;
-    this.setPostChestSequenceState('waiting_spawn', 'edict_confirmed');
+    this.setPostChestSequenceState('waiting_spawn', 'burst_once');
   }
 
   /** P3.7：确认军令弹窗→启动飞行（恢复 playing 防止卡死） */
@@ -10623,7 +10627,13 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private updateEliteSpawn() {
     if (this.eliteSpawned || !this.level.eliteSpawnAt || !this.level.eliteKind) return;
     if (!this.allNormalWavesSpawned) { this._eliteGateReason = 'no(not_all_waves)'; this._lastEliteGateBlocked = true; return; }
-    // V0803036: 军令后验证潮状态机 — 仅在 inactive/complete 许可精英
+    // V0803036+0803039: 军令后验证潮 — inactive/complete 仅在实际不要求验证潮时放行
+    const hasPostWaves = this.getEffectivePostChestWaves().length > 0;
+    if (this.postChestSequenceState === 'inactive' && hasPostWaves) {
+      this._eliteGateReason = 'no(inactive+hasPostWaves)'; this._lastEliteGateBlocked = true;
+      if (this.debugEnabled) console.warn(`[ELITE-GATE] BLOCK | state=inactive but hasPostWaves=true`);
+      return;
+    }
     if (this.postChestSequenceState !== 'inactive' && this.postChestSequenceState !== 'complete') {
       if (this.debugEnabled) console.warn(`[ELITE-GATE] BLOCK | state=${this.postChestSequenceState} | pci=${this.postChestWaveIndex} | alive=${this.enemies.filter(e=>e.alive).length} | q=${this.subSpawnQueue.length} | allPcDone=${this.allPostChestWavesSpawned}`);
       this._eliteGateReason = `no(state=${this.postChestSequenceState})`; this._lastEliteGateBlocked = true; return;
