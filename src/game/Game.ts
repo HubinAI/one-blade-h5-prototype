@@ -6627,6 +6627,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   /** 二次打磨：自动切换 battlePhase HUD 显示 */
   private updateBattlePhase() {
     if (this.finished) { this.battlePhase = 'result'; return; }
+    // V0804003: 自愈 — edictPostWavesQueued=true 但 state=inactive 时恢复 waiting_spawn
+    // (可能由 Game 重新构造导致 state 被重置)
+    if (this.edictPostWavesQueued && this.postChestSequenceState === 'inactive' && this.getEffectivePostChestWaves().length > 0) {
+      this.setPostChestSequenceState('waiting_spawn', 'recovery_after_reset');
+    }
     if (this.edictRewardState === "modal") return;
     // V0731006: 新流程精英后怪潮期间保持 edict_burst
     if (this.edictPostWavesQueued && (!this.allPostChestWavesSpawned || this.subSpawnQueue.length > 0 || this.enemies.some(e => e.alive))) {
