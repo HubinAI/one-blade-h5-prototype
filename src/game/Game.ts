@@ -458,6 +458,7 @@ export class Game {
   private _resetCallCount = 0;
   private _lastEliteGateBlocked = true;
   private _eliteGateReason = '-';
+  private _eliteGateLogCounter = 0;
   /** V0803037: 生成批次追踪 */
   private _spawnBatchId = 0;
   private _lastSpawnSource: string = '-';
@@ -7749,7 +7750,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const prev = this.postChestSequenceState;
     this.postChestSequenceState = next as any;
     if (this.debugEnabled && prev !== next) {
-      console.warn(`[POST-STATE] ${prev}→${next} | ${reason} | pci=${this.postChestWaveIndex} bp=${this.battlePhase} q=${this.subSpawnQueue.length} alv=${this.enemies.filter(e=>e.alive).length}`);
+      const cnt = this.enemies.filter(e => e.alive).length;
+      console.warn(`[POST-STATE] ${prev}→${next} | ${reason} | pci=${this.postChestWaveIndex} bp=${this.battlePhase} alv=${cnt}`);
     }
   }
 
@@ -10642,15 +10644,18 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         this._lastEliteGateBlocked = false;
       } else {
         this._eliteGateReason = 'no(inactive+hasPostWaves)'; this._lastEliteGateBlocked = true;
-        if (this.debugEnabled) console.warn(`[ELITE-GATE] BLOCK | state=inactive but hasPostWaves=true`);
+        this._eliteGateLogCounter += 1;
+        if (this.debugEnabled && this._eliteGateLogCounter % 30 === 0) console.warn(`[ELITE-GATE] BLOCK x${this._eliteGateLogCounter} | state=inactive hasPost`);
         return;
       }
     }
     if (this.postChestSequenceState !== 'inactive' && this.postChestSequenceState !== 'complete') {
-      if (this.debugEnabled) console.warn(`[ELITE-GATE] BLOCK | state=${this.postChestSequenceState} | pci=${this.postChestWaveIndex} | alive=${this.enemies.filter(e=>e.alive).length} | q=${this.subSpawnQueue.length} | allPcDone=${this.allPostChestWavesSpawned}`);
+      this._eliteGateLogCounter += 1;
+      if (this.debugEnabled && this._eliteGateLogCounter % 30 === 0) console.warn(`[ELITE-GATE] BLOCK x${this._eliteGateLogCounter} | state=${this.postChestSequenceState} | alive=${this.enemies.filter(e=>e.alive).length} | q=${this.subSpawnQueue.length}`);
       this._eliteGateReason = `no(state=${this.postChestSequenceState})`; this._lastEliteGateBlocked = true; return;
     }
-    if (this.debugEnabled) console.warn(`[ELITE-GATE] ALLOW | state=${this.postChestSequenceState} | pci=${this.postChestWaveIndex} | alive=${this.enemies.filter(e=>e.alive).length} | q=${this.subSpawnQueue.length}`);
+    this._eliteGateLogCounter = 0;
+    if (this.debugEnabled && this._lastEliteGateBlocked) console.warn(`[ELITE-GATE] ALLOW | state=${this.postChestSequenceState} | alive=${this.enemies.filter(e=>e.alive).length}`);
     this._eliteGateReason = `yes(state=${this.postChestSequenceState})`; this._lastEliteGateBlocked = false;
 
     // V0801008: 统一清场后0.6s精英入场（全关卡，覆盖spawnAt）
