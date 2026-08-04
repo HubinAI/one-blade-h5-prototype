@@ -10568,8 +10568,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   /** 精英怪生成 — V0801008: 全关卡事件驱动 */
   private updateEliteSpawn() {
     if (this.eliteSpawned || !this.level.eliteSpawnAt || !this.level.eliteKind) return;
-    // 三次修正：等所有主波次全部刷完后才出精英（避免精英乱入）
+    // 三次修正：等所有主波次全部刷完后才出精英
     if (!this.allNormalWavesSpawned) return;
+    // V0803034: 等军令后验证潮全部完成再出精英
+    if (this.edictPostWavesQueued && !this.allPostChestWavesSpawned) return;
+    if (this.edictPostWavesQueued && (this.subSpawnQueue.length > 0 || this.enemies.some(e => e.alive))) return;
 
     // V0801008: 统一清场后0.6s精英入场（全关卡，覆盖spawnAt）
     const aliveEnemies = this.enemies.filter(e => e.alive).length;
