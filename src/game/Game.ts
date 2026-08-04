@@ -7319,7 +7319,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (this.chestDone || this.edictRewardApplied) return;
     if (this.edictRewardState !== "flying") return;
 
-    // 启动验证潮序列（在 startEdictBurstOnce 之前，保证状态一定转移）
+    // 启动验证潮序列 — postChestSequenceState 从此唯一入口
     this.postChestWaveIndex = 0;
     this.setPostChestSequenceState('waiting_spawn', 'edict_confirmed');
 
@@ -7346,27 +7346,26 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.startEdictBurstOnce();
   }
 
-  /** P3.5：军令爆发只入队一次 */
+  /** P3.5：军令爆发只入队一次，状态统一由 postChestSequenceState 管理 */
   private startEdictBurstOnce() {
-    if (this.edictPostWavesQueued) return;
-
     const postWaves = this.getEffectivePostChestWaves();
-
     if (postWaves.length <= 0) {
       this.allPostChestWavesSpawned = true;
       this.edictBurstRoundIndex = 0;
       this.edictBurstRoundTotal = 0;
       return;
     }
-
-    this.edictPostWavesQueued = true;
+    // 避免重复入队，但初始化参数和状态必须执行
+    if (!this.edictPostWavesQueued) {
+      this.edictPostWavesQueued = true;
+    }
     this.battlePhase = "edict_burst";
     this.postChestStartAt = this.elapsed;
     this.postChestWaveIndex = 0;
     this.allPostChestWavesSpawned = false;
     this.edictBurstRoundIndex = 1;
     this.edictBurstRoundTotal = postWaves.length;
-    this.setPostChestSequenceState('waiting_spawn', 'burst_once');
+    // state 统一由 completeEliteChestReward 设置，此处不重复
   }
 
   /** P3.7：确认军令弹窗→启动飞行（恢复 playing 防止卡死） */
@@ -10637,17 +10636,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // V0803036+0803039: 军令后验证潮 — inactive/complete 仅在实际不要求验证潮时放行
     const hasPostWaves = this.getEffectivePostChestWaves().length > 0;
     if (this.postChestSequenceState === 'inactive' && hasPostWaves) {
-      // V0803040: 死锁保护 — 当全部主波已生成且战场清空,但军令流程未启动,
-      // 视为系统异常,强制放行精英以避免无限阻塞
-      if (this.enemies.filter(e => e.alive).length === 0 && this.subSpawnQueue.length === 0) {
-        this.setPostChestSequenceState('complete', 'inactive_stall_guard');
-        this._lastEliteGateBlocked = false;
-      } else {
-        this._eliteGateReason = 'no(inactive+hasPostWaves)'; this._lastEliteGateBlocked = true;
-        this._eliteGateLogCounter += 1;
-        if (this.debugEnabled && this._eliteGateLogCounter % 30 === 0) console.warn(`[ELITE-GATE] BLOCK x${this._eliteGateLogCounter} | state=inactive hasPost`);
-        return;
-      }
+      // 本关有军令后怪潮但未启动 → BLOCK
+      this._eliteGateLogCounter += 1;
+      this._eliteGateReason = 'no(inactive+hasPostWaves)'; this._lastEliteGateBlocked = true;
+      if (this.debugEnabled && this._eliteGateLogCounter % 30 === 0) console.warn(`[ELITE-GATE] BLOCK x${this._eliteGateLogCounter} | state=inactive hasPost`);
+      return;
     }
     if (this.postChestSequenceState !== 'inactive' && this.postChestSequenceState !== 'complete') {
       this._eliteGateLogCounter += 1;
