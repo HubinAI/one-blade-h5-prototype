@@ -894,6 +894,16 @@ export class Game {
       (window as any).__grantFrost = () => {
         self._activeEdicts.push({ id: "frost", level: 1 });
       };
+      // 0807-11C-1: 清空当前已激活军令（让 T/Y/U 切换时不被旧 edict 干扰）
+      (window as any).__clearActiveEdicts = () => {
+        self._activeEdicts = [];
+        self._edictArrivalTimer = 0;
+        self._pendingEdictId = null;
+        self._tripleSideTrails = [];
+        self._tripleSlashHitEnemyIds.clear();
+        self._scorchTrails = [];
+        for (const enemy of self.enemies) { (enemy as any)._frostState = undefined; }
+      };
     }
 
     // P3.2：重置精英播报状态，防止上一关残留

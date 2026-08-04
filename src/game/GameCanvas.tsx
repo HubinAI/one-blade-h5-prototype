@@ -126,6 +126,9 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
       } else if (event.key.toLowerCase() === "u") {
         // V0731012: 调试用授予凝霜令
         (window as any).__grantFrost?.();
+      } else if (event.key.toLowerCase() === "k") {
+        // 0807-11C-1: 清空当前已激活军令，切换 T/Y/U 时不被旧 edict 干扰
+        (window as any).__clearActiveEdicts?.();
       } else if (event.key.toLowerCase() === "s") {
         // 0807-11A: 调试跳过新手教学
         gameRef.current?.skipSwipeTutorial();
