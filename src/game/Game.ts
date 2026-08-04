@@ -453,6 +453,8 @@ export class Game {
   private allNormalWavesSpawned = false;
   /** 宝箱后爆发波索引 */
   private postChestWaveIndex = 0;
+  /** V0803036: 军令后验证潮状态机 */
+  private postChestSequenceState: 'inactive' | 'waiting_spawn' | 'fighting' | 'complete' = 'inactive';
   /** 宝箱后所有爆发波是否已生成 */
   private allPostChestWavesSpawned = false;
   /** 是否有关键动画播放中 */
@@ -1047,6 +1049,7 @@ export class Game {
     this.wavesSpawned = 0; this.allNormalWavesSpawned = false;
     this._lastWaveElapsed = 0; this.waveAdvanceLockedUntil = 0;
     this.edictRewardState = "none"; this.edictPostWavesQueued = false; this.allPostChestWavesSpawned = false;
+    this.postChestSequenceState = 'inactive';
     this.postChestStartAt = null;
     // 验证潮
     this._edictVerifyPhase = "none"; this._edictVerifyTimer = 0;
@@ -5796,6 +5799,7 @@ export class Game {
 
   /** P4.3A.3: 军令波改为截止时间+压力提前接力 */
   private updatePostChestWaves(dt: number) {
+    if (this.postChestSequenceState === 'inactive' || this.postChestSequenceState === 'complete') return;
     const postWaves = this.getEffectivePostChestWaves();
     if (!postWaves || postWaves.length === 0) return;
     // V0731006: 普通模式允许通过新流程入口推进，不强制要求旧 chestDone
@@ -5853,6 +5857,7 @@ export class Game {
     const roundIndex = this.postChestWaveIndex;
     this.edictBurstRoundIndex = Math.min(roundIndex, total);
     this.spawnPostChestWave(wave, roundIndex);
+    this.postChestSequenceState = 'fighting';
     this.postChestLastWaveQueuedAt = this.elapsed;
     this.postChestAdvanceLockedUntil = this.elapsed + randomRange(0.85, 1.10);
     this.postChestLastAdvanceReason = reason;
@@ -5861,6 +5866,12 @@ export class Game {
     if (this.postChestWaveIndex >= total) {
       this.allPostChestWavesSpawned = true;
       this.edictBurstRoundIndex = total;
+    }
+    // 完成检查：全部生成 + 无存活敌人 + 无排队 = complete
+    if (this.allPostChestWavesSpawned && this.postChestSequenceState === 'fighting') {
+      if (!this.enemies.some(e => e.alive) && this.subSpawnQueue.length === 0) {
+        this.postChestSequenceState = 'complete';
+      }
     }
   }
 
@@ -7332,6 +7343,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.allPostChestWavesSpawned = false;
     this.edictBurstRoundIndex = 1;
     this.edictBurstRoundTotal = postWaves.length;
+    this.postChestSequenceState = 'waiting_spawn';
   }
 
   /** P3.7：确认军令弹窗→启动飞行（恢复 playing 防止卡死） */
@@ -10569,11 +10581,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   /** 精英怪生成 — V0801008: 全关卡事件驱动 */
   private updateEliteSpawn() {
     if (this.eliteSpawned || !this.level.eliteSpawnAt || !this.level.eliteKind) return;
-    // 三次修正：等所有主波次全部刷完后才出精英
     if (!this.allNormalWavesSpawned) return;
-    // V0803034: 等军令后验证潮全部完成再出精英
-    if (this.edictPostWavesQueued && !this.allPostChestWavesSpawned) return;
-    if (this.edictPostWavesQueued && (this.subSpawnQueue.length > 0 || this.enemies.some(e => e.alive))) return;
+    // V0803036: 军令后验证潮状态机 — 仅在 inactive/complete 许可精英
+    if (this.postChestSequenceState !== 'inactive' && this.postChestSequenceState !== 'complete') return;
 
     // V0801008: 统一清场后0.6s精英入场（全关卡，覆盖spawnAt）
     const aliveEnemies = this.enemies.filter(e => e.alive).length;
