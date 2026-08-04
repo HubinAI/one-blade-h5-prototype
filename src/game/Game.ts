@@ -981,6 +981,13 @@ export class Game {
     else if (!this._debugShowDetail) { this._debugShowDetail = true; }
     else { this.debugEnabled = false; this._debugShowDetail = false; }
   }
+  /** H 键：HP 验收层开关 */
+  private _showHpOverlay = false;
+  toggleHpOverlay(): void {
+    this._showHpOverlay = !this._showHpOverlay;
+    if (!this._showHpOverlay && !this._debugShowDetail) this.debugEnabled = false;
+    else if (this._showHpOverlay) this.debugEnabled = true;
+  }
 
   /** 调试用：强制给所有存活敌人加破绽标记（按 W 触发） */
   debugForceWeakpoint() {
@@ -1266,7 +1273,7 @@ export class Game {
     // P4.2: 统一播报更新
     this.updateBattleNotice(scaledDt);
     this.updateBattlePhase();
-    this._currentStageNode = resolveLevel1Node(this.battlePhase, this.wavesSpawned);
+    this._currentStageNode = resolveLevel1Node(this.battlePhase, this.wavesSpawned + this.postChestWaveIndex);
     this.updateBuffChoiceTriggers();
     this.checkBattleEnd();
     this.updateVictoryTransition(scaledDt);
@@ -1340,6 +1347,7 @@ export class Game {
     } else if (this.debugEnabled) {
       if (this._debugShowDetail) { this.drawDebugPanel(ctx); }
       else { this._drawDebugCompact(ctx); }
+    if (this._showHpOverlay) this._drawHpOverlay(ctx);
     }
     if (this.debugEnabled) this._drawThreatVerificationCard(ctx);
     // P4.4A.2-R2: 调试十字准星——显示系统记录的触摸位置
@@ -10347,7 +10355,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   }
 
   private _drawDebugCompact(ctx: CanvasRenderingContext2D): void {
-    const cardW = 148; const cardH = 102;
+    const cardW = 148; const cardH = this._showHpOverlay ? 118 : 102;
     const x = 6; const topY = 10;
     ctx.save();
     ctx.fillStyle = 'rgba(13, 16, 17, 0.78)';
@@ -10366,6 +10374,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       { l: 'level', v: `${levelId}`, c: '#fff' },
       { l: 'phase', v: `${this.phase}`, c: '#fff' },
       { l: 'wave', v: `${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`, c: '#fff' },
+      ...(this._showHpOverlay ? [
+        { l: 'node', v: `${this._currentStageNode}`, c: '#f39c12' },
+        { l: 'hp', v: `${calcFinalHp(1,'infantry',this._currentStageNode)}`, c: '#f39c12' },
+      ] : []),
       { l: 'enemies', v: `${aliveCount}`, c: '#fff' },
       { l: 'playerHP', v: `${this.hp}`, c: '#e74c3c' },
       { l: 'bladeMomentum', v: `${this.energy.toFixed(0)} (${stage.label})`, c: '#ffd35a' },
@@ -10388,6 +10400,26 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.textAlign = 'left'; ctx.fillStyle = '#888'; ctx.fillText(row.l.slice(0, cap), lx, ry);
       ctx.textAlign = 'right'; ctx.fillStyle = row.c; ctx.fillText(row.v, vx, ry);
     });
+    ctx.restore();
+  }
+
+  private _drawHpOverlay(ctx: CanvasRenderingContext2D): void {
+    if (!this._showHpOverlay) return;
+    ctx.save();
+    ctx.font = 'bold 11px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      const x = clamp(e.x, 30, 370);
+      const y = e.y - e.radius - 8;
+      ctx.fillStyle = 'rgba(10,8,4,0.85)';
+      const txt = `${e.hp}/${e.maxHp}`;
+      const w = ctx.measureText(txt).width + 10;
+      ctx.beginPath(); ctx.roundRect(x - w/2, y - 7, w, 14, 4); ctx.fill();
+      ctx.fillStyle = '#ffd35a';
+      ctx.fillText(txt, x, y);
+    }
     ctx.restore();
   }
 
