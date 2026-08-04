@@ -7059,6 +7059,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (this.edictRewardState !== "flying") return;
     if (!this.edictIconFlying) return;
     this.edictIconFlyT += dt / this.edictIconFlyDuration;
+    if (this.debugEnabled && this.edictIconFlyT % 1 < 0.1 && this.edictIconFlyT > 0.3) console.warn(`[EDICT-FLY] t=${this.edictIconFlyT.toFixed(2)} iconFlying=${this.edictIconFlying}`);
     if (this.edictIconFlyT >= 1) {
       this.edictIconFlyT = 1;
       this.completeEliteChestReward();
@@ -7316,8 +7317,15 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   /** P2.9：完成精英宝箱奖励——应用buff + 军令Icon + 进入军令爆发 */
   /** P3.7：飞行完成→应用军令奖励（真正幂等）+ 启动军令爆发 */
   private completeEliteChestReward() {
-    if (this.chestDone || this.edictRewardApplied) return;
-    if (this.edictRewardState !== "flying") return;
+    if (this.chestDone || this.edictRewardApplied) {
+      if (this.debugEnabled) console.warn(`[EDICT-COMPLETE] BLOCK: chestDone=${this.chestDone} edictRewardApplied=${this.edictRewardApplied}`);
+      return;
+    }
+    if (this.edictRewardState !== "flying") {
+      if (this.debugEnabled) console.warn(`[EDICT-COMPLETE] BLOCK: state=${this.edictRewardState}`);
+      return;
+    }
+    if (this.debugEnabled) console.warn(`[EDICT-COMPLETE] OK: state=${this.edictRewardState} → waiting_spawn`);
 
     // 启动验证潮序列 — postChestSequenceState 从此唯一入口
     this.postChestWaveIndex = 0;
@@ -7373,6 +7381,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (this.edictRewardState !== "modal") return;
     if (!this.chestPendingConfirm) return;
     if (this.edictModalConfirmed) return;
+
+    if (this.debugEnabled) console.warn(`[EDICT-CONFIRM] ${this.edictRewardState}→flying`);
 
     this.edictModalConfirmed = true;
 
