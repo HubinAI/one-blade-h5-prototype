@@ -151,6 +151,7 @@ export class Game {
   private score = 0;
   // V0731005: 进度宝箱运行时代替旧 score HUD
   private _chestRuntime: ProgressChestRuntime = { stageIndex: 0, progress: 0, threshold: 30, status: "charging", maxChestCount: 1, lastCountedEnemyId: "", lastKillSource: "" };
+  private _chestProgressPaused = false;
   private _activeEdicts: EdictInstance[] = [];
   // V0731008: 宝箱开奖框架
   private _chestOpeningPhase: "idle" | "warning" | "entering" | "descending" | "settling" | "roulette" | "revealed" | "exiting" | "closed" = "idle";
@@ -894,15 +895,13 @@ export class Game {
       (window as any).__grantFrost = () => {
         self._activeEdicts.push({ id: "frost", level: 1 });
       };
-      // 0807-11C-1: 清空当前已激活军令（让 T/Y/U 切换时不被旧 edict 干扰）
-      (window as any).__clearActiveEdicts = () => {
-        self._activeEdicts = [];
-        self._edictArrivalTimer = 0;
-        self._pendingEdictId = null;
-        self._tripleSideTrails = [];
-        self._tripleSlashHitEnemyIds.clear();
-        self._scorchTrails = [];
-        for (const enemy of self.enemies) { (enemy as any)._frostState = undefined; }
+      // 0807-11C-1: 暂停/恢复宝箱计数（不让系统的军令随机宝箱干扰 T/Y/U 测试）
+      (window as any).__toggleChestProgress = () => {
+        self._chestProgressPaused = !self._chestProgressPaused;
+        if (self._chestProgressPaused) {
+          self._chestRuntime.status = "charging";
+          self._chestRuntime.progress = 0;
+        }
       };
     }
 
@@ -1135,7 +1134,7 @@ export class Game {
   update(dt: number) {
     const frameDt = Math.min(dt, 0.04);
     // V0731013: 正式接入 — 30/30时自动触发宝箱开奖
-    if (this._chestRuntime.status === "ready" && this._chestOpeningPhase === "idle" && this.battlePhase !== "edict_modal" && this.phase !== "buffChoice" && !this.currentSlash?.active) {
+    if (!this._chestProgressPaused && this._chestRuntime.status === "ready" && this._chestOpeningPhase === "idle" && this.battlePhase !== "edict_modal" && this.phase !== "buffChoice" && !this.currentSlash?.active) {
         this._chestOpeningPhase = "warning";
         this._chestWarningAt = 0;
         this.activeBattleNotice = null; // V0801005: 清旧播报
@@ -2576,6 +2575,7 @@ export class Game {
 
   /** 宝箱进度统一计数入口 */
   registerEnemyKillForProgressChest(enemyId: string, source: string) {
+    if (this._chestProgressPaused) return; // K 键暂停宝箱计数
     const rt = this._chestRuntime;
     if (rt.status !== "charging") return;
     if (rt.progress >= rt.threshold) return;
