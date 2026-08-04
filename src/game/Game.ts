@@ -7723,6 +7723,32 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
   }
 
+  private _getActiveBatchLabel(): string {
+    if (this.eliteSpawned) return 'ELITE';
+    if (this.postChestSequenceState === 'fighting') {
+      if (this.postChestWaveIndex === 1) return 'P1';
+      if (this.postChestWaveIndex === 2) return 'P2';
+      if (this.postChestWaveIndex === 3) return 'P3';
+    }
+    return '-';
+  }
+
+  private _getActiveBatchNode(): string {
+    if (this.eliteSpawned) return 'elite';
+    if (this.postChestWaveIndex === 1) return 'post_edict_release';
+    if (this.postChestWaveIndex === 2) return 'post_edict_understand';
+    if (this.postChestWaveIndex === 3) return 'post_edict_adapt';
+    return this._currentStageNode;
+  }
+
+  private _getActiveBatchHp(): number {
+    if (this.eliteSpawned) return 1265;
+    if (this.postChestWaveIndex === 1) return 75;
+    if (this.postChestWaveIndex === 2) return 83;
+    if (this.postChestWaveIndex === 3) return 86;
+    return calcFinalHp(1, 'infantry', this._currentStageNode);
+  }
+
   burstSlashFloats(hits: { damage: number; x: number; y: number; isKill: boolean; isElite?: boolean }[], refAtk: number, slashId: string): void {
     this.clusterSlashFloats(hits, refAtk, slashId);
   }
@@ -10401,11 +10427,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       { l: 'phase', v: `${this.phase}`, c: '#fff' },
       { l: 'wave', v: `${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`, c: '#fff' },
       ...(this._showHpOverlay ? [
-        { l: 'node', v: `${this._currentStageNode}`, c: '#f39c12' },
-        { l: 'configHp', v: `${calcFinalHp(1,'infantry',this._currentStageNode)}`, c: '#f39c12' },
-        { l: 'spawnedHp', v: `${this._lastSpawnedInfantryHp || '-'}`, c: this._lastSpawnedInfantryHp === calcFinalHp(1,'infantry',this._currentStageNode) ? '#2ecc71' : '#e74c3c' },
-        { l: 'src', v: `${this._lastSpawnSource}`, c: '#888' },
-        { l: 'pNode/uNode', v: `${this._lastSpawnPassedNode}/${this._lastSpawnUsedNode}`, c: '#888' },
+        { l: 'actBatch', v: this._getActiveBatchLabel(), c: '#ffd35a' },
+        { l: 'actNode', v: this._getActiveBatchNode(), c: '#f39c12' },
+        { l: 'actHp', v: `${this._getActiveBatchHp()}`, c: '#f39c12' },
+        { l: 'lastSrc', v: `${this._lastSpawnSource}`, c: '#888' },
+        { l: 'lastNode', v: `${this._lastSpawnPassedNode}`, c: '#888' },
+        { l: 'lastHp', v: `${this._lastSpawnMaxHp || '-'}`, c: '#888' },
         { l: 'seq', v: `${this.postChestSequenceState}`, c: '#f39c12' },
         { l: 'pci', v: `${this.postChestWaveIndex}`, c: '#888' },
         { l: 'gate', v: this._lastEliteGateBlocked ? 'BLOCK' : 'ALLOW', c: this._lastEliteGateBlocked ? '#e74c3c' : '#2ecc71' },
@@ -10444,9 +10471,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     for (const e of this.enemies) {
       if (!e.alive) continue;
       const esrc = (e as any)._spawnSource || '';
-      const srcLabel = esrc.startsWith('post_chest_wave_') ? esrc.replace('post_chest_wave_', 'P') :
-                       esrc === 'normal_wave' ? 'N' :
-                       esrc === 'elite' ? 'E' : '';
+      let srcLabel = '';
+      if (esrc.startsWith('post_chest_wave_')) {
+        srcLabel = esrc.replace('post_chest_wave_', 'P');
+      } else if (esrc.startsWith('normal_wave_')) {
+        srcLabel = 'N' + esrc.replace('normal_wave_', '');
+      } else if (esrc === 'elite') {
+        srcLabel = 'E';
+      }
       const x = clamp(e.x, 30, 370);
       const y = e.y - e.radius - 8;
       ctx.fillStyle = 'rgba(10,8,4,0.85)';
