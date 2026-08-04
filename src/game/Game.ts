@@ -364,6 +364,8 @@ export class Game {
   /** V0803025: 主刀伤害收集 buffer */
   private _currentMainSlashHits: { damage: number; x: number; y: number; isKill: boolean; isElite: boolean }[] | null = null;
   private _mainSlashBurstTimer: ReturnType<typeof setTimeout> | null = null;
+  /** V0803026: 连斩独立表现 */
+  private _comboPresentation: { count: number; tier: number; x: number; y: number; elapsed: number; totalDuration: number; shake: number } | null = null;
   private _numericalTestTarget: Enemy | null = null;
   private _numericalTestPaused = false;
   /** 火环威胁验证追踪 */
@@ -1230,6 +1232,7 @@ export class Game {
     this.updatePickups(scaledDt);
     this.updateParticles(scaledDt);
     this.updateTexts(scaledDt);
+    this._updateComboPresentation(scaledDt);
     this._updateL1TutorialGroups();
     this._updateSwipeTutorial(scaledDt); // 0807-11A: 稳定检测需在正常循环中运行
     this.updateWaves(scaledDt);
@@ -1299,6 +1302,7 @@ export class Game {
       ctx.save(); ctx.globalAlpha = 0.2;
     }
     this.drawFloatingTexts(ctx);
+    this._drawComboPresentation(ctx);
     this.drawBattleNotice(ctx);
     this.drawWaveProgress(ctx);
     if (this._chestOpeningPhase === "roulette" || this._chestOpeningPhase === "revealed") {
@@ -1551,6 +1555,7 @@ export class Game {
       if (this.debugEnabled) this.drawReactiveDebugOverlay(ctx, rc);
       // 6. 浮字 + 边缘闪屏
       this.drawFloatingTexts(ctx);
+    this._drawComboPresentation(ctx);
       this.drawEdgeFlash(ctx);
       // 7. Boss覆盖层
       rc.renderOverlay(ctx);
@@ -1595,6 +1600,7 @@ export class Game {
       this.renderPlayerCombatLayer(ctx);
     }
     this.drawFloatingTexts(ctx);
+    this._drawComboPresentation(ctx);
     this.drawEdgeFlash(ctx);
     // 3. Boss覆盖层（HUD/文字在最上方）
     this.bossController?.renderOverlay(ctx);
@@ -1632,6 +1638,7 @@ export class Game {
     this.updateActiveSlash(scaledDt);
     this.updateParticles(scaledDt);
     this.updateTexts(scaledDt);
+    this._updateComboPresentation(scaledDt);
     // P4.4B-R3 P0-A: 旧 Boss 模式也更新副刀待机动画（cooldown→ready 呼吸），
     // 不锁敌/不攻击，仅保留视觉。修复审计 §2.5 "进入旧追击后副刀不显示"。
     this.updateSubBlades(scaledDt);
@@ -1672,6 +1679,7 @@ export class Game {
     this.updateActiveSlash(scaledDt);
     this.updateParticles(scaledDt);
     this.updateTexts(scaledDt);
+    this._updateComboPresentation(scaledDt);
     // P4.4B-R3 P0-A: Reactive 模式也更新副刀待机动画（cooldown→ready 呼吸），
     // 不锁敌/不攻击，仅保留视觉。修复审计 §2.3 "Reactive Boss 模式不更新副刀"。
     this.updateSubBlades(scaledDt);
@@ -7671,65 +7679,125 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.clusterSlashFloats(hits, refAtk, slashId);
   }
 
-  clusterSlashFloats(hits: { damage: number; x: number; y: number; isKill: boolean; isElite?: boolean }[], refAtk: number, slashId: string): void {
+  clusterSlashFloats(hits: { damage: number; x: number; y: number; isKill: boolean; isElite?: boolean }[], _refAtk: number, slashId: string): void {
     if (hits.length === 0) return;
     const sorted = [...hits].sort((a, b) => a.x - b.x);
     const elites = sorted.filter(h => h.isElite);
     const norms = sorted.filter(h => !h.isElite);
-    const groups: { damage: number; x: number; y: number; count: number }[] = [];
+    const groups: { damage: number; x: number; y: number }[] = [];
 
-    // 精英独立显示
-    for (const e of elites) {
-      groups.push({ damage: e.damage, x: e.x, y: e.y, count: 1 });
-    }
+    // 精英独立
+    for (const e of elites) { groups.push({ damage: e.damage, x: e.x, y: e.y }); }
 
-    // 普通目标聚类
+    // 普通聚类 — 伤害总和，不×N
     const n = norms.length;
-    let maxGroups: number;
-    if (n <= 3) maxGroups = n;
-    else if (n <= 6) maxGroups = 3;
-    else if (n <= 9) maxGroups = 4;
-    else maxGroups = 5;
+    let maxG: number;
+    if (n <= 3) maxG = n;
+    else if (n <= 6) maxG = 2;
+    else maxG = 3;
 
-    if (n > 0 && maxGroups > 0) {
-      const groupSize = Math.max(1, Math.ceil(n / maxGroups));
-      for (let g = 0; g < maxGroups && g * groupSize < n; g++) {
-        const slice = norms.slice(g * groupSize, (g + 1) * groupSize);
-        if (slice.length === 0) break;
-        const cx = slice.reduce((s, h) => s + h.x, 0) / slice.length;
-        const cy = slice.reduce((s, h) => s + h.y, 0) / slice.length;
-        const totalDmg = slice.reduce((s, h) => s + h.damage, 0);
-        groups.push({ damage: totalDmg, x: cx, y: cy, count: slice.length });
+    if (n > 0 && maxG > 0) {
+      const gs = Math.max(1, Math.ceil(n / maxG));
+      for (let g = 0; g < maxG && g * gs < n; g++) {
+        const sl = norms.slice(g * gs, (g + 1) * gs);
+        if (sl.length === 0) break;
+        const cx = sl.reduce((s, h) => s + h.x, 0) / sl.length;
+        const cy = sl.reduce((s, h) => s + h.y, 0) / sl.length;
+        groups.push({ damage: sl.reduce((s, h) => s + h.damage, 0), x: cx, y: cy });
       }
     }
 
-    const iv = 35;
+    const iv = 35; const dur = 0.40; const sz = 16;
     groups.forEach((grp, i) => {
-      const dur = 0.45; const szMul = 0.85;
-      const text = grp.count >= 2 ? `${grp.damage} x${grp.count}` : `${grp.damage}`;
+      const text = `${grp.damage}`;
       const t = setTimeout(() => {
-        this.addCombatFloat({ x: grp.x, y: grp.y - 6, text, color: '#ffffff', size: 18 * szMul, duration: dur, category: 'damage', priority: 'A', mergeKey: `cluster_${slashId}_${i}` });
+        this.addCombatFloat({ x: grp.x, y: grp.y - 6, text, color: '#fff', size: sz, duration: dur, category: 'damage', priority: 'B', mergeKey: `c_${slashId}_${i}` });
       }, i * iv);
       this._burstTimers.push(t);
     });
 
-    // 连斩总结（≥4，分级差异化）
+    // 连斩独立表现（≥4）
     if (hits.length >= 4) {
       const last = groups[groups.length - 1];
-      const delay = (groups.length - 1) * iv + 50;
-      let label: string; let labelSize: number; let labelColor: string;
-      if (hits.length >= 10) {
-        label = `一刀十斩 \u00d7${hits.length}`; labelSize = 28; labelColor = '#ff6a33';
-      } else if (hits.length >= 6) {
-        label = `连斩 \u00d7${hits.length}`; labelSize = 24; labelColor = '#ffd35a';
-      } else {
-        label = `连斩 \u00d7${hits.length}`; labelSize = 20; labelColor = '#e8e0d0';
-      }
-      const t = setTimeout(() => {
-        this.addCombatFloat({ x: last.x, y: last.y - 20, text: label, color: labelColor, size: labelSize, duration: 0.65, category: 'blade-tier', priority: 'A', mergeKey: `summary_${slashId}` });
-      }, delay);
+      const delay = (groups.length - 1) * iv + 45;
+      const t = setTimeout(() => this._showComboPresentation(hits.length, last.x, last.y - 40), delay);
       this._burstTimers.push(t);
     }
+  }
+
+  private _showComboPresentation(count: number, x: number, y: number): void {
+    let tier: number; let shake: number; let dur: number;
+    if (count >= 10) { tier = 3; shake = 5; dur = 0.75; }
+    else if (count >= 6) { tier = 2; shake = 3; dur = 0.65; }
+    else { tier = 1; shake = 2; dur = 0.55; }
+    this._comboPresentation = { count, tier, x: clamp(x, 60, 340), y: clamp(y, 100, 320), elapsed: 0, totalDuration: dur, shake };
+    // 同步震屏
+    this.screenShake = Math.max(this.screenShake, shake);
+  }
+
+  /** 每帧更新连斩表现 */
+  private _updateComboPresentation(dt: number): void {
+    const cp = this._comboPresentation;
+    if (!cp) return;
+    cp.elapsed += dt;
+    if (cp.elapsed >= cp.totalDuration) { this._comboPresentation = null; return; }
+  }
+
+  /** 绘制连斩表现 */
+  private _drawComboPresentation(ctx: CanvasRenderingContext2D): void {
+    const cp = this._comboPresentation;
+    if (!cp) return;
+    const { count, tier, x, y, elapsed, totalDuration } = cp;
+    const p = elapsed / totalDuration; // 0→1
+    // scale: 0→120ms 从0.65→1.25, 120→200ms 回落→1.0
+    let scale: number;
+    const p120 = 0.12 / totalDuration;
+    const p200 = 0.20 / totalDuration;
+    if (p <= p120) scale = 0.65 + 0.60 * (p / p120);
+    else if (p <= p200) scale = 1.25 - 0.25 * ((p - p120) / (p200 - p120));
+    else scale = 1.0;
+    // alpha: hold → fade
+    const alpha = p < 0.6 ? 1.0 : Math.max(0, 1.0 - (p - 0.6) / 0.4);
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+
+    // tier-specific
+    const numSize = tier >= 3 ? 56 : tier >= 2 ? 44 : 28;
+    const numColor = tier >= 3 ? '#ff6a33' : tier >= 2 ? '#ffd35a' : '#e8e0d0';
+    const labelText = tier >= 3 ? '一刀·十斩' : '连斩';
+
+    // ink bg (tier >= 2)
+    if (tier >= 2) {
+      ctx.fillStyle = `rgba(20,14,8,${0.70 * alpha})`;
+      ctx.beginPath(); ctx.roundRect(-80, -30, 160, 60, 8); ctx.fill();
+      ctx.strokeStyle = tier >= 3 ? `rgba(255,106,51,${0.5 * alpha})` : `rgba(255,211,90,${0.4 * alpha})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(-80, -30, 160, 60, 8); ctx.stroke();
+    }
+
+    // 小标签
+    ctx.font = `bold ${tier >= 3 ? 16 : 14}px "Microsoft YaHei", sans-serif`;
+    ctx.fillStyle = numColor;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(labelText, 0, -4);
+
+    // 大数字
+    ctx.font = `bold ${numSize}px "Microsoft YaHei", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    // stroke for tier >= 2
+    if (tier >= 2) {
+      ctx.strokeStyle = `rgba(10,8,4,0.8)`;
+      ctx.lineWidth = 3;
+      ctx.strokeText(`${count}`, 0, 0);
+    }
+    ctx.fillText(`${count}`, 0, 0);
+
+    ctx.restore();
   }
 
   private addText(
@@ -11378,7 +11446,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (snap.showUI) {
       this.drawSlash(ctx); this.drawParticles(ctx);
       this.renderPlayerCombatLayer(ctx);
-      this.drawFloatingTexts(ctx); this.drawEdgeFlash(ctx);
+      this.drawFloatingTexts(ctx);
+    this._drawComboPresentation(ctx); this.drawEdgeFlash(ctx);
       if (this.debugEnabled) this.drawDebugPanel(ctx);
       if (this.flash > 0) { ctx.fillStyle = `rgba(255, 232, 146, ${this.flash * 0.18})`; ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT); }
     }
