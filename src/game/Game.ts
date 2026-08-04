@@ -2840,18 +2840,30 @@ export class Game {
     if (!trail.active || trail.points.length < 2) return;
     const pts = trail.points, stage = SWORD_STAGE_BY_ID[trail.tier], rEff = trail.reactiveBladeEffect;
     const effColor = rEff?.color ?? stage.color, effWidth = rEff?.width ?? stage.width;
-    const width = effWidth * trail.widthMultiplier * 0.28 * 0.85 * alphaMul;
-    const age = this.elapsed - this._tripleTrailStartTime;
+    const baseWidth = effWidth * trail.widthMultiplier;
+    const outerWidth = baseWidth * 0.80;
+    const coreWidth = baseWidth * 0.42;
+    const startAt = ((trail as any)._startAt as number) ?? this._tripleTrailStartTime;
+    const age = this.elapsed - startAt;
     const holdEnd = this._tripleTrailTravelDuration + this._tripleTrailHoldDuration;
     const alpha = clamp(age < holdEnd ? 1 : 1 - (age - holdEnd) / this._tripleTrailFadeDuration, 0.02, 1) * alphaMul;
-    const maxIdx = ((trail as any)._visibleEnd as number) ?? pts.length - 1;
+    const maxIdx = Math.min(((trail as any)._visibleEnd as number) ?? -1, pts.length - 1);
+    if (maxIdx < 0) return;
     ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.lineCap = "round"; ctx.lineJoin = "round";
-    for (let i = 1; i <= Math.min(maxIdx, pts.length - 1); i++) {
-      const a = pts[i-1], b = pts[i], segAlpha = clamp(alpha*(0.6+(i/pts.length)*0.4), 0.03, 0.8);
-      ctx.strokeStyle = `rgba(255,213,112,${segAlpha*0.5})`; ctx.shadowColor = effColor; ctx.lineWidth = width*0.9;
-      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
-      ctx.strokeStyle = `rgba(255,255,238,${segAlpha*0.8})`; ctx.shadowBlur = 2; ctx.lineWidth = Math.max(1,width*0.5);
-      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    // 外焰 — 单次连续 path
+    ctx.strokeStyle = `rgba(255,213,112,${alpha*0.5})`; ctx.shadowColor = effColor;
+    ctx.lineWidth = outerWidth; ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i <= maxIdx; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
+    // 白热核心
+    ctx.strokeStyle = `rgba(255,255,238,${alpha*0.8})`; ctx.shadowBlur = 2;
+    ctx.lineWidth = coreWidth; ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i <= maxIdx; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
+    // 活动刀头 — travel阶段最后3-5段
+    if (age < this._tripleTrailTravelDuration && maxIdx >= 3) {
+      const tipStart = Math.max(1, maxIdx - 4);
+      ctx.strokeStyle = `rgba(255,255,255,${alpha*0.45})`; ctx.shadowColor = "#fff";
+      ctx.lineWidth = coreWidth * 1.3; ctx.beginPath(); ctx.moveTo(pts[tipStart].x, pts[tipStart].y);
+      for (let i = tipStart + 1; i <= maxIdx; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
     }
     ctx.restore();
   }
@@ -2861,13 +2873,37 @@ export class Game {
     this._tripleSlashHitEnemyIds.clear();
     for (const id of main.hitEnemyIds) this._tripleSlashHitEnemyIds.add(id);
     const pts = main.points; if (pts.length < 2) return;
-    const sampled = this._sampledPath(pts, 32);
-    const dxLeft = sampled.map((p,i)=>{ const pi_1=i>0?sampled[i-1]:p, pi1=i<sampled.length-1?sampled[i+1]:p; return {dx:pi1.x-pi_1.x,dy:pi1.y-pi_1.y}; });
-    const startOff=24,endOff=88,n=sampled.length-1;
-    const gen = (sign:number) => sampled.map((p,i)=>{ const t=n===0?0:i/n,ease=t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2; const off=startOff+(endOff-startOff)*ease; let {dx,dy}=dxLeft[i]; const L=Math.sqrt(dx*dx+dy*dy)||1; return {x:p.x+(-dy/L)*sign*off,y:p.y+(dx/L)*sign*off}; });
+    let sampled = this._sampledPath(pts, 32);
+    // 2轮三点平滑
+    for (let r = 0; r < 2; r++) {
+      const copy = sampled.map(p => ({ x: p.x, y: p.y }));
+      for (let i = 1; i < sampled.length - 1; i++) {
+        sampled[i] = { x: copy[i-1].x*0.25+copy[i].x*0.5+copy[i+1].x*0.25, y: copy[i-1].y*0.25+copy[i].y*0.5+copy[i+1].y*0.25 };
+      }
+    }
+    const normals = sampled.map((p,i) => {
+      const pi_1 = i>0?sampled[i-1]:p, pi1 = i<sampled.length-1?sampled[i+1]:p;
+      return { dx: pi1.x-pi_1.x, dy: pi1.y-pi_1.y };
+    });
+    // 法线方向连续
+    for (let i = 1; i < normals.length; i++) {
+      const prev = normals[i-1], cur = normals[i];
+      if (prev.dx*cur.dx + prev.dy*cur.dy < 0) { normals[i] = { dx: -cur.dx, dy: -cur.dy }; }
+    }
+    const startOff=24, endOff=72, n=sampled.length-1;
+    const gen = (sign:number) => sampled.map((p,i) => {
+      const t=n===0?0:i/n, ease=t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+      const off=startOff+(endOff-startOff)*ease;
+      let {dx,dy}=normals[i]; const L=Math.sqrt(dx*dx+dy*dy)||1;
+      const nx = -dy/L, ny = dx/L;
+      return { x: p.x+nx*sign*off, y: p.y+ny*sign*off };
+    });
+    const baseTime = this.elapsed;
     this._tripleLeftTrail = this._createTripleSubTrail(gen(-1), main, '_l');
     this._tripleRightTrail = this._createTripleSubTrail(gen(1), main, '_r');
-    this._tripleTrailStartTime = this.elapsed;
+    this._tripleTrailStartTime = baseTime;
+    (this._tripleLeftTrail as any)._startAt = baseTime + this._tripleLeftDelay;
+    (this._tripleRightTrail as any)._startAt = baseTime + this._tripleRightDelay;
     const totalLife = this._tripleTrailTravelDuration + this._tripleTrailHoldDuration + this._tripleTrailFadeDuration;
     this._tripleLeftTrail.remainingDuration = totalLife;
     this._tripleRightTrail.remainingDuration = totalLife;
@@ -2885,8 +2921,9 @@ export class Game {
   private _tripleTrailTravelDuration = 0.16;
   private _tripleTrailHoldDuration = 0.05;
   private _tripleTrailFadeDuration = 0.12;
-  private _advanceTripleTrail(trail: SlashTrail, delay: number) {
-    const age = this.elapsed - this._tripleTrailStartTime - delay;
+  private _advanceTripleTrail(trail: SlashTrail, _delay: number) {
+    const startAt = ((trail as any)._startAt as number) ?? this._tripleTrailStartTime;
+    const age = this.elapsed - startAt;
     if (age < 0) return;
     const travel = this._tripleTrailTravelDuration;
     const progress = clamp(age / travel, 0, 1);
