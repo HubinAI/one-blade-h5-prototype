@@ -455,6 +455,7 @@ export class Game {
   private postChestWaveIndex = 0;
   /** V0803036: 军令后验证潮状态机 */
   private postChestSequenceState: 'inactive' | 'waiting_spawn' | 'fighting' | 'complete' = 'inactive';
+  private _resetCallCount = 0;
   private _lastEliteGateBlocked = true;
   private _eliteGateReason = '-';
   /** V0803037: 生成批次追踪 */
@@ -1059,6 +1060,10 @@ export class Game {
     this.edictRewardState = "none"; this.edictPostWavesQueued = false; this.allPostChestWavesSpawned = false;
     this.setPostChestSequenceState('inactive', 'resetRunState');
     this.postChestStartAt = null;
+    this._resetCallCount += 1;
+    if (this.debugEnabled && this._resetCallCount > 1) {
+      console.warn(`[POST-STATE] resetRunState call #${this._resetCallCount}`);
+    }
     // 验证潮
     this._edictVerifyPhase = "none"; this._edictVerifyTimer = 0;
     // 播报
@@ -10630,9 +10635,16 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // V0803036+0803039: 军令后验证潮 — inactive/complete 仅在实际不要求验证潮时放行
     const hasPostWaves = this.getEffectivePostChestWaves().length > 0;
     if (this.postChestSequenceState === 'inactive' && hasPostWaves) {
-      this._eliteGateReason = 'no(inactive+hasPostWaves)'; this._lastEliteGateBlocked = true;
-      if (this.debugEnabled) console.warn(`[ELITE-GATE] BLOCK | state=inactive but hasPostWaves=true`);
-      return;
+      // V0803040: 死锁保护 — 当全部主波已生成且战场清空,但军令流程未启动,
+      // 视为系统异常,强制放行精英以避免无限阻塞
+      if (this.enemies.filter(e => e.alive).length === 0 && this.subSpawnQueue.length === 0) {
+        this.setPostChestSequenceState('complete', 'inactive_stall_guard');
+        this._lastEliteGateBlocked = false;
+      } else {
+        this._eliteGateReason = 'no(inactive+hasPostWaves)'; this._lastEliteGateBlocked = true;
+        if (this.debugEnabled) console.warn(`[ELITE-GATE] BLOCK | state=inactive but hasPostWaves=true`);
+        return;
+      }
     }
     if (this.postChestSequenceState !== 'inactive' && this.postChestSequenceState !== 'complete') {
       if (this.debugEnabled) console.warn(`[ELITE-GATE] BLOCK | state=${this.postChestSequenceState} | pci=${this.postChestWaveIndex} | alive=${this.enemies.filter(e=>e.alive).length} | q=${this.subSpawnQueue.length} | allPcDone=${this.allPostChestWavesSpawned}`);
