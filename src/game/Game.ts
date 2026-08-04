@@ -365,7 +365,12 @@ export class Game {
   private _currentMainSlashHits: { damage: number; x: number; y: number; isKill: boolean; isElite: boolean }[] | null = null;
   private _mainSlashBurstTimer: ReturnType<typeof setTimeout> | null = null;
   /** V0803026: 连斩独立表现 */
-  private _comboPresentation: { count: number; tier: number; x: number; y: number; elapsed: number; totalDuration: number; shake: number } | null = null;
+/** V0803027: 实时连击计数器 */
+  private _comboCount = 0;
+  private _comboResetTimer = 0;
+  private _comboResetDelay = 1.0;
+  private _comboHitFlash = 0;
+  private _comboScale = 1.0;
   private _numericalTestTarget: Enemy | null = null;
   private _numericalTestPaused = false;
   /** 火环威胁验证追踪 */
@@ -7546,8 +7551,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     isKill: boolean,
     options?: { sourceType?: string; isDot?: boolean; isDerived?: boolean; sizeMultiplier?: number; priorityOverlay?: FloatPriority; duration?: number; }
   ): void {
-    // V0803025: MAIN_SLASH 收集到 burst buffer，延迟触发聚类爆发
+    // V0803025: MAIN_SLASH 收集到 burst buffer + 实时连击
     if (options?.sourceType === 'MAIN_SLASH' && !options?.isDot && !options?.isDerived) {
+      this._comboCount += 1;
+      this._comboResetTimer = 0;
+      this._comboHitFlash = 0.15;
+      this._comboScale = 1.18;
       if (!this._currentMainSlashHits) this._currentMainSlashHits = [];
       const slashId = `m${Date.now()}`;
       this._currentMainSlashHits.push({ damage, x, y, isKill, isElite: targetType === 'ELITE' || targetType === 'BOSS' });
@@ -7673,6 +7682,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._burstTimers = [];
     if (this._mainSlashBurstTimer) { clearTimeout(this._mainSlashBurstTimer); this._mainSlashBurstTimer = null; }
     this._currentMainSlashHits = null;
+    this._comboCount = 0;
+    this._comboResetTimer = 0;
+    this._comboHitFlash = 0;
+    this._comboScale = 1.0;
   }
 
   burstSlashFloats(hits: { damage: number; x: number; y: number; isKill: boolean; isElite?: boolean }[], refAtk: number, slashId: string): void {
@@ -7716,86 +7729,75 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       this._burstTimers.push(t);
     });
 
-    // 连斩独立表现（≥4）
-    if (hits.length >= 4) {
-      const last = groups[groups.length - 1];
-      const delay = (groups.length - 1) * iv + 45;
-      const t = setTimeout(() => this._showComboPresentation(hits.length, last.x, last.y - 40), delay);
-      this._burstTimers.push(t);
-    }
+    // 连击由实时 ComboCounter 处理，不再做动作后总结
   }
 
   private _showComboPresentation(count: number, x: number, y: number): void {
-    let tier: number; let shake: number; let dur: number;
-    if (count >= 10) { tier = 3; shake = 5; dur = 0.75; }
-    else if (count >= 6) { tier = 2; shake = 3; dur = 0.65; }
-    else { tier = 1; shake = 2; dur = 0.55; }
-    this._comboPresentation = { count, tier, x: clamp(x, 60, 340), y: clamp(y, 100, 320), elapsed: 0, totalDuration: dur, shake };
-    // 同步震屏
-    this.screenShake = Math.max(this.screenShake, shake);
+    this._comboCount += count;
+    this._comboResetTimer = 0;
+    this._comboHitFlash = 0.15;
+    this._comboScale = 1.18;
   }
 
-  /** 每帧更新连斩表现 */
   private _updateComboPresentation(dt: number): void {
-    const cp = this._comboPresentation;
-    if (!cp) return;
-    cp.elapsed += dt;
-    if (cp.elapsed >= cp.totalDuration) { this._comboPresentation = null; return; }
+    if (this._comboCount <= 0) { this._comboHitFlash = 0; this._comboScale = 1.0; return; }
+    // 断连计时
+    this._comboResetTimer += dt;
+    if (this._comboResetTimer >= this._comboResetDelay) {
+      this._comboCount = 0;
+      this._comboHitFlash = 0;
+      this._comboScale = 0.6; // 缩小淡出
+      return;
+    }
+    // 缩放衰减
+    if (this._comboScale > 1.01) this._comboScale = 1.0 + (this._comboScale - 1.0) * Math.exp(-8 * dt);
+    else this._comboScale = 1.0;
+    // 命中闪动衰减
+    if (this._comboHitFlash > 0) this._comboHitFlash = Math.max(0, this._comboHitFlash - dt * 4);
   }
 
-  /** 绘制连斩表现 */
   private _drawComboPresentation(ctx: CanvasRenderingContext2D): void {
-    const cp = this._comboPresentation;
-    if (!cp) return;
-    const { count, tier, x, y, elapsed, totalDuration } = cp;
-    const p = elapsed / totalDuration; // 0→1
-    // scale: 0→120ms 从0.65→1.25, 120→200ms 回落→1.0
-    let scale: number;
-    const p120 = 0.12 / totalDuration;
-    const p200 = 0.20 / totalDuration;
-    if (p <= p120) scale = 0.65 + 0.60 * (p / p120);
-    else if (p <= p200) scale = 1.25 - 0.25 * ((p - p120) / (p200 - p120));
-    else scale = 1.0;
-    // alpha: hold → fade
-    const alpha = p < 0.6 ? 1.0 : Math.max(0, 1.0 - (p - 0.6) / 0.4);
+    if (this._comboCount <= 0) return;
+    const phase = this._comboResetDelay - this._comboResetTimer;
+    const fadeAlpha = phase < 0.3 ? Math.max(0, phase / 0.3) : 1.0;
+    if (fadeAlpha <= 0) { this._comboCount = 0; this._comboScale = 1.0; return; }
+    
+    const x = 340, y = 130;
+    const tier = this._comboCount >= 30 ? 3 : this._comboCount >= 10 ? 2 : 1;
+    const numSize = tier >= 3 ? 52 : tier >= 2 ? 44 : 36;
+    const numColor = tier >= 3 ? '#ff6a33' : tier >= 2 ? '#ffd35a' : '#ffffff';
+    const hitGlow = this._comboHitFlash > 0 ? 0.3 * this._comboHitFlash : 0;
 
     ctx.save();
-    ctx.globalAlpha = alpha;
+    ctx.globalAlpha = fadeAlpha;
     ctx.translate(x, y);
-    ctx.scale(scale, scale);
+    ctx.scale(this._comboScale, this._comboScale);
 
-    // tier-specific
-    const numSize = tier >= 3 ? 56 : tier >= 2 ? 44 : 28;
-    const numColor = tier >= 3 ? '#ff6a33' : tier >= 2 ? '#ffd35a' : '#e8e0d0';
-    const labelText = tier >= 3 ? '一刀·十斩' : '连斩';
+    // 刷痕背景
+    const slashAngle = -0.5 + Math.sin(this.elapsed * 3) * 0.1;
+    ctx.save();
+    ctx.rotate(slashAngle);
+    ctx.fillStyle = `rgba(200,60,20,${0.15 * fadeAlpha + hitGlow})`;
+    ctx.fillRect(-60, -15, 100, 30);
+    ctx.restore();
 
-    // ink bg (tier >= 2)
-    if (tier >= 2) {
-      ctx.fillStyle = `rgba(20,14,8,${0.70 * alpha})`;
-      ctx.beginPath(); ctx.roundRect(-80, -30, 160, 60, 8); ctx.fill();
-      ctx.strokeStyle = tier >= 3 ? `rgba(255,106,51,${0.5 * alpha})` : `rgba(255,211,90,${0.4 * alpha})`;
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.roundRect(-80, -30, 160, 60, 8); ctx.stroke();
-    }
-
-    // 小标签
-    ctx.font = `bold ${tier >= 3 ? 16 : 14}px "Microsoft YaHei", sans-serif`;
-    ctx.fillStyle = numColor;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText(labelText, 0, -4);
-
-    // 大数字
+    // 数字
     ctx.font = `bold ${numSize}px "Microsoft YaHei", sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    // stroke for tier >= 2
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
     if (tier >= 2) {
-      ctx.strokeStyle = `rgba(10,8,4,0.8)`;
-      ctx.lineWidth = 3;
-      ctx.strokeText(`${count}`, 0, 0);
+      ctx.strokeStyle = `rgba(10,8,4,${0.8 * fadeAlpha})`;
+      ctx.lineWidth = tier >= 3 ? 4 : 3;
+      ctx.strokeText(`${this._comboCount}`, 0, 0);
     }
-    ctx.fillText(`${count}`, 0, 0);
+    ctx.fillStyle = numColor;
+    ctx.fillText(`${this._comboCount}`, 0, 0);
+
+    // "连击!" 标签
+    ctx.font = `bold ${tier >= 3 ? 18 : 14}px "Microsoft YaHei", sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = numColor;
+    ctx.fillText('连击!', 6, 4);
 
     ctx.restore();
   }
