@@ -1054,7 +1054,7 @@ export class Game {
     this._chestWarningAt = 0; this._chestOpenBlockUntilMs = 0; this._chestFlowClock = 0;
     this._edictArrivalTimer = 0; this._chestStampTimer = 0;
     // 军令与效果
-    this._activeEdicts = []; this._scorchTrails = []; this._tripleSideTrails = []; this._tripleSlashHitEnemyIds.clear();
+    this._activeEdicts = []; this._scorchTrails = []; this._tripleSideTrails = []; this._tripleSlashHitEnemyIds.clear(); this._tripleSlashSequence = null;
     // 精英与战斗
     this.eliteSpawned = false; this.eliteKilled = false; this.elitePreviewShown = false; this.eliteSpawnAnnounced = false;
     this._eliteClearanceAt = 0; this._elitePreviewAt = 0;
@@ -2575,6 +2575,7 @@ export class Game {
     this._activeEdicts = [];
     this._tripleSideTrails = []; // V0731010: 清空派生刀痕
     this._tripleSlashHitEnemyIds.clear();
+    this._tripleSlashSequence = null;
     this._scorchTrails = []; // V0731011: 清空火径
     // V0731012: 清除所有敌人霜冻状态
     for (const enemy of this.enemies) { (enemy as any)._frostState = undefined; }
