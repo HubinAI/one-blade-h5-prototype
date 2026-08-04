@@ -1067,8 +1067,6 @@ export class Game {
     if (this.debugEnabled && this._resetCallCount > 1) {
       console.warn(`[POST-STATE] resetRunState call #${this._resetCallCount}`);
     }
-    // 验证潮
-    this._edictVerifyPhase = "none"; this._edictVerifyTimer = 0;
     // 播报
     this.activeBattleNotice = null; this.battleNoticeQueue = [];
     this.battleNoticeCooldowns = new Map();
@@ -1255,7 +1253,6 @@ export class Game {
     // V0731011: 更新火径生命 + 敌人伤害
     this._updateScorchTrails(scaledDt);
     this._updateFrostStates(scaledDt); // V0731012
-    this._updateVerifyPhase(scaledDt); // V0801003
     this._edictArrivalTimer = Math.max(0, this._edictArrivalTimer - scaledDt); // V0801004
     if (BATTLEFIELD_FLOW.enabled) {
       this.updateBattlefieldFlow(scaledDt);
@@ -2564,9 +2561,6 @@ export class Game {
     this._scorchTrails = []; // V0731011: 清空火径
     // V0731012: 清除所有敌人霜冻状态
     for (const enemy of this.enemies) { (enemy as any)._frostState = undefined; }
-    // V0731013: 重置验证潮标记
-    this._edictVerifyPhase = "none";
-    this._edictVerifyTimer = 0;
     this._edictArrivalTimer = 0;
   }
 
@@ -2759,8 +2753,10 @@ export class Game {
         this._edictArrivalTimer = 0.35; // V0801004: 飞入落点闪亮
         this._applyPendingEdict();
         this.resolveCurrentChestAndAdvance();
-        // V0731013: 宝箱关闭后生成验证怪潮
-        this._queueEdictVerificationWaves();
+        // V0804004: 统一使用 postChestSequenceState 状态机，移除旧 _queueEdictVerificationWaves
+        this.postChestWaveIndex = 0;
+        this.setPostChestSequenceState('waiting_spawn', 'chest_closed');
+        this.startEdictBurstOnce();
         break;
       }
     }
@@ -2902,59 +2898,6 @@ export class Game {
       if (fs.frozenLeft > 0) { fs.frozenLeft -= dt; continue; } // 冻结优先消耗
       if (fs.slowLeft > 0) fs.slowLeft -= dt;
       if (fs.slowLeft <= 0 && fs.frozenLeft <= 0) { (enemy as any)._frostState = undefined; }
-    }
-  }
-
-  // V0801003: 事件驱动验证怪潮
-  private _edictVerifyPhase: "none" | "group1" | "group1_cleared" | "group2" | "group2_cleared" | "done" = "none";
-  private _edictVerifyTimer = 0;
-
-  private _queueEdictVerificationWaves() {
-    if (this._edictVerifyPhase !== "none") return;
-    this._edictVerifyPhase = "group1";
-    this._spawnVerifyGroup1();
-  }
-
-  private _spawnVerifyGroup1() {
-    for (let i = 0; i < 5; i++) {
-      this.subSpawnQueue.push({ kind: "infantry", x: 1 + i * 78, yOffset: 420 - BATTLEFIELD_ZONES.midfieldStartY, time: this.elapsed + 0.3 + i * 0.1, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
-    }
-    for (let i = 0; i < 5; i++) {
-      this.subSpawnQueue.push({ kind: "infantry", x: 1 + i * 78, yOffset: 470 - BATTLEFIELD_ZONES.midfieldStartY, time: this.elapsed + 1.1 + i * 0.1, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
-    }
-  }
-
-  private _spawnVerifyGroup2() {
-    for (let i = 0; i < 4; i++) {
-      this.subSpawnQueue.push({ kind: "infantry", x: 1 + i * 40, yOffset: 360 - BATTLEFIELD_ZONES.midfieldStartY, time: this.elapsed + 0.1 + i * 0.12, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
-      this.subSpawnQueue.push({ kind: "infantry", x: 320 - i * 40, yOffset: 360 - BATTLEFIELD_ZONES.midfieldStartY, time: this.elapsed + 0.1 + i * 0.12, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
-      this.subSpawnQueue.push({ kind: "infantry", x: 130 + i * 38, yOffset: 440 - BATTLEFIELD_ZONES.midfieldStartY, time: this.elapsed + 0.6 + i * 0.12, source: "edict", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
-    }
-  }
-
-  private _updateVerifyPhase(dt: number) {
-    const aliveVerify = this.enemies.filter(e => e.alive && (e as any)._verifyGroup !== undefined).length;
-    const queueVerify = this.subSpawnQueue.filter(q => q.source === "edict").length;
-    switch (this._edictVerifyPhase) {
-      case "group1":
-        if (aliveVerify === 0 && queueVerify === 0) {
-          this._edictVerifyTimer += dt;
-          if (this._edictVerifyTimer >= 0.25) {
-            this._edictVerifyPhase = "group2";
-            this._edictVerifyTimer = 0;
-            this._spawnVerifyGroup2();
-          }
-        }
-        break;
-      case "group2":
-        if (aliveVerify === 0 && queueVerify === 0) {
-          this._edictVerifyTimer += dt;
-          if (this._edictVerifyTimer >= 0.4) {
-            this._edictVerifyPhase = "done";
-            this._edictVerifyTimer = 0;
-          }
-        }
-        break;
     }
   }
 
@@ -6157,7 +6100,6 @@ export class Game {
     // P2.7：安全区约束
     const safeX = this.clampSpawnXByPhaseAndKind(item.x, item.kind as EnemyKind, phase);
     const enemy = this.createEnemy(item.kind as any, safeX, spawnY, item.speedMultiplier, profile);
-    if (item.source === "edict") (enemy as any)._verifyGroup = this._edictVerifyPhase === "group1" ? 1 : 2;
     if (this._currentWaveEvent) {
       enemy.spawnedWithEvent = this._currentWaveEvent;
     }
