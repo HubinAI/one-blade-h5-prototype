@@ -455,6 +455,8 @@ export class Game {
   private postChestWaveIndex = 0;
   /** V0803036: 军令后验证潮状态机 */
   private postChestSequenceState: 'inactive' | 'waiting_spawn' | 'fighting' | 'complete' = 'inactive';
+  private _lastEliteGateBlocked = true;
+  private _eliteGateReason = '-';
   /** V0803037: 生成批次追踪 */
   private _spawnBatchId = 0;
   private _lastSpawnSource: string = '-';
@@ -1055,7 +1057,7 @@ export class Game {
     this.wavesSpawned = 0; this.allNormalWavesSpawned = false;
     this._lastWaveElapsed = 0; this.waveAdvanceLockedUntil = 0;
     this.edictRewardState = "none"; this.edictPostWavesQueued = false; this.allPostChestWavesSpawned = false;
-    this.postChestSequenceState = 'inactive';
+    this.setPostChestSequenceState('inactive', 'resetRunState');
     this.postChestStartAt = null;
     // 验证潮
     this._edictVerifyPhase = "none"; this._edictVerifyTimer = 0;
@@ -5863,7 +5865,7 @@ export class Game {
     const roundIndex = this.postChestWaveIndex;
     this.edictBurstRoundIndex = Math.min(roundIndex, total);
     this.spawnPostChestWave(wave, roundIndex);
-    this.postChestSequenceState = 'fighting';
+    this.setPostChestSequenceState('fighting', 'wave_enqueued');
     this.postChestLastWaveQueuedAt = this.elapsed;
     this.postChestAdvanceLockedUntil = this.elapsed + randomRange(0.85, 1.10);
     this.postChestLastAdvanceReason = reason;
@@ -5876,7 +5878,7 @@ export class Game {
     // 完成检查：全部生成 + 无存活敌人 + 无排队 = complete
     if (this.allPostChestWavesSpawned && this.postChestSequenceState === 'fighting') {
       if (!this.enemies.some(e => e.alive) && this.subSpawnQueue.length === 0) {
-        this.postChestSequenceState = 'complete';
+        this.setPostChestSequenceState('complete', 'all_waves_done+clear');
       }
     }
   }
@@ -6131,7 +6133,7 @@ export class Game {
     this._lastSpawnSource = item.source || (item.battlePhase === 'edict_burst' ? 'post_chest_wave' : 'normal_wave');
     this._lastSpawnPassedNode = this._currentStageNode;
     if (this.debugEnabled && this.postChestSequenceState !== 'inactive') {
-      console.log(`[SPAWN-ITEM] eid=... src=${this._lastSpawnSource} pci=${this.postChestWaveIndex} node=${this._currentStageNode}`);
+      console.warn(`[SPAWN-ITEM] src=${this._lastSpawnSource} pci=${this.postChestWaveIndex} node=${this._currentStageNode}`);
     }
     const phase = item.battlePhase ?? this.battlePhase;
     const baseProfile = this.getEntryProfileForEnemy(item.kind as EnemyKind, phase);
@@ -7354,7 +7356,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.allPostChestWavesSpawned = false;
     this.edictBurstRoundIndex = 1;
     this.edictBurstRoundTotal = postWaves.length;
-    this.postChestSequenceState = 'waiting_spawn';
+    this.setPostChestSequenceState('waiting_spawn', 'edict_confirmed');
   }
 
   /** P3.7：确认军令弹窗→启动飞行（恢复 playing 防止卡死） */
@@ -7435,7 +7437,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const bid = `P${roundIndex}`;
     this._lastSpawnSource = `post_chest_wave_${roundIndex}`;
     if (this.debugEnabled && this.postChestSequenceState !== 'inactive') {
-      console.log(`[SPAWN-QUEUE] batch=${bid} pci=${this.postChestWaveIndex} node=${this._currentStageNode} planned=${wave.enemies.length}`);
+      console.warn(`[SPAWN-QUEUE] batch=${bid} pci=${this.postChestWaveIndex} node=${this._currentStageNode} planned=${wave.enemies.length}`);
     }
     const totalSpawns = wave.enemies;
     let localDelay = 0;
@@ -7496,7 +7498,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const realHp = baseHp + dailyShieldBonus + hpBonus;
     if (kind === "infantry") { this._lastSpawnedInfantryHp = realHp; this._lastSpawnUsedNode = this._currentStageNode; this._lastSpawnMaxHp = realHp; }
     if (this.debugEnabled && this.postChestSequenceState !== 'inactive') {
-      console.log(`[SPAWN-HP] pNode=${this._lastSpawnPassedNode} uNode=${this._currentStageNode} cfgHp=${baseHp} hp=${realHp}`);
+      console.warn(`[SPAWN-HP] pNode=${this._lastSpawnPassedNode} uNode=${this._currentStageNode} cfgHp=${baseHp} hp=${realHp}`);
     }
     return {
       id: this.nextId("enemy"),
@@ -7732,6 +7734,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._comboScale = 1.0;
     this._comboSparks = [];
     this._comboBaseLife = 0;
+  }
+
+  private setPostChestSequenceState(next: string, reason: string): void {
+    const prev = this.postChestSequenceState;
+    this.postChestSequenceState = next as any;
+    if (this.debugEnabled && prev !== next) {
+      console.warn(`[POST-STATE] ${prev}→${next} | ${reason} | pci=${this.postChestWaveIndex} bp=${this.battlePhase} q=${this.subSpawnQueue.length} alv=${this.enemies.filter(e=>e.alive).length}`);
+    }
   }
 
   burstSlashFloats(hits: { damage: number; x: number; y: number; isKill: boolean; isElite?: boolean }[], refAtk: number, slashId: string): void {
@@ -10392,7 +10402,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   }
 
   private _drawDebugCompact(ctx: CanvasRenderingContext2D): void {
-    const cardW = 148; const cardH = this._showHpOverlay ? 142 : 102;
+    const cardW = 148; const cardH = this._showHpOverlay ? 168 : 102;
     const x = 6; const topY = 10;
     ctx.save();
     ctx.fillStyle = 'rgba(13, 16, 17, 0.78)';
@@ -10417,6 +10427,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         { l: 'spawnedHp', v: `${this._lastSpawnedInfantryHp || '-'}`, c: this._lastSpawnedInfantryHp === calcFinalHp(1,'infantry',this._currentStageNode) ? '#2ecc71' : '#e74c3c' },
         { l: 'src', v: `${this._lastSpawnSource}`, c: '#888' },
         { l: 'pNode/uNode', v: `${this._lastSpawnPassedNode}/${this._lastSpawnUsedNode}`, c: '#888' },
+        { l: 'seq', v: `${this.postChestSequenceState}`, c: '#f39c12' },
+        { l: 'pci', v: `${this.postChestWaveIndex}`, c: '#888' },
+        { l: 'gate', v: this._lastEliteGateBlocked ? 'BLOCK' : 'ALLOW', c: this._lastEliteGateBlocked ? '#e74c3c' : '#2ecc71' },
       ] : []),
       { l: 'enemies', v: `${aliveCount}`, c: '#fff' },
       { l: 'playerHP', v: `${this.hp}`, c: '#e74c3c' },
@@ -10609,9 +10622,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   /** 精英怪生成 — V0801008: 全关卡事件驱动 */
   private updateEliteSpawn() {
     if (this.eliteSpawned || !this.level.eliteSpawnAt || !this.level.eliteKind) return;
-    if (!this.allNormalWavesSpawned) return;
+    if (!this.allNormalWavesSpawned) { this._eliteGateReason = 'no(not_all_waves)'; this._lastEliteGateBlocked = true; return; }
     // V0803036: 军令后验证潮状态机 — 仅在 inactive/complete 许可精英
-    if (this.postChestSequenceState !== 'inactive' && this.postChestSequenceState !== 'complete') return;
+    if (this.postChestSequenceState !== 'inactive' && this.postChestSequenceState !== 'complete') {
+      if (this.debugEnabled) console.warn(`[ELITE-GATE] BLOCK | state=${this.postChestSequenceState} | pci=${this.postChestWaveIndex} | alive=${this.enemies.filter(e=>e.alive).length} | q=${this.subSpawnQueue.length} | allPcDone=${this.allPostChestWavesSpawned}`);
+      this._eliteGateReason = `no(state=${this.postChestSequenceState})`; this._lastEliteGateBlocked = true; return;
+    }
+    if (this.debugEnabled) console.warn(`[ELITE-GATE] ALLOW | state=${this.postChestSequenceState} | pci=${this.postChestWaveIndex} | alive=${this.enemies.filter(e=>e.alive).length} | q=${this.subSpawnQueue.length}`);
+    this._eliteGateReason = `yes(state=${this.postChestSequenceState})`; this._lastEliteGateBlocked = false;
 
     // V0801008: 统一清场后0.6s精英入场（全关卡，覆盖spawnAt）
     const aliveEnemies = this.enemies.filter(e => e.alive).length;
@@ -10626,6 +10644,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
 
     this.eliteSpawned = true;
+    if (this.debugEnabled) console.warn(`[ELITE-SPAWN] state=${this.postChestSequenceState} | pci=${this.postChestWaveIndex} | alive=${this.enemies.filter(e=>e.alive).length}`);
     const ek = this.level.eliteKind;
     const conf = ELITE_CONFIG[ek];
     // 在随机列生成
