@@ -2820,6 +2820,7 @@ export class Game {
   }
 
   private _startTripleSlashSequence(main: SlashTrail) {
+    if (!this._activeEdicts.some(e => e.id === "triple_slash")) return;
     this._tripleSlashHitEnemyIds.clear();
     for (const id of main.hitEnemyIds) this._tripleSlashHitEnemyIds.add(id);
     const pts = main.points; if (pts.length < 2) return;
@@ -2837,10 +2838,11 @@ export class Game {
       return { x: p.x+nx*sign*off, y: p.y+ny*sign*off };
     });
     this._tripleStrikePlaybacks = [
-      { points: pts, playhead: 0, speed: 8, mainColor: color, mainWidth: width, trailId: main.id+'_c', damageSnapshot: dmg },
-      { points: genPath(-1), playhead: 0, speed: 8, mainColor: color, mainWidth: width, trailId: main.id+'_l', damageSnapshot: dmg },
-      { points: genPath(1), playhead: 0, speed: 8, mainColor: color, mainWidth: width, trailId: main.id+'_r', damageSnapshot: dmg },
+      { points: pts, playhead: 0, speed: 3, mainColor: color, mainWidth: width, trailId: main.id+'_c', damageSnapshot: dmg },
+      { points: genPath(-1), playhead: 0, speed: 3, mainColor: color, mainWidth: width, trailId: main.id+'_l', damageSnapshot: dmg },
+      { points: genPath(1), playhead: 0, speed: 3, mainColor: color, mainWidth: width, trailId: main.id+'_r', damageSnapshot: dmg },
     ];
+    if (this.debugEnabled) console.warn(`[TRIPLE] start: center=${pts.length} left=${genPath(-1).length} right=${genPath(1).length} color=${color} width=${width}`);
   }
 
   /** 三刀流共享去重与播放序列 */
