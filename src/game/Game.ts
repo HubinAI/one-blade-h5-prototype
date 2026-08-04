@@ -459,6 +459,7 @@ export class Game {
   private _lastEliteGateBlocked = true;
   private _eliteGateReason = '-';
   private _eliteGateLogCounter = 0;
+  private _stateRecoveryCount = 0;
   /** V0803037: 生成批次追踪 */
   private _spawnBatchId = 0;
   private _lastSpawnSource: string = '-';
@@ -1060,6 +1061,7 @@ export class Game {
     this._lastWaveElapsed = 0; this.waveAdvanceLockedUntil = 0;
     this.edictRewardState = "none"; this.edictPostWavesQueued = false; this.allPostChestWavesSpawned = false;
     this.setPostChestSequenceState('inactive', 'resetRunState');
+    this._stateRecoveryCount = 0;
     this.postChestStartAt = null;
     this._resetCallCount += 1;
     if (this.debugEnabled && this._resetCallCount > 1) {
@@ -6627,10 +6629,13 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   /** 二次打磨：自动切换 battlePhase HUD 显示 */
   private updateBattlePhase() {
     if (this.finished) { this.battlePhase = 'result'; return; }
-    // V0804003: 自愈 — edictPostWavesQueued=true 但 state=inactive 时恢复 waiting_spawn
-    // (可能由 Game 重新构造导致 state 被重置)
-    if (this.edictPostWavesQueued && this.postChestSequenceState === 'inactive' && this.getEffectivePostChestWaves().length > 0) {
+    // V0804003: 自愈 — edictPostWavesQueued=true 但 state=inactive，最多恢复 5 次
+    if (this.edictPostWavesQueued && this.postChestSequenceState === 'inactive' && this.getEffectivePostChestWaves().length > 0 && this._stateRecoveryCount < 5) {
+      this._stateRecoveryCount += 1;
       this.setPostChestSequenceState('waiting_spawn', 'recovery_after_reset');
+      if (this.debugEnabled && this._stateRecoveryCount === 1) {
+        console.error('[POST-STATE] DETECTED inactive after edict confirm — recovering');
+      }
     }
     if (this.edictRewardState === "modal") return;
     // V0731006: 新流程精英后怪潮期间保持 edict_burst
