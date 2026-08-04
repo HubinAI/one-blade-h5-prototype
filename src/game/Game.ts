@@ -1340,6 +1340,7 @@ export class Game {
     // 远景山间雾气遮罩（敌人从雾后现身）
     this.drawTopMist(ctx);
     this.drawSlash(ctx);
+    this.drawTripleSlashTrails(ctx);
     this._drawTutorialPrompt(ctx); // 0807-11A: 教学成功提示（独立渲染，不受P4.2限制）
     this.drawParticles(ctx);
     this.drawDefenseAndWarrior(ctx);
@@ -1593,6 +1594,7 @@ export class Game {
       rc.renderWorld(ctx);
       // 3. 战斗表现层
       this.drawSlash(ctx);
+      this.drawTripleSlashTrails(ctx);
       this.drawParticles(ctx);
       // 4. P4.4B-R3 P0-A: 玩家战斗层（玩家主体+主刀气场+副刀视觉+副刀槽）
       //    替代旧的"淡蓝虚线+蓝点"调试式可视化。
@@ -1640,6 +1642,7 @@ export class Game {
     this.bossController?.renderWorld(ctx);
     // 2. 战斗表现层（Boss身体上方）
     this.drawSlash(ctx);
+    this.drawTripleSlashTrails(ctx);
     this.drawParticles(ctx);
     // P4.4A.4: execution阶段隐藏普通斩/破按钮和技能倒计时
     const phase = this.bossController?.phase;
@@ -9599,9 +9602,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const angle = prev ? Math.atan2(last.y - prev.y, last.x - prev.x) : this.lastSlashAngle;
     const visualLength = effVisualLength * (0.34 + ratio * 0.82) * lowFade * 0.6;  // 缩短刀尖长度
     this.drawBladeTip(ctx, last, angle, visualLength, width, effColor, ratio);
-    ctx.restore();
-
-    // 三刀流副刀渲染
+    ctx.restore();}
+  private drawTripleSlashTrails(ctx: CanvasRenderingContext2D) {
     if (this._tripleLeftTrail?.active) this._drawTripleTrail(ctx, this._tripleLeftTrail, 1);
     if (this._tripleRightTrail?.active) this._drawTripleTrail(ctx, this._tripleRightTrail, 1);
   }
@@ -11701,7 +11703,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     drawChaseMode(ctx, snap, this.elapsed, this.chasePrevPositions);
     ctx.setTransform(1, 0, 0, 1, 0, 0);  // 重置震屏 → HUD 固定
     if (snap.showUI) {
-      this.drawSlash(ctx); this.drawParticles(ctx);
+      this.drawSlash(ctx); this.drawTripleSlashTrails(ctx); this.drawParticles(ctx);
       this.renderPlayerCombatLayer(ctx);
       this.drawFloatingTexts(ctx);
     this._drawComboPresentation(ctx); this.drawEdgeFlash(ctx);
