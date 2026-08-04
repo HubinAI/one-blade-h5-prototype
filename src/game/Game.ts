@@ -2853,7 +2853,17 @@ export class Game {
           tags: ["triple"], hitPos: { x: enemy.x, y: enemy.y }, timestamp: this.elapsed,
         }, enemy.hp, enemy.maxHp, enemy.alive, !!enemy.eliteKind);
         if (r && r.isAccepted && r.resolvedDamage > 0) {
-          this.damageEnemy(enemy, r.resolvedDamage, attackActionId as any, false, "triple_side");
+          // 直接应用伤害，不复用 damageEnemy（避免依赖 SlashTrail 字段）
+          enemy.hp -= r.resolvedDamage;
+          enemy.flash = 0.25;
+          if (enemy.hp <= 0) {
+            enemy.alive = false;
+            this.stats.kills += 1;
+            this.registerEnemyKillForProgressChest(enemy.id, "slash");
+            this.particles.push(...paperBurst(enemy, 12, paperColors));
+          } else {
+            this.particles.push(...sparkBurst(enemy, 8, "#ffd67c"));
+          }
           this.aggregateAndMaybeFlush(`${attackActionId}_s_${enemy.id}`, r.resolvedDamage, { x: enemy.x, y: enemy.y }, 'TRIPLE_DERIVED_1', 'ENEMY', 100, damageSnapshot.entryAttack, false, false);
         }
       }
