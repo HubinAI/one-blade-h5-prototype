@@ -362,6 +362,7 @@ export class Game {
   private _aggTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private _aggDebugTarget: { x: number; y: number; radius: number; hp: number; maxHp: number; alive: boolean; id: string; flash: number } | null = null;
   private _aggDebugTriple: { actionId: string; segments: number; damage: number } | null = null;
+  private _lastSpawnedInfantryHp = 0;
   private _aggDebugScorch: { ticks: number; pending: number; flushReason: string } | null = null;
   private _burstTimers: ReturnType<typeof setTimeout>[] = [];
   /** V0803025: 主刀伤害收集 buffer */
@@ -7449,9 +7450,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private createEnemy(kind: EnemyKind, x: number, y: number, speedMultiplier = 1, entryProfile?: { spawnY: number; entryEndY: number; entryMultiplier: number; entryMaxDuration: number }): Enemy {
     const balance = ENEMY_BALANCE[kind];
     const dailyShieldBonus = this.runContext.mode === "dailyChallenge" && this.runContext.dailyChallengeId === "hard_shield" && kind === "shield" ? 1 : 0;
-    // 逐波HP递增：每波+1，最多+5（仅对基础敌人生效，精英/Boss不受影响）
+    // 0807-11B-3: infantry HP 由节点倍率管理，不再叠加 waveHpBonus
     const isBasicEnemy = kind === "infantry" || kind === "shield" || kind === "powder" || kind === "core";
-    const hpBonus = isBasicEnemy ? this.waveHpBonus : 0;
+    const hpBonus = (kind === "infantry") ? 0 : (isBasicEnemy ? this.waveHpBonus : 0);
     // 第六轮修正：精英也使用 entryPhase（使用 ENTRY_PROFILE_ELITE）
     const shouldUseEntryPhase = isBasicEnemy || kind === "elite";
     // 第一轮修正：优先使用传入的 entryProfile，fallback 到 getEntryProfile()
@@ -7463,6 +7464,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 0807-11B-1: 真实HP — 普通敌人按公式计算
     const baseHp = this.getEnemyBaseHp(kind, balance.hp);
     const realHp = baseHp + dailyShieldBonus + hpBonus;
+    if (kind === "infantry") this._lastSpawnedInfantryHp = realHp;
     return {
       id: this.nextId("enemy"),
       kind,
@@ -10376,7 +10378,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       { l: 'wave', v: `${Math.min(this.wavesSpawned, this.level.waves.length)}/${this.level.waves.length}`, c: '#fff' },
       ...(this._showHpOverlay ? [
         { l: 'node', v: `${this._currentStageNode}`, c: '#f39c12' },
-        { l: 'hp', v: `${calcFinalHp(1,'infantry',this._currentStageNode)}`, c: '#f39c12' },
+        { l: 'configHp', v: `${calcFinalHp(1,'infantry',this._currentStageNode)}`, c: '#f39c12' },
+        { l: 'spawnedHp', v: `${this._lastSpawnedInfantryHp || '-'}`, c: this._lastSpawnedInfantryHp === calcFinalHp(1,'infantry',this._currentStageNode) ? '#2ecc71' : '#e74c3c' },
       ] : []),
       { l: 'enemies', v: `${aliveCount}`, c: '#fff' },
       { l: 'playerHP', v: `${this.hp}`, c: '#e74c3c' },
