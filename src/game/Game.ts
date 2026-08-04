@@ -2842,9 +2842,11 @@ export class Game {
     const effColor = rEff?.color ?? stage.color, effWidth = rEff?.width ?? stage.width;
     const width = effWidth * trail.widthMultiplier * 0.28 * 0.85 * alphaMul;
     const age = this.elapsed - this._tripleTrailStartTime;
-    const alpha = clamp(1 - Math.max(0, age - 0.22) / 0.12, 0.02, 1) * alphaMul;
+    const holdEnd = this._tripleTrailTravelDuration + this._tripleTrailHoldDuration;
+    const alpha = clamp(age < holdEnd ? 1 : 1 - (age - holdEnd) / this._tripleTrailFadeDuration, 0.02, 1) * alphaMul;
+    const maxIdx = ((trail as any)._visibleEnd as number) ?? pts.length - 1;
     ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.lineCap = "round"; ctx.lineJoin = "round";
-    for (let i = 1; i < pts.length; i++) {
+    for (let i = 1; i <= Math.min(maxIdx, pts.length - 1); i++) {
       const a = pts[i-1], b = pts[i], segAlpha = clamp(alpha*(0.6+(i/pts.length)*0.4), 0.03, 0.8);
       ctx.strokeStyle = `rgba(255,213,112,${segAlpha*0.5})`; ctx.shadowColor = effColor; ctx.lineWidth = width*0.9;
       ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
@@ -2869,7 +2871,8 @@ export class Game {
     const totalLife = this._tripleTrailTravelDuration + this._tripleTrailHoldDuration + this._tripleTrailFadeDuration;
     this._tripleLeftTrail.remainingDuration = totalLife;
     this._tripleRightTrail.remainingDuration = totalLife;
-    (this._tripleLeftTrail as any)._prevIdx = -1; (this._tripleRightTrail as any)._prevIdx = -1;
+    (this._tripleLeftTrail as any)._prevIdx = -1; (this._tripleLeftTrail as any)._visibleEnd = -1;
+    (this._tripleRightTrail as any)._prevIdx = -1; (this._tripleRightTrail as any)._visibleEnd = -1;
   }
 
   /** 三刀流共享去重 + 副刀 SlashTrail */
@@ -2893,6 +2896,7 @@ export class Game {
     if (newIdx > prevIdx) {
       this._checkTripleTrailCollision(trail, Math.max(-1, prevIdx), newIdx);
       (trail as any)._prevIdx = newIdx;
+      (trail as any)._visibleEnd = newIdx;
     }
     if (age >= travel + this._tripleTrailHoldDuration + this._tripleTrailFadeDuration) {
       trail.active = false;
