@@ -882,7 +882,7 @@ export class Game {
         self._pendingEdictId = null;
         self._chestRouletteResult = null;
       };
-      // V0731010: 直接授予三锋令
+      // V0731010: 直接授予三刀流
       (window as any).__grantTripleSlash = () => {
         self._activeEdicts.push({ id: "triple_slash", level: 1 });
       };
@@ -2861,7 +2861,7 @@ export class Game {
     }
   }
 
-  /** 三锋派生刀痕视觉数据 */
+  /** 三刀流副刀视觉数据 */
   private _tripleSideTrails: { points: { x: number; y: number; t: number }[]; life: number; maxLife: number }[] = [];
   private _tripleSlashHitEnemyIds: Set<string> = new Set();
   // ═══════════════════ V0731011: 燎原令火径 ═══════════════════

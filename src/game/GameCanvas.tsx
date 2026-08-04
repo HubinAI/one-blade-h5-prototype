@@ -118,7 +118,7 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
         // V0731008: 调试用触发宝箱开奖流程
         (window as any).__triggerChestFlow?.();
       } else if (event.key.toLowerCase() === "t") {
-        // V0731010: 调试用授予三锋令
+        // V0731010: 调试用授予三刀流
         (window as any).__grantTripleSlash?.();
       } else if (event.key.toLowerCase() === "y") {
         // V0731011: 调试用授予燎原令

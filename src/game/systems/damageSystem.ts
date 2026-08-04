@@ -19,8 +19,8 @@ export type DamageSourceType =
   | "MAIN_SLASH"
   | "SUB_BLADE_LEFT"    // 左刀横扫
   | "SUB_BLADE_RIGHT"   // 右刀破点
-  | "TRIPLE_DERIVED_1"  // 三锋派生刀1
-  | "TRIPLE_DERIVED_2"  // 三锋派生刀2
+  | "TRIPLE_DERIVED_1"  // 三刀流副刀1
+  | "TRIPLE_DERIVED_2"  // 三刀流副刀2
   | "SCORCH_TICK"       // 燎原跳伤
   | "SCORCH_EXPLOSION"  // 燎原收刀爆炸
   | "FROST";            // 凝霜（无直接伤害）
