@@ -1260,7 +1260,12 @@ export class Game {
     }
     // P4.3A: 战场流动控制
     // V0731010: 更新派生刀痕生命期
-    this._tripleSideTrails = this._tripleSideTrails.filter(t => { t.active = t.points.length >= 2 && this.elapsed - t.points[0].t < 0.55; return t.active; });
+    this._tripleSideTrails = this._tripleSideTrails.filter(t => {
+      // 还在刀中途、空点、或者还在0.55s生命周期内 → 保留
+      if (t.points.length < 2) return this.currentSlash?.active ?? true;
+      if (this.elapsed - t.points[0].t < 0.55) { t.active = true; return true; }
+      t.active = false; return false;
+    });
     // V0731011: 更新火径生命 + 敌人伤害
     this._updateScorchTrails(scaledDt);
     this._updateFrostStates(scaledDt); // V0731012
@@ -9535,10 +9540,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const effColor = rEff ? rEff.color : stage.color;
     const effWidth = rEff ? rEff.width : stage.width;
     const pts = st.points;
-    const width = effWidth * st.widthMultiplier * 0.28 * 0.85; // 副刀宽度 85%
-    const age = (this.elapsed - pts[0].t);
+    if (pts.length < 2) return;
+    const wMain = effWidth * st.widthMultiplier * 0.7;
+    const width = wMain * 0.85;
+    const age = pts[0].t > 0 ? (this.elapsed - pts[0].t) : 0;
     const activeDuration = 0.55;
-    const alpha = clamp(1 - age / activeDuration, 0, 1);
+    const alpha = clamp(1 - age / activeDuration, 0.05, 1);
     if (alpha <= 0) return;
 
     ctx.save();
@@ -9547,12 +9554,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.lineJoin = "round";
     for (let i = 1; i < pts.length; i++) {
       const a = pts[i - 1]; const b = pts[i];
-      const segAlpha = clamp(alpha * (0.6 + (i / pts.length) * 0.4), 0.03, 0.75);
-      ctx.strokeStyle = `rgba(255, 213, 112, ${segAlpha * 0.52})`;
+      const segAlpha = clamp(alpha * (0.6 + (i / pts.length) * 0.4), 0.05, 0.85);
+      ctx.strokeStyle = `rgba(255, 213, 112, ${segAlpha * 0.55})`;
       ctx.shadowColor = effColor;
-      ctx.lineWidth = width * 0.92;
+      ctx.lineWidth = wMain * 0.92;
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-      ctx.strokeStyle = `rgba(255, 255, 238, ${segAlpha * 0.85})`;
+      ctx.strokeStyle = `rgba(255, 255, 238, ${segAlpha * 0.9})`;
       ctx.shadowBlur = 2;
       ctx.lineWidth = Math.max(1.0, width * 0.55);
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
