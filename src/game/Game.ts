@@ -455,6 +455,12 @@ export class Game {
   private postChestWaveIndex = 0;
   /** V0803036: 军令后验证潮状态机 */
   private postChestSequenceState: 'inactive' | 'waiting_spawn' | 'fighting' | 'complete' = 'inactive';
+  /** V0803037: 生成批次追踪 */
+  private _spawnBatchId = 0;
+  private _lastSpawnSource: string = '-';
+  private _lastSpawnPassedNode: string = '-';
+  private _lastSpawnUsedNode: string = '-';
+  private _lastSpawnMaxHp = 0;
   /** 宝箱后所有爆发波是否已生成 */
   private allPostChestWavesSpawned = false;
   /** 是否有关键动画播放中 */
@@ -5884,6 +5890,7 @@ export class Game {
   private spawnCurrentWave(wave: typeof this.level.waves[0]) {
     this._lastWaveElapsed = this.elapsed;
     this.wavesSpawned += 1;
+    this._lastSpawnSource = `normal_wave_${this.wavesSpawned}`;
     if (this.wavesSpawned >= this.level.waves.length) {
       this.wavesFinishedAt = this.elapsed;
       this.allNormalWavesSpawned = true;
@@ -6117,10 +6124,14 @@ export class Game {
 
   /** 第六轮修正：从队列 item 生成敌人（抽取为独立方法） */
   private spawnEnemyFromQueueItem(item: typeof this.subSpawnQueue[0]) {
-    // P3.9：禁止普通队列生成裸 elite/boss（缺 eliteKind/bossId 会变成残影）
     if (item.kind === "elite" || item.kind === "boss") {
       console.warn("[invalid generic special spawn blocked]", { kind: item.kind, levelId: this.level.id, time: this.elapsed });
       return;
+    }
+    this._lastSpawnSource = item.source || (item.battlePhase === 'edict_burst' ? 'post_chest_wave' : 'normal_wave');
+    this._lastSpawnPassedNode = this._currentStageNode;
+    if (this.debugEnabled && this.postChestSequenceState !== 'inactive') {
+      console.log(`[SPAWN-ITEM] eid=... src=${this._lastSpawnSource} pci=${this.postChestWaveIndex} node=${this._currentStageNode}`);
     }
     const phase = item.battlePhase ?? this.battlePhase;
     const baseProfile = this.getEntryProfileForEnemy(item.kind as EnemyKind, phase);
@@ -7420,6 +7431,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
   /** 第四轮微调：军令爆发怪潮分批入队（拆 2-4 批，有间隔和前后排） */
   private enqueuePostChestWave(wave: typeof this.level.waves[0], roundIndex: number) {
+    this._spawnBatchId += 1;
+    const bid = `P${roundIndex}`;
+    this._lastSpawnSource = `post_chest_wave_${roundIndex}`;
+    if (this.debugEnabled && this.postChestSequenceState !== 'inactive') {
+      console.log(`[SPAWN-QUEUE] batch=${bid} pci=${this.postChestWaveIndex} node=${this._currentStageNode} planned=${wave.enemies.length}`);
+    }
     const totalSpawns = wave.enemies;
     let localDelay = 0;
     for (const spawn of totalSpawns) {
@@ -7477,7 +7494,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 0807-11B-1: 真实HP — 普通敌人按公式计算
     const baseHp = this.getEnemyBaseHp(kind, balance.hp);
     const realHp = baseHp + dailyShieldBonus + hpBonus;
-    if (kind === "infantry") this._lastSpawnedInfantryHp = realHp;
+    if (kind === "infantry") { this._lastSpawnedInfantryHp = realHp; this._lastSpawnUsedNode = this._currentStageNode; this._lastSpawnMaxHp = realHp; }
+    if (this.debugEnabled && this.postChestSequenceState !== 'inactive') {
+      console.log(`[SPAWN-HP] pNode=${this._lastSpawnPassedNode} uNode=${this._currentStageNode} cfgHp=${baseHp} hp=${realHp}`);
+    }
     return {
       id: this.nextId("enemy"),
       kind,
@@ -7516,7 +7536,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         completed: false
       } : undefined,
       rushTimer: isBasicEnemy && kind === "infantry" && Math.random() < 0.3 ? 0.8 : undefined,
-    };
+      _spawnSource: this._lastSpawnSource,
+      _spawnBatchId: this._spawnBatchId,
+    } as any;
   }
 
   private createPickup(kind: PickupKind, x: number, y: number): Pickup {
@@ -10370,7 +10392,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   }
 
   private _drawDebugCompact(ctx: CanvasRenderingContext2D): void {
-    const cardW = 148; const cardH = this._showHpOverlay ? 118 : 102;
+    const cardW = 148; const cardH = this._showHpOverlay ? 142 : 102;
     const x = 6; const topY = 10;
     ctx.save();
     ctx.fillStyle = 'rgba(13, 16, 17, 0.78)';
@@ -10393,6 +10415,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         { l: 'node', v: `${this._currentStageNode}`, c: '#f39c12' },
         { l: 'configHp', v: `${calcFinalHp(1,'infantry',this._currentStageNode)}`, c: '#f39c12' },
         { l: 'spawnedHp', v: `${this._lastSpawnedInfantryHp || '-'}`, c: this._lastSpawnedInfantryHp === calcFinalHp(1,'infantry',this._currentStageNode) ? '#2ecc71' : '#e74c3c' },
+        { l: 'src', v: `${this._lastSpawnSource}`, c: '#888' },
+        { l: 'pNode/uNode', v: `${this._lastSpawnPassedNode}/${this._lastSpawnUsedNode}`, c: '#888' },
       ] : []),
       { l: 'enemies', v: `${aliveCount}`, c: '#fff' },
       { l: 'playerHP', v: `${this.hp}`, c: '#e74c3c' },
@@ -10427,10 +10451,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.textBaseline = 'middle';
     for (const e of this.enemies) {
       if (!e.alive) continue;
+      const esrc = (e as any)._spawnSource || '';
+      const srcLabel = esrc.startsWith('post_chest_wave_') ? esrc.replace('post_chest_wave_', 'P') :
+                       esrc === 'normal_wave' ? 'N' :
+                       esrc === 'elite' ? 'E' : '';
       const x = clamp(e.x, 30, 370);
       const y = e.y - e.radius - 8;
       ctx.fillStyle = 'rgba(10,8,4,0.85)';
-      const txt = `${e.hp}/${e.maxHp}`;
+      const txt = `${srcLabel ? srcLabel + ' ' : ''}${e.hp}/${e.maxHp}`;
       const w = ctx.measureText(txt).width + 10;
       ctx.beginPath(); ctx.roundRect(x - w/2, y - 7, w, 14, 4); ctx.fill();
       ctx.fillStyle = '#ffd35a';

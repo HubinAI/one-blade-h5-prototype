@@ -227,6 +227,8 @@ export type Enemy = {
   spawnedWithEvent?: 'gather' | 'charge_pause';
   /** 急冲兵：出生后0.8s速度×2.2，之后×0.8 */
   rushTimer?: number;
+  _spawnSource?: string;
+  _spawnBatchId?: number;
   /** 蛇形兵初始y（用于 sin 摆动） */
   snakeSwayOriginY?: number;
   /** 蛇形兵已经过时间（秒） */
