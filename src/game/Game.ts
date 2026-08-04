@@ -2781,7 +2781,7 @@ export class Game {
     if (len < 10) return;
     const nx = -dy / len;
     const ny = dx / len;
-    const offset = 56; // 三刀流间距（三条刀中心到中心）
+    const offset = 56; // 三刀流间距
 
     // 建立本次挥刀的去重集合（包含主刀已命中敌人）
     this._tripleSlashHitEnemyIds.clear();
@@ -2789,40 +2789,42 @@ export class Game {
       this._tripleSlashHitEnemyIds.add(id);
     }
     const sideOffsets = [-offset, offset];
-    const delay = 0.025; // 极小延迟，保持同一动作感
 
     // 副刀伤害取主刀快照
     const mainDmg = main._damageSnapshot ?? this.captureDamageSnapshot();
-    const isElite = !!this.enemies.find(e => e.alive && !!e.eliteKind); // 仅用于精英
+
+    // 采集母刀渲染参数
+    const stage = SWORD_STAGE_BY_ID[main.tier];
+    const rEff = main.reactiveBladeEffect;
+    const effColor = rEff ? rEff.color : stage.color;
+    const effWidth = rEff ? rEff.width : stage.width;
+    const effBrightness = rEff ? rEff.brightness : stage.brightness;
+    const trailLife = 0.55; // 匹配 drawSlash 的峰值+消退总时长
 
     for (const sign of sideOffsets) {
       const offsetPts = pts.map(p => ({
         x: p.x + nx * sign,
         y: p.y + ny * sign,
-        t: p.t + delay,
+        t: p.t, // 同步：不添加延迟
       }));
       this._checkTripleSideHits(offsetPts, mainDmg, main.id);
     }
 
-    // 副刀视觉效果
-    this._tripleSideTrails.push({
-      points: pts.map(p => ({
-        x: p.x + nx * (-offset),
-        y: p.y + ny * (-offset),
-        t: p.t + delay,
-      })),
-      life: 0.25,
-      maxLife: 0.25,
-    });
-    this._tripleSideTrails.push({
-      points: pts.map(p => ({
-        x: p.x + nx * offset,
-        y: p.y + ny * offset,
-        t: p.t + delay,
-      })),
-      life: 0.25,
-      maxLife: 0.25,
-    });
+    // 副刀视觉轨迹：完整平移 + 母刀渲染参数
+    for (const sign of sideOffsets) {
+      this._tripleSideTrails.push({
+        points: pts.map(p => ({
+          x: p.x + nx * sign,
+          y: p.y + ny * sign,
+          t: p.t,
+        })),
+        life: trailLife,
+        maxLife: trailLife,
+        effColor,
+        effWidth,
+        effBrightness,
+      });
+    }
   }
 
   /** 派生刀痕碰撞检测 — 三刀流：共享去重、使用主刀伤害 */
@@ -2862,7 +2864,7 @@ export class Game {
   }
 
   /** 三刀流副刀视觉数据 */
-  private _tripleSideTrails: { points: { x: number; y: number; t: number }[]; life: number; maxLife: number }[] = [];
+  private _tripleSideTrails: { points: { x: number; y: number; t: number }[]; life: number; maxLife: number; effColor: string; effWidth: number; effBrightness: number }[] = [];
   private _tripleSlashHitEnemyIds: Set<string> = new Set();
   // ═══════════════════ V0731011: 燎原令火径 ═══════════════════
   private _scorchTrails: { points: { x: number; y: number }[]; life: number; maxLife: number; lastTickTime: number }[] = [];
@@ -8574,25 +8576,47 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
   }
 
-  // V0731010: 三刀流副刀绘制
+  // V0731010: 三刀流副刀绘制 — 复用主刀渲染管线
   private _drawTripleSideTrails(ctx: CanvasRenderingContext2D) {
+    const W_SCALE = 0.85; // 副刀宽度比例
+    const B_SCALE = 0.90; // 副刀亮度比例
     for (const t of this._tripleSideTrails) {
       if (t.points.length < 2) continue;
       const alpha = t.life / t.maxLife;
-      const flash = t.life > t.maxLife * 0.92 ? 1.8 : 1.0; // 出现瞬间闪亮
+      const flash = t.life > t.maxLife * 0.92 ? 1.8 : 1.0;
+      const fade = clamp(alpha * B_SCALE, 0.03, 0.55);
+      const sideWidth = t.effWidth * W_SCALE * 0.7;
+
       ctx.save();
-      ctx.globalAlpha = alpha * 0.60 * flash;
-      ctx.strokeStyle = "#a8d8ff";
-      ctx.lineWidth = 2.0;
-      ctx.shadowColor = "#88bbff";
-      ctx.shadowBlur = 2 * flash;
+      ctx.globalCompositeOperation = "lighter";
       ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(t.points[0].x, t.points[0].y);
+      ctx.lineJoin = "round";
+
       for (let i = 1; i < t.points.length; i++) {
-        ctx.lineTo(t.points[i].x, t.points[i].y);
+        const a = t.points[i - 1];
+        const b = t.points[i];
+        const age = i / Math.max(1, t.points.length - 1);
+        const segAlpha = clamp(age * fade * flash, 0.03, 0.55);
+
+        // 外层 glow（金白，略低于主刀）
+        ctx.strokeStyle = `rgba(255, 213, 112, ${segAlpha * 0.45})`;
+        ctx.shadowColor = t.effColor;
+        ctx.shadowBlur = (6 + t.effWidth * 0.25);
+        ctx.lineWidth = sideWidth * 0.95;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+
+        // 内层核心（亮白）
+        ctx.strokeStyle = `rgba(255, 255, 238, ${segAlpha * 0.80})`;
+        ctx.shadowBlur = 3;
+        ctx.lineWidth = Math.max(1.2, sideWidth * 0.28);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
       }
-      ctx.stroke();
       ctx.restore();
     }
   }
