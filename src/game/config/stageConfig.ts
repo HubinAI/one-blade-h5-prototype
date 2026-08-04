@@ -1,0 +1,97 @@
+/**
+ * 0807-11B-3: 关卡与节点配置底层
+ */
+import { BattlePhase } from '../types';
+
+// ═══════════════════════════════════════
+// 关卡基础属性
+// ═══════════════════════════════════════
+
+export interface LevelBaseStats {
+  baseHp: number;
+  baseAttack: number;
+}
+
+const LEVEL_BASE_STATS: Record<number, LevelBaseStats> = {
+  1: { baseHp: 100, baseAttack: 10 },
+};
+
+export function getLevelBaseStats(levelId: number): LevelBaseStats {
+  return LEVEL_BASE_STATS[levelId] ?? { baseHp: 100, baseAttack: 10 };
+}
+
+// ═══════════════════════════════════════
+// 怪物类型倍率
+// ═══════════════════════════════════════
+
+export type EnemyType = 'infantry' | 'shield' | 'powder' | 'core' | 'elite' | 'boss';
+
+const ENEMY_TYPE_HP: Record<EnemyType, number> = {
+  infantry: 0.75,
+  shield: 1.0,
+  powder: 0.80,
+  core: 0.70,
+  elite: 1.0,  // 精英独立配置，不套公式
+  boss: 1.0,    // Boss独立配置，不套公式
+};
+
+export function getEnemyTypeHpMultiplier(type: EnemyType): number {
+  return ENEMY_TYPE_HP[type] ?? 1.0;
+}
+
+// ═══════════════════════════════════════
+// 节点配置
+// ═══════════════════════════════════════
+
+export type StageNode = 'tutorial' | 'pre_edict_early' | 'pre_edict_late' | 'post_edict_release' | 'post_edict_understand' | 'post_edict_adapt' | 'elite';
+
+export interface NodeConfig {
+  hpMultiplier: number;
+  attackMultiplier: number;
+  speedMultiplier: number;
+  densityMultiplier: number;
+}
+
+const NODE_CONFIGS: Record<StageNode, NodeConfig> = {
+  tutorial:             { hpMultiplier: 1.00, attackMultiplier: 1.0, speedMultiplier: 1.0, densityMultiplier: 1.0 },
+  pre_edict_early:      { hpMultiplier: 1.00, attackMultiplier: 1.0, speedMultiplier: 1.0, densityMultiplier: 1.0 },
+  pre_edict_late:       { hpMultiplier: 1.05, attackMultiplier: 1.0, speedMultiplier: 1.0, densityMultiplier: 1.0 },
+  post_edict_release:   { hpMultiplier: 1.00, attackMultiplier: 1.0, speedMultiplier: 1.0, densityMultiplier: 1.0 },
+  post_edict_understand:{ hpMultiplier: 1.10, attackMultiplier: 1.0, speedMultiplier: 1.0, densityMultiplier: 1.0 },
+  post_edict_adapt:     { hpMultiplier: 1.15, attackMultiplier: 1.0, speedMultiplier: 1.0, densityMultiplier: 1.0 },
+  elite:                { hpMultiplier: 1.0,  attackMultiplier: 1.0, speedMultiplier: 1.0, densityMultiplier: 1.0 }, // 精英独立HP
+};
+
+export function getNodeConfig(node: StageNode): NodeConfig {
+  return NODE_CONFIGS[node];
+}
+
+// ═══════════════════════════════════════
+// HP 统一计算
+// ═══════════════════════════════════════
+
+export function calcFinalHp(levelId: number, enemyType: EnemyType, node: StageNode): number {
+  const lev = getLevelBaseStats(levelId);
+  const typeMul = getEnemyTypeHpMultiplier(enemyType);
+  const nodeMul = getNodeConfig(node).hpMultiplier;
+  return Math.round(lev.baseHp * typeMul * nodeMul);
+}
+
+// ═══════════════════════════════════════
+// 节点解析
+// ═══════════════════════════════════════
+
+export function resolveLevel1Node(battlePhase: BattlePhase, wavesSpawned: number): StageNode {
+  if (battlePhase === 'elite') return 'elite';
+  if (battlePhase === 'edict_modal' || battlePhase === 'edict_burst') {
+    // 军令期间按之前最后已知节点
+    return 'post_edict_release';
+  }
+  // main_waves: 按波次判断
+  if (wavesSpawned <= 3) return 'tutorial';
+  if (wavesSpawned <= 6) return 'pre_edict_early';
+  if (wavesSpawned <= 9) return 'pre_edict_late';
+  if (wavesSpawned <= 12) return 'post_edict_release';
+  if (wavesSpawned <= 15) return 'post_edict_understand';
+  return 'post_edict_adapt';
+}

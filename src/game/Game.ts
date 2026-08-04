@@ -27,6 +27,7 @@ import { createBladeMomentumState, applyBladeMaxChangePreserveRatio, resolveBlad
 import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles";
 import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, resolveDamage, resolveThreatDamage, type PlayerRunStats, type DamageRequest, type DamageResult, type DamageSourceType } from "./systems/damageSystem";
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
+import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
@@ -121,6 +122,8 @@ export class Game {
   private phase: GamePhase = "playing";
   /** 二次打磨：战斗阶段 HUD 显示 */
   private battlePhase: BattlePhase = 'main_waves';
+  /** V0803030: 节点配置追踪 */
+  private _currentStageNode: StageNode = 'tutorial';
   /** 军令爆发轮次索引 */
   private edictBurstRoundIndex = 0;
   /** 军令爆发轮次总数 */
@@ -1263,6 +1266,7 @@ export class Game {
     // P4.2: 统一播报更新
     this.updateBattleNotice(scaledDt);
     this.updateBattlePhase();
+    this._currentStageNode = resolveLevel1Node(this.battlePhase, this.wavesSpawned);
     this.updateBuffChoiceTriggers();
     this.checkBattleEnd();
     this.updateVictoryTransition(scaledDt);
@@ -2413,20 +2417,13 @@ export class Game {
     };
   }
 
-  /** 0807-11B-1: 计算敌人基础HP（关卡基础值 × 类型倍率 × 节点倍率） */
+  /** 0807-11B-3: 统一HP计算入口 */
   private getEnemyBaseHp(kind: EnemyKind, oldHp: number): number {
-    if (this.gameMode !== "normal") return oldHp; // Boss模式保持旧值
-    if (!this.isLogicalLevel1()) return oldHp;     // 非第1关保持旧值
-
-    // 第1关：基础HP=100
-    const levelBaseHp = 100;
-    const nodeMultiplier = 1.00; // 当前节点倍率（后续0807-11B-3扩展）
-
-    switch (kind) {
-      case "infantry": return Math.round(levelBaseHp * 0.75 * nodeMultiplier); // 75
-      // 以下类型伤害公式尚未迁移，暂保持旧HP（第1关仅出现infantry）
-      default:         return oldHp;
-    }
+    if (this.gameMode !== "normal") return oldHp;
+    if (!this.isLogicalLevel1()) return oldHp;
+    const et = (kind === 'infantry' || kind === 'shield' || kind === 'powder' || kind === 'core') ? 'infantry' as const : null;
+    if (!et) return oldHp;
+    return calcFinalHp(1, et, this._currentStageNode);
   }
 
   private getMainBladeDamageMultiplier(): number {
@@ -10426,6 +10423,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       `activeEdicts: [${this._activeEdicts.map(e => e.id).join(",")}]`,
       `lastKillSource: ${this._chestRuntime.lastKillSource}`,
       `--- ${APP_VERSION} Debug ---`,
+      `stageNode: ${this._currentStageNode}`,
+      `levelBaseHp: ${getLevelBaseStats(1).baseHp}`,
+      `typeHpMul: ${getEnemyTypeHpMultiplier('infantry')}`,
+      `nodeHpMul: ${getNodeConfig(this._currentStageNode).hpMultiplier}`,
+      `finalHp: ${calcFinalHp(1, 'infantry', this._currentStageNode)}`,
       `entryEndY: ${z.entryEndY}`,
       `midfieldStartY: ${z.midfieldStartY}`,
       `harvestStartY: ${z.harvestStartY}`,
