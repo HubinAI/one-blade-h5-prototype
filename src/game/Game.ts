@@ -1041,7 +1041,7 @@ export class Game {
     this._chestWarningAt = 0; this._chestOpenBlockUntilMs = 0; this._chestFlowClock = 0;
     this._edictArrivalTimer = 0; this._chestStampTimer = 0;
     // 军令与效果
-    this._activeEdicts = []; this._scorchTrails = []; this._tripleSideTrails = [];
+    this._activeEdicts = []; this._scorchTrails = []; this._tripleSideTrails = []; this._tripleSlashHitEnemyIds.clear();
     // 精英与战斗
     this.eliteSpawned = false; this.eliteKilled = false; this.elitePreviewShown = false; this.eliteSpawnAnnounced = false;
     this._eliteClearanceAt = 0; this._elitePreviewAt = 0;
@@ -2127,7 +2127,7 @@ export class Game {
     this.resolvePendingSlash(trail);
     const last = trail.points[trail.points.length - 1];
 
-    // V0731010: 三锋令 — 主刀后派生两道平行刀痕
+    // V0731010: 三刀流 — 主刀后派生两道平行刀痕
     if (this._activeEdicts.some(e => e.id === "triple_slash")) {
       this._fireTripleSideTrails(trail);
     }
@@ -2557,6 +2557,7 @@ export class Game {
     };
     this._activeEdicts = [];
     this._tripleSideTrails = []; // V0731010: 清空派生刀痕
+    this._tripleSlashHitEnemyIds.clear();
     this._scorchTrails = []; // V0731011: 清空火径
     // V0731012: 清除所有敌人霜冻状态
     for (const enemy of this.enemies) { (enemy as any)._frostState = undefined; }
@@ -2769,35 +2770,41 @@ export class Game {
     this._activeEdicts.push({ id: this._pendingEdictId, level: 1 });
     this._pendingEdictId = null;
   }
-  // ═══════════════════ V0731010: 三锋令 ═══════════════════
-  /** 主刀后派生两道平行刀痕 */
+  // ═══════════════════ V0731010: 三刀流 ═══════════════════
+  /** 主刀后派生两道平行副刀，扩大空间覆盖 */
   private _fireTripleSideTrails(main: SlashTrail) {
     if (main.points.length < 2) return;
     const pts = main.points;
-    // 计算主刀方向，派生偏移
     const dx = pts[pts.length - 1].x - pts[0].x;
     const dy = pts[pts.length - 1].y - pts[0].y;
     const len = Math.sqrt(dx * dx + dy * dy);
-    if (len < 10) return; // 刀路太短不派生
-    const nx = -dy / len; // 法线方向
+    if (len < 10) return;
+    const nx = -dy / len;
     const ny = dx / len;
-    const offset = 52; // 偏移量
+    const offset = 56; // 三刀流间距（三条刀中心到中心）
 
-    const sideOffsets = [-offset, offset]; // 左、右
-    const delay = 0.10; // 延迟秒
+    // 建立本次挥刀的去重集合（包含主刀已命中敌人）
+    this._tripleSlashHitEnemyIds.clear();
+    for (const id of main.hitEnemyIds) {
+      this._tripleSlashHitEnemyIds.add(id);
+    }
+    const sideOffsets = [-offset, offset];
+    const delay = 0.025; // 极小延迟，保持同一动作感
+
+    // 副刀伤害取主刀快照
+    const mainDmg = main._damageSnapshot ?? this.captureDamageSnapshot();
+    const isElite = !!this.enemies.find(e => e.alive && !!e.eliteKind); // 仅用于精英
 
     for (const sign of sideOffsets) {
-      // 偏移后的刀路点
       const offsetPts = pts.map(p => ({
         x: p.x + nx * sign,
         y: p.y + ny * sign,
         t: p.t + delay,
       }));
-      // 简化的派生刀痕碰撞检测
-      this._checkTripleSideHits(offsetPts, main);
+      this._checkTripleSideHits(offsetPts, mainDmg, main.id);
     }
 
-    // 派生刀痕视觉效果：复用主刀点但加偏移标记
+    // 副刀视觉效果
     this._tripleSideTrails.push({
       points: pts.map(p => ({
         x: p.x + nx * (-offset),
@@ -2818,19 +2825,17 @@ export class Game {
     });
   }
 
-  /** 派生刀痕碰撞检测 */
-  private _checkTripleSideHits(offsetPts: { x: number; y: number }[], main: SlashTrail) {
-    const hitIds = new Set<string>(); // 每道派生刀痕对同目标只结算一次
+  /** 派生刀痕碰撞检测 — 三刀流：共享去重、使用主刀伤害 */
+  private _checkTripleSideHits(offsetPts: { x: number; y: number }[], damageSnapshot: PlayerRunStats, attackActionId: string) {
     for (let i = 0; i < offsetPts.length - 1; i++) {
       const a = offsetPts[i];
       const b = offsetPts[i + 1];
       for (const enemy of this.enemies) {
         if (!enemy.alive) continue;
-        if (hitIds.has(enemy.id)) continue;
-        // 线段-圆碰撞检测
+        if (this._tripleSlashHitEnemyIds.has(enemy.id)) continue; // 跨刀路去重
         const abx = b.x - a.x, aby = b.y - a.y;
         const eax = a.x - enemy.x, eay = a.y - enemy.y;
-        const rad = enemy.radius + 12; // 加宽判定
+        const rad = enemy.radius + 12;
         const dot = abx * abx + aby * aby;
         if (dot < 1) continue;
         const t = clamp(-(eax * abx + eay * aby) / dot, 0, 1);
@@ -2838,21 +2843,19 @@ export class Game {
         const dist = Math.sqrt((cx - enemy.x) ** 2 + (cy - enemy.y) ** 2);
         if (dist > rad) continue;
 
-        hitIds.add(enemy.id);
-        // 伤害：普通兵 100% 主刀伤害，精英 25% 主刀伤害
-        const bm = createBladeMomentumState(this.energy, this.bladeMomentumMax);
-        const pct = bm.band === "high" ? 0.25 : bm.band === "mid" ? 0.20 : 0.15;
-        const isElite = !!enemy.eliteKind;
-        const dmgPct = isElite ? 0.25 : 1.0; // 精英 25%，普通兵 100%
-        const baseDmg = Math.max(1, Math.ceil(enemy.maxHp * pct * dmgPct));
-        this.damageEnemy(enemy, baseDmg, main, false, "triple_side");
-        // 0807-11B-2: 三锋聚合
-        const aggKey = `${main.id}_${enemy.id}`;
-        const refAtk = 100; // 开局攻击基准
-        this.aggregateAndMaybeFlush(aggKey, baseDmg, { x: enemy.x, y: enemy.y }, 'TRIPLE_SIDE', isElite ? 'ELITE' : 'NORMAL', 100, refAtk, !enemy.alive, false);
-        // 精英去重
-        if (isElite) {
-          this._eliteDamageDedup.add(`triple_${enemy.id}`);
+        this._tripleSlashHitEnemyIds.add(enemy.id);
+        // 三刀流：使用主刀最终伤害，通过 resolveDamage 统一计算
+        const r = resolveDamage({
+          actionId: this.nextId("dmg"), parentActionId: attackActionId,
+          sourceType: "TRIPLE_DERIVED_1", sourceConfig: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH,
+          attackerId: "player", targetId: enemy.id, targetCategory: "ENEMY",
+          skillCoefficient: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient, stats: damageSnapshot,
+          bladeBand: damageSnapshot.bladeDamageBonus >= 0.25 ? "high" : damageSnapshot.bladeDamageBonus >= 0.10 ? "mid" : "low",
+          tags: ["triple"], hitPos: { x: enemy.x, y: enemy.y }, timestamp: this.elapsed,
+        }, enemy.hp, enemy.maxHp, enemy.alive, !!enemy.eliteKind);
+        if (r && r.isAccepted && r.resolvedDamage > 0) {
+          this.damageEnemy(enemy, r.resolvedDamage, attackActionId as any, false, "triple_side");
+          this.aggregateAndMaybeFlush(`${attackActionId}_s_${enemy.id}`, r.resolvedDamage, { x: enemy.x, y: enemy.y }, 'TRIPLE_DERIVED_1', 'ENEMY', 100, damageSnapshot.entryAttack, false, false);
         }
       }
     }
@@ -2860,6 +2863,7 @@ export class Game {
 
   /** 三锋派生刀痕视觉数据 */
   private _tripleSideTrails: { points: { x: number; y: number; t: number }[]; life: number; maxLife: number }[] = [];
+  private _tripleSlashHitEnemyIds: Set<string> = new Set();
   // ═══════════════════ V0731011: 燎原令火径 ═══════════════════
   private _scorchTrails: { points: { x: number; y: number }[]; life: number; maxLife: number; lastTickTime: number }[] = [];
   // ═══════════════════ V0731011 End ═══════════════════
@@ -8510,7 +8514,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
     // 轮转+揭示（exiting阶段隐藏原始轮转）
     const EDICT_META: Record<EdictId, { name: string; icon: string; desc: string; color: string; glow: string }> = {
-      triple_slash: { name: "三锋令", icon: "⚔️", desc: "一刀化三锋", color: "#88bbff", glow: "#4488dd" },
+      triple_slash: { name: "三刀流", icon: "⚔️", desc: "一刀化三，横扫三线", color: "#88bbff", glow: "#4488dd" },
       scorch: { name: "燎原令", icon: "🔥", desc: "刀过留火径", color: "#ff8833", glow: "#dd4400" },
       frost: { name: "凝霜令", icon: "❄️", desc: "命中附凝霜", color: "#aaddff", glow: "#6699cc" },
     };
@@ -8570,18 +8574,18 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
   }
 
-  // V0731010: 三锋派生刀痕绘制
+  // V0731010: 三刀流副刀绘制
   private _drawTripleSideTrails(ctx: CanvasRenderingContext2D) {
     for (const t of this._tripleSideTrails) {
       if (t.points.length < 2) continue;
       const alpha = t.life / t.maxLife;
       const flash = t.life > t.maxLife * 0.92 ? 1.8 : 1.0; // 出现瞬间闪亮
       ctx.save();
-      ctx.globalAlpha = alpha * 0.75 * flash;
+      ctx.globalAlpha = alpha * 0.60 * flash;
       ctx.strokeStyle = "#a8d8ff";
-      ctx.lineWidth = 3.2;
+      ctx.lineWidth = 2.0;
       ctx.shadowColor = "#88bbff";
-      ctx.shadowBlur = 4 * flash;
+      ctx.shadowBlur = 2 * flash;
       ctx.lineCap = "round";
       ctx.beginPath();
       ctx.moveTo(t.points[0].x, t.points[0].y);
