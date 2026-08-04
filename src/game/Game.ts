@@ -904,7 +904,6 @@ export class Game {
         }
         // 清理三刀流
         self._tripleSlashHitEnemyIds.clear();
-        self._tripleCenterVisualTrail = null;
         self._tripleLeftTrail = null;
         self._tripleRightTrail = null;
       };
@@ -1055,7 +1054,7 @@ export class Game {
     this._chestWarningAt = 0; this._chestOpenBlockUntilMs = 0; this._chestFlowClock = 0;
     this._edictArrivalTimer = 0; this._chestStampTimer = 0;
     // 军令与效果
-    this._activeEdicts = []; this._scorchTrails = []; this._tripleCenterVisualTrail = null; this._tripleLeftTrail = null; this._tripleRightTrail = null; this._tripleSlashHitEnemyIds.clear();
+    this._activeEdicts = []; this._scorchTrails = []; this._tripleLeftTrail = null; this._tripleRightTrail = null; this._tripleSlashHitEnemyIds.clear();
     // 精英与战斗
     this.eliteSpawned = false; this.eliteKilled = false; this.elitePreviewShown = false; this.eliteSpawnAnnounced = false;
     this._eliteClearanceAt = 0; this._elitePreviewAt = 0;
@@ -1262,11 +1261,7 @@ export class Game {
     }
     // P4.3A: 战场流动控制
     // V0731010: 更新派生刀痕生命期
-    // 副刀生命周期（碰撞已在松手当帧一次性完成）
-    this._updateTripleTrails(scaledDt);
-    if (this._tripleCenterVisualTrail?.active) this._updateTripleTrailLife(this._tripleCenterVisualTrail);
-    if (this._tripleLeftTrail?.active) this._updateTripleTrailLife(this._tripleLeftTrail);
-    if (this._tripleRightTrail?.active) this._updateTripleTrailLife(this._tripleRightTrail);
+    // 副刀生命周期由 render 管理
     // V0731011: 更新火径生命 + 敌人伤害
     this._updateScorchTrails(scaledDt);
     this._updateFrostStates(scaledDt); // V0731012
@@ -2020,6 +2015,9 @@ export class Game {
     if (slashHasSoul) this.nextSoul = false;
     if (slashHasOil) this.nextOil = false;
 
+    // 三刀流：同步初始化左右副刀
+    this._initTripleSubTrails(this.currentSlash!);
+
     // P0: Reactive模式/BossV1 起刀时锁定刀势快照，不执行旧版消耗
     if (this.gameMode === "bossReactive" || this.gameMode === "chaseFlash") {
       // V0723014-Final.1 P0-1: 起刀快照已锁定在 lockedMomentum 中（PointerDown 时生成），整刀使用
@@ -2098,6 +2096,32 @@ export class Game {
     points.push(point);
     if (points.length > 82) points.shift();
 
+    // 三刀流实时扩面：同步生成左右点 + 碰撞
+    if (this._tripleLeftTrail?.active && this._tripleRightTrail?.active) {
+      const halfLen = Math.max(1, Math.sqrt((pos.x-last.x)**2+(pos.y-last.y)**2));
+      const nx = -(pos.y-last.y)/halfLen, ny = (pos.x-last.x)/halfLen;
+      const progress = clamp(trail.pathUsed / Math.max(1, trail.maxPathLength), 0, 1);
+      const ease = progress<0.5?2*progress*progress:1-Math.pow(-2*progress+2,2)/2;
+      const off = 24 + (72 - 24) * ease;
+      const pts = [{x:pos.x+nx*(-off),y:pos.y+ny*(-off)},{x:pos.x+nx*off,y:pos.y+ny*off}];
+      for (let si=0;si<2;si++) {
+        const t = si===0 ? this._tripleLeftTrail! : this._tripleRightTrail!;
+        t.points.push({x:pts[si].x,y:pts[si].y,t:this.elapsed,energyRatio:ratio} as SlashPoint);
+        if (t.points.length>2) { const a=t.points[t.points.length-2],b=t.points[t.points.length-1];
+          for (const enemy of this.enemies) {
+            if (!enemy.alive||this._tripleSlashHitEnemyIds.has(enemy.id)) continue;
+            const abx=b.x-a.x,aby=b.y-a.y,eax=a.x-enemy.x,eay=a.y-enemy.y,rad=enemy.radius+12;
+            const dot=abx*abx+aby*aby; if(dot<1)continue;
+            const tt=clamp(-(eax*abx+eay*aby)/dot,0,1);
+            if(Math.sqrt((a.x+abx*tt-enemy.x)**2+(a.y+aby*tt-enemy.y)**2)>rad)continue;
+            this._tripleSlashHitEnemyIds.add(enemy.id);
+            const r = resolveDamage({actionId:this.nextId("dmg"),parentActionId:t.id,sourceType:"TRIPLE_DERIVED_1",sourceConfig:DAMAGE_SOURCE_REGISTRY.MAIN_SLASH,attackerId:"player",targetId:enemy.id,targetCategory:"ENEMY",skillCoefficient:DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient,stats:t._damageSnapshot!,bladeBand:"mid",tags:["triple"],hitPos:{x:enemy.x,y:enemy.y},timestamp:this.elapsed},enemy.hp,enemy.maxHp,enemy.alive,!!enemy.eliteKind);
+            if(r?.isAccepted&&r.resolvedDamage>0){this.damageEnemy(enemy,r.resolvedDamage,t,false,"triple");this.aggregateAndMaybeFlush(`${t.id}_${enemy.id}`,r.resolvedDamage,{x:enemy.x,y:enemy.y},'TRIPLE_DERIVED_1','ENEMY',100,t._damageSnapshot!.entryAttack,false,false);}
+          }
+        }
+      }
+    }
+
     this.lastSlashAngle = Math.atan2(pos.y - last.y, pos.x - last.x);
     this.checkSegmentHits(last, point, trail);
 
@@ -2149,7 +2173,10 @@ export class Game {
 
     // V0731010: 三刀流 — 启动追斩序列
     if (this._activeEdicts.some(e => e.id === "triple_slash")) {
-      this._startTripleSlashSequence(trail);
+      // 实时副刀：松手后停止增长，快速消退
+      for (const t of [this._tripleLeftTrail, this._tripleRightTrail]) {
+        if (t) (t as any)._tripleSlowingFade = this.elapsed;
+      }
     }
 
     // V0731011: 燎原令 — 刀路留下火径
@@ -2576,7 +2603,7 @@ export class Game {
       lastKillSource: "",
     };
     this._activeEdicts = [];
-    this._tripleCenterVisualTrail = null; this._tripleLeftTrail = null; this._tripleRightTrail = null; // V0731010: 清空副刀
+    this._tripleLeftTrail = null; this._tripleRightTrail = null; // V0731010: 清空副刀
     this._tripleSlashHitEnemyIds.clear();
     this._scorchTrails = []; // V0731011: 清空火径
     // V0731012: 清除所有敌人霜冻状态
@@ -2791,56 +2818,11 @@ export class Game {
     this._activeEdicts.push({ id: this._pendingEdictId, level: 1 });
     this._pendingEdictId = null;
   }
-  // ═══════════════════ V0731010: 三刀流 ═══════════════════
-  private _sampledPath(pts: { x: number; y: number }[], n: number) {
-    if (pts.length <= 1) return [...pts];
-    let total = 0; const segs: number[] = [0];
-    for (let i = 1; i < pts.length; i++) { total += Math.sqrt((pts[i].x-pts[i-1].x)**2+(pts[i].y-pts[i-1].y)**2); segs.push(total); }
-    if (total < 1) return [pts[0], pts[pts.length-1]];
-    const out: {x:number;y:number}[] = [];
-    for (let j = 0; j < n; j++) { const dist = (j/(n-1))*total; let k=0; while(k<segs.length-1&&segs[k+1]<dist)k++; const t=(dist-segs[k])/(segs[k+1]-segs[k]||1); out.push({x:pts[k].x+(pts[k+1].x-pts[k].x)*t,y:pts[k].y+(pts[k+1].y-pts[k].y)*t}); }
-    return out;
-  }
-
-  private _createTripleSubTrail(pts: {x:number;y:number}[], main: SlashTrail, idSuffix: string): SlashTrail {
-    const stage = SWORD_STAGE_BY_ID[main.tier]; const rEff = main.reactiveBladeEffect;
-    return {
-      id: main.id + idSuffix, tier: main.tier, lockedEnergy: main.lockedEnergy, lockedMomentum: main.lockedMomentum,
-      maxPower: main.maxPower, remainingPower: main.maxPower, maxDuration: 0, remainingDuration: 0,
-      maxPathLength: main.maxPathLength, remainingPathLength: main.maxPathLength, pathUsed: 0,
-      widthMultiplier: main.widthMultiplier, energyBank: 0, explosionCount: 0, coreCollapseCount: 0,
-      points: pts.map(p => ({ x: p.x, y: p.y, t: this.elapsed, energyRatio: 1 } as SlashPoint)),
-      hitEnemyIds: this._tripleSlashHitEnemyIds, hitPickupIds: new Set(), pendingExplosionIds: new Set(),
-      pendingCoreIds: new Set(), oilTriggeredIds: new Set(), hasOil: false,
-      kills: 0, directMainKills: 0, chain: 0, active: true,
-      reactiveBladeEffect: rEff ? rEff : undefined,
-      _damageSnapshot: main._damageSnapshot ?? this.captureDamageSnapshot(),
-    } as SlashTrail;
-  }
-
-  private _checkTripleTrailCollision(trail: SlashTrail, prevIdx: number, newIdx: number) {
-    for (let i = prevIdx + 1; i <= newIdx && i < trail.points.length - 1; i++) {
-      const a = trail.points[i], b = trail.points[i + 1];
-      for (const enemy of this.enemies) {
-        if (!enemy.alive || this._tripleSlashHitEnemyIds.has(enemy.id)) continue;
-        const abx = b.x-a.x, aby = b.y-a.y, eax = a.x-enemy.x, eay = a.y-enemy.y, rad = enemy.radius+12;
-        const dot = abx*abx+aby*aby; if (dot<1) continue;
-        const t = clamp(-(eax*abx+eay*aby)/dot,0,1);
-        if (Math.sqrt((a.x+abx*t-enemy.x)**2+(a.y+aby*t-enemy.y)**2)>rad) continue;
-        this._tripleSlashHitEnemyIds.add(enemy.id);
-        const r = resolveDamage({ actionId: this.nextId("dmg"), parentActionId: trail.id, sourceType: "TRIPLE_DERIVED_1", sourceConfig: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH, attackerId: "player", targetId: enemy.id, targetCategory: "ENEMY", skillCoefficient: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient, stats: trail._damageSnapshot!, bladeBand: "mid", tags: ["triple"], hitPos: { x: enemy.x, y: enemy.y }, timestamp: this.elapsed }, enemy.hp, enemy.maxHp, enemy.alive, !!enemy.eliteKind);
-        if (r?.isAccepted && r.resolvedDamage > 0) {
-          this.damageEnemy(enemy, r.resolvedDamage, trail, false, "triple");
-          this.aggregateAndMaybeFlush(`${trail.id}_${enemy.id}`, r.resolvedDamage, { x: enemy.x, y: enemy.y }, 'TRIPLE_DERIVED_1', 'ENEMY', 100, trail._damageSnapshot!.entryAttack, false, false);
-        }
-      }
-    }
-  }
-
-  private _updateTripleTrails(scaledDt: number) {
-    for (const t of [this._tripleCenterVisualTrail, this._tripleLeftTrail, this._tripleRightTrail]) { if (!t || !t.active) continue; t.remainingDuration = Math.max(0, t.remainingDuration - scaledDt); }
-  }
-
+  // V0731010
+  /** 三刀流共享去重 + 实时副刀 */
+  private _tripleSlashHitEnemyIds: Set<string> = new Set();
+  private _tripleLeftTrail: SlashTrail | null = null;
+  private _tripleRightTrail: SlashTrail | null = null;
   private _drawTripleTrail(ctx: CanvasRenderingContext2D, trail: SlashTrail, alphaMul: number) {
     if (!trail.active || trail.points.length < 2) return;
     const pts = trail.points, stage = SWORD_STAGE_BY_ID[trail.tier], rEff = trail.reactiveBladeEffect;
@@ -2848,84 +2830,36 @@ export class Game {
     const baseWidth = effWidth * trail.widthMultiplier;
     const outerWidth = baseWidth * 0.80;
     const coreWidth = baseWidth * 0.42;
-    const age = this.elapsed - this._tripleTrailStartTime;
-    const isPeak = age < this._tripleTrailPeakDuration;
-    const alpha = clamp(isPeak ? 1 : 1 - (age - this._tripleTrailPeakDuration) / this._tripleTrailFadeDuration, 0.02, 1) * alphaMul;
-    const maxIdx = pts.length - 1;
+    const sFade = (trail as any)._tripleSlowingFade as number | undefined;
+    const alpha = sFade ? clamp(1 - (this.elapsed - sFade) / 0.12, 0.02, 1) : 1;
     ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.lineCap = "round"; ctx.lineJoin = "round";
     ctx.strokeStyle = `rgba(255,213,112,${alpha*0.5})`; ctx.shadowColor = effColor;
     ctx.lineWidth = outerWidth; ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i <= maxIdx; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
     ctx.strokeStyle = `rgba(255,255,238,${alpha*0.85})`; ctx.shadowBlur = 2;
     ctx.lineWidth = coreWidth; ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i <= maxIdx; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
     ctx.restore();
+    if (sFade && this.elapsed - sFade > 0.14) { trail.active = false; }
   }
 
-  private _startTripleSlashSequence(main: SlashTrail) {
+  private _initTripleSubTrails(main: SlashTrail) {
     if (!this._activeEdicts.some(e => e.id === "triple_slash")) return;
     this._tripleSlashHitEnemyIds.clear();
     for (const id of main.hitEnemyIds) this._tripleSlashHitEnemyIds.add(id);
-    const pts = main.points; if (pts.length < 2) return;
-    let sampled = this._sampledPath(pts, 32);
-    // 2轮三点平滑
-    for (let r = 0; r < 2; r++) {
-      const copy = sampled.map(p => ({ x: p.x, y: p.y }));
-      for (let i = 1; i < sampled.length - 1; i++) {
-        sampled[i] = { x: copy[i-1].x*0.25+copy[i].x*0.5+copy[i+1].x*0.25, y: copy[i-1].y*0.25+copy[i].y*0.5+copy[i+1].y*0.25 };
-      }
-    }
-    const normals = sampled.map((p,i) => {
-      const pi_1 = i>0?sampled[i-1]:p, pi1 = i<sampled.length-1?sampled[i+1]:p;
-      return { dx: pi1.x-pi_1.x, dy: pi1.y-pi_1.y };
-    });
-    // 法线方向连续
-    for (let i = 1; i < normals.length; i++) {
-      const prev = normals[i-1], cur = normals[i];
-      if (prev.dx*cur.dx + prev.dy*cur.dy < 0) { normals[i] = { dx: -cur.dx, dy: -cur.dy }; }
-    }
-    const startOff=24, endOff=72, n=sampled.length-1;
-    const gen = (sign:number) => sampled.map((p,i) => {
-      const t=n===0?0:i/n, ease=t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
-      const off=startOff+(endOff-startOff)*ease;
-      let {dx,dy}=normals[i]; const L=Math.sqrt(dx*dx+dy*dy)||1;
-      const nx = -dy/L, ny = dx/L;
-      return { x: p.x+nx*sign*off, y: p.y+ny*sign*off };
-    });
-    const baseTime = this.elapsed;
-    // center: 纯视觉
-    this._tripleCenterVisualTrail = this._createTripleSubTrail(gen(0), main, '_cv');
-    this._tripleLeftTrail = this._createTripleSubTrail(gen(-1), main, '_l');
-    this._tripleRightTrail = this._createTripleSubTrail(gen(1), main, '_r');
-    this._tripleTrailStartTime = baseTime;
-    const totalLife = this._tripleTrailPeakDuration + this._tripleTrailFadeDuration;
-    for (const t of [this._tripleCenterVisualTrail, this._tripleLeftTrail, this._tripleRightTrail]) {
-      t.remainingDuration = totalLife;
-      (t as any)._startAt = baseTime;
-      (t as any)._visibleEnd = t.points.length - 1; // 首帧完整
-    }
-    // 左右副刀一次性扩面碰撞
-    for (const st of [this._tripleLeftTrail, this._tripleRightTrail]) {
-      this._checkTripleTrailCollision(st, -1, st.points.length - 1);
-    }
-    // 快速结束旧主刀
-    if (this.currentSlash) this.currentSlash.active = false;
-  }
-
-  /** 三刀流共享去重 + 副刀 SlashTrail */
-  private _tripleSlashHitEnemyIds: Set<string> = new Set();
-  private _tripleCenterVisualTrail: SlashTrail | null = null;
-  private _tripleLeftTrail: SlashTrail | null = null;
-  private _tripleRightTrail: SlashTrail | null = null;
-  private _tripleTrailStartTime = 0;
-  private _tripleCenterDelay = 0;
-  private _tripleLeftDelay = 0;
-  private _tripleRightDelay = 0;
-  private _tripleTrailPeakDuration = 0.07;
-  private _tripleTrailFadeDuration = 0.15;
-  private _updateTripleTrailLife(trail: SlashTrail) {
-    const age = this.elapsed - this._tripleTrailStartTime;
-    if (age >= this._tripleTrailPeakDuration + this._tripleTrailFadeDuration) trail.active = false;
+    const rEff = main.reactiveBladeEffect;
+    const mk = (idSuffix: string): SlashTrail => ({
+      id: main.id + idSuffix, tier: main.tier, lockedEnergy: main.lockedEnergy, lockedMomentum: main.lockedMomentum,
+      maxPower: main.maxPower, remainingPower: main.maxPower, maxDuration: 0, remainingDuration: 0,
+      maxPathLength: main.maxPathLength, remainingPathLength: main.maxPathLength, pathUsed: 0,
+      widthMultiplier: main.widthMultiplier, energyBank: 0, explosionCount: 0, coreCollapseCount: 0,
+      points: [], hitEnemyIds: this._tripleSlashHitEnemyIds, hitPickupIds: new Set(), pendingExplosionIds: new Set(),
+      pendingCoreIds: new Set(), oilTriggeredIds: new Set(), hasOil: false,
+      kills: 0, directMainKills: 0, chain: 0, active: true,
+      reactiveBladeEffect: rEff ? rEff : undefined,
+      _damageSnapshot: main._damageSnapshot ?? this.captureDamageSnapshot(),
+    } as SlashTrail);
+    this._tripleLeftTrail = mk("_tl"); this._tripleRightTrail = mk("_tr");
   }
 
   // ═══════════════════ V0731011: 燎原令火径 ═══════════════════
@@ -9589,7 +9523,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.drawBladeTip(ctx, last, angle, visualLength, width, effColor, ratio);
     ctx.restore();}
   private drawTripleSlashTrails(ctx: CanvasRenderingContext2D) {
-    if (this._tripleCenterVisualTrail?.active) this._drawTripleTrail(ctx, this._tripleCenterVisualTrail, 1);
     if (this._tripleLeftTrail?.active) this._drawTripleTrail(ctx, this._tripleLeftTrail, 1);
     if (this._tripleRightTrail?.active) this._drawTripleTrail(ctx, this._tripleRightTrail, 1);
   }
