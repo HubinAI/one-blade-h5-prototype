@@ -5847,11 +5847,12 @@ export class Game {
 
     if (!shouldAdvance) { this.postChestLastAdvanceReason = null; return; }
 
-    // 执行生成
-    const roundIndex = this.postChestWaveIndex + 1;
+    // 先推进索引，再生成敌人（保证 createEnemy 读到正确节点）
+    this.postChestWaveIndex += 1;
+    this._currentStageNode = resolveLevel1Node(this.battlePhase, this.wavesSpawned, this.postChestWaveIndex);
+    const roundIndex = this.postChestWaveIndex;
     this.edictBurstRoundIndex = Math.min(roundIndex, total);
     this.spawnPostChestWave(wave, roundIndex);
-    this.postChestWaveIndex += 1;
     this.postChestLastWaveQueuedAt = this.elapsed;
     this.postChestAdvanceLockedUntil = this.elapsed + randomRange(0.85, 1.10);
     this.postChestLastAdvanceReason = reason;
