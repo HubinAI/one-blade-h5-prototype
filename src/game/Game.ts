@@ -904,6 +904,7 @@ export class Game {
         }
         // 清理三刀流
         self._tripleSlashHitEnemyIds.clear();
+        self._tripleCenterVisualTrail = null;
         self._tripleLeftTrail = null;
         self._tripleRightTrail = null;
       };
@@ -1054,7 +1055,7 @@ export class Game {
     this._chestWarningAt = 0; this._chestOpenBlockUntilMs = 0; this._chestFlowClock = 0;
     this._edictArrivalTimer = 0; this._chestStampTimer = 0;
     // 军令与效果
-    this._activeEdicts = []; this._scorchTrails = []; this._tripleLeftTrail = null; this._tripleRightTrail = null; this._tripleSlashHitEnemyIds.clear();
+    this._activeEdicts = []; this._scorchTrails = []; this._tripleCenterVisualTrail = null; this._tripleLeftTrail = null; this._tripleRightTrail = null; this._tripleSlashHitEnemyIds.clear();
     // 精英与战斗
     this.eliteSpawned = false; this.eliteKilled = false; this.elitePreviewShown = false; this.eliteSpawnAnnounced = false;
     this._eliteClearanceAt = 0; this._elitePreviewAt = 0;
@@ -1261,8 +1262,9 @@ export class Game {
     }
     // P4.3A: 战场流动控制
     // V0731010: 更新派生刀痕生命期
-    // 副刀时间推进 + 碰撞
+    // 副刀时间推进 + 碰撞 (center 纯视觉跳过)
     this._updateTripleTrails(scaledDt);
+    if (this._tripleCenterVisualTrail?.active) this._advanceTripleTrailVisualOnly(this._tripleCenterVisualTrail);
     if (this._tripleLeftTrail?.active) this._advanceTripleTrail(this._tripleLeftTrail, this._tripleLeftDelay);
     if (this._tripleRightTrail?.active) this._advanceTripleTrail(this._tripleRightTrail, this._tripleRightDelay);
     // V0731011: 更新火径生命 + 敌人伤害
@@ -2574,7 +2576,7 @@ export class Game {
       lastKillSource: "",
     };
     this._activeEdicts = [];
-    this._tripleLeftTrail = null; this._tripleRightTrail = null; // V0731010: 清空副刀
+    this._tripleCenterVisualTrail = null; this._tripleLeftTrail = null; this._tripleRightTrail = null; // V0731010: 清空副刀
     this._tripleSlashHitEnemyIds.clear();
     this._scorchTrails = []; // V0731011: 清空火径
     // V0731012: 清除所有敌人霜冻状态
@@ -2836,7 +2838,7 @@ export class Game {
   }
 
   private _updateTripleTrails(scaledDt: number) {
-    for (const t of [this._tripleLeftTrail, this._tripleRightTrail]) { if (!t || !t.active) continue; t.remainingDuration = Math.max(0, t.remainingDuration - scaledDt); }
+    for (const t of [this._tripleCenterVisualTrail, this._tripleLeftTrail, this._tripleRightTrail]) { if (!t || !t.active) continue; t.remainingDuration = Math.max(0, t.remainingDuration - scaledDt); }
   }
 
   private _drawTripleTrail(ctx: CanvasRenderingContext2D, trail: SlashTrail, alphaMul: number) {
@@ -2902,28 +2904,44 @@ export class Game {
       return { x: p.x+nx*sign*off, y: p.y+ny*sign*off };
     });
     const baseTime = this.elapsed;
+    // center: 纯视觉，无碰撞
+    this._tripleCenterVisualTrail = this._createTripleSubTrail(gen(0), main, '_cv');
     this._tripleLeftTrail = this._createTripleSubTrail(gen(-1), main, '_l');
     this._tripleRightTrail = this._createTripleSubTrail(gen(1), main, '_r');
     this._tripleTrailStartTime = baseTime;
+    (this._tripleCenterVisualTrail as any)._startAt = baseTime + this._tripleCenterDelay;
     (this._tripleLeftTrail as any)._startAt = baseTime + this._tripleLeftDelay;
     (this._tripleRightTrail as any)._startAt = baseTime + this._tripleRightDelay;
     const totalLife = this._tripleTrailTravelDuration + this._tripleTrailHoldDuration + this._tripleTrailFadeDuration;
-    this._tripleLeftTrail.remainingDuration = totalLife;
-    this._tripleRightTrail.remainingDuration = totalLife;
-    (this._tripleLeftTrail as any)._prevIdx = -1; (this._tripleLeftTrail as any)._visibleEnd = -1;
-    (this._tripleRightTrail as any)._prevIdx = -1; (this._tripleRightTrail as any)._visibleEnd = -1;
+    for (const t of [this._tripleCenterVisualTrail, this._tripleLeftTrail, this._tripleRightTrail]) {
+      t.remainingDuration = totalLife;
+      (t as any)._prevIdx = -1; (t as any)._visibleEnd = -1;
+    }
+    // 松手后快速结束旧主刀视觉
+    if (this.currentSlash) this.currentSlash.active = false;
   }
 
   /** 三刀流共享去重 + 副刀 SlashTrail */
   private _tripleSlashHitEnemyIds: Set<string> = new Set();
+  private _tripleCenterVisualTrail: SlashTrail | null = null;
   private _tripleLeftTrail: SlashTrail | null = null;
   private _tripleRightTrail: SlashTrail | null = null;
   private _tripleTrailStartTime = 0;
-  private _tripleLeftDelay = 0.03;
-  private _tripleRightDelay = 0.06;
+  private _tripleCenterDelay = 0;
+  private _tripleLeftDelay = 0.02;
+  private _tripleRightDelay = 0.04;
   private _tripleTrailTravelDuration = 0.16;
   private _tripleTrailHoldDuration = 0.05;
   private _tripleTrailFadeDuration = 0.12;
+  private _advanceTripleTrailVisualOnly(trail: SlashTrail) {
+    const startAt = ((trail as any)._startAt as number) ?? this._tripleTrailStartTime;
+    const age = this.elapsed - startAt; if (age < 0) return;
+    const progress = clamp(age / this._tripleTrailTravelDuration, 0, 1);
+    const newIdx = Math.min(Math.floor(progress * trail.points.length), trail.points.length - 1);
+    (trail as any)._prevIdx = newIdx; (trail as any)._visibleEnd = newIdx;
+    if (age >= this._tripleTrailTravelDuration + this._tripleTrailHoldDuration + this._tripleTrailFadeDuration) trail.active = false;
+  }
+
   private _advanceTripleTrail(trail: SlashTrail, _delay: number) {
     const startAt = ((trail as any)._startAt as number) ?? this._tripleTrailStartTime;
     const age = this.elapsed - startAt;
@@ -9604,6 +9622,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.drawBladeTip(ctx, last, angle, visualLength, width, effColor, ratio);
     ctx.restore();}
   private drawTripleSlashTrails(ctx: CanvasRenderingContext2D) {
+    if (this._tripleCenterVisualTrail?.active) this._drawTripleTrail(ctx, this._tripleCenterVisualTrail, 1);
     if (this._tripleLeftTrail?.active) this._drawTripleTrail(ctx, this._tripleLeftTrail, 1);
     if (this._tripleRightTrail?.active) this._drawTripleTrail(ctx, this._tripleRightTrail, 1);
   }
