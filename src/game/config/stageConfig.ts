@@ -81,17 +81,21 @@ export function calcFinalHp(levelId: number, enemyType: EnemyType, node: StageNo
 // 节点解析
 // ═══════════════════════════════════════
 
-export function resolveLevel1Node(battlePhase: BattlePhase, wavesSpawned: number): StageNode {
+export function resolveLevel1Node(battlePhase: BattlePhase, wavesSpawned: number, postChestWaveIndex: number): StageNode {
   if (battlePhase === 'elite') return 'elite';
-  if (battlePhase === 'edict_modal' || battlePhase === 'edict_burst') {
-    // 军令期间按之前最后已知节点
-    return 'post_edict_release';
+  if (battlePhase === 'edict_modal' || battlePhase === 'edict_burst') return 'post_edict_release';
+
+  // 军令后波次：postChestWaveIndex 已激活
+  if (postChestWaveIndex > 0) {
+    // postChestWaveIndex 起始值为 1（spawnPostChestWave 后 +1）
+    // 实际波次映射：第1波→release, 第2波→understand, 第3波→adapt
+    if (postChestWaveIndex <= 1) return 'post_edict_release';
+    if (postChestWaveIndex === 2) return 'post_edict_understand';
+    return 'post_edict_adapt';
   }
-  // main_waves: 按波次判断
+
+  // 普通主波阶段
   if (wavesSpawned <= 3) return 'tutorial';
   if (wavesSpawned <= 6) return 'pre_edict_early';
-  if (wavesSpawned <= 9) return 'pre_edict_late';
-  if (wavesSpawned <= 12) return 'post_edict_release';
-  if (wavesSpawned <= 15) return 'post_edict_understand';
-  return 'post_edict_adapt';
+  return 'pre_edict_late'; // 7-8
 }

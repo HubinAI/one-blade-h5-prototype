@@ -1274,7 +1274,7 @@ export class Game {
     // P4.2: 统一播报更新
     this.updateBattleNotice(scaledDt);
     this.updateBattlePhase();
-    this._currentStageNode = resolveLevel1Node(this.battlePhase, this.wavesSpawned + this.postChestWaveIndex);
+    this._currentStageNode = resolveLevel1Node(this.battlePhase, this.wavesSpawned, this.postChestWaveIndex);
     this.updateBuffChoiceTriggers();
     this.checkBattleEnd();
     this.updateVictoryTransition(scaledDt);
