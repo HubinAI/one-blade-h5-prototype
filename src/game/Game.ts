@@ -6605,6 +6605,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       }
     }
     if (this.edictRewardState === "modal") return;
+    // V0804009: K 锁宝箱时, 8波完成后不应卡死, 自动跳过宝箱启动 post-edict
+    if (this.allNormalWavesSpawned && this.postChestStartAt === null && this._chestProgressPaused && this.getEffectivePostChestWaves().length > 0) {
+      this.postChestWaveIndex = 0;
+      this.setPostChestSequenceState('waiting_spawn', 'chest_paused_skip');
+      this.startEdictBurstOnce();
+    }
     // V0731006: 新流程精英后怪潮期间保持 edict_burst
     if (this.edictPostWavesQueued && (!this.allPostChestWavesSpawned || this.subSpawnQueue.length > 0 || this.enemies.some(e => e.alive))) {
       this.battlePhase = 'edict_burst'; return;
