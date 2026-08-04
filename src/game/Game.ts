@@ -2820,6 +2820,10 @@ export class Game {
   // ═══════════════════ V0731010: 三刀流 ═══════════════════
   /** 主刀收刀后做副刀碰撞检测 */
   private _fireTripleSideTrails(main: SlashTrail) {
+    // 副刀共享主刀的去重集合
+    for (const id of main.hitEnemyIds) {
+      this._tripleSlashHitEnemyIds.add(id);
+    }
     for (const t of this._tripleSideTrails) {
       this._checkTripleSideHitsForTrail(t, main);
     }
