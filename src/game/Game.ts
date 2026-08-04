@@ -2815,60 +2815,8 @@ export class Game {
   // ═══════════════════ V0731010: 三刀流 ═══════════════════
   /** 主刀收刀后做副刀碰撞检测 */
   private _fireTripleSideTrails(main: SlashTrail) {
-    // 副刀碰撞：复用共享去重 + damageEnemy
     for (const t of this._tripleSideTrails) {
       this._checkTripleSideHitsForTrail(t, main);
-    }
-    // 清理（下一帧开始消退）
-    setTimeout(() => {
-      this._tripleSideTrails.forEach(t => t.active = false);
-      this._tripleSlashHitEnemyIds.clear();
-    }, 400);
-  }
-
-  /** 派生刀痕碰撞检测 — 三刀流：共享去重、使用主刀伤害 */
-  private _checkTripleSideHits(offsetPts: { x: number; y: number }[], damageSnapshot: PlayerRunStats, attackActionId: string) {
-    for (let i = 0; i < offsetPts.length - 1; i++) {
-      const a = offsetPts[i];
-      const b = offsetPts[i + 1];
-      for (const enemy of this.enemies) {
-        if (!enemy.alive) continue;
-        if (this._tripleSlashHitEnemyIds.has(enemy.id)) continue; // 跨刀路去重
-        const abx = b.x - a.x, aby = b.y - a.y;
-        const eax = a.x - enemy.x, eay = a.y - enemy.y;
-        const rad = enemy.radius + 12;
-        const dot = abx * abx + aby * aby;
-        if (dot < 1) continue;
-        const t = clamp(-(eax * abx + eay * aby) / dot, 0, 1);
-        const cx = a.x + abx * t, cy = a.y + aby * t;
-        const dist = Math.sqrt((cx - enemy.x) ** 2 + (cy - enemy.y) ** 2);
-        if (dist > rad) continue;
-
-        this._tripleSlashHitEnemyIds.add(enemy.id);
-        // 三刀流：使用主刀最终伤害，通过 resolveDamage 统一计算
-        const r = resolveDamage({
-          actionId: this.nextId("dmg"), parentActionId: attackActionId,
-          sourceType: "TRIPLE_DERIVED_1", sourceConfig: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH,
-          attackerId: "player", targetId: enemy.id, targetCategory: "ENEMY",
-          skillCoefficient: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient, stats: damageSnapshot,
-          bladeBand: damageSnapshot.bladeDamageBonus >= 0.25 ? "high" : damageSnapshot.bladeDamageBonus >= 0.10 ? "mid" : "low",
-          tags: ["triple"], hitPos: { x: enemy.x, y: enemy.y }, timestamp: this.elapsed,
-        }, enemy.hp, enemy.maxHp, enemy.alive, !!enemy.eliteKind);
-        if (r && r.isAccepted && r.resolvedDamage > 0) {
-          // 直接应用伤害，不复用 damageEnemy（避免依赖 SlashTrail 字段）
-          enemy.hp -= r.resolvedDamage;
-          enemy.flash = 0.25;
-          if (enemy.hp <= 0) {
-            enemy.alive = false;
-            this.stats.kills += 1;
-            this.registerEnemyKillForProgressChest(enemy.id, "slash");
-            this.particles.push(...paperBurst(enemy, 12, paperColors));
-          } else {
-            this.particles.push(...sparkBurst(enemy, 8, "#ffd67c"));
-          }
-          this.aggregateAndMaybeFlush(`${attackActionId}_s_${enemy.id}`, r.resolvedDamage, { x: enemy.x, y: enemy.y }, 'TRIPLE_DERIVED_1', 'ENEMY', 100, damageSnapshot.entryAttack, false, false);
-        }
-      }
     }
   }
 
