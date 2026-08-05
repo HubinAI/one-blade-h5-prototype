@@ -4559,7 +4559,7 @@ export class Game {
         // V0731012: 凝霜减速 — 普通40%, 精英20%
         const fs = (enemy as any)._frostState as { slowLeft: number; frozenLeft: number } | undefined;
         if (fs && fs.slowLeft > 0) {
-          const frostMul = enemy.eliteKind ? 0.80 : 0.60;
+          const frostMul = enemy.eliteKind ? 0.60 : 0.35;
           enemy.y -= enemy.speed * entryMultiplier * rushMultiplier * statusSlow * fortressSlow * flowMul * dt * (1 - frostMul);
         }
         if (fs && fs.frozenLeft > 0) {
