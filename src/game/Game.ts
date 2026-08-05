@@ -2925,7 +2925,7 @@ export class Game {
       if (!enemy.alive) { (enemy as any)._frostState = undefined; (enemy as any)._frostY = undefined; continue; }
       const fs = (enemy as any)._frostState as { frozenLeft: number; slowLeft: number; wasFrozen: boolean } | undefined;
       if (!fs) continue;
-      if (fs.frozenLeft > 0) { fs.frozenLeft -= dt; if (fs.frozenLeft <= 0) { fs.wasFrozen = true; (enemy as any)._frostShatterTimer = 0.16; } continue; }
+      if (fs.frozenLeft > 0) { fs.frozenLeft -= dt; if (fs.frozenLeft <= 0) { fs.wasFrozen = true; (enemy as any)._frostShatterTimer = 0.20; } continue; }
       // 碎裂计时
       const st = (enemy as any)._frostShatterTimer as number;
       if (st > 0) { (enemy as any)._frostShatterTimer = Math.max(0, st - dt); }
@@ -8931,73 +8931,64 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const isSlow = fs.wasFrozen && fs.slowLeft > 0 && !isShattering;
       const scale = enemy.eliteKind ? 1.35 : 1;
       const r = enemy.radius;
-      const seed = enemy.id.charCodeAt(0) * 17 + (enemy.id.charCodeAt(1) || 0) * 31;
+      const seed = enemy.id.charCodeAt(0)*17+(enemy.id.charCodeAt(1)||0)*31;
       ctx.save();
       if (isFrozen) {
-        // 冰壳 — 稳定多边形
-        const freezePct = 1 - fs.frozenLeft / (enemy.eliteKind ? 0.20 : 0.50);
-        ctx.globalAlpha = 0.65; ctx.fillStyle = "rgba(150,210,255,0.35)";
-        ctx.strokeStyle = "rgba(220,240,255,0.9)"; ctx.lineWidth = 3 * scale;
-        const sides = 6;
-        ctx.beginPath();
-        for (let i = 0; i < sides; i++) {
-          const ang = i * Math.PI * 2 / sides + seed * 0.01;
-          const dist = r + 5 * scale + Math.sin(i * 2.3 + seed) * 2;
-          ctx.lineTo(enemy.x + Math.cos(ang) * dist, enemy.y + Math.sin(ang) * dist);
-        }
-        ctx.closePath(); ctx.fill(); ctx.stroke();
+        // 冰壳包住敌人
+        ctx.globalAlpha=0.4; ctx.fillStyle="rgba(130,200,240,0.45)";
+        ctx.strokeStyle="rgba(220,240,255,0.95)"; ctx.lineWidth=3*scale;
+        const sides=6; ctx.beginPath();
+        for(let i=0;i<sides;i++){const ang=i*Math.PI*2/sides+seed*0.01;
+        const dist=r+5*scale+Math.sin(i*2.3+seed)*2;
+        i===0?ctx.moveTo(enemy.x+Math.cos(ang)*dist,enemy.y+Math.sin(ang)*dist)
+        :ctx.lineTo(enemy.x+Math.cos(ang)*dist,enemy.y+Math.sin(ang)*dist);}
+        ctx.closePath();ctx.fill();ctx.stroke();
+        // 内部冰裂纹
+        ctx.globalAlpha=0.35;ctx.strokeStyle="rgba(200,235,255,0.6)";ctx.lineWidth=1.5;
+        for(let i=0;i<3;i++){const a=seed*0.03+i*2.1;
+        ctx.beginPath();ctx.moveTo(enemy.x+Math.cos(a)*r*0.3,enemy.y+Math.sin(a)*r*0.3);
+        ctx.lineTo(enemy.x+Math.cos(a+0.4)*r*0.7,enemy.y+Math.sin(a+0.4)*r*0.7);ctx.stroke();}
         // 冰屑
-        ctx.globalAlpha = 0.45; ctx.fillStyle = "#eef";
-        for (let i = 0; i < 4; i++) {
-          const a = seed * 0.1 + i * Math.PI / 2;
-          const d = r + 7 * scale + freezePct * 10;
-          ctx.beginPath();
-          ctx.arc(enemy.x + Math.cos(a) * d, enemy.y + Math.sin(a) * d, 1.5 + (seed % 3) * 0.5, 0, Math.PI * 2); ctx.fill();
-        }
+        ctx.globalAlpha=0.4;ctx.fillStyle="#eef";
+        for(let i=0;i<4;i++){const a=seed*0.1+i*Math.PI/2;const d=r+7*scale;
+        ctx.beginPath();ctx.arc(enemy.x+Math.cos(a)*d,enemy.y+Math.sin(a)*d,2,0,Math.PI*2);ctx.fill();}
         // 凝结脉冲
-        if (freezePct < 0.25) {
-          ctx.globalAlpha = (1 - freezePct * 4) * 0.5;
-          ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.arc(enemy.x, enemy.y, r + 8 * scale + freezePct * 25, 0, Math.PI * 2); ctx.stroke();
-        }
+        const fp=1-fs.frozenLeft/(enemy.eliteKind?0.20:0.50);
+        if(fp<0.2){ctx.globalAlpha=(1-fp*5)*0.5;ctx.strokeStyle="#fff";ctx.lineWidth=2;
+        ctx.beginPath();ctx.arc(enemy.x,enemy.y,r+8*scale+fp*20,0,Math.PI*2);ctx.stroke();}
       } else if (isShattering) {
-        // 碎裂 — 裂纹 + 飞散冰块
-        const sp = 1 - st / 0.16;
+        // 碎裂爆点
+        const sp=1-st/0.20;
+        // 首帧亮闪
+        if(sp<0.08){ctx.globalAlpha=0.7*(1-sp*12);ctx.fillStyle="#fff";
+        ctx.beginPath();ctx.arc(enemy.x,enemy.y,r+6,0,Math.PI*2);ctx.fill();}
         // 裂纹
-        ctx.globalAlpha = 0.4 * (1 - sp); ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5;
-        for (let i = 0; i < 3; i++) {
-          const a = seed * 0.1 + i * Math.PI * 1.5;
-          ctx.beginPath();
-          ctx.moveTo(enemy.x, enemy.y);
-          ctx.lineTo(enemy.x + Math.cos(a) * r * 0.8, enemy.y + Math.sin(a) * r * 0.8);
-          ctx.stroke();
-        }
-        // 飞散冰片 6-10
-        ctx.globalAlpha = 0.5 + sp * 0.3; ctx.fillStyle = "#ddeeff";
-        for (let i = 0; i < 8; i++) {
-          const a = seed * 0.07 + i * Math.PI / 4;
-          const d = r + 5 + sp * 20;
-          ctx.beginPath();
-          ctx.moveTo(enemy.x + Math.cos(a) * d, enemy.y + Math.sin(a) * d);
-          ctx.lineTo(enemy.x + Math.cos(a + 0.3) * (d + 4), enemy.y + Math.sin(a + 0.3) * (d + 4));
-          ctx.lineTo(enemy.x + Math.cos(a - 0.2) * (d + 3), enemy.y + Math.sin(a - 0.2) * (d + 3));
-          ctx.fill();
-        }
-        // 短亮闪
-        if (sp < 0.15) { ctx.globalAlpha = 0.6 * (1 - sp * 6.6); ctx.fillStyle = "#fff";
-          ctx.beginPath(); ctx.arc(enemy.x, enemy.y, r + 4, 0, Math.PI * 2); ctx.fill(); }
+        ctx.globalAlpha=0.45*(1-sp);ctx.strokeStyle="#fff";ctx.lineWidth=2;
+        for(let i=0;i<3;i++){const a=seed*0.1+i*Math.PI*1.5;
+        ctx.beginPath();ctx.moveTo(enemy.x,enemy.y);
+        ctx.lineTo(enemy.x+Math.cos(a)*r*0.9,enemy.y+Math.sin(a)*r*0.9);ctx.stroke();}
+        // 飞散冰块 8-14px
+        ctx.globalAlpha=0.5+sp*0.2;ctx.fillStyle="#ddeeff";
+        for(let i=0;i<8;i++){const a=seed*0.07+i*Math.PI/4;
+        const d=r+6+sp*24,sz=4+(seed+i*7)%10;
+        ctx.beginPath();
+        ctx.moveTo(enemy.x+Math.cos(a)*d,enemy.y+Math.sin(a)*d);
+        ctx.lineTo(enemy.x+Math.cos(a+0.25)*(d+sz),enemy.y+Math.sin(a+0.25)*(d+sz));
+        ctx.lineTo(enemy.x+Math.cos(a-0.2)*(d+sz*0.7),enemy.y+Math.sin(a-0.2)*(d+sz*0.7));
+        ctx.fill();}
       } else if (isSlow) {
-        // 挂霜减速
-        ctx.globalAlpha = 0.35; ctx.strokeStyle = "#aaddff"; ctx.lineWidth = 2.5 * scale;
-        ctx.beginPath(); ctx.arc(enemy.x, enemy.y, r + 4, 0, Math.PI * 2); ctx.stroke();
-        ctx.globalAlpha = 0.2; ctx.fillStyle = "#aaddff";
-        ctx.beginPath(); ctx.ellipse(enemy.x, enemy.y + r * 0.85, r * 0.7 * scale, r * 0.22, 0, 0, Math.PI * 2); ctx.fill();
-        ctx.globalAlpha = 0.15; ctx.fillStyle = "#ddeeff";
-        for (let i = 0; i < 3; i++) {
-          const a = seed * 0.05 + i * Math.PI * 1.3;
-          ctx.beginPath();
-          ctx.arc(enemy.x + Math.cos(a) * r * 0.5, enemy.y + Math.sin(a) * r * 0.5, 1.5, 0, Math.PI * 2); ctx.fill();
-        }
+        // 挂霜减速 — 持续可见
+        const sf=fs.slowLeft/2.5;
+        ctx.globalAlpha=0.3*sf;ctx.fillStyle="rgba(140,210,240,0.4)";
+        ctx.beginPath();ctx.ellipse(enemy.x,enemy.y+r*0.1,r*0.75*scale,r*0.55,0,Math.PI,Math.PI*2);ctx.fill();
+        ctx.globalAlpha=0.25*sf;ctx.fillStyle="rgba(170,220,245,0.35)";
+        ctx.beginPath();ctx.ellipse(enemy.x,enemy.y+r*0.55,r*0.8*scale,r*0.25,0,0,Math.PI*2);ctx.fill();
+        // 霜晶 3-4片
+        ctx.globalAlpha=0.2*sf;ctx.fillStyle="#ddeeff";
+        for(let i=0;i<4;i++){const a=seed*0.05+i*Math.PI*1.5;
+        ctx.beginPath();ctx.moveTo(enemy.x+Math.cos(a)*r*0.5,enemy.y+Math.sin(a)*r*0.5);
+        ctx.lineTo(enemy.x+Math.cos(a+0.3)*(r*0.5+8),enemy.y+Math.sin(a+0.3)*(r*0.5+8));
+        ctx.lineTo(enemy.x+Math.cos(a-0.2)*(r*0.5+5),enemy.y+Math.sin(a-0.2)*(r*0.5+5));ctx.fill();}
       }
       ctx.restore();
     }
