@@ -2135,18 +2135,20 @@ export class Game {
     this.lastSlashAngle = Math.atan2(pos.y - last.y, pos.x - last.x);
     // 燎原百斩：实时追加草稿点
     if (this._scorchDraft?.active) {
+      const lastPt = this._scorchDraft.points[this._scorchDraft.points.length - 1];
       this._scorchDraft.points.push({ x: pos.x, y: pos.y });
-      if (this._scorchDraft.points.length > 120) this._scorchDraft.points.shift();
-      // 新segment超过2点后，孵化为新火痕
+      // 每新增一段(2点)，孵化独立火痕段(1.8s生命周期)
       if (this._scorchDraft.points.length >= 2) {
         this._scorchTrails.push({
-          points: this._scorchDraft.points.map(p => ({ x: p.x, y: p.y })),
+          points: [{ x: lastPt.x, y: lastPt.y }, { x: pos.x, y: pos.y }],
           life: 1.8, maxLife: 1.8,
           damageSnapshot: this._scorchDraft.damageSnapshot,
           parentId: this._scorchDraft.parentTrail.id,
           parentTrail: this._scorchDraft.parentTrail,
         });
-        while (this._scorchTrails.length > 8) this._scorchTrails.shift();
+        while (this._scorchTrails.length > 40) this._scorchTrails.shift();
+        // 只保留最后2点作为下一段的起点
+        this._scorchDraft.points = this._scorchDraft.points.slice(-2);
       }
     }
     this.checkSegmentHits(last, point, trail);
