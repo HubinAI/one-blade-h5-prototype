@@ -8979,18 +8979,21 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ctx.lineTo(enemy.x+Math.cos(a-0.2)*(d+sz*0.7),enemy.y+Math.sin(a-0.2)*(d+sz*0.7));
         ctx.fill();}
       } else if (isSlow) {
-        // 挂霜减速 — 三段：稳定→呼吸→碎霜退出
+        // 挂霜减速 — 入场缓动→稳定→呼吸→碎霜退出
         const sl=fs.slowLeft;
-        // 呼吸系数
-        const breathe=sl<0.60&&sl>=0.20?1+Math.sin(sl*14+seed)*0.1:1;
-        const breathR=sl<0.60&&sl>=0.20?Math.sin(sl*14+seed)*2:0;
-        // 退出碎霜系数
+        // 入场缓动 0.12s
+        const entryF=Math.min(1,Math.max(0,(2.5-sl)/0.12));
+        const entryR=-2*(1-entryF);
+        // 呼吸固定两周期 首尾归零 (0.60→0.20s)
+        const brPhase=sl<0.60&&sl>=0.20?Math.max(0,Math.min(1,(0.60-sl)/0.40)):0;
+        const wave=Math.sin(brPhase*Math.PI*4);
+        // 退出碎霜
         const exitF=sl<0.20?Math.max(0,sl/0.20):1;
         // 霜边弧段
         const arcCount=enemy.eliteKind?6:4;
-        const arcR=r+5*scale+breathR;
+        const arcR=r+5*scale+entryR+(brPhase>0?wave*2:0);
         ctx.strokeStyle="#88ccff";ctx.lineWidth=3*scale;
-        ctx.globalAlpha=0.55*breathe*exitF;
+        ctx.globalAlpha=0.55*entryF*(1+wave*0.08)*exitF;
         ctx.setLineDash([]);
         for(let i=0;i<arcCount;i++){
           const a0=i*Math.PI*2/arcCount+seed*0.02;
@@ -9000,7 +9003,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
           ctx.arc(enemy.x,enemy.y,arcR,a0+gap,a1-gap);ctx.stroke();
         }
         // 脚下寒气
-        ctx.globalAlpha=0.32*breathe*exitF;ctx.fillStyle="#aaddff";
+        ctx.globalAlpha=0.32*entryF*(1+wave*0.06)*exitF;ctx.fillStyle="#aaddff";
         const baseW=sl<0.20?exitF*0.8:1;
         ctx.beginPath();ctx.ellipse(enemy.x,enemy.y+r*0.88,r*0.8*scale*baseW,r*0.22*baseW,0,0,Math.PI*2);ctx.fill();
         // 霜晶 + 碎霜
