@@ -8091,55 +8091,60 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.restore(); // outer
   }
 
-  /** 冰霜斩痕绘制 — 替换默认黄刀 */
+  /** 冰霜斩痕绘制 — 锥形冰刃polygon */
   private _drawFrostSlash(ctx: CanvasRenderingContext2D, points: any[], width: number, lowFade: number, effBrightness: number) {
     if (points.length < 2) return;
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.lineCap = "round"; ctx.lineJoin = "round";
     const n = points.length;
-    for (let i = 1; i < n; i++) {
-      const a = points[i-1], b = points[i];
-      const age = i / Math.max(1, n-1);
-      const alpha = Math.min(0.65, Math.max(0.05, age * b.energyRatio * effBrightness * lowFade));
-      // 寒霜尾迹 — 宽, 低透明
-      ctx.strokeStyle = "rgba(120,200,240,alpha*0.45)".replace("alpha",(alpha*0.45).toFixed(2));
-      ctx.shadowColor = "#88ccff"; ctx.shadowBlur = 14 * lowFade;
-      ctx.lineWidth = Math.max(26, width * 1.6) * (0.8 + b.energyRatio * 0.2);
-      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
-      // 冰刃主体 — 中, 高亮
-      ctx.strokeStyle = "rgba(180,230,255,alpha*0.7)".replace("alpha",(alpha*0.7).toFixed(2));
-      ctx.shadowColor = "#aaddff"; ctx.shadowBlur = 8 * lowFade;
-      ctx.lineWidth = Math.max(13, width * 0.9) * (0.85 + b.energyRatio * 0.15);
-      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
-      // 冰白锋芯 — 窄, 锋利
-      ctx.strokeStyle = "rgba(240,250,255,alpha*0.95)".replace("alpha",(alpha*0.95).toFixed(2));
-      ctx.shadowColor = "#fff"; ctx.shadowBlur = 3;
-      ctx.lineWidth = Math.max(4, width * 0.28);
-      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    // 生成左右边缘（锥形：宽窄变化）
+    const L:any[]=[], R:any[]=[];
+    const bladeW = Math.min(18, Math.max(10, width * 1.05));
+    for (let i=0;i<n;i++){
+      const pp=points[Math.max(0,i-1)], pn=points[Math.min(n-1,i+1)], p=points[i];
+      const dx=pn.x-pp.x, dy=pn.y-pp.y, len=Math.sqrt(dx*dx+dy*dy)||1, nx=-dy/len, ny=dx/len;
+      const frac=i/(n-1), taper=0.2+(1-Math.abs(frac-0.5)*1.6)*0.8; // 中段100% 首尾20%-45%
+      const w=bladeW*taper;
+      L.push({x:p.x+nx*(-w), y:p.y+ny*(-w)});
+      R.push({x:p.x+nx*w, y:p.y+ny*w});
     }
-    // 霜晶 — 4-8片
-    ctx.globalAlpha = lowFade * 0.4; ctx.fillStyle = "#ddeeff";
-    const seedBase = (points[0].x * 137 + points[0].y * 251) % 10000;
-    for (let i = 0; i < 6; i++) {
-      const idx = Math.floor((i+0.5) * n / 6); if (idx >= n) continue;
-      const p = points[idx];
-      const seed = seedBase + i * 173;
-      const sx = p.x + (Math.sin(seed) * 14) * (i % 2 === 0 ? -1 : 1);
-      const sy = p.y + Math.cos(seed) * 10 - 4;
-      ctx.beginPath();
-      ctx.arc(sx, sy, 4 + Math.abs(Math.sin(seed*0.3))*6, 0, Math.PI*2); ctx.fill();
-    }
-    // 锋头 — 末端楔形
-    const last = points[n-1], prev = points[n-2] || last;
-    const dx = last.x-prev.x, dy = last.y-prev.y, len = Math.sqrt(dx*dx+dy*dy)||1;
-    const nx = dx/len, ny = dy/len;
-    ctx.globalAlpha = 0.7; ctx.fillStyle = "#fff";
+    ctx.save();
+    // 外层寒气
+    ctx.globalAlpha=lowFade*0.12; ctx.globalCompositeOperation="source-over";
+    ctx.fillStyle="rgba(140,210,240,0.3)";
     ctx.beginPath();
-    ctx.moveTo(last.x + nx*6, last.y + ny*6);
-    ctx.lineTo(last.x + nx*22 - ny*4, last.y + ny*22 + nx*4);
-    ctx.lineTo(last.x + nx*14 + ny*4, last.y + ny*14 - nx*4);
-    ctx.closePath(); ctx.fill();
+    for(let i=0;i<L.length;i++){i===0?ctx.moveTo(L[i].x,L[i].y):ctx.lineTo(L[i].x-2,L[i].y-2);}
+    for(let i=R.length-1;i>=0;i--)ctx.lineTo(R[i].x+2,R[i].y+2);ctx.closePath();ctx.fill();
+    // 主刃面 — 冰蓝polygon
+    ctx.globalAlpha=lowFade*0.68; ctx.fillStyle="rgba(100,190,240,0.85)";
+    ctx.beginPath();
+    for(let i=0;i<L.length;i++){i===0?ctx.moveTo(L[i].x,L[i].y):ctx.lineTo(L[i].x,L[i].y);}
+    for(let i=R.length-1;i>=0;i--)ctx.lineTo(R[i].x,R[i].y);ctx.closePath();ctx.fill();
+    // 下侧暗边 2-4px
+    ctx.globalAlpha=lowFade*0.5; ctx.strokeStyle="rgba(30,80,140,0.6)"; ctx.lineWidth=3;
+    ctx.beginPath();
+    for(let i=0;i<R.length;i++){i===0?ctx.moveTo(R[i].x,R[i].y):ctx.lineTo(R[i].x,R[i].y);}ctx.stroke();
+    // 上侧锐边 2-3px冰白 lighter
+    ctx.globalCompositeOperation="lighter"; ctx.globalAlpha=lowFade*0.55;
+    ctx.strokeStyle="rgba(220,245,255,0.8)"; ctx.lineWidth=2.5;
+    ctx.beginPath();
+    for(let i=0;i<L.length;i++){i===0?ctx.moveTo(L[i].x,L[i].y):ctx.lineTo(L[i].x,L[i].y);}ctx.stroke();
+    ctx.globalCompositeOperation="source-over";
+    // 锋头 — 延伸楔形
+    const last = points[n-1], prev=points[n-2]||last;
+    const dx=last.x-prev.x, dy=last.y-prev.y, len2=Math.sqrt(dx*dx+dy*dy)||1, fwdX=dx/len2, fwdY=dy/len2;
+    const fw=bladeW*0.45; // 锋头根部宽度
+    ctx.globalAlpha=lowFade*0.75; ctx.fillStyle="rgba(180,230,255,0.9)";
+    ctx.beginPath();
+    ctx.moveTo(last.x+fwdX*4 - fwdY*fw, last.y+fwdY*4 + fwdX*fw);
+    ctx.lineTo(last.x+fwdX*20, last.y+fwdY*20); // 尖端
+    ctx.lineTo(last.x+fwdX*4 + fwdY*fw, last.y+fwdY*4 - fwdX*fw);
+    ctx.closePath();ctx.fill();
+    // 霜晶 4-6片
+    ctx.globalAlpha=lowFade*0.35; ctx.fillStyle="#ddeeff";
+    const sb=(points[0].x*137+points[0].y*251)%10000;
+    for(let i=0;i<5;i++){const idx=Math.floor((i+0.5)*n/5);if(idx>=n)continue;
+    const pp=points[idx], ss=sb+i*173;
+    const sx=pp.x+(Math.sin(ss)*14)*((ss%2)*2-1), sy=pp.y+Math.cos(ss)*10-4;
+    ctx.beginPath();ctx.arc(sx,sy,4+Math.abs(Math.sin(ss*0.3))*6,0,Math.PI*2);ctx.fill();}
     ctx.restore();
   }
 
