@@ -2628,7 +2628,7 @@ export class Game {
     this._tripleSlashHitEnemyIds.clear();
     this._scorchTrails = []; this._scorchDraft = null; this._scorchVisualRoads = []; this._scorchVisualRoads = []; // V0731011: 清空火径
     // V0731012: 清除所有敌人霜冻状态
-    for (const enemy of this.enemies) { (enemy as any)._frostState = undefined; }
+    for (const enemy of this.enemies) { (enemy as any)._frostState = undefined; (enemy as any)._frostY = undefined; }
     this._edictArrivalTimer = 0;
   }
 
@@ -2922,6 +2922,7 @@ export class Game {
 
   private _updateFrostStates(dt: number) {
     for (const enemy of this.enemies) {
+      if (!enemy.alive) { (enemy as any)._frostState = undefined; (enemy as any)._frostY = undefined; continue; }
       const fs = (enemy as any)._frostState as { slowLeft: number; frozenLeft: number } | undefined;
       if (!fs) continue;
       if (fs.frozenLeft > 0) { fs.frozenLeft -= dt; continue; } // 冻结优先消耗
