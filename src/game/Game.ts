@@ -2910,10 +2910,11 @@ export class Game {
       if (!hit) continue;
       const isElite = !!enemy.eliteKind;
       const fs = (enemy as any)._frostState as { frozenLeft: number; slowLeft: number; wasFrozen: boolean } | undefined;
-      if (fs && fs.frozenLeft > 0) continue;
+      // 冰封/碎裂中不重置
+      if (fs && (fs.frozenLeft > 0 || ((enemy as any)._frostShatterTimer ?? 0) > 0)) continue;
       const freezeDur = isElite ? 0.20 : 0.50;
       if (!fs || (fs.slowLeft <= 0 && fs.frozenLeft <= 0)) {
-        (enemy as any)._frostState = { frozenLeft: freezeDur, slowLeft: 2.5, wasFrozen: false };
+        (enemy as any)._frostState = { frozenLeft: freezeDur, slowLeft: 0, wasFrozen: false };
       } else if (fs.slowLeft > 0) {
         fs.slowLeft = 2.5;
       }
@@ -2928,7 +2929,8 @@ export class Game {
       if (fs.frozenLeft > 0) { fs.frozenLeft -= dt; if (fs.frozenLeft <= 0) { fs.wasFrozen = true; (enemy as any)._frostShatterTimer = 0.20; } continue; }
       // 碎裂计时
       const st = (enemy as any)._frostShatterTimer as number;
-      if (st > 0) { (enemy as any)._frostShatterTimer = Math.max(0, st - dt); }
+      if (st > 0) { (enemy as any)._frostShatterTimer = Math.max(0, st - dt); if (st - dt <= 0) fs.slowLeft = 2.5; continue; }
+      // 减速计时
       if (fs.slowLeft > 0) fs.slowLeft -= dt;
       if (fs.slowLeft <= 0) { (enemy as any)._frostState = undefined; (enemy as any)._frostY = undefined; }
     }
