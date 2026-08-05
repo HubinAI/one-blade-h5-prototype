@@ -2965,6 +2965,7 @@ export class Game {
       }
       if (!bestSnap || !bestTrail) continue;
 
+      const targetIsImmune = this._eliteInvuln && enemy.eliteKind === "fireRing";
       const r = resolveDamage({
         actionId: this.nextId("scorch"), parentActionId: "scorch",
         sourceType: "SCORCH_BURN", sourceConfig: DAMAGE_SOURCE_REGISTRY.SCORCH_BURN,
@@ -2972,11 +2973,15 @@ export class Game {
         skillCoefficient: 0.12, stats: bestSnap,
         bladeBand: "mid", tags: ["scorch", "burn", "dot"],
         hitPos: { x: enemy.x, y: enemy.y }, timestamp: this.elapsed,
-      }, enemy.hp, enemy.maxHp, enemy.alive, !!enemy.eliteKind);
+      }, enemy.hp, enemy.maxHp, enemy.alive, targetIsImmune);
+      if (this.debugEnabled) {
+        const hpBefore = enemy.hp;
+        console.warn(`[SCORCH-RESOLVE] enemy=${enemy.id} immune=${targetIsImmune} accepted=${r?.isAccepted} dmg=${r?.effectiveHpLoss ?? 0} hpBefore=${hpBefore}`);
+      }
       if (r?.isAccepted && r.resolvedDamage > 0) {
         const wasAlive = enemy.alive;
         const isElite = !!enemy.eliteKind;
-        this.damageEnemy(enemy, r.resolvedDamage, bestTrail, false, "scorch");
+        this.damageEnemy(enemy, r.effectiveHpLoss, bestTrail, false, "scorch");
         const isKill = wasAlive && !enemy.alive;
         if (isElite) {
           // 精英每跳独立 CombatFloat（无 mergeKey，不聚合）
