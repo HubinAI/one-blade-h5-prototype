@@ -2977,12 +2977,17 @@ export class Game {
         this.damageEnemy(enemy, r.resolvedDamage, bestTrail, false, "scorch");
         const isKill = wasAlive && !enemy.alive;
         if (isElite) {
-          // 精英每跳立即显示：极小窗口(10ms)防止同帧重复，并左右错位
-          const offsetIdx = ((enemy as any)._scorchTickOff ?? 0) % 2;
-          (enemy as any)._scorchTickOff = offsetIdx + 1;
-          const ox = offsetIdx === 0 ? 12 : -12;
-          const key = `scorch_e_${enemy.id}_${Math.floor(this.elapsed / 0.25)}`;
-          this.aggregateAndMaybeFlush(key, r.resolvedDamage, { x: enemy.x+ox, y: enemy.y-enemy.radius-14 }, 'SCORCH_BURN', 'ELITE', 10, bestSnap.entryAttack, isKill, true);
+          // 精英每跳独立即时飘字（不聚合）
+          const offIdx = ((enemy as any)._scorchDotIdx ?? 0) % 2;
+          (enemy as any)._scorchDotIdx = offIdx + 1;
+          const side = offIdx === 0 ? 1 : -1;
+          const hOffset = enemy.radius + 22;
+          const px = enemy.x + side * hOffset;
+          const py = enemy.y - enemy.radius * 0.55;
+          const dotText = isKill ? `${r.resolvedDamage}🔥` : `${r.resolvedDamage}`;
+          const dotColor = isKill ? "#ffaa33" : "#ff6622";
+          this.addText(px, py, dotText, dotColor, 14, 0.5);
+          if (this.debugEnabled) console.warn(`[SCORCH-DOT] enemy=${enemy.id} dmg=${r.resolvedDamage} hp=${enemy.hp} tick=${offIdx+1}`);
         } else {
           this.aggregateAndMaybeFlush(`scorch_${enemy.id}`, r.resolvedDamage, { x: enemy.x, y: enemy.y }, 'SCORCH_BURN', 'ENEMY', 500, bestSnap.entryAttack, isKill, true);
         }
