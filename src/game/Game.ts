@@ -2987,7 +2987,16 @@ export class Game {
           const dotText = isKill ? `${r.resolvedDamage}🔥` : `${r.resolvedDamage}`;
           const prevCount = this.texts.length;
           this.addCombatFloat({ x: px, y: py, text: dotText, color: dotColor, size: 14, duration: 0.5, category: "damage", priority: "B", targetId: enemy.id });
-          if (this.debugEnabled) console.warn(`[SCORCH-DOT] enemy=${enemy.id} dmg=${r.resolvedDamage} hp=${enemy.hp} tick=${offIdx+1} floatAdded=${this.texts.length > prevCount} activeFloats=${this.texts.length}`);
+          const dotId = this.texts.length > prevCount ? this.texts[this.texts.length - 1].id : null;
+          if (this.debugEnabled && dotId) {
+            const dotG = `${this.elapsed.toFixed(2)}_${r.resolvedDamage}`;
+            if (!(this as any)._scorchTrace) (this as any)._scorchTrace = new Set<string>();
+            if (!(this as any)._scorchTrace.has(dotG)) {
+              (this as any)._scorchTrace.add(dotG);
+              console.warn(`[SCORCH-FLOAT] id=${dotId} stage=queued`);
+            }
+            (enemy as any)._scorchDotTraceId = dotId;
+          }
         } else {
           this.aggregateAndMaybeFlush(`scorch_${enemy.id}`, r.resolvedDamage, { x: enemy.x, y: enemy.y }, 'SCORCH_BURN', 'ENEMY', 500, bestSnap.entryAttack, isKill, true);
         }
@@ -5705,7 +5714,62 @@ export class Game {
       text.life -= dt;
       text.y -= 22 * dt;
     }
-    this.texts = this.texts.filter((text) => text.life > 0).slice(0, MAX_FLOATING_TEXT);
+    this.texts = this.texts.filter((text) => text.life > 0);
+    this.enforceFloatingTextLimit();
+  }
+
+  /** 统一浮字上限裁剪：按优先级移除，不按数组位置 */
+  private enforceFloatingTextLimit() {
+    const max = FLOAT_LIMITS.maxOnScreen ?? 36;
+    if (this.texts.length <= max) {
+      if (this.debugEnabled) this._traceScorchFloats("survived-update");
+      return;
+    }
+    const toRemove = this.texts.length - max;
+    const scored = this.texts.map((t, i) => {
+      let score = 0;
+      if (!t.category) score = -1000;
+      else if (t.priority === 'C') score = -800;
+      else if (t.priority === 'B') score = -500 + t.maxLife - t.life;
+      else if (t.priority === 'A') score = -100 + t.maxLife - t.life;
+      if (t.category === 'damage' && t.priority === 'B' && (t as any).targetId) score += 300;
+      return { t, i, score };
+    });
+    scored.sort((a, b) => a.score - b.score);
+    const removeIds = new Set(scored.slice(0, toRemove).map(s => this.texts[s.i].id));
+    this.texts = this.texts.filter(t => !removeIds.has(t.id));
+    if (this.debugEnabled) this._traceScorchFloats("survived-update");
+  }
+
+  private _traceScorchFloats(stage: string) {
+    const trace: Set<string> = (this as any)._scorchTrace;
+    if (!trace) return;
+    const traced: string[] = [];
+    for (const t of this.texts) {
+      if (t.category === 'damage' && t.priority === 'B' && (t as any).targetId) {
+        const k = `${t.id}`;
+        if (!trace.has(`drawn_${k}`) && stage === 'drawn') {
+          console.warn(`[SCORCH-FLOAT] id=${t.id} stage=drawn`);
+          trace.add(`drawn_${k}`);
+        }
+        if (stage === 'survived-update' && (t as any)._scorchSurvived !== k) {
+          (t as any)._scorchSurvived = k;
+        }
+      }
+    }
+    // track survived
+    if (stage === 'survived-update') {
+      for (const id of trace) {
+        if (id.startsWith('drawn_')) continue;
+        const k = id;
+        if (this.texts.some(t => t.id === k)) {
+          if (!trace.has(`surv_${k}`)) {
+            console.warn(`[SCORCH-FLOAT] id=${k} stage=survived-update`);
+            trace.add(`surv_${k}`);
+          }
+        }
+      }
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -10538,6 +10602,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.fillText(text.text, text.x, text.y);
     }
     ctx.restore();
+    if (this.debugEnabled) this._traceScorchFloats("drawn");
   }
 
   private drawBuffChoice(ctx: CanvasRenderingContext2D) {
