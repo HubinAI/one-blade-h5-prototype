@@ -8119,18 +8119,32 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const bn=bladePts.length;
     const L=[],R=[];
     const bw=Math.min(28,Math.max(18,width*1.5));
+    // 月牙：前宽后窄带弧弯
     for(let i=0;i<bn;i++){
       const pp=bladePts[Math.max(0,i-1)],pn=bladePts[Math.min(bn-1,i+1)],p=bladePts[i];
       const dx=pn.x-pp.x,dy=pn.y-pp.y,len=Math.sqrt(dx*dx+dy*dy)||1,nx=-dy/len,ny=dx/len;
-      const frac=i/(bn-1),taper=0.25+frac*0.9;
+      const frac=i/(bn-1),taper=0.9-frac*0.55;
       const w=bw*taper;
-      L.push({x:p.x+nx*(-w),y:p.y+ny*(-w)});
-      R.push({x:p.x+nx*w,y:p.y+ny*w});
+      const curve=Math.sin(frac*Math.PI)*5;
+      L.push({x:p.x+nx*(-w-curve),y:p.y+ny*(-w-curve)});
+      R.push({x:p.x+nx*(w-curve*0.4),y:p.y+ny*(w-curve*0.4)});
     }
     ctx.globalAlpha=lowFade*0.72; ctx.fillStyle='rgba(80,180,235,0.85)';
     ctx.beginPath();
     for(let i=0;i<L.length;i++){i===0?ctx.moveTo(L[i].x,L[i].y):ctx.lineTo(L[i].x,L[i].y);}
     for(let i=R.length-1;i>=0;i--)ctx.lineTo(R[i].x,R[i].y);ctx.closePath();ctx.fill();
+    // 冰裂纹 2-3条
+    ctx.globalAlpha=lowFade*0.3; ctx.strokeStyle='rgba(200,240,255,0.5)'; ctx.lineWidth=1;
+    for(let ci=0;ci<3;ci++){
+      const ci0=Math.floor(bn*0.15+ci*bn*0.25),ci1=Math.floor(bn*0.2+ci*bn*0.28);
+      if(ci0<bn&&ci1<bn){
+        ctx.beginPath();
+        ctx.moveTo(bladePts[ci0].x,bladePts[ci0].y);
+        ctx.lineTo(bladePts[ci0].x+(L[ci0].x-bladePts[ci0].x)*0.4,bladePts[ci0].y+(L[ci0].y-bladePts[ci0].y)*0.4);
+        ctx.lineTo(bladePts[ci1].x+(R[ci1].x-bladePts[ci1].x)*0.3,bladePts[ci1].y+(R[ci1].y-bladePts[ci1].y)*0.3);
+        ctx.stroke();
+      }
+    }
     ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=lowFade*0.55;
     ctx.strokeStyle='rgba(210,240,255,0.85)'; ctx.lineWidth=3.5;
     ctx.beginPath();for(let i=0;i<L.length;i++){i===0?ctx.moveTo(L[i].x,L[i].y):ctx.lineTo(L[i].x,L[i].y);}ctx.stroke();
@@ -8141,9 +8155,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const dx=lp.x-pp.x,dy=lp.y-pp.y,llen=Math.sqrt(dx*dx+dy*dy)||1,fx=dx/llen,fy=dy/llen;
     ctx.globalAlpha=lowFade*0.85; ctx.fillStyle='rgba(180,230,255,0.95)';
     ctx.beginPath();
-    ctx.moveTo(lp.x+fx*3-fy*bw*0.45, lp.y+fy*2+fx*bw*0.45);
-    ctx.lineTo(lp.x+fx*30, lp.y+fy*18);
-    ctx.lineTo(lp.x+fx*3+fy*bw*0.45, lp.y+fy*2-fx*bw*0.45);
+    ctx.moveTo(lp.x+fx*3-fy*bw*0.45, lp.y+fy*3+fx*bw*0.45);
+    ctx.lineTo(lp.x+fx*30, lp.y+fy*30);
+    ctx.lineTo(lp.x+fx*3+fy*bw*0.45, lp.y+fy*3-fx*bw*0.45);
     ctx.closePath();ctx.fill();
     ctx.restore();
   }
