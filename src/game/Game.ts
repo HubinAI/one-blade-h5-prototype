@@ -8745,33 +8745,13 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     for (const vr of this._scorchVisualRoads) {
       if (vr.points.length < 3) continue;
       const age = vr.maxLife - vr.life, pts = vr.points, n = pts.length;
-      const gf = clamp(vr.life / 1.0, 0, 1); if (gf < 0.02) continue;
-      // 生成左右边缘
-      const left: {x:number;y:number}[] = [], right: {x:number;y:number}[] = [];
-      for (let i = 0; i < n; i++) {
-        const p = pts[i], pn = pts[Math.min(i+1,n-1)], pp = pts[Math.max(i-1,0)];
-        const dx = pn.x-pp.x, dy = pn.y-pp.y, len = Math.sqrt(dx*dx+dy*dy)||1;
-        const nx = -dy/len, ny = dx/len, s = pts[i].seed;
-        const localAge = age - (vr.maxLife - (vr.life + (1.8 - (this.elapsed - pts[i].bornAt))));
-        const localFade = clamp(1 - Math.max(0, age - (this.elapsed - pts[i].bornAt) - 1.35) / 0.45, 0, 1);
-        const off = (44 + Math.sin(s*3)*5 + Math.cos(s*2.7)*4) * localFade;
-        left.push({ x: p.x+nx*(-off), y: p.y+ny*(-off) });
-        right.push({ x: p.x+nx*off, y: p.y+ny*off });
-      }
+      const gf = clamp(vr.life / 0.6, 0, 1); if (gf < 0.02) continue;
+      // 静态焦痕底带 — 低透明, 无动画, 无虚线
       ctx.save();
-      // 焦黑底带 (最宽最暗)
-      ctx.globalAlpha = gf * 0.15; ctx.fillStyle = "#060200";
-      ctx.beginPath();
-      for (let i = 0; i < left.length; i++) { i===0?ctx.moveTo(left[i].x,left[i].y):ctx.lineTo(left[i].x,left[i].y); }
-      for (let i = right.length-1; i >= 0; i--) ctx.lineTo(right[i].x,right[i].y);
-      ctx.closePath(); ctx.fill();
-      // 暗红灼边 (断续虚线, 70px)
-      ctx.globalAlpha = gf * 0.22;
-      ctx.setLineDash([14+Math.sin(age*3.5)*3, 20+Math.cos(age*2.8)*5]);
-      ctx.strokeStyle = "#220300"; ctx.lineWidth = 70;
-      ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
-      for (let i=1;i<n;i++) ctx.lineTo(pts[i].x,pts[i].y); ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.globalAlpha = gf * 0.1;
+      ctx.fillStyle = "#060200";
+      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+      for (let i=1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();
       ctx.restore();
     }
   }
@@ -8782,25 +8762,25 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const age = vr.maxLife - vr.life, pts = vr.points, n = pts.length;
       const gf = clamp(vr.life / 0.7, 0, 1); if (gf < 0.03) continue;
       ctx.save();
-      // 橙色燃烧主体 — 窄, 低不透明, 不用lighter
-      ctx.globalAlpha = gf * 0.22;
-      ctx.strokeStyle = "#aa2200"; ctx.lineWidth = 24;
-      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
-      for (let i=1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();
-      ctx.globalAlpha = gf * 0.16;
-      ctx.strokeStyle = "#cc3300"; ctx.lineWidth = 12;
-      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
-      for (let i=1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();
-      // 金白裂缝 — 短段, 断续, lighter
+      // 橙色燃烧区 — 窄, lighter
       ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = gf * 0.45;
+      ctx.globalAlpha = gf * 0.22;
+      ctx.strokeStyle = "#aa2200"; ctx.lineWidth = 22;
+      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+      for (let i=1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();
+      ctx.globalAlpha = gf * 0.15;
+      ctx.strokeStyle = "#cc3300"; ctx.lineWidth = 10;
+      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+      for (let i=1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();
+      // 金白裂缝 — 短段, lighter
+      ctx.globalAlpha = gf * 0.4;
       ctx.strokeStyle = "#ff7722"; ctx.lineWidth = 5;
       for (let i=0;i<n-1;i+=14+Math.floor(Math.abs(Math.sin(i*0.6+age))*10)) {
         const end=Math.min(i+1+Math.floor(Math.abs(Math.sin(i*1.3))*2),n-1);
         ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);
         for (let j=i+1;j<=end;j++)ctx.lineTo(pts[j].x,pts[j].y);ctx.stroke();
       }
-      ctx.globalAlpha = gf * 0.3;
+      ctx.globalAlpha = gf * 0.28;
       ctx.strokeStyle = "#ffdd55"; ctx.lineWidth = 2;
       for (let i=2;i<n-1;i+=18+Math.floor(Math.abs(Math.sin(i*0.8+age))*9)) {
         const end=Math.min(i+1,n-1);
@@ -8809,7 +8789,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       }
       ctx.globalCompositeOperation = "source-over";
       ctx.restore();
-      // 火舌 — 主要视觉轮廓 (间距32-46px, 高22-38px)
+      // 火舌 — 主要轮廓 (32-46px, 22-38px)
       ctx.save();
       for (let i = 0; i < n-1; i += 5) {
         const a=pts[i], b=pts[Math.min(i+1,n-1)];
@@ -8827,7 +8807,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         for (let side=-1;side<=1;side+=2) {
           const sx=mx+nx*side*8, sy=my+ny*side*5;
           const lean=Math.sin(seed*2.6+side)*0.18;
-          // 主火舌 — 22-38px, 橙红底
           ctx.globalAlpha = gf*lf*0.5;
           ctx.fillStyle = "#aa1400";
           ctx.beginPath();
@@ -8836,7 +8815,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
           ctx.lineTo(sx+nx*side*lean*3,sy-th*0.88);
           ctx.lineTo(sx-nx*side*1.5,sy-th*0.35);
           ctx.fill();
-          // 金顶 — lighter
           ctx.globalCompositeOperation = "lighter";
           ctx.globalAlpha = gf*lf*0.35;
           ctx.fillStyle = "#ff6611";
@@ -8846,7 +8824,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
           ctx.lineTo(sx-nx*side*1.5,sy-th*0.72);
           ctx.fill();
           ctx.globalCompositeOperation = "source-over";
-          // 小副舌
           ctx.globalAlpha = gf*lf*0.25;
           ctx.fillStyle = "#ee5511";
           ctx.beginPath();
@@ -8857,20 +8834,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         }
       }
       ctx.restore();
-      // 余烬火星
-      ctx.save();ctx.globalAlpha=gf*0.2;ctx.fillStyle="#ff8833";
-      for (let i=0;i<n;i+=5){
+      // 少量金色火星
+      ctx.save();ctx.globalAlpha=gf*0.18;ctx.fillStyle="#ff9933";
+      for (let i=0;i<n;i+=6){
         const p=pts[i];
         ctx.beginPath();
-        ctx.arc(p.x+Math.sin(age*10+p.seed)*3,p.y-2-(age*9+p.seed*2)%15,1.5,0,Math.PI*2);
+        ctx.arc(p.x+Math.sin(age*10+p.seed)*3,p.y-2-(age*8+p.seed*2)%13,1.4,0,Math.PI*2);
         ctx.fill();
       }
-      ctx.restore();
-      // 焦烟
-      ctx.save();ctx.globalAlpha=gf*0.03;
-      ctx.strokeStyle="rgba(6,2,0,0.3)";ctx.lineWidth=20;
-      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y-2);
-      for (let i=1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y-2);ctx.stroke();
       ctx.restore();
     }
   }
