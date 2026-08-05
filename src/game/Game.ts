@@ -8981,12 +8981,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       } else if (isSlow) {
         // 挂霜减速 — 持续可见
         const sf=fs.slowLeft/2.5;
-        ctx.globalAlpha=0.3*sf;ctx.fillStyle="rgba(140,210,240,0.4)";
-        ctx.beginPath();ctx.ellipse(enemy.x,enemy.y+r*0.1,r*0.75*scale,r*0.55,0,Math.PI,Math.PI*2);ctx.fill();
-        ctx.globalAlpha=0.25*sf;ctx.fillStyle="rgba(170,220,245,0.35)";
-        ctx.beginPath();ctx.ellipse(enemy.x,enemy.y+r*0.55,r*0.8*scale,r*0.25,0,0,Math.PI*2);ctx.fill();
+        ctx.globalAlpha=0.45*sf;ctx.fillStyle="rgba(120,200,240,0.45)";
+        ctx.beginPath();ctx.ellipse(enemy.x,enemy.y+r*0.1,r*0.8*scale,r*0.55,0,Math.PI,Math.PI*2);ctx.fill();
+        ctx.globalAlpha=0.35*sf;ctx.fillStyle="rgba(160,220,245,0.4)";
+        ctx.beginPath();ctx.ellipse(enemy.x,enemy.y+r*0.55,r*0.85*scale,r*0.25,0,0,Math.PI*2);ctx.fill();
         // 霜晶 3-4片
-        ctx.globalAlpha=0.2*sf;ctx.fillStyle="#ddeeff";
+        ctx.globalAlpha=0.3*sf;ctx.fillStyle="#ddeeff";
         for(let i=0;i<4;i++){const a=seed*0.05+i*Math.PI*1.5;
         ctx.beginPath();ctx.moveTo(enemy.x+Math.cos(a)*r*0.5,enemy.y+Math.sin(a)*r*0.5);
         ctx.lineTo(enemy.x+Math.cos(a+0.3)*(r*0.5+8),enemy.y+Math.sin(a+0.3)*(r*0.5+8));
