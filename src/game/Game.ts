@@ -2909,13 +2909,13 @@ export class Game {
       }
       if (!hit) continue;
       const isElite = !!enemy.eliteKind;
-      const fs = (enemy as any)._frostState as { slowLeft: number; frozenLeft: number } | undefined;
-      if (isElite) {
-        if (!fs || fs.slowLeft <= 0) (enemy as any)._frostState = { slowLeft: 2.5, frozenLeft: 0 };
-        else fs.slowLeft = 2.5;
-      } else {
-        if (fs && fs.slowLeft > 0 && fs.frozenLeft <= 0) fs.frozenLeft = 0.6;
-        else (enemy as any)._frostState = { slowLeft: 2.5, frozenLeft: 0 };
+      const fs = (enemy as any)._frostState as { frozenLeft: number; slowLeft: number; wasFrozen: boolean } | undefined;
+      if (fs && fs.frozenLeft > 0) continue;
+      const freezeDur = isElite ? 0.20 : 0.50;
+      if (!fs || (fs.slowLeft <= 0 && fs.frozenLeft <= 0)) {
+        (enemy as any)._frostState = { frozenLeft: freezeDur, slowLeft: 2.5, wasFrozen: false };
+      } else if (fs.slowLeft > 0) {
+        fs.slowLeft = 2.5;
       }
     }
   }
@@ -2923,11 +2923,11 @@ export class Game {
   private _updateFrostStates(dt: number) {
     for (const enemy of this.enemies) {
       if (!enemy.alive) { (enemy as any)._frostState = undefined; (enemy as any)._frostY = undefined; continue; }
-      const fs = (enemy as any)._frostState as { slowLeft: number; frozenLeft: number } | undefined;
+      const fs = (enemy as any)._frostState as { frozenLeft: number; slowLeft: number; wasFrozen: boolean } | undefined;
       if (!fs) continue;
-      if (fs.frozenLeft > 0) { fs.frozenLeft -= dt; continue; } // 冻结优先消耗
+      if (fs.frozenLeft > 0) { fs.frozenLeft -= dt; if (fs.frozenLeft <= 0) fs.wasFrozen = true; continue; }
       if (fs.slowLeft > 0) fs.slowLeft -= dt;
-      if (fs.slowLeft <= 0 && fs.frozenLeft <= 0) { (enemy as any)._frostState = undefined; }
+      if (fs.slowLeft <= 0) { (enemy as any)._frostState = undefined; (enemy as any)._frostY = undefined; }
     }
   }
 
@@ -8833,36 +8833,57 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private _drawFrostEffects(ctx: CanvasRenderingContext2D) {
     for (const enemy of this.enemies) {
       if (!enemy.alive) continue;
-      const fs = (enemy as any)._frostState as { slowLeft: number; frozenLeft: number } | undefined;
-      if (!fs || (fs.slowLeft <= 0 && fs.frozenLeft <= 0)) continue;
+      const fs = (enemy as any)._frostState as { frozenLeft: number; slowLeft: number; wasFrozen: boolean } | undefined;
+      if (!fs || (fs.frozenLeft <= 0 && fs.slowLeft <= 0)) continue;
       const isFrozen = fs.frozenLeft > 0;
-      const a = isFrozen ? 0.7 : 0.35;
-      const t = performance.now() / 1000;
-      ctx.save(); ctx.globalAlpha = a;
-      ctx.fillStyle = "#88ccff"; ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius + 5, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = "#aaddff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius + 3, 0, Math.PI * 2); ctx.stroke();
+      const isSlow = fs.wasFrozen && fs.slowLeft > 0;
+      const tt = performance.now() / 1000;
+      const scale = enemy.eliteKind ? 1.35 : 1;
+      const r = enemy.radius;
+      ctx.save();
       if (isFrozen) {
-        ctx.globalAlpha = 0.8; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.5;
-        for (let i = 0; i < 6; i++) {
-          const ang = i * Math.PI / 3;
-          ctx.beginPath();
-          ctx.moveTo(enemy.x + Math.cos(ang) * (enemy.radius + 4), enemy.y + Math.sin(ang) * (enemy.radius + 4));
-          ctx.lineTo(enemy.x + Math.cos(ang + 0.3) * (enemy.radius + 2 + Math.sin(t * 5 + i) * 3), enemy.y + Math.sin(ang + 0.3) * (enemy.radius + 2 + Math.sin(t * 5 + i) * 3));
-          ctx.stroke();
-        }
-      }
-      ctx.globalAlpha = 0.3; ctx.fillStyle = "#ddeeff";
-      for (let i = 0; i < 3; i++) {
+        const freezePct = 1 - fs.frozenLeft / (enemy.eliteKind ? 0.20 : 0.50);
+        ctx.globalAlpha = 0.6 + Math.sin(tt * 8) * 0.1;
+        ctx.fillStyle = "rgba(150,210,255,0.35)";
+        ctx.strokeStyle = "rgba(220,240,255,0.9)"; ctx.lineWidth = 3 * scale;
+        const sides = 5 + Math.floor((enemy.id.charCodeAt(0) || 0) % 3);
         ctx.beginPath();
-        ctx.arc(enemy.x + Math.sin(t * 3 + i) * (enemy.radius + 2), enemy.y + enemy.radius + Math.abs(Math.sin(t * 7 + i)) * 8, 2, 0, Math.PI * 2);
-        ctx.fill();
+        for (let i = 0; i < sides; i++) {
+          const ang = i * Math.PI * 2 / sides;
+          const dist = r + 4 * scale + Math.sin(i * 2.3 + tt * 3) * 3;
+          const px = enemy.x + Math.cos(ang) * dist;
+          const py = enemy.y + Math.sin(ang) * dist;
+          i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        }
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.globalAlpha = 0.5; ctx.fillStyle = "#eef";
+        for (let i = 0; i < 6; i++) {
+          const a = i * Math.PI / 3 + freezePct * Math.PI;
+          const d = r + 6 * scale + freezePct * 12;
+          ctx.beginPath();
+          ctx.arc(enemy.x + Math.cos(a) * d, enemy.y + Math.sin(a) * d, 1.5 + Math.random() * 2, 0, Math.PI * 2); ctx.fill();
+        }
+        if (freezePct < 0.3) {
+          ctx.globalAlpha = (1 - freezePct * 3.3) * 0.6;
+          ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(enemy.x, enemy.y, r + 8 * scale + freezePct * 30, 0, Math.PI * 2); ctx.stroke();
+        }
+      } else if (isSlow) {
+        ctx.globalAlpha = 0.35; ctx.strokeStyle = "#aaddff"; ctx.lineWidth = 2.5 * scale;
+        ctx.beginPath(); ctx.arc(enemy.x, enemy.y, r + 4, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 0.2; ctx.fillStyle = "#aaddff";
+        ctx.beginPath(); ctx.ellipse(enemy.x, enemy.y + r * 0.85, r * 0.7 * scale, r * 0.22, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 0.15; ctx.fillStyle = "#ddeeff";
+        for (let i = 0; i < 4; i++) {
+          const a = tt * 2 + i * Math.PI / 2;
+          ctx.beginPath();
+          ctx.arc(enemy.x + Math.cos(a) * r * 0.6, enemy.y + Math.sin(a) * r * 0.6, 1.5, 0, Math.PI * 2); ctx.fill();
+        }
       }
       ctx.restore();
     }
   }
 
-  // ═══════════════════════════════════════════════════════
-  // 0807-11A: 新手教学覆盖层渲染
   // ═══════════════════════════════════════════════════════
 
   private _drawSwipeTutorial(ctx: CanvasRenderingContext2D): void {
