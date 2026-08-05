@@ -1328,8 +1328,14 @@ export class Game {
     }
 
     this.drawBackground(ctx);
+    // L2: 地面火路（敌人下方）
+    this._drawScorchGround(ctx);
+    this._drawScorchFlames(ctx);
     this.drawPickups(ctx);
     this.drawEnemies(ctx);
+    // L3: 敌人挂载（敌人上方、浮字下方）
+    this._drawEnemyScorchAttachments(ctx);
+    this._drawFrostEffects(ctx); // V0731012
     if (this._numericalTestMode) this._drawNumericalTest(ctx); // 0807-11B-1
     this._drawFireRings(ctx); // V0801008
     this.drawTractorLinks(ctx);
@@ -1359,10 +1365,6 @@ export class Game {
     this.drawChestDrop(ctx);
     this.drawEdictRewardModal(ctx);
     this._drawChestOpeningFlow(ctx); // V0731008
-    this._drawScorchGround(ctx);
-    this._drawScorchFlames(ctx);
-    this._drawFrostEffects(ctx); // V0731012
-    this._drawEnemyScorchAttachments(ctx);
     this.drawMidfieldEventBorder(ctx);
     // P4.2: drawIntroOverlay已删除，由BattleNotice系统替代
     // P2.8：战斗层之后绘制边缘金光和破阵过渡
