@@ -8956,16 +8956,13 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ctx.beginPath();ctx.arc(enemy.x+Math.cos(a)*d,enemy.y+Math.sin(a)*d,2,0,Math.PI*2);ctx.fill();}
         // 凝结脉冲
         const fp=1-fs.frozenLeft/(enemy.eliteKind?0.20:0.50);
-        if(fp<0.2){ctx.globalAlpha=(1-fp*5)*0.5;ctx.strokeStyle="#fff";ctx.lineWidth=2;
-        ctx.beginPath();ctx.arc(enemy.x,enemy.y,r+8*scale+fp*20,0,Math.PI*2);ctx.stroke();}
+        if(fp<0.1){ctx.globalAlpha=(1-fp*10)*0.22;ctx.strokeStyle="#aaddff";ctx.lineWidth=2;
+        ctx.beginPath();ctx.arc(enemy.x,enemy.y,r-2+fp*60,0,Math.PI*2);ctx.stroke();}
       } else if (isShattering) {
-        // 碎裂爆点
+        // 碎裂
         const sp=1-st/0.20;
-        // 首帧亮闪
-        if(sp<0.08){ctx.globalAlpha=0.7*(1-sp*12);ctx.fillStyle="#fff";
-        ctx.beginPath();ctx.arc(enemy.x,enemy.y,r+6,0,Math.PI*2);ctx.fill();}
-        // 裂纹
-        ctx.globalAlpha=0.45*(1-sp);ctx.strokeStyle="#fff";ctx.lineWidth=2;
+        // 裂纹 短亮初帧
+        ctx.globalAlpha=0.55*Math.max(0,1-sp*10);ctx.strokeStyle="#eef";ctx.lineWidth=2.5;
         for(let i=0;i<3;i++){const a=seed*0.1+i*Math.PI*1.5;
         ctx.beginPath();ctx.moveTo(enemy.x,enemy.y);
         ctx.lineTo(enemy.x+Math.cos(a)*r*0.9,enemy.y+Math.sin(a)*r*0.9);ctx.stroke();}
