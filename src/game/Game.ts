@@ -8979,18 +8979,20 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ctx.lineTo(enemy.x+Math.cos(a-0.2)*(d+sz*0.7),enemy.y+Math.sin(a-0.2)*(d+sz*0.7));
         ctx.fill();}
       } else if (isSlow) {
-        // 挂霜减速 — 持续可见
-        const sf=fs.slowLeft/2.5;
-        ctx.globalAlpha=0.45*sf;ctx.fillStyle="rgba(120,200,240,0.45)";
-        ctx.beginPath();ctx.ellipse(enemy.x,enemy.y+r*0.1,r*0.8*scale,r*0.55,0,Math.PI,Math.PI*2);ctx.fill();
-        ctx.globalAlpha=0.35*sf;ctx.fillStyle="rgba(160,220,245,0.4)";
-        ctx.beginPath();ctx.ellipse(enemy.x,enemy.y+r*0.55,r*0.85*scale,r*0.25,0,0,Math.PI*2);ctx.fill();
+        // 挂霜减速 — 前2s稳定 + 末0.5s淡出
+        const fva=fs.slowLeft>0.5?1:Math.max(0,fs.slowLeft/0.5);
+        // 外侧冰蓝霜边
+        ctx.globalAlpha=0.55*fva;ctx.strokeStyle="#88ccff";ctx.lineWidth=3*scale;
+        ctx.beginPath();ctx.arc(enemy.x,enemy.y,r+5*scale,0,Math.PI*2);ctx.stroke();
+        // 脚下寒气底座
+        ctx.globalAlpha=0.32*fva;ctx.fillStyle="#aaddff";
+        ctx.beginPath();ctx.ellipse(enemy.x,enemy.y+r*0.88,r*0.8*scale,r*0.22,0,0,Math.PI*2);ctx.fill();
         // 霜晶 3-4片
-        ctx.globalAlpha=0.3*sf;ctx.fillStyle="#ddeeff";
+        ctx.globalAlpha=0.6*fva;ctx.fillStyle="#ddeeff";
         for(let i=0;i<4;i++){const a=seed*0.05+i*Math.PI*1.5;
-        ctx.beginPath();ctx.moveTo(enemy.x+Math.cos(a)*r*0.5,enemy.y+Math.sin(a)*r*0.5);
-        ctx.lineTo(enemy.x+Math.cos(a+0.3)*(r*0.5+8),enemy.y+Math.sin(a+0.3)*(r*0.5+8));
-        ctx.lineTo(enemy.x+Math.cos(a-0.2)*(r*0.5+5),enemy.y+Math.sin(a-0.2)*(r*0.5+5));ctx.fill();}
+        ctx.beginPath();ctx.moveTo(enemy.x+Math.cos(a)*(r+8),enemy.y+Math.sin(a)*(r+8));
+        ctx.lineTo(enemy.x+Math.cos(a+0.3)*(r+14),enemy.y+Math.sin(a+0.3)*(r+14));
+        ctx.lineTo(enemy.x+Math.cos(a-0.2)*(r+12),enemy.y+Math.sin(a-0.2)*(r+12));ctx.fill();}
       }
       ctx.restore();
     }
