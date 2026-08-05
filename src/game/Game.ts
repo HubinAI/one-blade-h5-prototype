@@ -8780,98 +8780,95 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     for (const vr of this._scorchVisualRoads) {
       if (vr.points.length < 3) continue;
       const age = vr.maxLife - vr.life, pts = vr.points, n = pts.length;
-      const gf = clamp(vr.life / 0.8, 0, 1); if (gf < 0.03) continue;
+      const gf = clamp(vr.life / 0.7, 0, 1); if (gf < 0.03) continue;
       ctx.save();
-      // 橙红燃烧主体 (lighter, 较亮)
+      // 橙色燃烧主体 — 窄, 低不透明, 不用lighter
+      ctx.globalAlpha = gf * 0.22;
+      ctx.strokeStyle = "#aa2200"; ctx.lineWidth = 24;
+      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+      for (let i=1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();
+      ctx.globalAlpha = gf * 0.16;
+      ctx.strokeStyle = "#cc3300"; ctx.lineWidth = 12;
+      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+      for (let i=1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();
+      // 金白裂缝 — 短段, 断续, lighter
       ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = gf * 0.35;
-      ctx.strokeStyle = "#a02000"; ctx.lineWidth = 30;
-      ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
-      for (let i=1;i<n;i++) ctx.lineTo(pts[i].x,pts[i].y); ctx.stroke();
-      ctx.globalAlpha = gf * 0.28;
-      ctx.strokeStyle = "#dd3300"; ctx.lineWidth = 16;
-      ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
-      for (let i=1;i<n;i++) ctx.lineTo(pts[i].x,pts[i].y); ctx.stroke();
-      ctx.globalCompositeOperation = "source-over";
-      // 金白核心 (5-8px, 断续, 高亮)
-      ctx.globalAlpha = gf * 0.55;
-      ctx.strokeStyle = "#ff8822"; ctx.lineWidth = 6;
-      for (let i=0;i<n-1;i+=10+Math.floor(Math.abs(Math.sin(i*0.45+age))*8)) {
-        const end=Math.min(i+2,n-1);
+      ctx.globalAlpha = gf * 0.45;
+      ctx.strokeStyle = "#ff7722"; ctx.lineWidth = 5;
+      for (let i=0;i<n-1;i+=14+Math.floor(Math.abs(Math.sin(i*0.6+age))*10)) {
+        const end=Math.min(i+1+Math.floor(Math.abs(Math.sin(i*1.3))*2),n-1);
         ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);
         for (let j=i+1;j<=end;j++)ctx.lineTo(pts[j].x,pts[j].y);ctx.stroke();
       }
-      ctx.globalAlpha = gf * 0.4;
-      ctx.strokeStyle = "#ffdd55"; ctx.lineWidth = 3;
-      for (let i=1;i<n-1;i+=15+Math.floor(Math.abs(Math.cos(i*0.55+age))*7)) {
+      ctx.globalAlpha = gf * 0.3;
+      ctx.strokeStyle = "#ffdd55"; ctx.lineWidth = 2;
+      for (let i=2;i<n-1;i+=18+Math.floor(Math.abs(Math.sin(i*0.8+age))*9)) {
         const end=Math.min(i+1,n-1);
         ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);
-        for (let j=i+1;j<=end;j++)ctx.lineTo(pts[j].x,pts[j].y);ctx.stroke();
+        ctx.lineTo(pts[end].x,pts[end].y);ctx.stroke();
       }
+      ctx.globalCompositeOperation = "source-over";
       ctx.restore();
-      // 火舌 — 大力强化
+      // 火舌 — 主要视觉轮廓 (间距32-46px, 高22-38px)
       ctx.save();
-      for (let i = 0; i < n-1; i += 3) {
+      for (let i = 0; i < n-1; i += 5) {
         const a=pts[i], b=pts[Math.min(i+1,n-1)];
         const dx=b.x-a.x,dy=b.y-a.y,len=Math.sqrt(dx*dx+dy*dy)||1;
         const nx=-dy/len,ny=dx/len, seed=pts[i].seed;
         const localAge = age - (this.elapsed - pts[i].bornAt);
-        if (localAge < 0.04 || localAge > 1.35) continue;
-        const lf = clamp(1-Math.max(0,localAge-1.35)/0.45,0,1);
-        // 核心先灭: 1.35-1.5s 火舌保留, 1.5-1.8s 只剩减弱余火
-        const coreDead = localAge > 1.50;
-        const flameLF = coreDead ? lf*0.3 : lf;
-        if (flameLF < 0.08) continue;
-        const breath = 0.55 + Math.sin(age*4+seed*1.3)*0.45;
-        const hBase = 18 + (Math.sin(seed*1.9)*0.5+0.5)*12;
-        const th = hBase * breath * flameLF * gf;
-        if (th < 3) continue;
+        if (localAge < 0.03 || localAge > 1.32) continue;
+        const lf = clamp(1-Math.max(0,localAge-1.32)/0.48,0,1);
+        if (lf < 0.08) continue;
+        const breath = 0.5 + Math.sin(age*4.5+seed*1.4)*0.5;
+        const hBase = 22 + (Math.sin(seed*2)*0.5+0.5)*14;
+        const th = hBase * breath * lf * gf;
+        if (th < 5) continue;
         const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
         for (let side=-1;side<=1;side+=2) {
-          const sx=mx+nx*side*9, sy=my+ny*side*5;
-          const lean=Math.sin(seed*2.5+side)*0.2;
-          // 主火舌 (橙底, 高alpha)
-          ctx.globalAlpha = gf*flameLF*0.55;
-          ctx.fillStyle = "#bb1800";
+          const sx=mx+nx*side*8, sy=my+ny*side*5;
+          const lean=Math.sin(seed*2.6+side)*0.18;
+          // 主火舌 — 22-38px, 橙红底
+          ctx.globalAlpha = gf*lf*0.5;
+          ctx.fillStyle = "#aa1400";
           ctx.beginPath();
-          ctx.moveTo(sx,sy);
-          ctx.lineTo(sx+nx*side*5,sy-th*0.52);
-          ctx.lineTo(sx+nx*side*lean*3,sy-th*0.9);
-          ctx.lineTo(sx-nx*side*2,sy-th*0.4);
+          ctx.moveTo(sx+nx*side*2,sy);
+          ctx.lineTo(sx+nx*side*4,sy-th*0.45);
+          ctx.lineTo(sx+nx*side*lean*3,sy-th*0.88);
+          ctx.lineTo(sx-nx*side*1.5,sy-th*0.35);
           ctx.fill();
-          // 金顶
-          ctx.globalAlpha = gf*flameLF*0.4;
+          // 金顶 — lighter
+          ctx.globalCompositeOperation = "lighter";
+          ctx.globalAlpha = gf*lf*0.35;
           ctx.fillStyle = "#ff6611";
           ctx.beginPath();
-          ctx.moveTo(sx+nx*side*1,sy-th*0.25);
-          ctx.lineTo(sx+nx*side*2.5,sy-th*0.7);
-          ctx.lineTo(sx-nx*side*1.5,sy-th*0.75);
+          ctx.moveTo(sx+nx*side*1,sy-th*0.2);
+          ctx.lineTo(sx+nx*side*2,sy-th*0.65);
+          ctx.lineTo(sx-nx*side*1.5,sy-th*0.72);
           ctx.fill();
+          ctx.globalCompositeOperation = "source-over";
           // 小副舌
-          ctx.globalAlpha = gf*flameLF*0.3;
+          ctx.globalAlpha = gf*lf*0.25;
           ctx.fillStyle = "#ee5511";
           ctx.beginPath();
-          ctx.moveTo(sx-nx*side*2,sy-th*0.1);
-          ctx.lineTo(sx+nx*side*1,sy-th*0.45);
-          ctx.lineTo(sx-nx*side*4,sy-th*0.4);
+          ctx.moveTo(sx-nx*side*2,sy-th*0.05);
+          ctx.lineTo(sx+nx*side*1,sy-th*0.4);
+          ctx.lineTo(sx-nx*side*3.5,sy-th*0.35);
           ctx.fill();
         }
       }
       ctx.restore();
-      // 余烬 + 火星
-      ctx.save(); ctx.globalAlpha = gf*0.25; ctx.fillStyle = "#ff9933";
-      for (let i=0;i<n;i+=4) {
-        const p=pts[i], s=p.seed;
-        const localAge = age - (this.elapsed - p.bornAt);
-        if (localAge > 1.35 && localAge < 1.6) continue; // core dead gap
+      // 余烬火星
+      ctx.save();ctx.globalAlpha=gf*0.2;ctx.fillStyle="#ff8833";
+      for (let i=0;i<n;i+=5){
+        const p=pts[i];
         ctx.beginPath();
-        ctx.arc(p.x+Math.sin(age*9+s)*4, p.y-3-(age*8+s*2)%16, 1.8, 0, Math.PI*2);
+        ctx.arc(p.x+Math.sin(age*10+p.seed)*3,p.y-2-(age*9+p.seed*2)%15,1.5,0,Math.PI*2);
         ctx.fill();
       }
       ctx.restore();
-      // 焦烟 (极少量)
-      ctx.save(); ctx.globalAlpha = gf*0.04;
-      ctx.strokeStyle = "rgba(8,3,0,0.3)"; ctx.lineWidth = 22;
+      // 焦烟
+      ctx.save();ctx.globalAlpha=gf*0.03;
+      ctx.strokeStyle="rgba(6,2,0,0.3)";ctx.lineWidth=20;
       ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y-2);
       for (let i=1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y-2);ctx.stroke();
       ctx.restore();
