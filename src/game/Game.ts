@@ -8760,29 +8760,24 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       if (vr.points.length < 3) continue;
       const age=vr.maxLife-vr.life,pts=vr.points,n=pts.length,gf=Math.min(1,vr.life/(vr.maxLife*0.7));if(gf<0.03)continue;
       ctx.save();
-      // 金黄高温核心 8-12px
-      ctx.globalCompositeOperation="lighter";
-      ctx.globalAlpha=gf*0.32; ctx.strokeStyle="#ff8822"; ctx.lineWidth=10;
-      for(let i=0;i<n-1;i+=20+Math.floor(Math.abs(Math.sin(i*0.55+age))*12)){const end=Math.min(i+2,n-1);ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);for(let j=i+1;j<=end;j++)ctx.lineTo(pts[j].x,pts[j].y);ctx.stroke();}
-      ctx.globalAlpha=gf*0.2; ctx.strokeStyle="#ffdd55"; ctx.lineWidth=3;
-      for(let i=2;i<n-1;i+=25+Math.floor(Math.abs(Math.sin(i*0.7+age))*10)){const end=Math.min(i+1,n-1);ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);ctx.lineTo(pts[end].x,pts[end].y);ctx.stroke();}
-      ctx.globalCompositeOperation="source-over";ctx.restore();
-      // 火舌 每条路3-5处
+      // 连续赤橙火带 44-56px
+      ctx.globalAlpha=gf*0.14; ctx.strokeStyle="#881100"; ctx.lineWidth=48;
+      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);for(let i=1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();
+      ctx.globalAlpha=gf*0.09; ctx.strokeStyle="#cc3300"; ctx.lineWidth=28;
+      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);for(let i=1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();
+      ctx.restore();
+      // 火焰簇 3-5处不等距
       ctx.save();
-      const tongueCount=3+Math.floor(Math.abs(Math.sin(pts[0].seed))*2);
-      for(let ti=0;ti<tongueCount;ti++){const idx=Math.floor((ti+0.5)*n/(tongueCount+1)),i=Math.min(idx,n-2);
+      const tc=3+Math.floor(Math.abs(Math.sin(pts[0].seed))*2);
+      for(let ti=0;ti<tc;ti++){const idx=Math.floor((ti*1+Math.sin(ti*2.7)*0.25)*n/(tc+1)),i=Math.min(idx,n-2);
       const a=pts[i],b=pts[Math.min(i+1,n-1)],dx=b.x-a.x,dy=b.y-a.y,len=Math.sqrt(dx*dx+dy*dy)||1,nx=-dy/len,ny=dx/len,seed=pts[i].seed,localAge=age-(this.elapsed-pts[i].bornAt);
-      if(localAge<0.05||localAge>1.28)continue;const lf=Math.min(1,Math.max(0,1-Math.max(0,localAge-1.28)/0.52));if(lf<0.1)continue;
-      const breath=0.5+Math.sin(age*4+seed*1.6)*0.5,hBase=20+(Math.sin(seed*2.3)*0.5+0.5)*10,th=hBase*breath*lf*gf;if(th<5)continue;
+      if(localAge<0.05||localAge>1.25)continue;const lf=Math.min(1,Math.max(0,1-Math.max(0,localAge-1.25)/0.55));if(lf<0.1)continue;
+      const breath=0.5+Math.sin(age*4+seed*1.6)*0.5,hBase=20+(Math.sin(seed*2.3)*0.5+0.5)*8,th=hBase*breath*lf*gf;if(th<5)continue;
       const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
       for(let side=-1;side<=1;side+=2){const sx=mx+nx*side*12,sy=my+ny*side*7,lean=Math.sin(seed*2.8+side)*0.14;
-      ctx.globalAlpha=gf*lf*0.55;ctx.fillStyle="#cc2200";ctx.beginPath();ctx.moveTo(sx+nx*side*3,sy);ctx.lineTo(sx+nx*side*6,sy-th*0.4);ctx.lineTo(sx+nx*side*lean*4,sy-th*0.9);ctx.lineTo(sx-nx*side*2,sy-th*0.28);ctx.fill();
-      ctx.globalCompositeOperation="lighter";ctx.globalAlpha=gf*lf*0.4;ctx.fillStyle="#ff8822";ctx.beginPath();ctx.moveTo(sx+nx*side*2,sy-th*0.15);ctx.lineTo(sx+nx*side*3,sy-th*0.6);ctx.lineTo(sx-nx*side*1.5,sy-th*0.68);ctx.fill();ctx.globalCompositeOperation="source-over";
-      ctx.globalAlpha=gf*lf*0.28;ctx.fillStyle="#ee5511";ctx.beginPath();ctx.moveTo(sx-nx*side*2,sy-th*0.02);ctx.lineTo(sx+nx*side*1,sy-th*0.36);ctx.lineTo(sx-nx*side*3.5,sy-th*0.3);ctx.fill();}}
-      ctx.restore();
-      // 火星
-      ctx.save();ctx.globalAlpha=gf*0.15;ctx.fillStyle="#ff8833";
-      for(let i=0;i<n;i+=10){const p=pts[i];ctx.beginPath();ctx.arc(p.x+Math.sin(age*9+p.seed)*3,p.y-2-(age*7+p.seed)%10,1.2,0,Math.PI*2);ctx.fill();}
+      ctx.globalAlpha=gf*lf*0.55;ctx.fillStyle="#cc2200";ctx.beginPath();ctx.moveTo(sx+nx*side*3,sy);ctx.lineTo(sx+nx*side*6,sy-th*0.4);ctx.lineTo(sx+nx*side*lean*4,sy-th*0.88);ctx.lineTo(sx-nx*side*2,sy-th*0.28);ctx.fill();
+      ctx.globalCompositeOperation="lighter";ctx.globalAlpha=gf*lf*0.4;ctx.fillStyle="#ff8822";ctx.beginPath();ctx.moveTo(sx+nx*side*2,sy-th*0.12);ctx.lineTo(sx+nx*side*3,sy-th*0.55);ctx.lineTo(sx-nx*side*1.5,sy-th*0.65);ctx.fill();ctx.globalCompositeOperation="source-over";
+      ctx.globalAlpha=gf*lf*0.28;ctx.fillStyle="#ee5511";ctx.beginPath();ctx.moveTo(sx-nx*side*2,sy-th*0.02);ctx.lineTo(sx+nx*side*1,sy-th*0.34);ctx.lineTo(sx-nx*side*3.5,sy-th*0.28);ctx.fill();}}
       ctx.restore();
     }
   }// V0731011 敌人燃烧挂载
