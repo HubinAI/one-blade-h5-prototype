@@ -8112,17 +8112,17 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.lineTo(p.x+Math.cos(a-0.4)*6,p.y+Math.sin(a-0.4)*6);
       ctx.fill();
     }
-    const bladeLen=Math.min(100,Math.floor(n*0.3));
+    const bladeLen=Math.min(220,Math.max(150,Math.floor(n*0.52)));
     const start=Math.max(0,n-bladeLen);
     const bladePts=points.slice(start);
     if(bladePts.length<2){ctx.restore();return;}
     const bn=bladePts.length;
     const L=[],R=[];
-    const bw=Math.min(15,Math.max(9,width*0.9));
+    const bw=Math.min(28,Math.max(18,width*1.5));
     for(let i=0;i<bn;i++){
       const pp=bladePts[Math.max(0,i-1)],pn=bladePts[Math.min(bn-1,i+1)],p=bladePts[i];
       const dx=pn.x-pp.x,dy=pn.y-pp.y,len=Math.sqrt(dx*dx+dy*dy)||1,nx=-dy/len,ny=dx/len;
-      const frac=i/(bn-1),taper=0.3+frac*0.7;
+      const frac=i/(bn-1),taper=0.25+frac*0.9;
       const w=bw*taper;
       L.push({x:p.x+nx*(-w),y:p.y+ny*(-w)});
       R.push({x:p.x+nx*w,y:p.y+ny*w});
@@ -8132,18 +8132,18 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     for(let i=0;i<L.length;i++){i===0?ctx.moveTo(L[i].x,L[i].y):ctx.lineTo(L[i].x,L[i].y);}
     for(let i=R.length-1;i>=0;i--)ctx.lineTo(R[i].x,R[i].y);ctx.closePath();ctx.fill();
     ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=lowFade*0.55;
-    ctx.strokeStyle='rgba(210,240,255,0.85)'; ctx.lineWidth=2;
+    ctx.strokeStyle='rgba(210,240,255,0.85)'; ctx.lineWidth=3.5;
     ctx.beginPath();for(let i=0;i<L.length;i++){i===0?ctx.moveTo(L[i].x,L[i].y):ctx.lineTo(L[i].x,L[i].y);}ctx.stroke();
     ctx.globalCompositeOperation='source-over'; ctx.globalAlpha=lowFade*0.45;
-    ctx.strokeStyle='rgba(20,60,120,0.6)'; ctx.lineWidth=2.5;
+    ctx.strokeStyle='rgba(20,60,120,0.6)'; ctx.lineWidth=4;
     ctx.beginPath();for(let i=0;i<R.length;i++){i===0?ctx.moveTo(R[i].x,R[i].y):ctx.lineTo(R[i].x,R[i].y);}ctx.stroke();
     const lp=bladePts[bn-1],pp=bladePts[bn-2]||lp;
     const dx=lp.x-pp.x,dy=lp.y-pp.y,llen=Math.sqrt(dx*dx+dy*dy)||1,fx=dx/llen,fy=dy/llen;
-    ctx.globalAlpha=lowFade*0.8; ctx.fillStyle='rgba(180,230,255,0.95)';
+    ctx.globalAlpha=lowFade*0.85; ctx.fillStyle='rgba(180,230,255,0.95)';
     ctx.beginPath();
-    ctx.moveTo(lp.x+fx*2-fy*bw*0.4, lp.y+fy*2+fx*bw*0.4);
-    ctx.lineTo(lp.x+fx*18, lp.y+fy*18);
-    ctx.lineTo(lp.x+fx*2+fy*bw*0.4, lp.y+fy*2-fx*bw*0.4);
+    ctx.moveTo(lp.x+fx*3-fy*bw*0.45, lp.y+fy*2+fx*bw*0.45);
+    ctx.lineTo(lp.x+fx*30, lp.y+fy*18);
+    ctx.lineTo(lp.x+fx*3+fy*bw*0.45, lp.y+fy*2-fx*bw*0.45);
     ctx.closePath();ctx.fill();
     ctx.restore();
   }
