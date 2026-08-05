@@ -9647,19 +9647,15 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const points = trail.points;
     const isLowBlade = ratio <= BALANCE.slash.lowBladeRemainRatio;
     const lowFade = isLowBlade ? 0.46 + (ratio / BALANCE.slash.lowBladeRemainRatio) * 0.38 : 1;
+    const isFrost = this._activeEdicts.some(e => e.id === "frost");
 
     // P4.4B-R3 P1-A: Reactive 模式优先使用起刀时的连续刀势视觉快照（reactiveBladeEffect），
-    // 让刀光长度/宽度/亮度/颜色随起刀瞬间锁定，不随实时刀势跳变（"一刀一象"）。
-    // 非 reactive 模式仍用旧离散段位 stage.width/color/brightness/visualLength。
     const rEff = trail.reactiveBladeEffect;
     const effWidth = rEff ? rEff.width : stage.width;
     const effColor = rEff ? rEff.color : stage.color;
     const effBrightness = rEff ? rEff.brightness : stage.brightness;
     const effVisualLength = rEff ? rEff.visualLength : stage.visualLength;
-
-    // P4.4A.2-R2: 大幅缩短刀光总时长
     const width = effWidth * trail.widthMultiplier * (0.28 + ratio * 0.95) * 0.7;
-
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
@@ -9670,25 +9666,44 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const a = points[i - 1];
       const b = points[i];
       const age = i / Math.max(1, points.length - 1);
-      // P4.4A.2-R2: 加速淡出（命中最亮0.15s，强残影0.15s，淡出0.25s，总计≤0.55s）
       const alpha = clamp(age * b.energyRatio * effBrightness * lowFade, 0.05, 0.6);
-      ctx.strokeStyle = `rgba(255, 213, 112, ${alpha * 0.5})`;
-      ctx.shadowColor = effColor;
-      ctx.shadowBlur = (8 + effWidth * 0.3) * lowFade;  // 减少glow
-      ctx.lineWidth = width * (0.9 + b.energyRatio);
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
 
-      // 简化：去掉外发光第三层（避免视觉夸张）
-      ctx.strokeStyle = `rgba(255, 255, 238, ${alpha * 0.9})`;
-      ctx.shadowBlur = 4;
-      ctx.lineWidth = Math.max(1.5, width * 0.3);
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
+      if (isFrost) {
+        // 冰蓝三层刀气
+        ctx.strokeStyle = `rgba(130, 210, 255, ${alpha * 0.55})`; // 外层冰蓝
+        ctx.shadowColor = "#aaddff";
+        ctx.shadowBlur = (10 + effWidth * 0.3) * lowFade;
+        ctx.lineWidth = width * 1.1 * (0.9 + b.energyRatio);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        // 中层亮蓝
+        ctx.strokeStyle = `rgba(190, 240, 255, ${alpha * 0.75})`;
+        ctx.shadowBlur = 5;
+        ctx.lineWidth = width * 0.6;
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        // 内层冰白核心
+        ctx.strokeStyle = `rgba(240, 250, 255, ${alpha * 0.9})`;
+        ctx.shadowBlur = 3;
+        ctx.lineWidth = Math.max(1.5, width * 0.25);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        // 边缘霜晶
+        ctx.strokeStyle = `rgba(220, 240, 255, ${alpha * 0.3})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(a.x + 2, a.y - 1); ctx.lineTo(b.x + 2, b.y - 1); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(a.x - 2, a.y + 1); ctx.lineTo(b.x - 2, b.y + 1); ctx.stroke();
+      } else {
+        // 原金白刀光
+        ctx.strokeStyle = `rgba(255, 213, 112, ${alpha * 0.5})`;
+        ctx.shadowColor = effColor;
+        ctx.shadowBlur = (8 + effWidth * 0.3) * lowFade;
+        ctx.lineWidth = width * (0.9 + b.energyRatio);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        ctx.strokeStyle = `rgba(255, 255, 238, ${alpha * 0.9})`;
+        ctx.shadowBlur = 4;
+        ctx.lineWidth = Math.max(1.5, width * 0.3);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      }
     }
 
     // P4.4A.2-R2: Debug模式绘制真实刀路（白色细线，无glow）
