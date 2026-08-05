@@ -1054,7 +1054,7 @@ export class Game {
     this._chestWarningAt = 0; this._chestOpenBlockUntilMs = 0; this._chestFlowClock = 0;
     this._edictArrivalTimer = 0; this._chestStampTimer = 0;
     // 军令与效果
-    this._activeEdicts = []; this._scorchTrails = []; this._scorchDraft = null; this._tripleLeftTrail = null; this._tripleRightTrail = null; this._tripleSlashHitEnemyIds.clear();
+    this._activeEdicts = []; this._scorchTrails = []; this._scorchDraft = null; this._scorchVisualRoads = []; this._tripleLeftTrail = null; this._tripleRightTrail = null; this._tripleSlashHitEnemyIds.clear();
     // 精英与战斗
     this.eliteSpawned = false; this.eliteKilled = false; this.elitePreviewShown = false; this.eliteSpawnAnnounced = false;
     this._eliteClearanceAt = 0; this._elitePreviewAt = 0;
@@ -2021,8 +2021,10 @@ export class Game {
 
     // 三刀流：同步初始化左右副刀
     this._initTripleSubTrails(this.currentSlash!);
-    // 燎原百斩：初始化草稿
+    // 燎原百斩：初始化草稿 + 视觉路
     if (this._activeEdicts.some(e => e.id === "scorch")) {
+      this._scorchVisualRoads.push({ points: [], active: true, life: 1.8, maxLife: 1.8 });
+      while (this._scorchVisualRoads.length > 6) this._scorchVisualRoads.shift();
       this._scorchDraft = {
         points: [{ x: this.currentSlash!.points[0]?.x ?? 0, y: this.currentSlash!.points[0]?.y ?? 0 }],
         damageSnapshot: this.currentSlash!._damageSnapshot ?? this.captureDamageSnapshot(),
@@ -2135,8 +2137,9 @@ export class Game {
     }
 
     this.lastSlashAngle = Math.atan2(pos.y - last.y, pos.x - last.x);
-    // 燎原百斩：实时追加草稿点
+    // 燎原百斩：实时追加草稿点 + 视觉路点
     if (this._scorchDraft?.active) {
+      for (const vr of this._scorchVisualRoads) { if (vr.active) { vr.points.push({ x: pos.x, y: pos.y, bornAt: this.elapsed, seed: this.elapsed*7919 + pos.x*0.37 + pos.y*0.53 }); break; } }
       const lastPt = this._scorchDraft.points[this._scorchDraft.points.length - 1];
       this._scorchDraft.points.push({ x: pos.x, y: pos.y });
       // 每新增一段(2点)，孵化独立火痕段(1.8s生命周期)
@@ -2209,9 +2212,10 @@ export class Game {
       }
     }
 
-    // V0731011: 燎原百斩 — 完成当前草稿
-    if (this._activeEdicts.some(e => e.id === "scorch") && this._scorchDraft?.active) {
-      this._scorchDraft.active = false;
+    // V0731011: 燎原百斩 — 完成当前草稿与视觉路
+    if (this._activeEdicts.some(e => e.id === "scorch")) {
+      if (this._scorchDraft?.active) this._scorchDraft.active = false;
+      for (const vr of this._scorchVisualRoads) { if (vr.active) { vr.active = false; break; } }
     }
 
     // V0731012: 凝霜令 — 主刀命中未死亡敌人施加霜冻
@@ -2622,7 +2626,7 @@ export class Game {
     this._activeEdicts = [];
     this._tripleLeftTrail = null; this._tripleRightTrail = null; // V0731010: 清空副刀
     this._tripleSlashHitEnemyIds.clear();
-    this._scorchTrails = []; this._scorchDraft = null; // V0731011: 清空火径
+    this._scorchTrails = []; this._scorchDraft = null; this._scorchVisualRoads = []; this._scorchVisualRoads = []; // V0731011: 清空火径
     // V0731012: 清除所有敌人霜冻状态
     for (const enemy of this.enemies) { (enemy as any)._frostState = undefined; }
     this._edictArrivalTimer = 0;
@@ -2884,6 +2888,9 @@ export class Game {
     damageSnapshot: PlayerRunStats; parentId: string; parentTrail: SlashTrail }[] = [];
   private _scorchDraft: { points: {x:number;y:number}[]; damageSnapshot: PlayerRunStats;
     parentTrail: SlashTrail; active: boolean } | null = null;
+  /** 视觉火路 (连续带状,每条挥刀一条) */
+  private _scorchVisualRoads: { points: {x:number;y:number;bornAt:number;seed:number}[]; active: boolean;
+    life: number; maxLife: number }[] = [];
   
   // ═══════════════════ V0731011 End ═══════════════════
 
@@ -2929,6 +2936,7 @@ export class Game {
 
     // Step 1: 递减火痕生命
     for (const t of this._scorchTrails) { t.life -= dt; }
+    for (const vr of this._scorchVisualRoads) { vr.life -= dt; if (vr.life <= 0) vr.points = []; }
 
     // Step 2: 为每个敌人判断是否处于任意火痕中
     for (const enemy of this.enemies) {
@@ -3019,6 +3027,7 @@ export class Game {
     // Step 4: 清理过期火痕
     for (let i = this._scorchTrails.length - 1; i >= 0; i--) {
       if (this._scorchTrails[i].life <= 0) this._scorchTrails.splice(i, 1);
+    for (let i2 = this._scorchVisualRoads.length - 1; i2 >= 0; i2--) { if (this._scorchVisualRoads[i2].points.length === 0) this._scorchVisualRoads.splice(i2, 1); }
     }
   }
 
@@ -8733,150 +8742,125 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
   // V0731011 火路地面层（焦痕＋灼边，敌人之前）
   private _drawScorchGround(ctx: CanvasRenderingContext2D) {
-    for (const t of this._scorchTrails) {
-      if (t.points.length < 2) continue;
-      const life = t.life, age = t.maxLife - life;
-      const isIgnite = life > 1.68; // first 0.12s
-      const fadeT = clamp(life / 0.45, 0, 1);
-      const pts = t.points, n = pts.length;
-      if (isIgnite && pts.length >= 2) {
-        // 金白灼线
-        ctx.save(); ctx.globalAlpha = 0.45; ctx.lineCap = "round";
-        ctx.strokeStyle = "#ffcc44"; ctx.lineWidth = 2.5;
-        ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
-        for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
-        ctx.restore();
-      }
-      // 焦痕基底 94px — 低透明，不规则边缘
-      ctx.save(); ctx.globalAlpha = fadeT * 0.12; ctx.lineCap = "round";
-      ctx.strokeStyle = "#1a0800"; ctx.lineWidth = 94;
-      ctx.setLineDash([12 + Math.sin(age*3)*3, 16 + Math.cos(age*2.3)*5]);
-      ctx.beginPath();
+    for (const vr of this._scorchVisualRoads) {
+      if (vr.points.length < 3) continue;
+      const age = vr.maxLife - vr.life, pts = vr.points, n = pts.length;
+      const rd = (i: number) => ({ p: pts[i], next: pts[Math.min(i+1,n-1)], prev: pts[Math.max(i-1,0)] });
+      // 生成左右边缘
+      const left: {x:number;y:number}[] = [], right: {x:number;y:number}[] = [];
       for (let i = 0; i < n; i++) {
-        const frac = i / (n - 1), w = 84 + Math.sin(i*0.37)*6 + Math.cos(i*0.53+age)*4;
-        const tIn = clamp(frac / 0.12, 0, 1), tOut = clamp((1-frac) / 0.12, 0, 1);
-        const edgeScale = tIn * tOut * (0.6 + Math.sin(i*0.3)*0.4);
-        const alpha = fadeT * 0.12 * edgeScale;
-        ctx.globalAlpha = alpha;
-        ctx.lineWidth = w;
-        if (i === 0) ctx.moveTo(pts[i].x, pts[i].y);
-        else ctx.lineTo(pts[i].x, pts[i].y);
-        if (i > 0 && (i % 2 === 0 || i === n - 1)) { ctx.stroke(); ctx.beginPath(); ctx.moveTo(pts[i].x, pts[i].y); }
+        const { p, next, prev } = rd(i);
+        const dx = next.x-prev.x, dy = next.y-prev.y;
+        const len = Math.sqrt(dx*dx+dy*dy)||1;
+        const nx = -dy/len, ny = dx/len;
+        const seed = pts[i].seed;
+        const wBase = 46 + Math.sin(seed*3)*8 + Math.cos(seed*2.7)*6;
+        const localAge = age - (this.elapsed - pts[i].bornAt);
+        const localFade = clamp(1 - Math.max(0, localAge - 1.35) / 0.45, 0, 1);
+        const edgeOff = wBase * (0.7 + Math.sin(seed*1.3)*0.3) * localFade;
+        left.push({ x: p.x + nx*(-edgeOff), y: p.y + ny*(-edgeOff) });
+        right.push({ x: p.x + nx*edgeOff, y: p.y + ny*edgeOff });
       }
-      ctx.setLineDash([]); ctx.restore();
-      // 暗红灼边 68px — 断续
-      if (fadeT > 0.15) {
-        ctx.save(); ctx.globalAlpha = fadeT * 0.2; ctx.lineCap = "round";
-        ctx.strokeStyle = "#3a0500"; ctx.lineWidth = 68;
-        ctx.setLineDash([18 + Math.sin(age*5)*4, 22 + Math.cos(age*3.5)*6]);
-        ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
-        for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
-        ctx.setLineDash([]); ctx.restore();
-      }
-    }
-  }
-
-  // V0731011 火路火焰层（火焰＋火舌，敌人附近但不遮挡名称HP）
-  private _drawScorchFlames(ctx: CanvasRenderingContext2D) {
-    for (const t of this._scorchTrails) {
-      if (t.points.length < 2) continue;
-      const life = t.life, age = t.maxLife - life, pts = t.points, n = pts.length;
-      const isIgnite = life > 1.68, isDying = life <= 0.45;
-      const fadeT = isDying ? clamp(life/0.45,0,1) : 1;
-      // 橙红燃烧区 48px — 光泽叠加
-      ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.lineCap = "round";
-      ctx.globalAlpha = fadeT * 0.22;
-      ctx.strokeStyle = "#772200"; ctx.lineWidth = 48;
+      const globalFade = clamp(vr.life / 1.0, 0, 1);
+      ctx.save(); ctx.globalAlpha = globalFade * 0.13;
+      // 焦黑底带
+      ctx.fillStyle = "#0d0400";
+      ctx.beginPath();
+      for (let i = 0; i < left.length; i++) { if (i===0) ctx.moveTo(left[i].x, left[i].y); else ctx.lineTo(left[i].x, left[i].y); }
+      for (let i = right.length-1; i >= 0; i--) ctx.lineTo(right[i].x, right[i].y);
+      ctx.closePath(); ctx.fill();
+      // 暗红灼边 (较窄,断续质感)
+      ctx.globalAlpha = globalFade * 0.18;
+      ctx.setLineDash([16, 18+Math.sin(age*3)*4]);
+      ctx.strokeStyle = "#2a0400"; ctx.lineWidth = 64;
       ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
-      ctx.globalAlpha = fadeT * 0.15;
-      ctx.strokeStyle = "#aa3300"; ctx.lineWidth = 34;
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+  }
+  // V0731011 火路火焰层
+  private _drawScorchFlames(ctx: CanvasRenderingContext2D) {
+    for (const vr of this._scorchVisualRoads) {
+      if (vr.points.length < 3) continue;
+      const age = vr.maxLife - vr.life, pts = vr.points, n = pts.length;
+      const globalFade = clamp(vr.life / 1.0, 0, 1);
+      if (globalFade < 0.05) continue;
+      ctx.save();
+      // 橙红燃烧主体 (中间层, lighter叠加)
+      ctx.globalAlpha = globalFade * 0.2;
+      ctx.globalCompositeOperation = "lighter";
+      ctx.strokeStyle = "#771100"; ctx.lineWidth = 38;
+      ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
+      ctx.globalAlpha = globalFade * 0.12;
+      ctx.strokeStyle = "#aa2200"; ctx.lineWidth = 26;
       ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
       ctx.restore();
-      // 金白裂缝 10px 断续
-      if (!isDying || fadeT > 0.4) {
-        ctx.save(); ctx.globalAlpha = fadeT * 0.28; ctx.lineCap = "round";
-        ctx.strokeStyle = "#ff9944"; ctx.lineWidth = 10;
-        for (let i = 0; i < n - 1; i += 15 + Math.floor(Math.abs(Math.sin(i*0.5+age))*10)) {
-          const end = Math.min(i+3, n-1);
-          ctx.beginPath(); ctx.moveTo(pts[i].x, pts[i].y);
-          for (let j = i+1; j <= end; j++) ctx.lineTo(pts[j].x, pts[j].y); ctx.stroke();
-        }
-        ctx.globalAlpha = fadeT * 0.18;
-        ctx.strokeStyle = "#ffcc66"; ctx.lineWidth = 3;
-        for (let i = 2; i < n - 1; i += 20 + Math.floor(Math.abs(Math.cos(i*0.7+age))*8)) {
-          const end = Math.min(i+2, n-1);
-          ctx.beginPath(); ctx.moveTo(pts[i].x, pts[i].y);
-          for (let j = i+1; j <= end; j++) ctx.lineTo(pts[j].x, pts[j].y); ctx.stroke();
-        }
-        ctx.restore();
+      // 金白裂缝 (中心窄线, 断续)
+      ctx.save(); ctx.globalAlpha = globalFade * 0.25;
+      ctx.strokeStyle = "#ff8833"; ctx.lineWidth = 7;
+      for (let i = 0; i < n-1; i += 16 + Math.floor(Math.abs(Math.sin(i*0.47+age))*9)) {
+        const end = Math.min(i+3, n-1);
+        ctx.beginPath(); ctx.moveTo(pts[i].x, pts[i].y);
+        for (let j = i+1; j <= end; j++) ctx.lineTo(pts[j].x, pts[j].y); ctx.stroke();
       }
-      // 剪纸火舌（路径两侧边缘）
-      if ((!isDying || fadeT > 0.2) && n > 3) {
-        ctx.save();
-        for (let i = 0; i < n - 1; i += 6) {
-          const a = pts[i], b = pts[Math.min(i+1, n-1)];
-          const segIdx = i / (n-1);
-          const tin = n <= 3 ? 1 : clamp(segIdx/0.12, 0, 1);
-          const tout = n <= 3 ? 1 : clamp((1-segIdx)/0.12, 0, 1);
-          const edgeFade = tin * tout;
-          if (edgeFade < 0.15) continue;
-          const dx = b.x-a.x, dy = b.y-a.y, len = Math.sqrt(dx*dx+dy*dy)||1;
-          const nx = -dy/len, ny = dx/len;
-          const seed = i * 0.73 + t.maxLife * 1000;
-          const phase = (age*2.5 + seed*1.3) % (Math.PI*2);
-          const breath = 0.5 + Math.sin(phase)*0.5;
-          const hBase = 16 + (Math.sin(seed)*0.5+0.5)*14;
-          const h = hBase * breath * fadeT * edgeFade;
-          if (h < 4) continue;
-          const mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
-          // 左右各一组火舌
-          for (let side = -1; side <= 1; side += 2) {
-            const sx = mx + nx * side * 14, sy = my + ny * side * 6;
-            const lean = (Math.sin(seed*2.1+side)*0.3) * side;
-            ctx.globalAlpha = fadeT * edgeFade * 0.35;
-            ctx.fillStyle = "#cc3300";
-            ctx.beginPath();
-            ctx.moveTo(sx, sy);
-            ctx.lineTo(sx+nx*side*6, sy-h*0.6);
-            ctx.lineTo(sx+nx*side*lean*4, sy-h*0.95);
-            ctx.lineTo(sx-nx*side*3, sy-h*0.5);
-            ctx.fill();
-            ctx.globalAlpha = fadeT * edgeFade * 0.25;
-            ctx.fillStyle = "#ff7722";
-            ctx.beginPath();
-            ctx.moveTo(sx, sy-h*0.3);
-            ctx.lineTo(sx+nx*side*3, sy-h*0.7);
-            ctx.lineTo(sx-nx*side*2, sy-h*0.85);
-            ctx.fill();
-          }
-        }
-        ctx.restore();
+      ctx.globalAlpha = globalFade * 0.15;
+      ctx.strokeStyle = "#ffcc55"; ctx.lineWidth = 3;
+      for (let i = 2; i < n-1; i += 22 + Math.floor(Math.abs(Math.cos(i*0.6+age))*7)) {
+        const end = Math.min(i+2, n-1);
+        ctx.beginPath(); ctx.moveTo(pts[i].x, pts[i].y);
+        for (let j = i+1; j <= end; j++) ctx.lineTo(pts[j].x, pts[j].y); ctx.stroke();
       }
-      // 余烬
-      if (!isDying || fadeT > 0.1) {
-        ctx.save(); ctx.globalAlpha = fadeT * 0.18;
-        ctx.fillStyle = "#ff8844";
-        for (let i = 0; i < n; i += 8) {
-          const p = pts[i], seed = i*0.6;
+      ctx.restore();
+      // 火舌 (沿连续道路两侧)
+      ctx.save();
+      for (let i = 0; i < n-1; i += 4) {
+        const a = pts[i], b = pts[Math.min(i+1,n-1)];
+        const dx=b.x-a.x, dy=b.y-a.y, len=Math.sqrt(dx*dx+dy*dy)||1;
+        const nx = -dy/len, ny = dx/len;
+        const localAge = age - (this.elapsed - pts[i].bornAt);
+        if (localAge < 0.08 || localAge > 1.35) continue;
+        const localFade = clamp(1 - Math.max(0, localAge-1.35)/0.45, 0, 1);
+        const seed = pts[i].seed;
+        const breath = 0.5 + Math.sin(age*3 + seed)*0.5;
+        const hBase = 14 + (Math.sin(seed*1.7)*0.5+0.5)*12;
+        const th = hBase * breath * localFade * globalFade;
+        if (th < 3) continue;
+        const mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
+        for (let side = -1; side <= 1; side += 2) {
+          const sx = mx + nx*side*12, sy = my + ny*side*8;
+          const lean = Math.sin(seed*2.3+side)*0.25;
+          ctx.globalAlpha = globalFade*localFade*0.3;
+          ctx.fillStyle = "#bb2200";
           ctx.beginPath();
-          ctx.arc(p.x+Math.sin(age*7+seed)*5, p.y-6-(age*7+seed)%14, 1.8, 0, Math.PI*2);
+          ctx.moveTo(sx, sy);
+          ctx.lineTo(sx+nx*side*5, sy-th*0.55);
+          ctx.lineTo(sx+nx*side*lean*3, sy-th*0.92);
+          ctx.lineTo(sx-nx*side*2, sy-th*0.45);
+          ctx.fill();
+          ctx.globalAlpha = globalFade*localFade*0.2;
+          ctx.fillStyle = "#ff6622";
+          ctx.beginPath();
+          ctx.moveTo(sx, sy-th*0.25);
+          ctx.lineTo(sx+nx*side*2.5, sy-th*0.65);
+          ctx.lineTo(sx-nx*side*1.5, sy-th*0.8);
           ctx.fill();
         }
-        ctx.restore();
       }
-      // 焦烟
-      if (!isIgnite && fadeT > 0.1) {
-        ctx.save(); ctx.globalAlpha = fadeT * 0.03;
-        ctx.strokeStyle = "rgba(12,6,0,0.3)"; ctx.lineWidth = 24;
-        ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y-3);
-        for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y-3); ctx.stroke();
-        ctx.restore();
+      ctx.restore();
+      // 余烬
+      ctx.save(); ctx.globalAlpha = globalFade*0.15; ctx.fillStyle = "#ff8833";
+      for (let i = 0; i < n; i += 6) {
+        const p = pts[i], seed = p.seed;
+        ctx.beginPath();
+        ctx.arc(p.x+Math.sin(age*7+seed)*4, p.y-5-(age*6+seed*2)%12, 1.6, 0, Math.PI*2);
+        ctx.fill();
       }
+      ctx.restore();
     }
   }
-
   // V0731011 敌人燃烧挂载
   private _drawEnemyScorchAttachments(ctx: CanvasRenderingContext2D) {
     for (const enemy of this.enemies) {
