@@ -2185,7 +2185,7 @@ export class Game {
         points: trail.points.map(p => ({ x: p.x, y: p.y })),
         life: 1.8, maxLife: 1.8, tickTimer: 0,
         damageSnapshot: trail._damageSnapshot ?? this.captureDamageSnapshot(),
-        parentId: trail.id,
+        parentId: trail.id, parentTrail: trail,
       });
       while (this._scorchTrails.length > 6) this._scorchTrails.shift();
     }
@@ -2856,7 +2856,7 @@ export class Game {
   }
 
   /** V0731011: 燎原百斩 — 火痕留场 */
-  private _scorchTrails: { points: { x: number; y: number }[]; life: number; maxLife: number; tickTimer: number; damageSnapshot: PlayerRunStats; parentId: string }[] = [];
+  private _scorchTrails: { points: { x: number; y: number }[]; life: number; maxLife: number; tickTimer: number; damageSnapshot: PlayerRunStats; parentId: string; parentTrail: SlashTrail }[] = [];
   private _scorchGlobalTick = 0;
   // ═══════════════════ V0731011 End ═══════════════════
 
@@ -2922,13 +2922,9 @@ export class Game {
           hitPos: { x: enemy.x, y: enemy.y }, timestamp: this.elapsed,
         }, enemy.hp, enemy.maxHp, enemy.alive, !!enemy.eliteKind);
         if (r?.isAccepted && r.resolvedDamage > 0) {
-          const wasAlive = enemy.alive;
-          const stubTrail: SlashTrail = { id: `scorch_${t.parentId}`, kills: 0, chain: 0, directMainKills: 0, active: false } as any;
-          this.damageEnemy(enemy, r.resolvedDamage, stubTrail, false, "scorch");
+          const ktTrail = t.parentTrail;
+          this.damageEnemy(enemy, r.resolvedDamage, ktTrail, false, "scorch");
           this.aggregateAndMaybeFlush(`scorch_${enemy.id}_${gTick}`, r.resolvedDamage, { x: enemy.x, y: enemy.y }, 'SCORCH_BURN', 'ENEMY', 600, t.damageSnapshot.entryAttack, false, true);
-          if (!enemy.alive && wasAlive) {
-            // 火痕击杀由 damageEnemy 自动计入连击
-          }
         }
         (enemy as any)._scorchBurning = 0.5;
       }
