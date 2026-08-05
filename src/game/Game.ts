@@ -8091,6 +8091,58 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.restore(); // outer
   }
 
+  /** 冰霜斩痕绘制 — 替换默认黄刀 */
+  private _drawFrostSlash(ctx: CanvasRenderingContext2D, points: any[], width: number, lowFade: number, effBrightness: number) {
+    if (points.length < 2) return;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    const n = points.length;
+    for (let i = 1; i < n; i++) {
+      const a = points[i-1], b = points[i];
+      const age = i / Math.max(1, n-1);
+      const alpha = Math.min(0.65, Math.max(0.05, age * b.energyRatio * effBrightness * lowFade));
+      // 寒霜尾迹 — 宽, 低透明
+      ctx.strokeStyle = "rgba(120,200,240,alpha*0.45)".replace("alpha",(alpha*0.45).toFixed(2));
+      ctx.shadowColor = "#88ccff"; ctx.shadowBlur = 14 * lowFade;
+      ctx.lineWidth = Math.max(26, width * 1.6) * (0.8 + b.energyRatio * 0.2);
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+      // 冰刃主体 — 中, 高亮
+      ctx.strokeStyle = "rgba(180,230,255,alpha*0.7)".replace("alpha",(alpha*0.7).toFixed(2));
+      ctx.shadowColor = "#aaddff"; ctx.shadowBlur = 8 * lowFade;
+      ctx.lineWidth = Math.max(13, width * 0.9) * (0.85 + b.energyRatio * 0.15);
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+      // 冰白锋芯 — 窄, 锋利
+      ctx.strokeStyle = "rgba(240,250,255,alpha*0.95)".replace("alpha",(alpha*0.95).toFixed(2));
+      ctx.shadowColor = "#fff"; ctx.shadowBlur = 3;
+      ctx.lineWidth = Math.max(4, width * 0.28);
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    }
+    // 霜晶 — 4-8片
+    ctx.globalAlpha = lowFade * 0.4; ctx.fillStyle = "#ddeeff";
+    const seedBase = (points[0].x * 137 + points[0].y * 251) % 10000;
+    for (let i = 0; i < 6; i++) {
+      const idx = Math.floor((i+0.5) * n / 6); if (idx >= n) continue;
+      const p = points[idx];
+      const seed = seedBase + i * 173;
+      const sx = p.x + (Math.sin(seed) * 14) * (i % 2 === 0 ? -1 : 1);
+      const sy = p.y + Math.cos(seed) * 10 - 4;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 4 + Math.abs(Math.sin(seed*0.3))*6, 0, Math.PI*2); ctx.fill();
+    }
+    // 锋头 — 末端楔形
+    const last = points[n-1], prev = points[n-2] || last;
+    const dx = last.x-prev.x, dy = last.y-prev.y, len = Math.sqrt(dx*dx+dy*dy)||1;
+    const nx = dx/len, ny = dy/len;
+    ctx.globalAlpha = 0.7; ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.moveTo(last.x + nx*6, last.y + ny*6);
+    ctx.lineTo(last.x + nx*22 - ny*4, last.y + ny*22 + nx*4);
+    ctx.lineTo(last.x + nx*14 + ny*4, last.y + ny*14 - nx*4);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
   /** 斜切刀痕形状：不规则梯形/桨形 */
   private _drawSlashShape(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, progress: number): void {
     const pw = w * progress;
@@ -9649,13 +9701,25 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const lowFade = isLowBlade ? 0.46 + (ratio / BALANCE.slash.lowBladeRemainRatio) * 0.38 : 1;
     const isFrost = this._activeEdicts.some(e => e.id === "frost");
 
-    // P4.4B-R3 P1-A: Reactive 模式优先使用起刀时的连续刀势视觉快照（reactiveBladeEffect），
     const rEff = trail.reactiveBladeEffect;
     const effWidth = rEff ? rEff.width : stage.width;
     const effColor = rEff ? rEff.color : stage.color;
     const effBrightness = rEff ? rEff.brightness : stage.brightness;
     const effVisualLength = rEff ? rEff.visualLength : stage.visualLength;
     const width = effWidth * trail.widthMultiplier * (0.28 + ratio * 0.95) * 0.7;
+
+    if (isFrost) {
+      this._drawFrostSlash(ctx, points, width, lowFade, effBrightness);
+      // 仍然绘制刀尖尾拖
+      if (points.length >= 2) {
+        const last = points[points.length - 1];
+        const prev = points[points.length - 2];
+        const angle = prev ? Math.atan2(last.y - prev.y, last.x - prev.x) : this.lastSlashAngle;
+        const visualLength = effVisualLength * (0.34 + ratio * 0.82) * lowFade * 0.6;
+        this._drawSlashShape(ctx, last.x, last.y, width * 0.8, visualLength, ratio);
+      }
+      return;
+    }
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
@@ -9667,43 +9731,15 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const b = points[i];
       const age = i / Math.max(1, points.length - 1);
       const alpha = clamp(age * b.energyRatio * effBrightness * lowFade, 0.05, 0.6);
-
-      if (isFrost) {
-        // 冰蓝三层刀气
-        ctx.strokeStyle = `rgba(130, 210, 255, ${alpha * 0.55})`; // 外层冰蓝
-        ctx.shadowColor = "#aaddff";
-        ctx.shadowBlur = (10 + effWidth * 0.3) * lowFade;
-        ctx.lineWidth = width * 1.1 * (0.9 + b.energyRatio);
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-        // 中层亮蓝
-        ctx.strokeStyle = `rgba(190, 240, 255, ${alpha * 0.75})`;
-        ctx.shadowBlur = 5;
-        ctx.lineWidth = width * 0.6;
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-        // 内层冰白核心
-        ctx.strokeStyle = `rgba(240, 250, 255, ${alpha * 0.9})`;
-        ctx.shadowBlur = 3;
-        ctx.lineWidth = Math.max(1.5, width * 0.25);
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-        // 边缘霜晶
-        ctx.strokeStyle = `rgba(220, 240, 255, ${alpha * 0.3})`;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(a.x + 2, a.y - 1); ctx.lineTo(b.x + 2, b.y - 1); ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(a.x - 2, a.y + 1); ctx.lineTo(b.x - 2, b.y + 1); ctx.stroke();
-      } else {
-        // 原金白刀光
-        ctx.strokeStyle = `rgba(255, 213, 112, ${alpha * 0.5})`;
-        ctx.shadowColor = effColor;
-        ctx.shadowBlur = (8 + effWidth * 0.3) * lowFade;
-        ctx.lineWidth = width * (0.9 + b.energyRatio);
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-        ctx.strokeStyle = `rgba(255, 255, 238, ${alpha * 0.9})`;
-        ctx.shadowBlur = 4;
-        ctx.lineWidth = Math.max(1.5, width * 0.3);
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-      }
+      ctx.strokeStyle = `rgba(255, 213, 112, ${alpha * 0.5})`;
+      ctx.shadowColor = effColor;
+      ctx.shadowBlur = (8 + effWidth * 0.3) * lowFade;
+      ctx.lineWidth = width * (0.9 + b.energyRatio);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      ctx.strokeStyle = `rgba(255, 255, 238, ${alpha * 0.9})`;
+      ctx.shadowBlur = 4;
+      ctx.lineWidth = Math.max(1.5, width * 0.3);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     }
 
     // P4.4A.2-R2: Debug模式绘制真实刀路（白色细线，无glow）
