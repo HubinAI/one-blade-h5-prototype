@@ -8731,7 +8731,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         for (let i = 0; i < n - 1; i += 6) {
           const a = pts[i], b = pts[Math.min(i+1, n-1)];
           const segIdx = i / (n-1);
-          const tin = clamp(segIdx/0.12, 0, 1), tout = clamp((1-segIdx)/0.12, 0, 1);
+          const tin = n <= 3 ? 1 : clamp(segIdx/0.12, 0, 1);
+          const tout = n <= 3 ? 1 : clamp((1-segIdx)/0.12, 0, 1);
           const edgeFade = tin * tout;
           if (edgeFade < 0.15) continue;
           const dx = b.x-a.x, dy = b.y-a.y, len = Math.sqrt(dx*dx+dy*dy)||1;
