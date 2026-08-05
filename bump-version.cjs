@@ -121,7 +121,22 @@ function toSemver(ver) {
 function readState() {
   if (fs.existsSync(STATE_FILE)) {
     try {
-      return JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+      const state = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+      // 自我修复：state 与 src/version.ts 不一致时，以 src/version.ts 为准
+      try {
+        const vts = fs.readFileSync(path.join(ROOT, "src/version.ts"), "utf8");
+        const m = vts.match(/APP_VERSION\s*=\s*"([^"]+)"/);
+        if (m && m[1] !== state.currentVersion) {
+          console.warn(`🩹 state 与 src/version.ts 不一致 (state=${state.currentVersion}, ts=${m[1]}), 以 ts 为准`);
+          state.currentVersion = m[1];
+          const seqMatch = m[1].match(/V(\d{4})(\d{3})/);
+          if (seqMatch) {
+            state.lastDate = `20${seqMatch[1].slice(0,2)}-${seqMatch[1].slice(2)}`;
+            state.lastSeq = parseInt(seqMatch[2], 10);
+          }
+        }
+      } catch {}
+      return state;
     } catch {
       return {};
     }
