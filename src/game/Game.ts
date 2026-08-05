@@ -2973,11 +2973,22 @@ export class Game {
       }, enemy.hp, enemy.maxHp, enemy.alive, !!enemy.eliteKind);
       if (r?.isAccepted && r.resolvedDamage > 0) {
         const wasAlive = enemy.alive;
+        const isElite = !!enemy.eliteKind;
         this.damageEnemy(enemy, r.resolvedDamage, bestTrail, false, "scorch");
-        this.aggregateAndMaybeFlush(`scorch_${enemy.id}`, r.resolvedDamage, { x: enemy.x, y: enemy.y }, 'SCORCH_BURN', 'ENEMY', 600, bestSnap.entryAttack, false, true);
+        const isKill = wasAlive && !enemy.alive;
+        if (isElite) {
+          // 精英每跳立即显示：极小窗口(10ms)防止同帧重复，并左右错位
+          const offsetIdx = ((enemy as any)._scorchTickOff ?? 0) % 2;
+          (enemy as any)._scorchTickOff = offsetIdx + 1;
+          const ox = offsetIdx === 0 ? 12 : -12;
+          const key = `scorch_e_${enemy.id}_${Math.floor(this.elapsed / 0.25)}`;
+          this.aggregateAndMaybeFlush(key, r.resolvedDamage, { x: enemy.x+ox, y: enemy.y-enemy.radius-14 }, 'SCORCH_BURN', 'ELITE', 10, bestSnap.entryAttack, isKill, true);
+        } else {
+          this.aggregateAndMaybeFlush(`scorch_${enemy.id}`, r.resolvedDamage, { x: enemy.x, y: enemy.y }, 'SCORCH_BURN', 'ENEMY', 500, bestSnap.entryAttack, isKill, true);
+        }
         (enemy as any)._scorchPulse = 0.14;
         (enemy as any)._scorchBurning = 0.45;
-        if (!enemy.alive && wasAlive) {
+        if (isKill) {
           (enemy as any)._scorchKilled = true;
           (enemy as any)._scorchKillAlpha = 1;
         }
