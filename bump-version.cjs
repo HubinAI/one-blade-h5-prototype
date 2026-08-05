@@ -48,6 +48,24 @@ const TARGETS = [
       content.replace(/V(?:\d{7}|[\d.]+)(?: IAA版)?/, ver),
   },
   {
+    file: "package-lock.json",
+    // 根版本：V0708002 → "0708.002"
+    replace: (content, ver, semver) => {
+      const rootVer = `"version": "${semver}"`;
+      // 同步替换根版本与直接子包版本（第二个 "version" 行）
+      const parts = content.split('\n');
+      let count = 0;
+      for (let i = 0; i < parts.length; i++) {
+        if (/^  "version":\s*"[\d.]+"/.test(parts[i]) || /^      "version":\s*"[\d.]+"/.test(parts[i])) {
+          parts[i] = parts[i].replace(/"version":\s*"[\d.]+"/, `"version": "${semver}"`);
+          count++;
+          if (count >= 2) break;
+        }
+      }
+      return parts.join('\n');
+    },
+  },
+  {
     file: "src/App.tsx",
     // 替换 appVersion useState 的 V 号
     replace: (content, ver) =>
