@@ -2977,17 +2977,17 @@ export class Game {
         this.damageEnemy(enemy, r.resolvedDamage, bestTrail, false, "scorch");
         const isKill = wasAlive && !enemy.alive;
         if (isElite) {
-          // 精英每跳独立即时飘字（不聚合）
+          // 精英每跳独立 CombatFloat（无 mergeKey，不聚合）
           const offIdx = ((enemy as any)._scorchDotIdx ?? 0) % 2;
           (enemy as any)._scorchDotIdx = offIdx + 1;
           const side = offIdx === 0 ? 1 : -1;
-          const hOffset = enemy.radius + 22;
-          const px = enemy.x + side * hOffset;
-          const py = enemy.y - enemy.radius * 0.55;
-          const dotText = isKill ? `${r.resolvedDamage}🔥` : `${r.resolvedDamage}`;
+          const px = clamp(enemy.x + side * (enemy.radius + 22), 24, DESIGN_WIDTH - 24);
+          const py = clamp(enemy.y - enemy.radius * 0.55, 96, DESIGN_HEIGHT - 112);
           const dotColor = isKill ? "#ffaa33" : "#ff6622";
-          this.addText(px, py, dotText, dotColor, 14, 0.5);
-          if (this.debugEnabled) console.warn(`[SCORCH-DOT] enemy=${enemy.id} dmg=${r.resolvedDamage} hp=${enemy.hp} tick=${offIdx+1}`);
+          const dotText = isKill ? `${r.resolvedDamage}🔥` : `${r.resolvedDamage}`;
+          const prevCount = this.texts.length;
+          this.addCombatFloat({ x: px, y: py, text: dotText, color: dotColor, size: 14, duration: 0.5, category: "damage", priority: "B", targetId: enemy.id });
+          if (this.debugEnabled) console.warn(`[SCORCH-DOT] enemy=${enemy.id} dmg=${r.resolvedDamage} hp=${enemy.hp} tick=${offIdx+1} floatAdded=${this.texts.length > prevCount} activeFloats=${this.texts.length}`);
         } else {
           this.aggregateAndMaybeFlush(`scorch_${enemy.id}`, r.resolvedDamage, { x: enemy.x, y: enemy.y }, 'SCORCH_BURN', 'ENEMY', 500, bestSnap.entryAttack, isKill, true);
         }
