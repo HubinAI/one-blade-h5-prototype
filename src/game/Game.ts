@@ -8745,36 +8745,32 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     for (const vr of this._scorchVisualRoads) {
       if (vr.points.length < 3) continue;
       const age = vr.maxLife - vr.life, pts = vr.points, n = pts.length;
-      const rd = (i: number) => ({ p: pts[i], next: pts[Math.min(i+1,n-1)], prev: pts[Math.max(i-1,0)] });
+      const gf = clamp(vr.life / 1.0, 0, 1); if (gf < 0.02) continue;
       // 生成左右边缘
       const left: {x:number;y:number}[] = [], right: {x:number;y:number}[] = [];
       for (let i = 0; i < n; i++) {
-        const { p, next, prev } = rd(i);
-        const dx = next.x-prev.x, dy = next.y-prev.y;
-        const len = Math.sqrt(dx*dx+dy*dy)||1;
-        const nx = -dy/len, ny = dx/len;
-        const seed = pts[i].seed;
-        const wBase = 46 + Math.sin(seed*3)*8 + Math.cos(seed*2.7)*6;
-        const localAge = age - (this.elapsed - pts[i].bornAt);
-        const localFade = clamp(1 - Math.max(0, localAge - 1.35) / 0.45, 0, 1);
-        const edgeOff = wBase * (0.7 + Math.sin(seed*1.3)*0.3) * localFade;
-        left.push({ x: p.x + nx*(-edgeOff), y: p.y + ny*(-edgeOff) });
-        right.push({ x: p.x + nx*edgeOff, y: p.y + ny*edgeOff });
+        const p = pts[i], pn = pts[Math.min(i+1,n-1)], pp = pts[Math.max(i-1,0)];
+        const dx = pn.x-pp.x, dy = pn.y-pp.y, len = Math.sqrt(dx*dx+dy*dy)||1;
+        const nx = -dy/len, ny = dx/len, s = pts[i].seed;
+        const localAge = age - (vr.maxLife - (vr.life + (1.8 - (this.elapsed - pts[i].bornAt))));
+        const localFade = clamp(1 - Math.max(0, age - (this.elapsed - pts[i].bornAt) - 1.35) / 0.45, 0, 1);
+        const off = (44 + Math.sin(s*3)*5 + Math.cos(s*2.7)*4) * localFade;
+        left.push({ x: p.x+nx*(-off), y: p.y+ny*(-off) });
+        right.push({ x: p.x+nx*off, y: p.y+ny*off });
       }
-      const globalFade = clamp(vr.life / 1.0, 0, 1);
-      ctx.save(); ctx.globalAlpha = globalFade * 0.13;
-      // 焦黑底带
-      ctx.fillStyle = "#0d0400";
+      ctx.save();
+      // 焦黑底带 (最宽最暗)
+      ctx.globalAlpha = gf * 0.15; ctx.fillStyle = "#060200";
       ctx.beginPath();
-      for (let i = 0; i < left.length; i++) { if (i===0) ctx.moveTo(left[i].x, left[i].y); else ctx.lineTo(left[i].x, left[i].y); }
-      for (let i = right.length-1; i >= 0; i--) ctx.lineTo(right[i].x, right[i].y);
+      for (let i = 0; i < left.length; i++) { i===0?ctx.moveTo(left[i].x,left[i].y):ctx.lineTo(left[i].x,left[i].y); }
+      for (let i = right.length-1; i >= 0; i--) ctx.lineTo(right[i].x,right[i].y);
       ctx.closePath(); ctx.fill();
-      // 暗红灼边 (较窄,断续质感)
-      ctx.globalAlpha = globalFade * 0.18;
-      ctx.setLineDash([16, 18+Math.sin(age*3)*4]);
-      ctx.strokeStyle = "#2a0400"; ctx.lineWidth = 64;
-      ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
+      // 暗红灼边 (断续虚线, 70px)
+      ctx.globalAlpha = gf * 0.22;
+      ctx.setLineDash([14+Math.sin(age*3.5)*3, 20+Math.cos(age*2.8)*5]);
+      ctx.strokeStyle = "#220300"; ctx.lineWidth = 70;
+      ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
+      for (let i=1;i<n;i++) ctx.lineTo(pts[i].x,pts[i].y); ctx.stroke();
       ctx.setLineDash([]);
       ctx.restore();
     }
@@ -8784,78 +8780,83 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     for (const vr of this._scorchVisualRoads) {
       if (vr.points.length < 3) continue;
       const age = vr.maxLife - vr.life, pts = vr.points, n = pts.length;
-      const globalFade = clamp(vr.life / 1.0, 0, 1);
-      if (globalFade < 0.05) continue;
+      const gf = clamp(vr.life / 1.0, 0, 1); if (gf < 0.03) continue;
       ctx.save();
-      // 橙红燃烧主体 (中间层, lighter叠加)
-      ctx.globalAlpha = globalFade * 0.2;
+      // 橙红燃烧主体 (提亮, lighter)
       ctx.globalCompositeOperation = "lighter";
-      ctx.strokeStyle = "#771100"; ctx.lineWidth = 38;
-      ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
-      ctx.globalAlpha = globalFade * 0.12;
-      ctx.strokeStyle = "#aa2200"; ctx.lineWidth = 26;
-      ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
-      ctx.restore();
-      // 金白裂缝 (中心窄线, 断续)
-      ctx.save(); ctx.globalAlpha = globalFade * 0.25;
-      ctx.strokeStyle = "#ff8833"; ctx.lineWidth = 7;
-      for (let i = 0; i < n-1; i += 16 + Math.floor(Math.abs(Math.sin(i*0.47+age))*9)) {
-        const end = Math.min(i+3, n-1);
-        ctx.beginPath(); ctx.moveTo(pts[i].x, pts[i].y);
-        for (let j = i+1; j <= end; j++) ctx.lineTo(pts[j].x, pts[j].y); ctx.stroke();
+      ctx.globalAlpha = gf * 0.28;
+      ctx.strokeStyle = "#882200"; ctx.lineWidth = 36;
+      ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
+      for (let i=1;i<n;i++) ctx.lineTo(pts[i].x,pts[i].y); ctx.stroke();
+      ctx.globalAlpha = gf * 0.2;
+      ctx.strokeStyle = "#cc3300"; ctx.lineWidth = 22;
+      ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
+      for (let i=1;i<n;i++) ctx.lineTo(pts[i].x,pts[i].y); ctx.stroke();
+      ctx.globalCompositeOperation = "source-over";
+      // 金白核心 (窄, 断续, 高亮)
+      ctx.globalAlpha = gf * 0.4;
+      ctx.strokeStyle = "#ff9933"; ctx.lineWidth = 5;
+      for (let i=0;i<n-1;i+=12+Math.floor(Math.abs(Math.sin(i*0.5+age))*8)) {
+        const end=Math.min(i+3,n-1);
+        ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);
+        for (let j=i+1;j<=end;j++)ctx.lineTo(pts[j].x,pts[j].y);ctx.stroke();
       }
-      ctx.globalAlpha = globalFade * 0.15;
-      ctx.strokeStyle = "#ffcc55"; ctx.lineWidth = 3;
-      for (let i = 2; i < n-1; i += 22 + Math.floor(Math.abs(Math.cos(i*0.6+age))*7)) {
-        const end = Math.min(i+2, n-1);
-        ctx.beginPath(); ctx.moveTo(pts[i].x, pts[i].y);
-        for (let j = i+1; j <= end; j++) ctx.lineTo(pts[j].x, pts[j].y); ctx.stroke();
+      ctx.globalAlpha = gf * 0.25;
+      ctx.strokeStyle = "#ffdd55"; ctx.lineWidth = 2;
+      for (let i=2;i<n-1;i+=18+Math.floor(Math.abs(Math.cos(i*0.6+age))*6)) {
+        const end=Math.min(i+2,n-1);
+        ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);
+        for (let j=i+1;j<=end;j++)ctx.lineTo(pts[j].x,pts[j].y);ctx.stroke();
       }
       ctx.restore();
-      // 火舌 (沿连续道路两侧)
+      // 火舌 (沿两侧 24-32px 一组)
       ctx.save();
       for (let i = 0; i < n-1; i += 4) {
-        const a = pts[i], b = pts[Math.min(i+1,n-1)];
-        const dx=b.x-a.x, dy=b.y-a.y, len=Math.sqrt(dx*dx+dy*dy)||1;
-        const nx = -dy/len, ny = dx/len;
+        const a=pts[i], b=pts[Math.min(i+1,n-1)];
+        const dx=b.x-a.x,dy=b.y-a.y,len=Math.sqrt(dx*dx+dy*dy)||1;
+        const nx=-dy/len,ny=dx/len, seed=pts[i].seed;
         const localAge = age - (this.elapsed - pts[i].bornAt);
-        if (localAge < 0.08 || localAge > 1.35) continue;
-        const localFade = clamp(1 - Math.max(0, localAge-1.35)/0.45, 0, 1);
-        const seed = pts[i].seed;
-        const breath = 0.5 + Math.sin(age*3 + seed)*0.5;
-        const hBase = 14 + (Math.sin(seed*1.7)*0.5+0.5)*12;
-        const th = hBase * breath * localFade * globalFade;
+        if (localAge < 0.06 || localAge > 1.35) continue;
+        const lf = clamp(1 - Math.max(0,localAge-1.35)/0.45,0,1);
+        if (lf < 0.1) continue;
+        const breath = 0.5 + Math.sin(age*3.5+seed*1.2)*0.5;
+        const hBase = 16 + (Math.sin(seed*1.8)*0.5+0.5)*11;
+        const th = hBase * breath * lf * gf;
         if (th < 3) continue;
-        const mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
-        for (let side = -1; side <= 1; side += 2) {
-          const sx = mx + nx*side*12, sy = my + ny*side*8;
-          const lean = Math.sin(seed*2.3+side)*0.25;
-          ctx.globalAlpha = globalFade*localFade*0.3;
-          ctx.fillStyle = "#bb2200";
+        const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
+        for (let side=-1;side<=1;side+=2) {
+          const sx=mx+nx*side*10, sy=my+ny*side*6;
+          const lean = Math.sin(seed*2.4+side)*0.22;
+          // 主火舌
+          ctx.globalAlpha = gf*lf*0.4;
+          ctx.fillStyle = "#cc2200";
           ctx.beginPath();
-          ctx.moveTo(sx, sy);
-          ctx.lineTo(sx+nx*side*5, sy-th*0.55);
-          ctx.lineTo(sx+nx*side*lean*3, sy-th*0.92);
-          ctx.lineTo(sx-nx*side*2, sy-th*0.45);
-          ctx.fill();
-          ctx.globalAlpha = globalFade*localFade*0.2;
-          ctx.fillStyle = "#ff6622";
+          ctx.moveTo(sx,sy); ctx.lineTo(sx+nx*side*4,sy-th*0.5);
+          ctx.lineTo(sx+nx*side*lean*2.5,sy-th*0.88);
+          ctx.lineTo(sx-nx*side*1.5,sy-th*0.4); ctx.fill();
+          // 小火舌
+          ctx.globalAlpha = gf*lf*0.25;
+          ctx.fillStyle = "#ff6611";
           ctx.beginPath();
-          ctx.moveTo(sx, sy-th*0.25);
-          ctx.lineTo(sx+nx*side*2.5, sy-th*0.65);
-          ctx.lineTo(sx-nx*side*1.5, sy-th*0.8);
-          ctx.fill();
+          ctx.moveTo(sx+nx*side*2,sy-th*0.2);
+          ctx.lineTo(sx+nx*side*3.5,sy-th*0.6);
+          ctx.lineTo(sx-nx*side*1,sy-th*0.7); ctx.fill();
+          // 第二个小火舌 (不同倾斜)
+          ctx.globalAlpha = gf*lf*0.2;
+          ctx.fillStyle = "#ff9933";
+          ctx.beginPath();
+          ctx.moveTo(sx-nx*side*1,sy-th*0.15);
+          ctx.lineTo(sx+nx*side*0.5,sy-th*0.55);
+          ctx.lineTo(sx-nx*side*3,sy-th*0.5); ctx.fill();
         }
       }
       ctx.restore();
-      // 余烬
-      ctx.save(); ctx.globalAlpha = globalFade*0.15; ctx.fillStyle = "#ff8833";
-      for (let i = 0; i < n; i += 6) {
-        const p = pts[i], seed = p.seed;
+      // 余烬火星
+      ctx.save(); ctx.globalAlpha = gf*0.2; ctx.fillStyle = "#ff9944";
+      for (let i=0;i<n;i+=5) {
+        const p=pts[i], s=p.seed;
         ctx.beginPath();
-        ctx.arc(p.x+Math.sin(age*7+seed)*4, p.y-5-(age*6+seed*2)%12, 1.6, 0, Math.PI*2);
+        ctx.arc(p.x+Math.sin(age*8+s)*4, p.y-4-(age*7+s*2)%14, 1.5, 0, Math.PI*2);
         ctx.fill();
       }
       ctx.restore();
