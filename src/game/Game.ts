@@ -8979,20 +8979,44 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ctx.lineTo(enemy.x+Math.cos(a-0.2)*(d+sz*0.7),enemy.y+Math.sin(a-0.2)*(d+sz*0.7));
         ctx.fill();}
       } else if (isSlow) {
-        // 挂霜减速 — 前2s稳定 + 末0.5s淡出
-        const fva=fs.slowLeft>0.5?1:Math.max(0,fs.slowLeft/0.5);
-        // 外侧冰蓝霜边
-        ctx.globalAlpha=0.55*fva;ctx.strokeStyle="#88ccff";ctx.lineWidth=3*scale;
-        ctx.beginPath();ctx.arc(enemy.x,enemy.y,r+5*scale,0,Math.PI*2);ctx.stroke();
-        // 脚下寒气底座
-        ctx.globalAlpha=0.32*fva;ctx.fillStyle="#aaddff";
-        ctx.beginPath();ctx.ellipse(enemy.x,enemy.y+r*0.88,r*0.8*scale,r*0.22,0,0,Math.PI*2);ctx.fill();
-        // 霜晶 3-4片
-        ctx.globalAlpha=0.6*fva;ctx.fillStyle="#ddeeff";
+        // 挂霜减速 — 三段：稳定→呼吸→碎霜退出
+        const sl=fs.slowLeft;
+        // 呼吸系数
+        const breathe=sl<0.60&&sl>=0.20?1+Math.sin(sl*14+seed)*0.1:1;
+        const breathR=sl<0.60&&sl>=0.20?Math.sin(sl*14+seed)*2:0;
+        // 退出碎霜系数
+        const exitF=sl<0.20?Math.max(0,sl/0.20):1;
+        // 霜边弧段
+        const arcCount=enemy.eliteKind?6:4;
+        const arcR=r+5*scale+breathR;
+        ctx.strokeStyle="#88ccff";ctx.lineWidth=3*scale;
+        ctx.globalAlpha=0.55*breathe*exitF;
+        ctx.setLineDash([]);
+        for(let i=0;i<arcCount;i++){
+          const a0=i*Math.PI*2/arcCount+seed*0.02;
+          const a1=a0+Math.PI*2/arcCount*0.7;
+          const gap=sl<0.20?(1-exitF)*0.3:0;
+          ctx.beginPath();
+          ctx.arc(enemy.x,enemy.y,arcR,a0+gap,a1-gap);ctx.stroke();
+        }
+        // 脚下寒气
+        ctx.globalAlpha=0.32*breathe*exitF;ctx.fillStyle="#aaddff";
+        const baseW=sl<0.20?exitF*0.8:1;
+        ctx.beginPath();ctx.ellipse(enemy.x,enemy.y+r*0.88,r*0.8*scale*baseW,r*0.22*baseW,0,0,Math.PI*2);ctx.fill();
+        // 霜晶 + 碎霜
+        ctx.globalAlpha=0.6*exitF;ctx.fillStyle="#ddeeff";
         for(let i=0;i<4;i++){const a=seed*0.05+i*Math.PI*1.5;
         ctx.beginPath();ctx.moveTo(enemy.x+Math.cos(a)*(r+8),enemy.y+Math.sin(a)*(r+8));
         ctx.lineTo(enemy.x+Math.cos(a+0.3)*(r+14),enemy.y+Math.sin(a+0.3)*(r+14));
         ctx.lineTo(enemy.x+Math.cos(a-0.2)*(r+12),enemy.y+Math.sin(a-0.2)*(r+12));ctx.fill();}
+        if(sl<0.20){
+          const fragCount=enemy.eliteKind?8:4;
+          for(let i=0;i<fragCount;i++){const a=seed*0.07+i*Math.PI*2/fragCount;
+          const d=r+8+(1-exitF)*16;
+          ctx.beginPath();ctx.moveTo(enemy.x+Math.cos(a)*d,enemy.y+Math.sin(a)*d);
+          ctx.lineTo(enemy.x+Math.cos(a+0.25)*(d+6),enemy.y+Math.sin(a+0.25)*(d+6));
+          ctx.lineTo(enemy.x+Math.cos(a-0.2)*(d+4),enemy.y+Math.sin(a-0.2)*(d+4));ctx.fill();}
+        }
       }
       ctx.restore();
     }
