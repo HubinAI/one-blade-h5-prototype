@@ -8,11 +8,12 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: "22"
       - run: npm ci
       - run: npm run check:version
       - run: npm run test
@@ -29,13 +30,13 @@ jobs:
 
   test-e2e-dpr3:
     runs-on: ubuntu-latest
-    # advisory only — 高DPR渲染在CI环境有敏感性，不阻塞合并。正式门禁由 test job 保证。
+    timeout-minutes: 10
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: "22"
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test --config=playwright.dpr3.config.ts
@@ -54,7 +55,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: "22"
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test --config=playwright.touch.config.ts
