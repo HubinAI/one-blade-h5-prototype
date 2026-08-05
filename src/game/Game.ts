@@ -8091,64 +8091,62 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.restore(); // outer
   }
 
-  /** 冰霜斩痕绘制 — 锥形冰刃polygon */
+  /** 冰霜斩痕 - 移动锋刃 + 寒霜残影 */
   private _drawFrostSlash(ctx: CanvasRenderingContext2D, points: any[], width: number, lowFade: number, effBrightness: number) {
     if (points.length < 2) return;
     const n = points.length;
-    // 生成左右边缘（锥形：宽窄变化）
-    const L:any[]=[], R:any[]=[];
-    const bladeW = Math.min(18, Math.max(10, width * 1.05));
-    for (let i=0;i<n;i++){
-      const pp=points[Math.max(0,i-1)], pn=points[Math.min(n-1,i+1)], p=points[i];
-      const dx=pn.x-pp.x, dy=pn.y-pp.y, len=Math.sqrt(dx*dx+dy*dy)||1, nx=-dy/len, ny=dx/len;
-      const frac=i/(n-1), taper=0.2+(1-Math.abs(frac-0.5)*1.6)*0.8; // 中段100% 首尾20%-45%
-      const w=bladeW*taper;
-      L.push({x:p.x+nx*(-w), y:p.y+ny*(-w)});
-      R.push({x:p.x+nx*w, y:p.y+ny*w});
-    }
     ctx.save();
-    // 外层寒气
-    ctx.globalAlpha=lowFade*0.12; ctx.globalCompositeOperation="source-over";
-    ctx.fillStyle="rgba(140,210,240,0.3)";
-    ctx.beginPath();
-    for(let i=0;i<L.length;i++){i===0?ctx.moveTo(L[i].x,L[i].y):ctx.lineTo(L[i].x-2,L[i].y-2);}
-    for(let i=R.length-1;i>=0;i--)ctx.lineTo(R[i].x+2,R[i].y+2);ctx.closePath();ctx.fill();
-    // 主刃面 — 冰蓝polygon
-    ctx.globalAlpha=lowFade*0.68; ctx.fillStyle="rgba(100,190,240,0.85)";
+    ctx.globalAlpha=lowFade*0.25; ctx.strokeStyle='rgba(150,210,240,0.5)'; ctx.lineWidth=4;
+    ctx.setLineDash([20, 28]); ctx.beginPath();
+    ctx.moveTo(points[0].x,points[0].y);
+    for(let i=1;i<n-1;i++)ctx.lineTo(points[i].x,points[i].y);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha=lowFade*0.3; ctx.fillStyle='#cce';
+    const sb=(points[0].x*137+points[0].y*251)%10000;
+    for(let i=0;i<5;i++){
+      const idx=Math.floor((i+0.5)*(n-1)/5); if(idx>=n)continue;
+      const p=points[idx], s=sb+i*173, a=Math.sin(s)*Math.PI;
+      ctx.beginPath();
+      ctx.moveTo(p.x+Math.cos(a)*4,p.y+Math.sin(a)*4);
+      ctx.lineTo(p.x+Math.cos(a+0.4)*10,p.y+Math.sin(a+0.4)*10);
+      ctx.lineTo(p.x+Math.cos(a-0.4)*6,p.y+Math.sin(a-0.4)*6);
+      ctx.fill();
+    }
+    const bladeLen=Math.min(100,Math.floor(n*0.3));
+    const start=Math.max(0,n-bladeLen);
+    const bladePts=points.slice(start);
+    if(bladePts.length<2){ctx.restore();return;}
+    const bn=bladePts.length;
+    const L=[],R=[];
+    const bw=Math.min(15,Math.max(9,width*0.9));
+    for(let i=0;i<bn;i++){
+      const pp=bladePts[Math.max(0,i-1)],pn=bladePts[Math.min(bn-1,i+1)],p=bladePts[i];
+      const dx=pn.x-pp.x,dy=pn.y-pp.y,len=Math.sqrt(dx*dx+dy*dy)||1,nx=-dy/len,ny=dx/len;
+      const frac=i/(bn-1),taper=0.3+frac*0.7;
+      const w=bw*taper;
+      L.push({x:p.x+nx*(-w),y:p.y+ny*(-w)});
+      R.push({x:p.x+nx*w,y:p.y+ny*w});
+    }
+    ctx.globalAlpha=lowFade*0.72; ctx.fillStyle='rgba(80,180,235,0.85)';
     ctx.beginPath();
     for(let i=0;i<L.length;i++){i===0?ctx.moveTo(L[i].x,L[i].y):ctx.lineTo(L[i].x,L[i].y);}
     for(let i=R.length-1;i>=0;i--)ctx.lineTo(R[i].x,R[i].y);ctx.closePath();ctx.fill();
-    // 下侧暗边 2-4px
-    ctx.globalAlpha=lowFade*0.5; ctx.strokeStyle="rgba(30,80,140,0.6)"; ctx.lineWidth=3;
+    ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=lowFade*0.55;
+    ctx.strokeStyle='rgba(210,240,255,0.85)'; ctx.lineWidth=2;
+    ctx.beginPath();for(let i=0;i<L.length;i++){i===0?ctx.moveTo(L[i].x,L[i].y):ctx.lineTo(L[i].x,L[i].y);}ctx.stroke();
+    ctx.globalCompositeOperation='source-over'; ctx.globalAlpha=lowFade*0.45;
+    ctx.strokeStyle='rgba(20,60,120,0.6)'; ctx.lineWidth=2.5;
+    ctx.beginPath();for(let i=0;i<R.length;i++){i===0?ctx.moveTo(R[i].x,R[i].y):ctx.lineTo(R[i].x,R[i].y);}ctx.stroke();
+    const lp=bladePts[bn-1],pp=bladePts[bn-2]||lp;
+    const dx=lp.x-pp.x,dy=lp.y-pp.y,llen=Math.sqrt(dx*dx+dy*dy)||1,fx=dx/llen,fy=dy/llen;
+    ctx.globalAlpha=lowFade*0.8; ctx.fillStyle='rgba(180,230,255,0.95)';
     ctx.beginPath();
-    for(let i=0;i<R.length;i++){i===0?ctx.moveTo(R[i].x,R[i].y):ctx.lineTo(R[i].x,R[i].y);}ctx.stroke();
-    // 上侧锐边 2-3px冰白 lighter
-    ctx.globalCompositeOperation="lighter"; ctx.globalAlpha=lowFade*0.55;
-    ctx.strokeStyle="rgba(220,245,255,0.8)"; ctx.lineWidth=2.5;
-    ctx.beginPath();
-    for(let i=0;i<L.length;i++){i===0?ctx.moveTo(L[i].x,L[i].y):ctx.lineTo(L[i].x,L[i].y);}ctx.stroke();
-    ctx.globalCompositeOperation="source-over";
-    // 锋头 — 延伸楔形
-    const last = points[n-1], prev=points[n-2]||last;
-    const dx=last.x-prev.x, dy=last.y-prev.y, len2=Math.sqrt(dx*dx+dy*dy)||1, fwdX=dx/len2, fwdY=dy/len2;
-    const fw=bladeW*0.45; // 锋头根部宽度
-    ctx.globalAlpha=lowFade*0.75; ctx.fillStyle="rgba(180,230,255,0.9)";
-    ctx.beginPath();
-    ctx.moveTo(last.x+fwdX*4 - fwdY*fw, last.y+fwdY*4 + fwdX*fw);
-    ctx.lineTo(last.x+fwdX*20, last.y+fwdY*20); // 尖端
-    ctx.lineTo(last.x+fwdX*4 + fwdY*fw, last.y+fwdY*4 - fwdX*fw);
+    ctx.moveTo(lp.x+fx*2-fy*bw*0.4, lp.y+fy*2+fx*bw*0.4);
+    ctx.lineTo(lp.x+fx*18, lp.y+fy*18);
+    ctx.lineTo(lp.x+fx*2+fy*bw*0.4, lp.y+fy*2-fx*bw*0.4);
     ctx.closePath();ctx.fill();
-    // 霜晶 4-6片
-    ctx.globalAlpha=lowFade*0.35; ctx.fillStyle="#ddeeff";
-    const sb=(points[0].x*137+points[0].y*251)%10000;
-    for(let i=0;i<5;i++){const idx=Math.floor((i+0.5)*n/5);if(idx>=n)continue;
-    const pp=points[idx], ss=sb+i*173;
-    const sx=pp.x+(Math.sin(ss)*14)*((ss%2)*2-1), sy=pp.y+Math.cos(ss)*10-4;
-    ctx.beginPath();ctx.arc(sx,sy,4+Math.abs(Math.sin(ss*0.3))*6,0,Math.PI*2);ctx.fill();}
     ctx.restore();
   }
-
-  /** 斜切刀痕形状：不规则梯形/桨形 */
   private _drawSlashShape(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, progress: number): void {
     const pw = w * progress;
     ctx.beginPath();
