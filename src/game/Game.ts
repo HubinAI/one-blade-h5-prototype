@@ -8744,17 +8744,26 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private _drawScorchGround(ctx: CanvasRenderingContext2D) {
     for (const vr of this._scorchVisualRoads) {
       if (vr.points.length < 3) continue;
-      const pts = vr.points, n = pts.length, gf = Math.min(1, vr.life / (vr.maxLife * 0.6)); if(gf<0.02)continue;
+      const pts=vr.points,n=pts.length,gf=Math.min(1,vr.life/(vr.maxLife*0.6));if(gf<0.02)continue;
+      // 生成不规则刀痕边缘
+      const L:{x:number;y:number}[]=[],R:{x:number;y:number}[]=[];
+      for(let i=0;i<n;i++){const pp=pts[Math.max(0,i-1)],pn=pts[Math.min(n-1,i+1)],dx=pn.x-pp.x,dy=pn.y-pp.y,len=Math.sqrt(dx*dx+dy*dy)||1,nx=-dy/len,ny=dx/len,s=pts[i].seed;
+      const frac=i/(n-1),taper=Math.min(frac/0.1,1,(1-frac)/0.12);
+      const wBase=40+Math.sin(s*3)*12+Math.cos(s*2.5)*10,wr=taper*wBase*(0.7+Math.cos(s*1.7)*0.3),wl=taper*wBase*(0.5+Math.sin(s*2.2)*0.5);
+      const scarOff=(i>0&&i<n-1)?Math.sin(s*5)*8:0;
+      L.push({x:pts[i].x+nx*(-wl-scarOff),y:pts[i].y+ny*(-wl-scarOff)});
+      R.push({x:pts[i].x+nx*(wr+scarOff*0.6),y:pts[i].y+ny*(wr+scarOff*0.6)});}
       ctx.save();
-      // 宽热区 80-100px 极低透明
-      ctx.globalAlpha=gf*0.08; ctx.strokeStyle="#441100"; ctx.lineWidth=88;
-      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);for(let i=1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();
-      ctx.globalAlpha=gf*0.05; ctx.strokeStyle="#662200"; ctx.lineWidth=60;
-      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);for(let i=1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();
-      // 焦痕底带 94px 静态
-      ctx.globalAlpha=gf*0.1; ctx.strokeStyle="#060200"; ctx.lineWidth=94;
-      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);for(let i=1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();
-      ctx.restore();
+      // 焦黑刀痕 — 不规则polygon
+      ctx.globalAlpha=gf*0.12;ctx.fillStyle="#060200";
+      ctx.beginPath();for(let i=0;i<L.length;i++){i===0?ctx.moveTo(L[i].x,L[i].y):ctx.lineTo(L[i].x,L[i].y);}
+      for(let i=R.length-1;i>=0;i--)ctx.lineTo(R[i].x,R[i].y);ctx.closePath();ctx.fill();
+      // 暗红灼边 — 断续跟随撕裂边缘
+      ctx.globalAlpha=gf*0.15;ctx.setLineDash([12+Math.sin(vr.maxLife-vr.life)*3,22+Math.cos(vr.maxLife-vr.life)*5]);
+      ctx.strokeStyle="#300600";ctx.lineWidth=3;
+      for(let side=0;side<2;side++){const edge=side===0?L:R;
+      ctx.beginPath();for(let i=0;i<edge.length;i++){i===0?ctx.moveTo(edge[i].x,edge[i].y):(i%3===0?ctx.moveTo(edge[i].x,edge[i].y):ctx.lineTo(edge[i].x,edge[i].y));}ctx.stroke();}
+      ctx.setLineDash([]);ctx.restore();
     }
   }
   // V0731011 火路火焰层
@@ -8763,30 +8772,37 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       if (vr.points.length < 3) continue;
       const age=vr.maxLife-vr.life,pts=vr.points,n=pts.length,gf=Math.min(1,vr.life/(vr.maxLife*0.7));if(gf<0.03)continue;
       ctx.save();
-      // 橙红主体 30-42px 温和连接
-      ctx.globalAlpha=gf*0.18; ctx.strokeStyle="#992200"; ctx.lineWidth=36;
+      // 余火基底 — 窄, 温和连接
+      ctx.globalAlpha=gf*0.12; ctx.strokeStyle="#772200"; ctx.lineWidth=18;
       ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);for(let i=1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();
-      ctx.globalAlpha=gf*0.12; ctx.strokeStyle="#bb3300"; ctx.lineWidth=18;
-      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);for(let i=1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();
-      // 金白裂缝 断续 lighter
+      // 金白热点 — 仅局部 (起刀/收刀/转折点)
       ctx.globalCompositeOperation="lighter";
-      ctx.globalAlpha=gf*0.35; ctx.strokeStyle="#ff8822"; ctx.lineWidth=5;
-      for(let i=0;i<n-1;i+=16+Math.floor(Math.abs(Math.sin(i*0.6+age))*10)){const end=Math.min(i+1+Math.floor(Math.abs(Math.sin(i*1.3))*2),n-1);ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);for(let j=i+1;j<=end;j++)ctx.lineTo(pts[j].x,pts[j].y);ctx.stroke();}
-      ctx.globalAlpha=gf*0.22; ctx.strokeStyle="#ffdd55"; ctx.lineWidth=2;
-      for(let i=2;i<n-1;i+=20+Math.floor(Math.abs(Math.sin(i*0.8+age))*9)){const end=Math.min(i+1,n-1);ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);ctx.lineTo(pts[end].x,pts[end].y);ctx.stroke();}
+      const hotspots=[0,Math.floor(n*0.25),Math.floor(n*0.5),Math.floor(n*0.75),n-1];
+      for(const hi of hotspots){if(hi>=n)continue;const p=pts[hi];
+      ctx.globalAlpha=gf*0.35;ctx.strokeStyle="#ff8822";ctx.lineWidth=6;
+      ctx.beginPath();ctx.arc(p.x,p.y,6+Math.sin(age*6+hi)*3,0,Math.PI*2);ctx.stroke();
+      ctx.globalAlpha=gf*0.22;ctx.strokeStyle="#ffdd55";ctx.lineWidth=2.5;
+      ctx.beginPath();ctx.arc(p.x,p.y,8+Math.cos(age*7+hi)*4,0,Math.PI*2);ctx.stroke();}
       ctx.globalCompositeOperation="source-over";ctx.restore();
-      // 火舌 连续分布 20-28px间距, 14-24px高(少数节点28-32px)
+      // 火焰簇 — 集中在局部区域
       ctx.save();
-      for(let i=0;i<n-1;i+=4){const a=pts[i],b=pts[Math.min(i+1,n-1)],dx=b.x-a.x,dy=b.y-a.y,len=Math.sqrt(dx*dx+dy*dy)||1,nx=-dy/len,ny=dx/len,seed=pts[i].seed,localAge=age-(this.elapsed-pts[i].bornAt);
+      for(let i=0;i<n-1;i+=3){const a=pts[i],b=pts[Math.min(i+1,n-1)],dx=b.x-a.x,dy=b.y-a.y,len=Math.sqrt(dx*dx+dy*dy)||1,nx=-dy/len,ny=dx/len,seed=pts[i].seed,localAge=age-(this.elapsed-pts[i].bornAt);
       if(localAge<0.03||localAge>1.30)continue;const lf=Math.min(1,Math.max(0,1-Math.max(0,localAge-1.30)/0.50));if(lf<0.08)continue;
-      const breath=0.5+Math.sin(age*4+seed*1.5)*0.5;
-      const tall=Math.sin(seed*3.3)>0.7;
-      const hBase=tall?26+(Math.sin(seed*2.1)*0.5+0.5)*8:18+(Math.sin(seed*2.1)*0.5+0.5)*8,th=hBase*breath*lf*gf;if(th<4)continue;
+      // 只在关键区域产生可见火焰 (前/中/后1/3处密集, 其余稀疏)
+      const frac=i/(n-1),isHot=frac<0.2||frac>0.75||(frac>0.45&&frac<0.55);
+      const density=isHot?1:(Math.abs(Math.sin(seed*5))>0.55?0.4:0);
+      if(density<0.3)continue;
+      const breath=0.5+Math.sin(age*4.5+seed*1.5)*0.5,hBase=14+(Math.sin(seed*2.1)*0.5+0.5)*8,th=hBase*breath*lf*gf*density;if(th<3)continue;
       const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
-      for(let side=-1;side<=1;side+=2){const sx=mx+nx*side*9,sy=my+ny*side*5,lean=Math.sin(seed*2.7+side)*0.16;
-      ctx.globalAlpha=gf*lf*0.5;ctx.fillStyle="#aa1400";ctx.beginPath();ctx.moveTo(sx+nx*side*2,sy);ctx.lineTo(sx+nx*side*4,sy-th*0.42);ctx.lineTo(sx+nx*side*lean*3,sy-th*0.88);ctx.lineTo(sx-nx*side*1.5,sy-th*0.3);ctx.fill();
-      ctx.globalCompositeOperation="lighter";ctx.globalAlpha=gf*lf*0.35;ctx.fillStyle="#ff7722";ctx.beginPath();ctx.moveTo(sx+nx*side*1.5,sy-th*0.18);ctx.lineTo(sx+nx*side*3,sy-th*0.62);ctx.lineTo(sx-nx*side*2,sy-th*0.7);ctx.fill();ctx.globalCompositeOperation="source-over";
-      ctx.globalAlpha=gf*lf*0.25;ctx.fillStyle="#ee5511";ctx.beginPath();ctx.moveTo(sx-nx*side*2,sy-th*0.02);ctx.lineTo(sx+nx*side*1.5,sy-th*0.38);ctx.lineTo(sx-nx*side*3.5,sy-th*0.32);ctx.fill();}}
+      for(let side=-1;side<=1;side+=2){const sx=mx+nx*side*8,sy=my+ny*side*5,lean=Math.sin(seed*2.7+side)*0.16;
+      ctx.globalAlpha=gf*lf*0.45*density;ctx.fillStyle="#aa1400";ctx.beginPath();ctx.moveTo(sx+nx*side*2,sy);ctx.lineTo(sx+nx*side*4,sy-th*0.42);ctx.lineTo(sx+nx*side*lean*3,sy-th*0.88);ctx.lineTo(sx-nx*side*1.5,sy-th*0.3);ctx.fill();
+      ctx.globalCompositeOperation="lighter";ctx.globalAlpha=gf*lf*0.3*density;ctx.fillStyle="#ff7722";ctx.beginPath();ctx.moveTo(sx+nx*side*1.5,sy-th*0.18);ctx.lineTo(sx+nx*side*3,sy-th*0.62);ctx.lineTo(sx-nx*side*2,sy-th*0.7);ctx.fill();ctx.globalCompositeOperation="source-over";
+      ctx.globalAlpha=gf*lf*0.22*density;ctx.fillStyle="#ee5511";ctx.beginPath();ctx.moveTo(sx-nx*side*2,sy-th*0.02);ctx.lineTo(sx+nx*side*1.5,sy-th*0.38);ctx.lineTo(sx-nx*side*3.5,sy-th*0.32);ctx.fill();}}
+      ctx.restore();
+      // 刀势余烬 — 沿刀方向飘散
+      ctx.save();ctx.globalAlpha=gf*0.15;ctx.fillStyle="#ff8833";
+      for(let i=0;i<n;i+=8){const p=pts[i],pn=pts[Math.min(i+1,n-1)],dx=pn.x-p.x,dy=pn.y-p.y,s=pts[i].seed;
+      ctx.beginPath();ctx.arc(p.x+dx*0.3+Math.sin(age*8+s)*3,p.y+dy*0.3-(age*6+s*2)%10,1.3,0,Math.PI*2);ctx.fill();}
       ctx.restore();
     }
   }
