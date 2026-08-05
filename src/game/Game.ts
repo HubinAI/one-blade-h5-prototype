@@ -1335,11 +1335,11 @@ export class Game {
     this.drawEnemies(ctx);
     // L3: 敌人挂载（敌人上方、浮字下方）
     this._drawEnemyScorchAttachments(ctx);
-    this._drawFrostEffects(ctx); // V0731012
     if (this._numericalTestMode) this._drawNumericalTest(ctx); // 0807-11B-1
     this._drawFireRings(ctx); // V0801008
     this.drawTractorLinks(ctx);
-    this._drawSwipeTutorial(ctx); // 0807-11A: 教学覆盖层
+    this._drawFrostEffects(ctx); // V0731012 — 在火环之上保证挂霜不被遮
+    this._drawSwipeTutorial(ctx); // 0807-11A
     // 远景山间雾气遮罩（敌人从雾后现身）
     this.drawTopMist(ctx);
     this.drawSlash(ctx);
