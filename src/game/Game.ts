@@ -8119,22 +8119,22 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const bn=bladePts.length;
     const L=[],R=[];
     const bw=Math.min(28,Math.max(18,width*1.5));
-    // 月牙：前宽后窄带弧弯
+    // 真月牙：sin(πt) 宽度, 外弧饱满 内弧收进
     for(let i=0;i<bn;i++){
       const pp=bladePts[Math.max(0,i-1)],pn=bladePts[Math.min(bn-1,i+1)],p=bladePts[i];
       const dx=pn.x-pp.x,dy=pn.y-pp.y,len=Math.sqrt(dx*dx+dy*dy)||1,nx=-dy/len,ny=dx/len;
-      const frac=i/(bn-1),taper=0.9-frac*0.55;
-      const w=bw*taper;
-      const curve=Math.sin(frac*Math.PI)*5;
-      L.push({x:p.x+nx*(-w-curve),y:p.y+ny*(-w-curve)});
-      R.push({x:p.x+nx*(w-curve*0.4),y:p.y+ny*(w-curve*0.4)});
+      const frac=i/(bn-1),sinW=Math.sin(frac*Math.PI); // 0→1→0
+      const outer=bw*sinW;
+      const inner=outer*0.35;
+      L.push({x:p.x+nx*(-outer),y:p.y+ny*(-outer)});
+      R.push({x:p.x+nx*inner,y:p.y+ny*inner});
     }
-    ctx.globalAlpha=lowFade*0.72; ctx.fillStyle='rgba(80,180,235,0.85)';
+    ctx.globalAlpha=lowFade*0.63; ctx.fillStyle='rgba(80,180,235,0.78)';
     ctx.beginPath();
     for(let i=0;i<L.length;i++){i===0?ctx.moveTo(L[i].x,L[i].y):ctx.lineTo(L[i].x,L[i].y);}
     for(let i=R.length-1;i>=0;i--)ctx.lineTo(R[i].x,R[i].y);ctx.closePath();ctx.fill();
     // 冰裂纹 2-3条
-    ctx.globalAlpha=lowFade*0.3; ctx.strokeStyle='rgba(200,240,255,0.5)'; ctx.lineWidth=1;
+    ctx.globalAlpha=lowFade*0.25; ctx.strokeStyle='rgba(200,240,255,0.45)'; ctx.lineWidth=1;
     for(let ci=0;ci<3;ci++){
       const ci0=Math.floor(bn*0.15+ci*bn*0.25),ci1=Math.floor(bn*0.2+ci*bn*0.28);
       if(ci0<bn&&ci1<bn){
@@ -8145,19 +8145,37 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ctx.stroke();
       }
     }
-    ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=lowFade*0.55;
-    ctx.strokeStyle='rgba(210,240,255,0.85)'; ctx.lineWidth=3.5;
-    ctx.beginPath();for(let i=0;i<L.length;i++){i===0?ctx.moveTo(L[i].x,L[i].y):ctx.lineTo(L[i].x,L[i].y);}ctx.stroke();
-    ctx.globalCompositeOperation='source-over'; ctx.globalAlpha=lowFade*0.45;
-    ctx.strokeStyle='rgba(20,60,120,0.6)'; ctx.lineWidth=4;
+    // 锋口仅沿外弧前段
+    ctx.globalCompositeOperation='lighter';
+    const frontSeg=Math.floor(bn*0.35);
+    ctx.globalAlpha=lowFade*0.55; ctx.strokeStyle='rgba(210,240,255,0.85)'; ctx.lineWidth=3.5;
+    ctx.beginPath();
+    for(let i=0;i<=frontSeg;i++){i===0?ctx.moveTo(L[i].x,L[i].y):ctx.lineTo(L[i].x,L[i].y);}ctx.stroke();
+    // 后段锋口渐弱
+    ctx.globalAlpha=lowFade*0.22; ctx.lineWidth=2;
+    ctx.beginPath();
+    for(let i=frontSeg;i<L.length;i++){i===frontSeg?ctx.moveTo(L[i].x,L[i].y):ctx.lineTo(L[i].x,L[i].y);}ctx.stroke();
+    ctx.globalCompositeOperation='source-over';
+    // 背刃沿内弧
+    ctx.globalAlpha=lowFade*0.35; ctx.strokeStyle='rgba(20,60,120,0.55)'; ctx.lineWidth=3;
     ctx.beginPath();for(let i=0;i<R.length;i++){i===0?ctx.moveTo(R[i].x,R[i].y):ctx.lineTo(R[i].x,R[i].y);}ctx.stroke();
+    // 前锋 24-32px
     const lp=bladePts[bn-1],pp=bladePts[bn-2]||lp;
     const dx=lp.x-pp.x,dy=lp.y-pp.y,llen=Math.sqrt(dx*dx+dy*dy)||1,fx=dx/llen,fy=dy/llen;
-    ctx.globalAlpha=lowFade*0.85; ctx.fillStyle='rgba(180,230,255,0.95)';
+    ctx.globalAlpha=lowFade*0.82; ctx.fillStyle='rgba(180,230,255,0.92)';
     ctx.beginPath();
-    ctx.moveTo(lp.x+fx*3-fy*bw*0.45, lp.y+fy*3+fx*bw*0.45);
-    ctx.lineTo(lp.x+fx*30, lp.y+fy*30);
-    ctx.lineTo(lp.x+fx*3+fy*bw*0.45, lp.y+fy*3-fx*bw*0.45);
+    ctx.moveTo(lp.x+fx*3-fy*bw*0.35, lp.y+fy*3+fx*bw*0.35);
+    ctx.lineTo(lp.x+fx*28, lp.y+fy*28);
+    ctx.lineTo(lp.x+fx*3+fy*bw*0.35, lp.y+fy*3-fx*bw*0.35);
+    ctx.closePath();ctx.fill();
+    // 后尖
+    const tp=bladePts[0],tp2=bladePts[1]||tp;
+    const tdx=tp.x-tp2.x,tdy=tp.y-tp2.y,tlen=Math.sqrt(tdx*tdx+tdy*tdy)||1,tfx=tdx/tlen,tfy=tdy/tlen;
+    ctx.globalAlpha=lowFade*0.5; ctx.fillStyle='rgba(100,200,240,0.7)';
+    ctx.beginPath();
+    ctx.moveTo(tp.x+tfx*2-tfy*3, tp.y+tfy*2+tfx*3);
+    ctx.lineTo(tp.x+tfx*8, tp.y+tfy*8);
+    ctx.lineTo(tp.x+tfx*2+tfy*3, tp.y+tfy*2-tfx*3);
     ctx.closePath();ctx.fill();
     ctx.restore();
   }
