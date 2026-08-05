@@ -22,6 +22,7 @@ export type DamageSourceType =
   | "TRIPLE_DERIVED_1"  // 三刀流副刀1
   | "TRIPLE_DERIVED_2"  // 三刀流副刀2
   | "SCORCH_TICK"       // 燎原跳伤
+  | "SCORCH_BURN"       // 燎原百斩持续烧伤
   | "SCORCH_EXPLOSION"  // 燎原收刀爆炸
   | "FROST";            // 凝霜（无直接伤害）
 
@@ -338,6 +339,16 @@ export const DAMAGE_SOURCE_REGISTRY: Record<DamageSourceType, DamageSourceConfig
     canDamageThreat: false,
     canTriggerOnHit: false,
     canTriggerOnKill: false,
+  },
+  SCORCH_BURN: {
+    sourceType: "SCORCH_BURN",
+    skillCoefficient: 0.15,  // damageSnapshot的15%
+    resolveOrder: 490,
+    tags: ["edict", "scorch", "burn", "dot"],
+    canDamageEnemy: true,
+    canDamageThreat: false,
+    canTriggerOnHit: false,
+    canTriggerOnKill: true,  // 火痕击杀可触发击杀奖励
   },
   SCORCH_EXPLOSION: {
     sourceType: "SCORCH_EXPLOSION",

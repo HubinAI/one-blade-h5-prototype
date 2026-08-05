@@ -63,10 +63,10 @@ export const RUN_BUFFS: RunBuffConfig[] = [
   },
   {
     id: "scorch",
-    name: "燎原",
-    shortName: "燎原",
-    description: "收刀时，所有点燃状态敌军额外触发爆炸",
-    feedback: "已获得：燎原，收刀即全场引爆",
+    name: "燎原百斩",
+    shortName: "燎原百斩",
+    description: "刀痕留火，持续收割",
+    feedback: "已获得：燎原百斩",
     route: "scorch",
     tier: 3,
     color: ROUTE_COLORS.scorch

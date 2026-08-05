@@ -2179,16 +2179,15 @@ export class Game {
       }
     }
 
-    // V0731011: 燎原令 — 刀路留下火径
+    // V0731011: 燎原百斩 — 刀路留下火痕
     if (this._activeEdicts.some(e => e.id === "scorch") && trail.points.length >= 2) {
       this._scorchTrails.push({
         points: trail.points.map(p => ({ x: p.x, y: p.y })),
-        life: 2.5,
-        maxLife: 2.5,
-        lastTickTime: 0,
+        life: 1.8, maxLife: 1.8, tickTimer: 0,
+        damageSnapshot: trail._damageSnapshot ?? this.captureDamageSnapshot(),
+        parentId: trail.id,
       });
-      // 最多保留3条
-      while (this._scorchTrails.length > 3) this._scorchTrails.shift();
+      while (this._scorchTrails.length > 6) this._scorchTrails.shift();
     }
 
     // V0731012: 凝霜令 — 主刀命中未死亡敌人施加霜冻
@@ -2196,15 +2195,9 @@ export class Game {
       this._applyFrostToTrailHits(trail);
     }
 
-    // ---- 燎原路线收刀特效：所有点燃敌军额外爆炸 ----
-    if (this.hasBuff("scorch")) {
-      this.triggerScorchEnd(trail);
-    }
-
+    // V0731012: 凝霜令 — 主刀命中未死亡敌人施加霜冻
     const slashBonus = this.getSlashScoreBonus(trail.kills);
     if (slashBonus > 0) this.score += slashBonus;
-
-    // V0730001: 第1关使用统一刀势结算，其余关卡保持旧返还逻辑
     const isLevel1 = this.isLogicalLevel1();
     if (isLevel1) {
       // V0730015: 统一结算改用 directMainKills（不含连锁/爆炸/副刀）
@@ -2862,8 +2855,9 @@ export class Game {
     this._tripleLeftTrail = mk("_tl"); this._tripleRightTrail = mk("_tr");
   }
 
-  // ═══════════════════ V0731011: 燎原令火径 ═══════════════════
-  private _scorchTrails: { points: { x: number; y: number }[]; life: number; maxLife: number; lastTickTime: number }[] = [];
+  /** V0731011: 燎原百斩 — 火痕留场 */
+  private _scorchTrails: { points: { x: number; y: number }[]; life: number; maxLife: number; tickTimer: number; damageSnapshot: PlayerRunStats; parentId: string }[] = [];
+  private _scorchGlobalTick = 0;
   // ═══════════════════ V0731011 End ═══════════════════
 
   // V0731012: 凝霜令 — 施加 + 更新
@@ -2902,42 +2896,60 @@ export class Game {
     }
   }
 
-  // V0731011: 火径更新 + 敌人伤害
+  // V0731011: 燎原百斩 — 火痕更新 + 敌人伤害
   private _updateScorchTrails(dt: number) {
+    const tickInterval = 0.25, validDist = 36; // 有效宽度 ≈ 40px
     for (const t of this._scorchTrails) {
-      t.life -= dt;
-      t.lastTickTime += dt;
-      if (t.lastTickTime < 0.35) continue;
-      t.lastTickTime = 0;
+      t.life -= dt; t.tickTimer += dt;
+      // 首次进入可立即触发：tickTimer 初始为0，第一帧累积dt后可能<interval，但若敌人已经在范围内应立即触发
+      // 使用一个布尔标记首次触发
+      if ((t as any)._tickedOnce && t.tickTimer < tickInterval) continue;
+      if (!(t as any)._tickedOnce) (t as any)._tickedOnce = true;
+      else t.tickTimer -= tickInterval;
+      this._scorchGlobalTick++;
+      const gTick = this._scorchGlobalTick;
       for (const enemy of this.enemies) {
         if (!enemy.alive) continue;
-        if ((enemy as any)._scorchTickAt === t) continue;
-        let minDist = Infinity;
-        for (let i = 0; i < t.points.length - 1; i++) {
-          const a = t.points[i], b = t.points[i + 1];
-          const abx = b.x - a.x, aby = b.y - a.y;
-          const eax = a.x - enemy.x, eay = a.y - enemy.y;
-          const dot = abx * abx + aby * aby;
-          const tt = dot > 1e-6 ? clamp(-(eax * abx + eay * aby) / dot, 0, 1) : 0;
-          const cx = a.x + abx * tt, cy = a.y + aby * tt;
-          minDist = Math.min(minDist, Math.hypot(cx - enemy.x, cy - enemy.y));
+        if ((enemy as any)._scorchTickG === gTick) continue;
+        if (!this._enemyInScorchRange(t, enemy, validDist)) continue;
+        (enemy as any)._scorchTickG = gTick;
+        const r = resolveDamage({
+          actionId: this.nextId("scorch"), parentActionId: t.parentId || "scorch",
+          sourceType: "SCORCH_BURN", sourceConfig: DAMAGE_SOURCE_REGISTRY.SCORCH_BURN,
+          attackerId: "player", targetId: enemy.id, targetCategory: "ENEMY",
+          skillCoefficient: 0.15, stats: t.damageSnapshot,
+          bladeBand: "mid", tags: ["scorch", "burn"],
+          hitPos: { x: enemy.x, y: enemy.y }, timestamp: this.elapsed,
+        }, enemy.hp, enemy.maxHp, enemy.alive, !!enemy.eliteKind);
+        if (r?.isAccepted && r.resolvedDamage > 0) {
+          const wasAlive = enemy.alive;
+          const stubTrail: SlashTrail = { id: `scorch_${t.parentId}`, kills: 0, chain: 0, directMainKills: 0, active: false } as any;
+          this.damageEnemy(enemy, r.resolvedDamage, stubTrail, false, "scorch");
+          this.aggregateAndMaybeFlush(`scorch_${enemy.id}_${gTick}`, r.resolvedDamage, { x: enemy.x, y: enemy.y }, 'SCORCH_BURN', 'ENEMY', 600, t.damageSnapshot.entryAttack, false, true);
+          if (!enemy.alive && wasAlive) {
+            // 火痕击杀由 damageEnemy 自动计入连击
+          }
         }
-        if (minDist > enemy.radius + 16) continue;
-        (enemy as any)._scorchTickAt = t;
-        const isElite = !!enemy.eliteKind;
-        const dmg = Math.max(1, Math.ceil(isElite ? 2 : 4));
-        const safeTrail = this.currentSlash ?? { kills: 0, chain: 0, directMainKills: 0, tier: "weak", energyBank: 0, id: "scorch", points: [], active: false, explosionCount: 0, coreCollapseCount: 0 } as any;
-        this.damageEnemy(enemy, dmg, safeTrail, false, "scorch");
-        // 0807-11B-2: 燎原聚合
-        const sKey = `scorch_${enemy.id}`;
-        this.aggregateAndMaybeFlush(sKey, dmg, { x: enemy.x, y: enemy.y }, 'SCORCH', isElite ? 'ELITE' : 'NORMAL', 600, 100, !enemy.alive, true);
-        (enemy as any)._scorchBurning = 0.6;
+        (enemy as any)._scorchBurning = 0.5;
       }
     }
     for (let i = this._scorchTrails.length - 1; i >= 0; i--) {
       if (this._scorchTrails[i].life <= 0) this._scorchTrails.splice(i, 1);
     }
   }
+
+  private _enemyInScorchRange(t: typeof this._scorchTrails[0], enemy: Enemy, dist: number): boolean {
+    let minDist = Infinity;
+    for (let i = 0; i < t.points.length - 1; i++) {
+      const a = t.points[i], b = t.points[i+1], abx = b.x-a.x, aby = b.y-a.y, eax = a.x-enemy.x, eay = a.y-enemy.y;
+      const dot = abx*abx+aby*aby, tt = dot>1e-6 ? clamp(-(eax*abx+eay*aby)/dot,0,1) : 0;
+      minDist = Math.min(minDist, Math.hypot(a.x+abx*tt-enemy.x, a.y+aby*tt-enemy.y));
+      if (minDist <= dist + enemy.radius) return true;
+    }
+    return minDist <= dist + enemy.radius;
+  }
+
+  // V0731011 本地端点函数 END
 
   /** V0730019: L1副刀解锁 — 前三组教学期间不永久解锁，等completed后 */
   private _checkL1SubBladeUnlock(): boolean {
@@ -8580,72 +8592,29 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
   // V0731011: 火径绘制（强化版）
   private _drawScorchTrails(ctx: CanvasRenderingContext2D) {
-    const now = performance.now() / 1000;
     for (const t of this._scorchTrails) {
       if (t.points.length < 2) continue;
       const a = clamp(t.life / t.maxLife, 0, 1);
-      // 底层深橙轮廓（旧基线保留）
-      ctx.save(); ctx.globalAlpha = a * 0.55; ctx.strokeStyle = "#cc4400"; ctx.lineWidth = 10; ctx.lineCap = "round";
+      ctx.save(); ctx.globalAlpha = a * 0.6; ctx.lineCap = "round";
+      // 外焰 — 深红底色
+      ctx.strokeStyle = "#992200"; ctx.lineWidth = 14;
       ctx.beginPath(); ctx.moveTo(t.points[0].x, t.points[0].y);
-      for (let i = 1; i < t.points.length; i++) ctx.lineTo(t.points[i].x, t.points[i].y);
-      ctx.stroke();
-      // 中层火焰核心
-      ctx.globalAlpha = a * 0.7; ctx.strokeStyle = "#ff8833"; ctx.lineWidth = 5;
+      for (let i = 1; i < t.points.length; i++) ctx.lineTo(t.points[i].x, t.points[i].y); ctx.stroke();
+      // 中层 — 橙红热痕
+      ctx.globalAlpha = a * 0.7; ctx.strokeStyle = "#e04400"; ctx.lineWidth = 8;
       ctx.beginPath(); ctx.moveTo(t.points[0].x, t.points[0].y);
-      for (let i = 1; i < t.points.length; i++) ctx.lineTo(t.points[i].x, t.points[i].y);
-      ctx.stroke();
-      // 亮黄内核
-      ctx.globalAlpha = a * 0.5; ctx.strokeStyle = "#ffcc44"; ctx.lineWidth = 2;
+      for (let i = 1; i < t.points.length; i++) ctx.lineTo(t.points[i].x, t.points[i].y); ctx.stroke();
+      // 内层 — 金色火核 + 余烬粒子
+      ctx.globalAlpha = a * 0.5; ctx.strokeStyle = "#ffaa33"; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.moveTo(t.points[0].x, t.points[0].y);
-      for (let i = 1; i < t.points.length; i++) ctx.lineTo(t.points[i].x, t.points[i].y);
-      ctx.stroke();
-      // 跳动火苗点缀
-      ctx.globalAlpha = a * 0.5;
-      const sampleGap = Math.max(1, Math.floor(t.points.length / 10));
-      for (let i = 0; i < t.points.length; i += sampleGap) {
-        const p = t.points[i];
-        const flicker = 1 + Math.sin(now * 12 + i * 0.7) * 0.4;
-        ctx.globalAlpha = a * 0.35 * flicker;
-        ctx.fillStyle = "#ffaa33";
-        ctx.beginPath(); ctx.arc(p.x + (Math.sin(now * 8 + i) * 4), p.y - 4 * flicker, 3 * flicker, 0, Math.PI * 2); ctx.fill();
-        // 火星偶尔飞出
-        if (Math.sin(now * 15 + i * 2.3) > 0.3) {
-          ctx.globalAlpha = a * 0.25;
-          ctx.fillStyle = "#ffcc88";
-          ctx.beginPath();
-          ctx.arc(p.x + (Math.sin(now * 10 + i) * 6), p.y - 6 - Math.abs(Math.sin(now * 7 + i)) * 8, 2, 0, Math.PI * 2);
-          ctx.fill();
+      for (let i = 1; i < t.points.length; i++) ctx.lineTo(t.points[i].x, t.points[i].y); ctx.stroke();
+      // 余烬火星
+      if (a > 0.15) {
+        ctx.globalAlpha = a * 0.3; ctx.fillStyle = "#ff6644";
+        for (let i = 0; i < t.points.length; i += 3) {
+          const p = t.points[i]; const ox = (Math.sin(t.life*8+i)*8), oy = Math.cos(t.life*7+i)*8 - t.life*12;
+          ctx.beginPath(); ctx.arc(p.x+ox, p.y+oy, Math.max(1, 2*a), 0, Math.PI*2); ctx.fill();
         }
-      }
-      // 轻烟
-      ctx.globalAlpha = a * 0.12;
-      ctx.strokeStyle = "rgba(180,160,140,0.4)"; ctx.lineWidth = 16;
-      ctx.beginPath(); ctx.moveTo(t.points[0].x, t.points[0].y);
-      for (let i = 1; i < t.points.length; i++) ctx.lineTo(t.points[i].x, t.points[i].y);
-      ctx.stroke();
-      ctx.restore();
-    }
-    // 敌人挂火——延长燃烧显示
-    for (const enemy of this.enemies) {
-      if (!enemy.alive) continue;
-      const burn = (enemy as any)._scorchBurning ?? 0;
-      if (burn <= 0) continue;
-      (enemy as any)._scorchBurning = Math.max(0, burn - 0.012); // 慢衰减，覆盖两个伤害间隔
-      const pulse = 0.6 + Math.sin(now * 14) * 0.4;
-      ctx.save();
-      ctx.globalAlpha = burn * 0.65;
-      ctx.fillStyle = "#ff5500";
-      ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius + 5, 0, Math.PI * 2); ctx.fill();
-      ctx.globalAlpha = burn * 0.5 * pulse;
-      ctx.fillStyle = "#ffbb33";
-      ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius + 2, 0, Math.PI * 2); ctx.fill();
-      // 余烬火花
-      if (burn > 0.3) {
-        ctx.globalAlpha = burn * 0.3;
-        ctx.fillStyle = "#ffeebb";
-        ctx.beginPath();
-        ctx.arc(enemy.x + Math.sin(now * 18) * 4, enemy.y - enemy.radius - 4 - Math.abs(Math.sin(now * 10)) * 5, 2.5, 0, Math.PI * 2);
-        ctx.fill();
       }
       ctx.restore();
     }
