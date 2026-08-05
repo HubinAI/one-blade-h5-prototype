@@ -887,7 +887,7 @@ export class Game {
       (window as any).__grantTripleSlash = () => {
         self._activeEdicts.push({ id: "triple_slash", level: 1 });
       };
-      // V0731011: 直接授予燎原令
+      // V0731011: 直接授予燎原百斩
       (window as any).__grantScorch = () => {
         self._activeEdicts.push({ id: "scorch", level: 1 });
       };
@@ -8531,7 +8531,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 轮转+揭示（exiting阶段隐藏原始轮转）
     const EDICT_META: Record<EdictId, { name: string; icon: string; desc: string; color: string; glow: string }> = {
       triple_slash: { name: "三刀流", icon: "⚔️", desc: "一刀化三，横扫三线", color: "#88bbff", glow: "#4488dd" },
-      scorch: { name: "燎原令", icon: "🔥", desc: "刀过留火径", color: "#ff8833", glow: "#dd4400" },
+      scorch: { name: "燎原百斩", icon: "🔥", desc: "刀痕留火，持续收割", color: "#ff8833", glow: "#dd4400" },
       frost: { name: "凝霜令", icon: "❄️", desc: "命中附凝霜", color: "#aaddff", glow: "#6699cc" },
     };
     const iconY = cy - 20;
