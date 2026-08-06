@@ -167,6 +167,9 @@ export class Game {
   private energy: number = 0;
   /** V0723014: Reactive 模式刀势上限（可成长，默认 100） */
   private reactiveBladeMax: number = BLADE_MOMENTUM_CONFIG.baseMax;
+  /** 0807-11D-4B: 满势爆发状态 */
+  private _momentumState: 'charging' | 'armed' | 'bursting' = 'charging';
+  private _burstRemaining = 0;  // 爆发倒计时(秒)
   /** V0723014: Reactive 模式肉鸽修正器 */
   private reactiveBladeRunModifiers: BladeRunModifiers = { ...DEFAULT_BLADE_RUN_MODIFIERS };
   /** V0730001: 统一刀势上限（普通关用，默认 100，可成长） */
@@ -1223,7 +1226,7 @@ export class Game {
     const effectiveDrumTimer = this.drumTimer + this.chestMomentumTimer;
     // V0730001: 第1关使用统一被动恢复（20%封顶，2%/秒），其余关卡保持旧逻辑
     const isLevel1 = this.isLogicalLevel1();
-    if (!this.currentSlash?.active && !this.pendingSlash && this.regenDelayTimer <= 0 && this.warDrumNoDecayTimer <= 0) {
+    if (!this.currentSlash?.active && !this.pendingSlash && this.regenDelayTimer <= 0 && this.warDrumNoDecayTimer <= 0 && this._momentumState !== 'bursting') {
       if (isLevel1) {
         const recovery = resolveBladePassiveRecovery(this.energy, this.bladeMomentumMax, scaledDt);
         this.energy = recovery.newCurrent;
@@ -1234,6 +1237,19 @@ export class Game {
     // 鼓阵：击杀后1s内刀势不衰减（不扣regenDelay）
     if (!this.currentSlash?.active && this.warDrumNoDecayTimer > 0) {
       // 不恢复也不衰减，维持当前刀势
+    }
+
+    // ═══ 0807-11D-4B: 满势爆发 ═══
+    if (this._momentumState === 'bursting') {
+      this._burstRemaining -= scaledDt;
+      if (this._burstRemaining <= 0) {
+        this._momentumState = 'charging';
+        this.energy = Math.round(BALANCE.swordEnergy.max * 0.35);
+        this._burstRemaining = 0;
+      }
+    } else if (this._momentumState === 'charging' && this.energy >= BALANCE.swordEnergy.max) {
+      this._momentumState = 'armed';
+      this.energy = BALANCE.swordEnergy.max;
     }
 
     // V0730001: high档位就绪提示（ratio ≥ 70%）
@@ -1372,6 +1388,7 @@ export class Game {
       ctx.restore();
     }
     this.drawChestDrop(ctx);
+    this._drawBurstFlame(ctx); // 0807-11D-4B
     this.drawEdictRewardModal(ctx);
     this._drawChestOpeningFlow(ctx); // V0731008
     this.drawMidfieldEventBorder(ctx);
@@ -1945,6 +1962,8 @@ export class Game {
   }
 
   private startSlash(pos: Vec2, pending?: NonNullable<typeof this.pendingSlash>) {
+    // 0807-11D-4B: armed → bursting
+    if (this._momentumState === 'armed') { this._momentumState = 'bursting'; this._burstRemaining = 5.0; }
     const lockedEnergy = pending ? pending.lockedEnergy : clamp(this.energy, 0, BALANCE.swordEnergy.max);
     // V0723014-Final.1 P0-1: Reactive 模式起刀时继承 pending.lockedMomentum（PointerDown 时锁定）。
     // 禁止重新调用 this.getReactiveBladeMomentum()，避免 pending 期间 max 变化导致快照不一致。
@@ -7537,6 +7556,30 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.fillStyle = "#ffd35a";
     ctx.fillText(inBurst ? "爆发中" : "已激活", 0, 29);
 
+    ctx.restore();
+  }
+
+  /** 0807-11D-4B: 满势爆发边缘金焰 */
+  private _drawBurstFlame(ctx: CanvasRenderingContext2D) {
+    if (this._momentumState !== 'bursting') return;
+    const remain = this._burstRemaining;
+    const urgency = remain < 1.0 ? 1 + (1 - remain) * 3 : 1;
+    const pulse = Math.sin(this.elapsed * 6) * 0.3 + 0.7;
+    const alpha = 0.22 * pulse * urgency;
+    ctx.save();
+    ctx.globalAlpha = Math.min(0.5, alpha);
+    // 四边金白焰 (渐变窄带)
+    const edgeW = 6;
+    const grad = ctx.createLinearGradient(0, 0, 0, DESIGN_HEIGHT);
+    grad.addColorStop(0, '#ffd35a'); grad.addColorStop(0.5, '#ff9944'); grad.addColorStop(1, '#ffd35a');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, edgeW, DESIGN_HEIGHT);        // 左
+    ctx.fillRect(DESIGN_WIDTH - edgeW, 0, edgeW, DESIGN_HEIGHT); // 右
+    const gradH = ctx.createLinearGradient(0, 0, DESIGN_WIDTH, 0);
+    gradH.addColorStop(0, '#ffd35a'); gradH.addColorStop(0.5, '#ff9944'); gradH.addColorStop(1, '#ffd35a');
+    ctx.fillStyle = gradH;
+    ctx.fillRect(0, 0, DESIGN_WIDTH, 4);              // 上
+    ctx.fillRect(0, DESIGN_HEIGHT - 4, DESIGN_WIDTH, 4); // 下
     ctx.restore();
   }
 
