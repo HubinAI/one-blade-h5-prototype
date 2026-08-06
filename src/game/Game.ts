@@ -5955,6 +5955,7 @@ export class Game {
     const currPhase = postEdictDirector.currentPhase ?? '';
     if (currPhase && currPhase !== prevPhase) {
       this._directorPhaseStartMs = elapsedMs;
+      postEdictDirector.setPhaseStartMs(elapsedMs);
       if (!this._hpTierTracker) this._hpTierTracker = { phase: currPhase, trash: 0, tough: 0, wall: 0 };
       this._hpTierTracker.phase = currPhase;
     }
@@ -7607,6 +7608,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.edictBurstRoundTotal = postWaves.length;
     // 0807-11D: 同时启动导演系统（chest_closed / chest_paused_skip 路径也会触发）
     postEdictDirector.start();
+    postEdictDirector.setPhaseStartMs(this.elapsed * 1000);
     this._directorPhaseStartMs = this.elapsed * 1000;
     this._hpTierTracker = { phase: 'P1', trash: 0, tough: 0, wall: 0 };
     this._edictArrivalTimer = 0;

@@ -385,6 +385,11 @@ export class PostEdictDirector {
     return this.beats[this._beatIndex].id;
   }
 
+  /** 由 Game.ts 在阶段切换时同步，用于 notBefore 计时 */
+  setPhaseStartMs(ms: number): void {
+    this._phaseStartMs = ms;
+  }
+
   canSpawnElite(): boolean {
     return this._allComplete && this._finalAfterglowTimer >= FINAL_AFTERGLOW_SEC;
   }
@@ -593,7 +598,8 @@ export class PostEdictDirector {
     this._phaseBeatBridgeUsed.add(this._beatIndex);
 
     const bridgeCount = BRIDGE_COUNT_MIN + Math.floor(Math.random() * (BRIDGE_COUNT_MAX - BRIDGE_COUNT_MIN + 1));
-    const actualCount = Math.min(bridgeCount, beat.totalCount - this._phaseGenerated);
+    // 以阶段剩余预算为上限, 而非单节拍
+    const actualCount = Math.min(bridgeCount, phase.totalEnemies - this._phaseGenerated);
 
     if (actualCount <= 0) return [];
 
@@ -618,14 +624,25 @@ export class PostEdictDirector {
   /** 推进到下一节拍，考虑桥接扣除 */
   private _advanceToNextBeat(nextBeatIndex: number): void {
     this._beatIndex = nextBeatIndex;
-    this._microBatchIndex = 0;
-    this._currentBeatBridgeDone = false;
-
-    // 扣减桥接量：从下一节拍的剩余预算中减
-    if (this._currentBeatBridged > 0) {
-      this._phaseGenerated -= this._currentBeatBridged;
-      this._currentBeatBridged = 0;
+    // 桥接扣除：跳过已被桥接占用的微批次
+    const bridged = this._currentBeatBridged;
+    if (bridged > 0) {
+      const nextBeat = this.beats[nextBeatIndex];
+      let remaining = bridged;
+      let skipIdx = 0;
+      while (remaining > 0 && skipIdx < nextBeat.microBatches.length) {
+        const mb = nextBeat.microBatches[skipIdx];
+        const mbCount = mb.hpTiers.reduce((s, [, c]) => s + c, 0);
+        remaining -= mbCount;
+        skipIdx++;
+      }
+      this._microBatchIndex = skipIdx; // 从第一个未桥接的微批次开始
+      this._phaseGenerated -= bridged;
+    } else {
+      this._microBatchIndex = 0;
     }
+    this._currentBeatBridgeDone = false;
+    this._currentBeatBridged = 0;
   }
 
   /** 推进到下一阶段 */
@@ -652,9 +669,10 @@ export class PostEdictDirector {
 
   /** 生成节拍的第一个微批次 */
   private _spawnFirstMicroBatch(beat: DirectorBeat, phase: PhaseConfig): DirectorSpawnRequest[] {
-    if (beat.microBatches.length === 0) return [];
-    const mb = beat.microBatches[0];
-    this._microBatchIndex = 1;
+    const startIdx = this._microBatchIndex;
+    if (startIdx >= beat.microBatches.length) return [];
+    const mb = beat.microBatches[startIdx];
+    this._microBatchIndex = startIdx + 1;
 
     const items: SpawnItem[] = [];
     for (const [tier, cnt] of mb.hpTiers) {
@@ -670,25 +688,7 @@ export class PostEdictDirector {
       }
     }
 
-    // 桥接扣减：从节拍总量扣除
-    const bridged = this._currentBeatBridged;
-    const effectiveCount = items.length - bridged;
-    this._phaseGenerated += effectiveCount;
-
-    // 如果桥接量大于第一个微批次，继续往下个微批次扣
-    let remaining = bridged - items.length;
-    let mbIdx = 1;
-    while (remaining > 0 && mbIdx < beat.microBatches.length) {
-      const nextMb = beat.microBatches[mbIdx];
-      const nextCount = nextMb.hpTiers.reduce((s, [, c]) => s + c, 0);
-      remaining -= nextCount;
-      mbIdx += 1;
-    }
-    if (mbIdx > this._microBatchIndex) {
-      this._microBatchIndex = mbIdx;
-    }
-
-    this._currentBeatBridged = 0;
+    this._phaseGenerated += items.length;
     this._nextState = 'SPAWN';
     return [{ phase: beat.phase, items }];
   }
