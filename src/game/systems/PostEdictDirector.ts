@@ -64,6 +64,13 @@ export function isEnemyCombatTargetable(enemy: { _directorEntryState?: string; a
 }
 
 /** 导演敌人是否处于影化状态（不可战斗） */
+/** 0807-11D-3A: ease-out quad (p 0→1) */
+export function easeOutQuad(t: number): number {
+  const p = Math.max(0, Math.min(1, t));
+  return 1 - (1 - p) * (1 - p);
+}
+
+/** 导演敌人是否处于影化状态（不可战斗） */
 export function isShadowState(enemy: { _directorEntryState?: string }): boolean {
   const s = enemy._directorEntryState;
   return s === 'shadow_fall' || s === 'shadow_deploy' || s === 'materializing';
@@ -105,10 +112,12 @@ export const FORMATION_ANCHORS: Record<string, string> = {
   scattered_walls:  'center',
 };
 
-// 入场时长常量 (秒)
-export const SHADOW_FALL_DURATION = 0.33;
-export const SHADOW_DEPLOY_DURATION = 0.28;
-export const MATERIALIZE_DURATION = 0.10;
+// 入场时长常量 (秒) — 0807-11D-3A
+export const SHADOW_FALL_DURATION = 0.60;
+export const SHADOW_DEPLOY_HOLD = 0.10;    // 集结点停留
+export const SHADOW_DEPLOY_SPREAD = 0.40;  // 散阵
+export const SHADOW_DEPLOY_DURATION = SHADOW_DEPLOY_HOLD + SHADOW_DEPLOY_SPREAD; // 0.50
+export const MATERIALIZE_DURATION = 0.15;
 
 // ═══════════════════ HP 配置 ═══════════════════
 

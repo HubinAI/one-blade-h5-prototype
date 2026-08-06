@@ -28,7 +28,7 @@ import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles"
 import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, resolveDamage, resolveThreatDamage, type PlayerRunStats, type DamageRequest, type DamageResult, type DamageSourceType } from "./systems/damageSystem";
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
-import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS, SHADOW_FALL_DURATION, SHADOW_DEPLOY_DURATION, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
+import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, easeOutQuad, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS, SHADOW_FALL_DURATION, SHADOW_DEPLOY_DURATION, SHADOW_DEPLOY_HOLD, SHADOW_DEPLOY_SPREAD, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
@@ -4568,47 +4568,80 @@ export class Game {
       const isCharging = enemy.chargeTimer !== undefined && enemy.chargeTimer >= 0;
       if (!isCharging) {
 
-        // ═══ 0807-11D-3: 影化入场生命周期 ═══
+        // ═══ 0807-11D-3A: 影化入场 — 固定起终点lerp ═══
         if (enemy._directorEntryState === 'shadow_fall') {
           enemy._directorEntryTimer = (enemy._directorEntryTimer || 0) + dt;
-          const progress = Math.min(1, enemy._directorEntryTimer / (SHADOW_FALL_DURATION));
-          const ax = enemy._directorEntryAnchorX ?? enemy.x;
-          const ay = enemy._directorEntryAnchorY ?? (BATTLEFIELD_ZONES.midfieldStartY - 30);
-          enemy.x = enemy.x + (ax - enemy.x) * progress * 3;
-          enemy.y = enemy.y + (ay - enemy.y) * progress * 3;
-          (enemy as any)._shadowAlpha = 0.30 + progress * 0.12;
-          if (enemy._directorEntryTimer >= SHADOW_FALL_DURATION) {
+          // 首次进入记录起终点
+          if (!(enemy as any)._shadowStartX) {
+            (enemy as any)._shadowStartX = enemy.x;
+            (enemy as any)._shadowStartY = enemy.y;
+            (enemy as any)._shadowTargetX = enemy._directorEntryAnchorX ?? enemy.x;
+            (enemy as any)._shadowTargetY = enemy._directorEntryAnchorY ?? (BATTLEFIELD_ZONES.midfieldStartY - 30);
+          }
+          const sx = (enemy as any)._shadowStartX;
+          const sy = (enemy as any)._shadowStartY;
+          const tx = (enemy as any)._shadowTargetX;
+          const ty = (enemy as any)._shadowTargetY;
+          const p = Math.min(1, enemy._directorEntryTimer / SHADOW_FALL_DURATION);
+          const ep = easeOutQuad(p);
+          enemy.x = sx + (tx - sx) * ep;
+          enemy.y = sy + (ty - sy) * ep;
+          (enemy as any)._shadowAlpha = 0.30 + p * 0.12;
+          if (p >= 1) {
+            enemy.x = tx; enemy.y = ty; // 强制吸附
             enemy._directorEntryState = 'shadow_deploy';
             enemy._directorEntryTimer = 0;
+            // 清理fall记录，deploy将重录
+            delete (enemy as any)._shadowStartX;
+            delete (enemy as any)._shadowStartY;
           }
-          continue; // shadow fall: 不参与正常移动
+          continue;
         }
 
         if (enemy._directorEntryState === 'shadow_deploy') {
           enemy._directorEntryTimer = (enemy._directorEntryTimer || 0) + dt;
-          const progress = Math.min(1, enemy._directorEntryTimer / (SHADOW_DEPLOY_DURATION));
-          const ease = 1 - Math.pow(1 - progress, 2); // ease-out
-          const tx = enemy._directorTargetX ?? enemy.x;
-          const ty = enemy._directorTargetY ?? enemy.y;
-          enemy.x = enemy.x + (tx - enemy.x) * ease * 3;
-          enemy.y = enemy.y + (ty - enemy.y) * ease * 3;
-          (enemy as any)._shadowAlpha = 0.42;
-          if (enemy._directorEntryTimer >= SHADOW_DEPLOY_DURATION) {
+          const elapsed = enemy._directorEntryTimer;
+          // 首次进入记录起终点（当前锚点→最终队形位置）
+          if (!(enemy as any)._shadowStartX) {
+            (enemy as any)._shadowStartX = enemy.x;
+            (enemy as any)._shadowStartY = enemy.y;
+            (enemy as any)._shadowTargetX = enemy._directorTargetX ?? enemy.x;
+            (enemy as any)._shadowTargetY = enemy._directorTargetY ?? enemy.y;
+          }
+          const sx = (enemy as any)._shadowStartX;
+          const sy = (enemy as any)._shadowStartY;
+          const tx = (enemy as any)._shadowTargetX;
+          const ty = (enemy as any)._shadowTargetY;
+          if (elapsed < SHADOW_DEPLOY_HOLD) {
+            // 保持集结点位置
+            (enemy as any)._shadowAlpha = 0.42;
+          } else {
+            const spreadElapsed = elapsed - SHADOW_DEPLOY_HOLD;
+            const p = Math.min(1, spreadElapsed / SHADOW_DEPLOY_SPREAD);
+            const ep = easeOutQuad(p);
+            enemy.x = sx + (tx - sx) * ep;
+            enemy.y = sy + (ty - sy) * ep;
+            (enemy as any)._shadowAlpha = 0.42;
+          }
+          if (elapsed >= SHADOW_DEPLOY_DURATION) {
+            enemy.x = tx; enemy.y = ty; // 强制吸附
             enemy._directorEntryState = 'materializing';
             enemy._directorEntryTimer = 0;
+            delete (enemy as any)._shadowStartX;
+            delete (enemy as any)._shadowStartY;
           }
-          continue; // shadow deploy: 不参与正常移动
+          continue;
         }
 
         if (enemy._directorEntryState === 'materializing') {
           enemy._directorEntryTimer = (enemy._directorEntryTimer || 0) + dt;
-          const prog = Math.min(1, enemy._directorEntryTimer / (MATERIALIZE_DURATION));
-          (enemy as any)._shadowAlpha = 0.42 + prog * 0.58;
-          if (enemy._directorEntryTimer >= (MATERIALIZE_DURATION)) {
+          const p = Math.min(1, enemy._directorEntryTimer / MATERIALIZE_DURATION);
+          (enemy as any)._shadowAlpha = 0.42 + p * 0.58;
+          if (p >= 1) {
             enemy._directorEntryState = 'active';
             (enemy as any)._shadowAlpha = 1;
           }
-          continue; // materializing: 不参与正常移动
+          continue;
         }
         // ═══ END 影化生命周期 ═══
 
@@ -9392,6 +9425,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         const scale = layer === "rear" ? dd.rearScale : layer === "front" ? dd.frontScale : dd.midScale;
         ctx.scale(scale, scale);
         ctx.globalAlpha = layer === "rear" ? dd.rearAlpha : 1;
+      }
+      // 0807-11D-3A: 影化透明度 (叠加到现有 globalAlpha)
+      const shadowAlpha = (enemy as any)._shadowAlpha;
+      if (shadowAlpha !== undefined && shadowAlpha < 1) {
+        ctx.globalAlpha *= shadowAlpha;
       }
       ctx.rotate(Math.sin(enemy.wobble * 2) * 0.04);
       ctx.shadowColor = "rgba(0,0,0,0.45)";
