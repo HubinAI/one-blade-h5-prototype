@@ -26,6 +26,8 @@ export interface SpawnItem {
   /** 0807-11D-3: 影化锚点 */
   anchorId: string; anchorX: number; anchorY: number;
   skipShadow: boolean;
+  /** 0807-11D-4A: 放置模式 */
+  placementMode?: 'clustered' | 'special';
 }
 
 export interface DirectorSpawnRequest {
@@ -136,6 +138,37 @@ function formationSeed(beatId: string, mbIdx: number): number {
   return ((h * 17 + mbIdx) | 0) >>> 0;
 }
 
+// ═══ 0807-11D-4A: 确定性PRNG (Mulberry32) ═══
+function mulberry32(a: number): () => number {
+  return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+
+// ═══ 4A 阵位构建 ═══
+export interface PlacementResult { x: number; y: number; }
+
+/** 统一的微批次阵位生成 */
+export function buildMicroBatchPlacements(
+  mb: MicroBatch, phase: string, beatId: string, mbIdx: number, placementSeed: number,
+): PlacementResult[] {
+  const mode = mb.placementMode || inferPlacementMode(beatId, mbIdx);
+  const seed = ((placementSeed * 31 + hashStr(beatId) * 7 + mbIdx) | 0) >>> 0;
+  const rng = mulberry32(seed);
+  const rand = (min: number, max: number) => min + rng() * (max - min);
+
+  if (mode === 'clustered') {
+    return buildClustered(mb, phase, rng, rand);
+  }
+  return buildSpecial(mb, rng, rand);
+}
+
+function hashStr(s: string): number { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h; }
+
+function inferPlacementMode(beatId: string, mbIdx: number): 'clustered' | 'special' {
+  // 80% clustered, 20% special (beatId+mbIdx→确定性)
+  const h = (hashStr(beatId) * 13 + mbIdx) & 0xff;
+  return h < 204 ? 'clustered' : 'special';
+}
+
 /** 咬定至安全区 */
 function clampToSafeX(x: number): number {
   return Math.max(BATTLE_SAFE_X.normalMin + 8, Math.min(BATTLE_SAFE_X.normalMax - 8, x));
@@ -218,6 +251,72 @@ function rowEndY(row: 'back' | 'mid' | 'front', jitter = true): number {
   return jitter ? r.min + Math.random() * (r.max - r.min) : (r.min + r.max) / 2;
 }
 
+// ═══ 0807-11D-4A: 聚团与特殊阵位 ═══
+
+function clampedX(x: number): number { return Math.max(BATTLE_SAFE_X.normalMin + 6, Math.min(BATTLE_SAFE_X.normalMax - 6, Math.round(x))); }
+
+function phaseYConfig(phase: string, rng: () => number) {
+  const top = BATTLEFIELD_ZONES.midfieldStartY + 16;
+  const bottom = BATTLEFIELD_ZONES.harvestEndY - 24;
+  const totalH = bottom - top;
+  if (phase === 'P1') return { top, bottom, range: totalH * 0.35, centerY: top + totalH * 0.25 };
+  if (phase === 'P2') return { top, bottom, range: totalH * 0.50, centerY: top + totalH * 0.35 };
+  return { top, bottom, range: totalH * 0.70, centerY: top + totalH * 0.40,
+    farWeight: 0.25, midWeight: 0.40, nearWeight: 0.35 };
+}
+
+function buildClustered(mb: MicroBatch, phase: string, rng: () => number, rand: (a: number, b: number) => number): PlacementResult[] {
+  const count = mb.count;
+  const yConf = phaseYConfig(phase, rng);
+  const clusterCount = count <= 6 ? 2 : count <= 10 ? 3 : 4;
+  const MAX_ATTEMPTS = 20;
+  // 生成聚团中心
+  const clusterCenters: { cx: number; cy: number }[] = [];
+  for (let ci = 0; ci < clusterCount; ci++) {
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const cx = rand(mb.xRange[0] + 16, mb.xRange[1] - 16);
+      const cy = rand(yConf.top, yConf.top + yConf.range);
+      let ok = true;
+      for (const c of clusterCenters) { if (Math.hypot(cx - c.cx, cy - c.cy) < 60) { ok = false; break; } }
+      if (ok) { clusterCenters.push({ cx, cy }); break; }
+    }
+    if (clusterCenters.length <= ci) {
+      // 安全回退: Y分层
+      clusterCenters.push({ cx: rand(mb.xRange[0] + 24, mb.xRange[1] - 24), cy: yConf.top + 50 + ci * (yConf.range - 50) / clusterCount });
+    }
+  }
+  // 分配敌人到聚团
+  const results: PlacementResult[] = [];
+  const perCluster = Math.floor(count / clusterCount);
+  const extra = count % clusterCount;
+  for (let ci = 0; ci < clusterCount; ci++) {
+    const n = perCluster + (ci < extra ? 1 : 0);
+    const c = clusterCenters[ci];
+    for (let j = 0; j < n; j++) {
+      const dx = rand(-16, 16);
+      const dy = rand(-22, 22);
+      const x = clampedX(c.cx + dx);
+      const y = Math.max(yConf.top, Math.min(yConf.top + yConf.range, Math.round(c.cy + dy)));
+      results.push({ x, y });
+    }
+  }
+  return results;
+}
+
+function buildSpecial(mb: MicroBatch, rng: () => number, rand: (a: number, b: number) => number): PlacementResult[] {
+  const count = mb.count;
+  const xSpan = mb.xRange[1] - mb.xRange[0];
+  const y = mb.row === 'back' ? (BACK_ROW.min + BACK_ROW.max) / 2 : mb.row === 'mid' ? (MID_ROW.min + MID_ROW.max) / 2 : (FRONT_ROW.min + FRONT_ROW.max) / 2;
+  const results: PlacementResult[] = [];
+  for (let i = 0; i < count; i++) {
+    const baseX = mb.xRange[0] + xSpan * (i + 0.5) / count;
+    const dx = rand(-8, 8);
+    const dy = rand(-8, 8);
+    results.push({ x: clampedX(baseX + dx), y: Math.round(y + dy) });
+  }
+  return results;
+}
+
 // ═══════════════════ 微批次配置 ═══════════════════
 
 interface MicroBatch {
@@ -228,6 +327,8 @@ interface MicroBatch {
   row: 'back' | 'mid' | 'front';
   internalDelay: number;
   speedBonus: number;
+  /** 0807-11D-4A: 放置模式 */
+  placementMode?: 'clustered' | 'special';
 }
 
 interface DirectorBeat {
@@ -409,6 +510,9 @@ export class PostEdictDirector {
   private _bridgeMicroBatchId: string | null = null;  // 被桥接消费的微批次 ID
   private _bridgeBeatIdx = -1;
 
+  /** 0807-11D-4A: 阵位种子 (局内唯一, start时生成) */
+  private _placementSeed = 0;
+
   private _nextState = 'READY';
   private _lastReason = '';
   private _currentFormationId = '';
@@ -425,7 +529,14 @@ export class PostEdictDirector {
     this._nextState = 'READY'; this._lastReason = ''; this._currentFormationId = '';
   }
 
-  start(): void { this.reset(); this._active = true; this._lastReason = 'start'; }
+  start(seed?: number): void {
+    this.reset();
+    this._placementSeed = seed ?? (Math.floor(Date.now() / 1000) % 100000) ^ (Math.floor(Math.random() * 65536));
+    this._active = true;
+    this._lastReason = 'start';
+  }
+
+  get placementSeed(): number { return this._placementSeed; }
 
   get active(): boolean { return this._active; }
   get allComplete(): boolean { return this._allComplete; }
@@ -521,45 +632,45 @@ export class PostEdictDirector {
     // 检查是否被桥接消费
     const mbId = `${beat.id}_mb${this._microBatchIndex}`;
     if (this._bridgeMicroBatchId === mbId) {
-      this._bridgeMicroBatchId = null; // 已消费，不重复生成
-      this._microBatchIndex += 1;
-      this._nextState = 'READY';
-      return [];
+      this._bridgeMicroBatchId = null; this._microBatchIndex += 1; this._nextState = 'READY'; return [];
     }
-
     const mb = beat.microBatches[this._microBatchIndex];
     this._microBatchIndex += 1;
     this._lastMbTime = elapsedMs;
     this._nextState = 'SPAWN';
     this._currentFormationId = mb.formationId;
 
+    // P1-1 强制 special
+    const isP11 = beat.phase === 'P1' && beat.id === 'P1-1';
+    const mode = isP11 ? 'special' : (mb.placementMode || inferPlacementMode(beat.id, this._microBatchIndex));
+    const effectiveMb = isP11 ? { ...mb, placementMode: 'special' as const } : mb;
+
+    const placements = buildMicroBatchPlacements(effectiveMb, beat.phase, beat.id, this._microBatchIndex, this._placementSeed);
     const items: SpawnItem[] = [];
-    const rowEnd = rowEndY(mb.row);
-    const jitter = () => (Math.random() - 0.5) * 12;
     const anchorId = FORMATION_ANCHORS[mb.formationId] || 'center';
     const anchor = ANCHORS[anchorId];
-    const skipShadow = beat.phase === 'P1' && beat.id === 'P1-1';
+    const skipShadow = isP11;
+    let idx = 0;
 
     for (const [tier, cnt] of mb.tiers) {
       if (cnt <= 0) continue;
-      const xPositions = this._calcXPositions(cnt, mb.xRange);
       for (let i = 0; i < cnt; i++) {
-        const offset = getFormationOffset(mb.formationId, beat.id, this._microBatchIndex, i, cnt);
+        const p = placements[idx];
         items.push({
-          x: Math.round(xPositions[i] + jitter()),
+          x: Math.round(p.x + (Math.random() - 0.5) * 6),  // 仅生成X微抖(非最终阵位X)
           y: -20 + (mb.row === 'back' ? 0 : mb.row === 'mid' ? -5 : -10),
           speedMul: phase.speedMul + mb.speedBonus,
-          hpTier: tier,
-          hpOverride: HP_TIERS[tier].hp,
+          hpTier: tier, hpOverride: HP_TIERS[tier].hp,
           formationId: mb.formationId,
-          entryTargetX: Math.round(clampToSafeX(xPositions[i] + offset.dx)),
-          entryEndYOverride: rowEnd + offset.dy + jitter() * 0.4,
+          entryTargetX: p.x,
+          entryEndYOverride: p.y,
           directorPhase: beat.phase,
           directorBeatId: beat.id,
           directorMicroBatchId: mbId,
           anchorId, anchorX: anchor.x, anchorY: anchor.y,
-          skipShadow,
+          skipShadow, placementMode: mode,
         });
+        idx++;
       }
     }
 
@@ -621,34 +732,34 @@ export class PostEdictDirector {
 
   private _makeItems(mb: MicroBatch, beat: DirectorBeat, phase: PhaseConfig): SpawnItem[] {
     const items: SpawnItem[] = [];
-    const rowEnd = rowEndY(mb.row);
-    const jitter = () => (Math.random() - 0.5) * 12;
     const anchorId = FORMATION_ANCHORS[mb.formationId] || 'center';
     const anchor = ANCHORS[anchorId];
-    const skipShadow = beat.phase === 'P1' && beat.id === 'P1-1';
-    const xPositions = this._calcXPositions(mb.count, mb.xRange);
-    let i = 0;
+    const isP11 = beat.phase === 'P1' && beat.id === 'P1-1';
+    const mode = isP11 ? 'special' : (mb.placementMode || inferPlacementMode(beat.id, this._microBatchIndex - 1));
+    const effectiveMb = isP11 ? { ...mb, placementMode: 'special' as const } : mb;
+
+    const placements = buildMicroBatchPlacements(effectiveMb, beat.phase, beat.id, this._microBatchIndex - 1, this._placementSeed);
+    let idx = 0;
 
     for (const [tier, cnt] of mb.tiers) {
       if (cnt <= 0) continue;
       for (let j = 0; j < cnt; j++) {
-        const offset = getFormationOffset(mb.formationId, beat.id, this._microBatchIndex - 1, i, mb.count);
+        const p = placements[idx];
         items.push({
-          x: Math.round(xPositions[i] + jitter()),
+          x: Math.round(p.x + (Math.random() - 0.5) * 6),
           y: -20 + (mb.row === 'back' ? 0 : mb.row === 'mid' ? -5 : -10),
           speedMul: phase.speedMul + mb.speedBonus,
-          hpTier: tier,
-          hpOverride: HP_TIERS[tier].hp,
+          hpTier: tier, hpOverride: HP_TIERS[tier].hp,
           formationId: mb.formationId,
-          entryTargetX: Math.round(clampToSafeX(xPositions[i] + offset.dx)),
-          entryEndYOverride: rowEnd + offset.dy + jitter() * 0.4,
+          entryTargetX: p.x,
+          entryEndYOverride: p.y,
           directorPhase: beat.phase,
           directorBeatId: beat.id,
           directorMicroBatchId: `${beat.id}_mb${this._microBatchIndex - 1}`,
           anchorId, anchorX: anchor.x, anchorY: anchor.y,
-          skipShadow,
+          skipShadow: isP11, placementMode: mode,
         });
-        i++;
+        idx++;
       }
     }
     return items;
