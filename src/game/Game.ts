@@ -7587,17 +7587,17 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const phase = this.elapsed * 2 + i * 1.1;
       const sparkAlpha = 0.4 + Math.sin(phase) * 0.2;
       ctx.globalAlpha = Math.min(0.75, alpha * sparkAlpha);
-      // 左边缘
+      // 左边缘 → 向内(右)
       const fy = 40 + (i / flameCount) * (DESIGN_HEIGHT - 80);
       const fl = 18 + Math.sin(phase) * 10;
-      ctx.beginPath(); ctx.moveTo(0, fy - 6); ctx.lineTo(-fl, fy); ctx.lineTo(0, fy + 6); ctx.fill();
-      // 右边缘
-      ctx.beginPath(); ctx.moveTo(DESIGN_WIDTH, fy - 6); ctx.lineTo(DESIGN_WIDTH + fl, fy); ctx.lineTo(DESIGN_WIDTH, fy + 6); ctx.fill();
-      // 上边缘
+      ctx.beginPath(); ctx.moveTo(0, fy - 6); ctx.lineTo(fl, fy); ctx.lineTo(0, fy + 6); ctx.fill();
+      // 右边缘 → 向内(左)
+      ctx.beginPath(); ctx.moveTo(DESIGN_WIDTH, fy - 6); ctx.lineTo(DESIGN_WIDTH - fl, fy); ctx.lineTo(DESIGN_WIDTH, fy + 6); ctx.fill();
+      // 上边缘 → 向内(下)
       const fx = 40 + (i / flameCount) * (DESIGN_WIDTH - 80);
-      ctx.beginPath(); ctx.moveTo(fx - 6, 0); ctx.lineTo(fx, -fl); ctx.lineTo(fx + 6, 0); ctx.fill();
-      // 下边缘
-      ctx.beginPath(); ctx.moveTo(fx - 6, DESIGN_HEIGHT); ctx.lineTo(fx, DESIGN_HEIGHT + fl); ctx.lineTo(fx + 6, DESIGN_HEIGHT); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(fx - 6, 0); ctx.lineTo(fx, fl); ctx.lineTo(fx + 6, 0); ctx.fill();
+      // 下边缘 → 向内(上)
+      ctx.beginPath(); ctx.moveTo(fx - 6, DESIGN_HEIGHT); ctx.lineTo(fx, DESIGN_HEIGHT - fl); ctx.lineTo(fx + 6, DESIGN_HEIGHT); ctx.fill();
     }
 
     // Layer 3: 内收暖色渐变
