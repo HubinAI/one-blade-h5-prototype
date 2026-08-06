@@ -342,7 +342,7 @@ export const DAMAGE_SOURCE_REGISTRY: Record<DamageSourceType, DamageSourceConfig
   },
   SCORCH_BURN: {
     sourceType: "SCORCH_BURN",
-    skillCoefficient: 0.15,  // damageSnapshot的15%
+    skillCoefficient: 0.12,  // damageSnapshot的12%
     resolveOrder: 490,
     tags: ["edict", "scorch", "burn", "dot"],
     canDamageEnemy: true,

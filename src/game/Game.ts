@@ -2626,7 +2626,7 @@ export class Game {
     this._activeEdicts = [];
     this._tripleLeftTrail = null; this._tripleRightTrail = null; // V0731010: 清空副刀
     this._tripleSlashHitEnemyIds.clear();
-    this._scorchTrails = []; this._scorchDraft = null; this._scorchVisualRoads = []; this._scorchVisualRoads = []; // V0731011: 清空火径
+    this._scorchTrails = []; this._scorchDraft = null; this._scorchVisualRoads = []; // V0731011: 清空火径
     // V0731012: 清除所有敌人霜冻状态
     for (const enemy of this.enemies) { (enemy as any)._frostState = undefined; (enemy as any)._frostY = undefined; }
     this._edictArrivalTimer = 0;
@@ -11214,8 +11214,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
           // 回血范围内所有敌军
           for (const target of this.enemies) {
             if (!target.alive || target === enemy || distance(target, enemy) > radius) continue;
-            const originalHp = ENEMY_BALANCE[target.kind as EnemyKind]?.hp ?? 1;
-            target.hp = Math.min(target.hp + 1, originalHp);
+            target.hp = Math.min(target.hp + 1, target.maxHp);
             target.flash = 0.2;
           }
         }
