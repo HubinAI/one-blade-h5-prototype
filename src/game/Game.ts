@@ -28,7 +28,7 @@ import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles"
 import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, resolveDamage, resolveThreatDamage, type PlayerRunStats, type DamageRequest, type DamageResult, type DamageSourceType } from "./systems/damageSystem";
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
-import { postEdictDirector, isInCombatZone, type DirectorDebugInfo } from "./systems/PostEdictDirector";
+import { postEdictDirector, isInCombatZone, isApproaching, type DirectorDebugInfo, type DirectorSpawnRequest, type HpTier, HP_TIERS } from "./systems/PostEdictDirector";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
@@ -215,7 +215,7 @@ export class Game {
     attackEndPos: Vec2;
   }[] = [];
   // 多波多次刷新队列：每个子刷新有时间戳，到时间就spawn
-  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; stageNode?: string; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number; isTailCatchup?: boolean }[] = [];
+  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; stageNode?: string; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number; isTailCatchup?: boolean; hpOverride?: number }[] = [];
 
   private pointerDown = false;
   private pointerPos?: Vec2;
@@ -476,6 +476,8 @@ export class Game {
 
   /** 第一轮修正：军令爆发开始的时间基准 */
   private postChestStartAt: number | null = null;
+  /** 0807-11D-1: 导演当前阶段开始时间(ms) */
+  private _directorPhaseStartMs = 0;
   /** P2.7：hit stop 计时器 */
   private hitStopTimer = 0;
   private hitStopScale = 1;
@@ -1074,6 +1076,8 @@ export class Game {
     this._lastWaveElapsed = 0; this.waveAdvanceLockedUntil = 0;
     this.edictRewardState = "none"; this.edictPostWavesQueued = false; this.allPostChestWavesSpawned = false;
     postEdictDirector.reset(); // 0807-11D: 导演重置
+    this._directorPhaseStartMs = 0;
+    this._hpTierTracker = null;
     this.setPostChestSequenceState('inactive', 'resetRunState');
     this._stateRecoveryCount = 0;
     this.postChestStartAt = null;
@@ -5924,15 +5928,17 @@ export class Game {
     }
   }
 
-  /** 0807-11D: 导演式怪潮 — 替代旧 updatePostChestWaves */
+  /** 0807-11D-1: 导演式怪潮 — 节拍/断点/桥接版 */
   private _updatePostEdictDirector(dt: number) {
     if (this.postChestSequenceState === 'inactive' || this.postChestSequenceState === 'complete') return;
     if (this.gameMode !== "normal") return;
 
     const aliveInZone = this.enemies.filter(e => e.alive && isInCombatZone(e.y)).length;
     const aliveTotal = this.enemies.filter(e => e.alive).length;
+    const approachingCount = this.enemies.filter(e => e.alive && isApproaching(e.y)).length;
+    const elapsedMs = this.elapsed * 1000;
 
-    // 0807-11D: 导演完成时 _active=false，需要在此之前检查完成状态
+    // 导演完成时 _active=false
     if (!postEdictDirector.active) {
       if (postEdictDirector.allComplete) {
         this.allPostChestWavesSpawned = true;
@@ -5944,7 +5950,18 @@ export class Game {
       return;
     }
 
-    const spawnRequests = postEdictDirector.tick(dt, aliveInZone, aliveTotal, this.subSpawnQueue.length, this.elapsed);
+    // 检测阶段变化 → 更新 phaseStartMs
+    const prevPhase = this._hpTierTracker?.phase ?? '';
+    const currPhase = postEdictDirector.currentPhase ?? '';
+    if (currPhase && currPhase !== prevPhase) {
+      this._directorPhaseStartMs = elapsedMs;
+      if (!this._hpTierTracker) this._hpTierTracker = { phase: currPhase, trash: 0, tough: 0, wall: 0 };
+      this._hpTierTracker.phase = currPhase;
+    }
+
+    const spawnRequests = postEdictDirector.tick(
+      dt, aliveInZone, aliveTotal, approachingCount, this.subSpawnQueue.length, elapsedMs,
+    );
 
     for (const req of spawnRequests) {
       this.setPostChestSequenceState('fighting', 'director_spawning');
@@ -5952,25 +5969,38 @@ export class Game {
     }
   }
 
-  /** 0807-11D: 将导演批次的敌人入队到 subSpawnQueue */
-  private _enqueueDirectorBatch(req: { batches: Array<{ x: number; y: number; speedMul: number }>; phase: string; hp: number }) {
-    const phaseMap: Record<string, string> = {
-      'P1': 'post_edict_director_p1',
-      'P2': 'post_edict_director_p2',
-      'P3': 'post_edict_director_p3',
-    };
-    const stageNode = phaseMap[req.phase] ?? 'post_edict_release';
+  /** 0807-11D-1: 将导演 SpawnItem 入队，支持 hpTier → hpOverride */
+  private _directorPhaseNodes: Record<string, string> = {
+    'P1': 'post_edict_director_p1',
+    'P2': 'post_edict_director_p2',
+    'P3': 'post_edict_director_p3',
+  };
+  private _hpTierTracker: { phase: string; trash: number; tough: number; wall: number } | null = null;
+
+  private _enqueueDirectorBatch(req: DirectorSpawnRequest) {
+    const stageNode = this._directorPhaseNodes[req.phase] ?? 'post_edict_release';
     this._spawnBatchId += 1;
     this._lastSpawnSource = `edict_${req.phase}`;
 
-    for (let i = 0; i < req.batches.length; i++) {
-      const pos = req.batches[i];
+    for (let i = 0; i < req.items.length; i++) {
+      const item = req.items[i];
+      const hpTier = item.hpTier;
+      const tierCfg = HP_TIERS[hpTier];
+      const hpOverride = tierCfg.hp;
+
+      // 追踪 HP tier 计数
+      if (this._hpTierTracker && this._hpTierTracker.phase === req.phase) {
+        if (hpTier === 'trash') this._hpTierTracker.trash++;
+        else if (hpTier === 'tough') this._hpTierTracker.tough++;
+        else if (hpTier === 'elite_wall') this._hpTierTracker.wall++;
+      }
+
       this.subSpawnQueue.push({
         time: this.elapsed + 0.02 + i * 0.01,
         kind: 'infantry' as any,
-        x: pos.x,
-        speedMultiplier: pos.speedMul,
-        yOffset: ENTRY_PROFILE_EDICT_BURST.spawnY - pos.y,
+        x: item.x,
+        speedMultiplier: item.speedMul,
+        yOffset: ENTRY_PROFILE_EDICT_BURST.spawnY - item.y,
         battlePhase: 'edict_burst',
         stageNode: stageNode as any,
         flowRole: 'main',
@@ -5979,6 +6009,7 @@ export class Game {
         entryEndYOffset: 0,
         source: 'edict',
         roundIndex: 0,
+        hpOverride,
       });
     }
   }
@@ -6332,6 +6363,11 @@ export class Game {
     if (item.stageNode) { this._currentStageNode = item.stageNode as StageNode; }
     const enemy = this.createEnemy(item.kind as any, safeX, spawnY, item.speedMultiplier, profile);
     this._currentStageNode = savedNode;
+    // 0807-11D-1: hpOverride 覆盖 stageConfig 默认 HP
+    if (item.hpOverride !== undefined && item.hpOverride > 0) {
+      enemy.hp = item.hpOverride;
+      enemy.maxHp = item.hpOverride;
+    }
     if (this._currentWaveEvent) {
       enemy.spawnedWithEvent = this._currentWaveEvent;
     }
@@ -7571,6 +7607,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.edictBurstRoundTotal = postWaves.length;
     // 0807-11D: 同时启动导演系统（chest_closed / chest_paused_skip 路径也会触发）
     postEdictDirector.start();
+    this._directorPhaseStartMs = this.elapsed * 1000;
+    this._hpTierTracker = { phase: 'P1', trash: 0, tough: 0, wall: 0 };
     this._edictArrivalTimer = 0;
     // state 统一由 completeEliteChestReward 设置，此处不重复
   }
@@ -10820,9 +10858,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const tier = getBladeTier(this.energy);
     const stage = getTierConfig(tier);
     const levelId = typeof this.level.id === 'number' ? this.level.id : parseInt(String(this.level.id), 10) || 1;
-    // 0807-11D: 导演 debug 数据
+    // 0807-11D-1: 导演 debug 数据（含 HP 档位统计）
     const zoneCount = this.enemies.filter(e => e.alive && isInCombatZone(e.y)).length;
-    const di: DirectorDebugInfo = postEdictDirector.getDebugInfo(zoneCount, aliveCount);
+    const apprCount = this.enemies.filter(e => e.alive && isApproaching(e.y)).length;
+    const tracker = this._hpTierTracker ?? { trash: 0, tough: 0, wall: 0 };
+    const di: DirectorDebugInfo = postEdictDirector.getDebugInfo(
+      tracker.trash, tracker.tough, tracker.wall, aliveCount, apprCount, zoneCount,
+      this.subSpawnQueue.length, this.elapsed * 1000,
+    );
     const rowData = [
       { l: 'level', v: `${levelId}`, c: '#fff' },
       { l: 'phase', v: `${this.phase}`, c: '#fff' },
@@ -10837,13 +10880,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         { l: 'seq', v: `${this.postChestSequenceState}`, c: '#f39c12' },
         { l: 'pci', v: `${this.postChestWaveIndex}`, c: '#888' },
         { l: 'gate', v: this._lastEliteGateBlocked ? 'BLOCK' : 'ALLOW', c: this._lastEliteGateBlocked ? '#e74c3c' : '#2ecc71' },
-        // 0807-11D: 导演 debug 信息
+        // 0807-11D-1: 导演 debug 信息
         ...(hasDirector ? [
-          { l: 'dir', v: `${di.phase} ${di.subWave}`, c: '#9b6dff' },
+          { l: 'dir', v: `${di.phase} ${di.beat}`, c: '#9b6dff' },
           { l: 'gen', v: `${di.generated}/${di.total}`, c: '#ffd35a' },
-          { l: 'alive', v: `${di.alive} (zone:${di.aliveInZone})`, c: '#fff' },
-          { l: 'next', v: `${di.nextBatchState}`, c: di.nextBatchState === 'SPAWNED' ? '#2ecc71' : di.nextBatchState === 'WAIT_CAP' ? '#e74c3c' : '#ffd35a' },
-          { l: 'elapsed', v: `${di.phaseElapsed}s`, c: '#888' },
+          { l: 'HP', v: `T${di.aliveTrash} t${di.aliveTough} W${di.aliveWall}`, c: '#ffd35a' },
+          { l: 'zone', v: `cbt${di.combatReadyCount} app${di.approachingCount} q${di.pendingSpawnCount}`, c: '#888' },
+          { l: 'nb4', v: `nb${di.notBeforeRemaining}ms ${di.nextState}`, c: '#ffd35a' },
+          { l: 'ela', v: `${di.phaseElapsed}s`, c: '#888' },
         ] : []),
       ] : []),
       { l: 'enemies', v: `${aliveCount}`, c: '#fff' },
