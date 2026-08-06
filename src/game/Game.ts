@@ -1388,7 +1388,6 @@ export class Game {
       ctx.restore();
     }
     this.drawChestDrop(ctx);
-    this._drawBurstFlame(ctx); // 0807-11D-4B
     this.drawEdictRewardModal(ctx);
     this._drawChestOpeningFlow(ctx); // V0731008
     this.drawMidfieldEventBorder(ctx);
@@ -3991,7 +3990,7 @@ export class Game {
       }
     }
     const stage = SWORD_STAGE_BY_ID[trail.tier];
-    enemy.flash = 0.25;
+    enemy.flash = this._momentumState === 'bursting' ? 0.45 : 0.25; // 0807-11D-4B-5
     const bladeDmg = this.getMainBladeDamageMultiplier();
     // 一刀斩模式：本次挥刀所有伤害×2（仅当前这一刀）
     const oneBladeMul = this._slashOneBladeBoost ?? 1.0;
@@ -7559,113 +7558,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.restore();
   }
 
-  /** 0807-11D-4B-4: 连续能量波边 */
-  private _drawBurstFlame(ctx: CanvasRenderingContext2D) {
-    if (this._momentumState !== 'bursting') return;
-    const t = this._burstRemaining;
-    const elapsed = 5.0 - t;
-    const fadeIn = Math.min(1, elapsed / 0.2);
-    const urgency = t < 1.0 ? 1 + (1 - t) * 2 : 1;
-    const pulse = Math.sin(this.elapsed * 4) * 0.15 + 0.85;
-    const alpha = fadeIn * pulse * urgency * 0.55;
-
-    ctx.save();
-    ctx.globalAlpha = Math.min(0.75, alpha);
-
-    // 连续波浪能量边 (基础10-12px + 3-6px波动)
-    this._drawWaveEdge(ctx, 0, DESIGN_WIDTH, DESIGN_HEIGHT, this.elapsed);
-
-    // Layer 2: 内收暖色渐变
-    ctx.globalAlpha = Math.min(0.35, alpha * 0.45);
-    const ig = 30;
-    const gradTop = ctx.createLinearGradient(0, 0, 0, ig);
-    gradTop.addColorStop(0, '#ff9944'); gradTop.addColorStop(1, 'rgba(255,153,68,0)');
-    ctx.fillStyle = gradTop; ctx.fillRect(0, 0, DESIGN_WIDTH, ig);
-    const gradBot = ctx.createLinearGradient(0, DESIGN_HEIGHT, 0, DESIGN_HEIGHT - ig);
-    gradBot.addColorStop(0, '#ff9944'); gradBot.addColorStop(1, 'rgba(255,153,68,0)');
-    ctx.fillStyle = gradBot; ctx.fillRect(0, DESIGN_HEIGHT - ig, DESIGN_WIDTH, ig);
-    const gradL = ctx.createLinearGradient(0, 0, ig, 0);
-    gradL.addColorStop(0, '#ff7733'); gradL.addColorStop(1, 'rgba(255,119,51,0)');
-    ctx.fillStyle = gradL; ctx.fillRect(0, 0, ig, DESIGN_HEIGHT);
-    const gradR = ctx.createLinearGradient(DESIGN_WIDTH, 0, DESIGN_WIDTH - ig, 0);
-    gradR.addColorStop(0, '#ff7733'); gradR.addColorStop(1, 'rgba(255,119,51,0)');
-    ctx.fillStyle = gradR; ctx.fillRect(DESIGN_WIDTH - ig, 0, ig, DESIGN_HEIGHT);
-
-    ctx.restore();
-  }
-
-  /** 绘制单边波浪能量带 */
-  private _drawWaveEdge(ctx: CanvasRenderingContext2D, _topX: number, w: number, h: number, t: number) {
-    ctx.fillStyle = '#ff8820';
-    const baseW = 11;
-    const amp = 4;
-    const waves = 8; // 每条边8个波
-    const phaseOffset = t * 1.5;
-
-    // 左边缘
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    for (let i = 0; i < waves; i++) {
-      const y0 = (i / waves) * h;
-      const y1 = ((i + 1) / waves) * h;
-      const cp = y0 + (y1 - y0) / 2;
-      const w0 = baseW + Math.sin(phaseOffset + i * 1.3) * amp;
-      const w1 = baseW + Math.sin(phaseOffset + (i + 0.5) * 1.3) * amp;
-      ctx.lineTo(w0, cp);
-      ctx.lineTo(w1, y1);
-    }
-    ctx.lineTo(0, h);
-    ctx.closePath();
-    ctx.fill();
-
-    // 右边缘
-    ctx.beginPath();
-    ctx.moveTo(w, 0);
-    for (let i = 0; i < waves; i++) {
-      const y0 = (i / waves) * h;
-      const y1 = ((i + 1) / waves) * h;
-      const cp = y0 + (y1 - y0) / 2;
-      const w0 = baseW + Math.sin(phaseOffset + 3 + i * 1.7) * amp;
-      const w1 = baseW + Math.sin(phaseOffset + 3 + (i + 0.5) * 1.7) * amp;
-      ctx.lineTo(w - w0, cp);
-      ctx.lineTo(w - w1, y1);
-    }
-    ctx.lineTo(w, h);
-    ctx.closePath();
-    ctx.fill();
-
-    // 上边缘
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    for (let i = 0; i < waves; i++) {
-      const x0 = (i / waves) * w;
-      const x1 = ((i + 1) / waves) * w;
-      const cp = x0 + (x1 - x0) / 2;
-      const w0 = baseW + Math.sin(phaseOffset + 1.5 + i * 1.1) * amp;
-      const w1 = baseW + Math.sin(phaseOffset + 1.5 + (i + 0.5) * 1.1) * amp;
-      ctx.lineTo(cp, w0);
-      ctx.lineTo(x1, w1);
-    }
-    ctx.lineTo(w, 0);
-    ctx.closePath();
-    ctx.fill();
-
-    // 下边缘
-    ctx.beginPath();
-    ctx.moveTo(0, h);
-    for (let i = 0; i < waves; i++) {
-      const x0 = (i / waves) * w;
-      const x1 = ((i + 1) / waves) * w;
-      const cp = x0 + (x1 - x0) / 2;
-      const w0 = baseW + Math.sin(phaseOffset + 4.5 + i * 1.5) * amp;
-      const w1 = baseW + Math.sin(phaseOffset + 4.5 + (i + 0.5) * 1.5) * amp;
-      ctx.lineTo(cp, h - w0);
-      ctx.lineTo(x1, h - w1);
-    }
-    ctx.lineTo(w, h);
-    ctx.closePath();
-    ctx.fill();
-  }
 
   /** P3.8：绘制军令弹窗（紫色框体完整版） */
   private drawEdictRewardModal(ctx: CanvasRenderingContext2D) {
@@ -10232,6 +10124,24 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.shadowBlur = 4;
       ctx.lineWidth = Math.max(1.5, width * 0.3);
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+
+    // 0807-11D-4B-5: 爆发刀轨增强
+    if (this._momentumState === 'bursting') {
+      const burstPulse = 0.7 + Math.sin(this.elapsed * 8) * 0.3;
+      for (let i = 1; i < points.length; i += 2) {
+        const a = points[i];
+        const alpha = 0.35 * burstPulse;
+        ctx.strokeStyle = `rgba(255, 240, 180, ${alpha})`;
+        ctx.lineWidth = width * 0.55;
+        ctx.shadowColor = '#ffcc44';
+        ctx.shadowBlur = 6;
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(a.x + 1, a.y + 1); ctx.stroke();
+        // 金色碎光
+        ctx.fillStyle = `rgba(255, 220, 100, ${alpha * 0.7})`;
+        ctx.shadowBlur = 3;
+        ctx.beginPath(); ctx.arc(a.x + (Math.sin(this.elapsed * 12 + i) * 4), a.y + (Math.cos(this.elapsed * 12 + i) * 4), 2, 0, Math.PI * 2); ctx.fill();
+      }
     }
 
     // P4.4A.2-R2: Debug模式绘制真实刀路（白色细线，无glow）
