@@ -269,6 +269,9 @@ function buildClustered(mb: MicroBatch, phase: string, rng: () => number, rand: 
   const count = mb.count;
   const yConf = phaseYConfig(phase, rng);
   const clusterCount = count <= 6 ? 2 : count <= 10 ? 3 : 4;
+  const MIN_DIST = 36;  // 聚团内最小中心距
+  const MAX_RETRY = 10;
+  const CENTER_MIN_DIST = 60;
   const MAX_ATTEMPTS = 20;
   // 生成聚团中心
   const clusterCenters: { cx: number; cy: number }[] = [];
@@ -277,15 +280,14 @@ function buildClustered(mb: MicroBatch, phase: string, rng: () => number, rand: 
       const cx = rand(mb.xRange[0] + 16, mb.xRange[1] - 16);
       const cy = rand(yConf.top, yConf.top + yConf.range);
       let ok = true;
-      for (const c of clusterCenters) { if (Math.hypot(cx - c.cx, cy - c.cy) < 60) { ok = false; break; } }
+      for (const c of clusterCenters) { if (Math.hypot(cx - c.cx, cy - c.cy) < CENTER_MIN_DIST) { ok = false; break; } }
       if (ok) { clusterCenters.push({ cx, cy }); break; }
     }
     if (clusterCenters.length <= ci) {
-      // 安全回退: Y分层
       clusterCenters.push({ cx: rand(mb.xRange[0] + 24, mb.xRange[1] - 24), cy: yConf.top + 50 + ci * (yConf.range - 50) / clusterCount });
     }
   }
-  // 分配敌人到聚团
+  // 分配敌人：每个位置检查最小间距
   const results: PlacementResult[] = [];
   const perCluster = Math.floor(count / clusterCount);
   const extra = count % clusterCount;
@@ -293,11 +295,24 @@ function buildClustered(mb: MicroBatch, phase: string, rng: () => number, rand: 
     const n = perCluster + (ci < extra ? 1 : 0);
     const c = clusterCenters[ci];
     for (let j = 0; j < n; j++) {
-      const dx = rand(-16, 16);
-      const dy = rand(-22, 22);
-      const x = clampedX(c.cx + dx);
-      const y = Math.max(yConf.top, Math.min(yConf.top + yConf.range, Math.round(c.cy + dy)));
-      results.push({ x, y });
+      let placed = false;
+      for (let retry = 0; retry < MAX_RETRY; retry++) {
+        const dx = rand(-16, 16);
+        const dy = rand(-22, 22);
+        const x = clampedX(c.cx + dx);
+        const y = Math.max(yConf.top, Math.min(yConf.top + yConf.range, Math.round(c.cy + dy)));
+        // 检查与本批次已放置敌人的间距
+        let tooClose = false;
+        for (const p of results) { if (Math.hypot(x - p.x, y - p.y) < MIN_DIST) { tooClose = true; break; } }
+        if (!tooClose) { results.push({ x, y }); placed = true; break; }
+      }
+      if (!placed) {
+        // 安全回退: 环形偏移
+        const angle = (j / n) * Math.PI * 2;
+        const x = clampedX(c.cx + Math.cos(angle) * MIN_DIST);
+        const y = Math.max(yConf.top, Math.min(yConf.top + yConf.range, Math.round(c.cy + Math.sin(angle) * MIN_DIST)));
+        results.push({ x, y });
+      }
     }
   }
   return results;
@@ -305,14 +320,48 @@ function buildClustered(mb: MicroBatch, phase: string, rng: () => number, rand: 
 
 function buildSpecial(mb: MicroBatch, rng: () => number, rand: (a: number, b: number) => number): PlacementResult[] {
   const count = mb.count;
+  const cat = FORMATION_CATEGORY[mb.formationId] || 'broad';
   const xSpan = mb.xRange[1] - mb.xRange[0];
-  const y = mb.row === 'back' ? (BACK_ROW.min + BACK_ROW.max) / 2 : mb.row === 'mid' ? (MID_ROW.min + MID_ROW.max) / 2 : (FRONT_ROW.min + FRONT_ROW.max) / 2;
   const results: PlacementResult[] = [];
-  for (let i = 0; i < count; i++) {
-    const baseX = mb.xRange[0] + xSpan * (i + 0.5) / count;
-    const dx = rand(-8, 8);
-    const dy = rand(-8, 8);
-    results.push({ x: clampedX(baseX + dx), y: Math.round(y + dy) });
+
+  if (cat === 'broad') {
+    // 横排/宽幕: 2-3浅层
+    for (let i = 0; i < count; i++) {
+      const baseX = mb.xRange[0] + xSpan * (i + 0.5) / count;
+      const layerDY = i < 2 ? -12 : i < Math.ceil(count * 0.6) ? 0 : 12;
+      const y = (mb.row === 'back' ? (BACK_ROW.min + BACK_ROW.max) / 2 : mb.row === 'mid' ? (MID_ROW.min + MID_ROW.max) / 2 : (FRONT_ROW.min + FRONT_ROW.max) / 2) + layerDY;
+      const dx = rand(-6, 6);
+      const dy = rand(-4, 4);
+      results.push({ x: clampedX(baseX + dx), y: Math.round(y + dy) });
+    }
+  } else if (cat === 'slant') {
+    // 斜幕: 保持左高右低或右高左低
+    const isRightHigh = mb.formationId.includes('right');
+    const yBase = (mb.row === 'back' ? (BACK_ROW.min + BACK_ROW.max) / 2 : mb.row === 'mid' ? (MID_ROW.min + MID_ROW.max) / 2 : (FRONT_ROW.min + FRONT_ROW.max) / 2);
+    const ySpan = 36; // 总Y倾斜
+    for (let i = 0; i < count; i++) {
+      const baseX = mb.xRange[0] + xSpan * (i + 0.5) / count;
+      const slantY = yBase + (isRightHigh ? -1 : 1) * (i / (count - 1 || 1) - 0.5) * ySpan;
+      const dx = rand(-5, 5);
+      const dy = rand(-4, 4);
+      results.push({ x: clampedX(baseX + dx), y: Math.round(slantY + dy) });
+    }
+  } else {
+    // dual: 前后双层/左右双团
+    const mid = Math.floor(count / 2);
+    const yBack = (BACK_ROW.min + BACK_ROW.max) / 2;
+    const yFront = (FRONT_ROW.min + FRONT_ROW.max) / 2;
+    for (let i = 0; i < count; i++) {
+      const isBackGroup = i < mid;
+      const groupXCenter = mb.xRange[0] + xSpan * (isBackGroup ? 0.25 : 0.75);
+      const localI = isBackGroup ? i : i - mid;
+      const localN = isBackGroup ? mid : count - mid;
+      const baseX = groupXCenter + (localI - (localN - 1) / 2) * (xSpan * 0.3 / Math.max(1, localN - 1));
+      const y = isBackGroup ? yBack : yFront;
+      const dx = rand(-6, 6);
+      const dy = rand(-5, 5);
+      results.push({ x: clampedX(baseX + dx), y: Math.round(y + dy) });
+    }
   }
   return results;
 }
