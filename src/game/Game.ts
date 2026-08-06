@@ -1250,12 +1250,6 @@ export class Game {
     } else if (this._momentumState === 'charging' && this.energy >= BALANCE.swordEnergy.max) {
       this._momentumState = 'armed';
       this.energy = BALANCE.swordEnergy.max;
-      // 武装提示
-      this.addText(DESIGN_WIDTH / 2, 180, '满势', '#ffd35a', 22, 1.2);
-    }
-    // 爆发倒计时显示
-    if (this._momentumState === 'bursting' && Math.floor(this._burstRemaining * 2) % 2 === 0) {
-      this.addText(DESIGN_WIDTH / 2, 160, `${Math.ceil(this._burstRemaining)}s`, '#ff9944', 18, 0.3);
     }
 
     // V0730001: high档位就绪提示（ratio ≥ 70%）
@@ -7565,27 +7559,67 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.restore();
   }
 
-  /** 0807-11D-4B: 满势爆发边缘金焰 */
+  /** 0807-11D-4B-1: 满势爆发三层气场 */
   private _drawBurstFlame(ctx: CanvasRenderingContext2D) {
     if (this._momentumState !== 'bursting') return;
-    const remain = this._burstRemaining;
-    const urgency = remain < 1.0 ? 1 + (1 - remain) * 3 : 1;
-    const pulse = Math.sin(this.elapsed * 6) * 0.3 + 0.7;
-    const alpha = 0.35 * pulse * urgency;
+    const t = this._burstRemaining;
+    const elapsed = 5.0 - t;
+    const fadeIn = Math.min(1, elapsed / 0.2);           // 0→0.2s 亮起
+    const urgency = t < 1.0 ? 1 + (1 - t) * 2 : 1;      // 最后1秒加速
+    const pulse = Math.sin(this.elapsed * 4) * 0.15 + 0.85;
+    const alpha = fadeIn * pulse * urgency * 0.55;
+
     ctx.save();
-    ctx.globalAlpha = Math.min(0.7, alpha);
-    // 四边金白焰
-    const edgeW = 8;
-    const grad = ctx.createLinearGradient(0, 0, 0, DESIGN_HEIGHT);
-    grad.addColorStop(0, '#ffcc44'); grad.addColorStop(0.5, '#ff7733'); grad.addColorStop(1, '#ffcc44');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, edgeW, DESIGN_HEIGHT);
-    ctx.fillRect(DESIGN_WIDTH - edgeW, 0, edgeW, DESIGN_HEIGHT);
-    const gradH = ctx.createLinearGradient(0, 0, DESIGN_WIDTH, 0);
-    gradH.addColorStop(0, '#ffcc44'); gradH.addColorStop(0.5, '#ff7733'); gradH.addColorStop(1, '#ffcc44');
-    ctx.fillStyle = gradH;
-    ctx.fillRect(0, 0, DESIGN_WIDTH, 5);
-    ctx.fillRect(0, DESIGN_HEIGHT - 5, DESIGN_WIDTH, 5);
+    ctx.globalAlpha = Math.min(0.75, alpha);
+
+    // Layer 1: 四边金橙能量边缘 (10-14px)
+    const ew = 10 + Math.sin(this.elapsed * 3.7) * 4;
+    ctx.fillStyle = '#ff8820';
+    ctx.fillRect(0, 0, ew, DESIGN_HEIGHT);
+    ctx.fillRect(DESIGN_WIDTH - ew, 0, ew, DESIGN_HEIGHT);
+    ctx.fillRect(0, 0, DESIGN_WIDTH, ew);
+    ctx.fillRect(0, DESIGN_HEIGHT - ew, DESIGN_WIDTH, ew);
+
+    // Layer 2: 短焰尖 (4-6个尖端向内伸出)
+    ctx.fillStyle = '#ffcc44';
+    const flameCount = 6;
+    for (let i = 0; i < flameCount; i++) {
+      const phase = this.elapsed * 2 + i * 1.1;
+      const sparkAlpha = 0.4 + Math.sin(phase) * 0.2;
+      ctx.globalAlpha = Math.min(0.75, alpha * sparkAlpha);
+      // 左边缘
+      const fy = 40 + (i / flameCount) * (DESIGN_HEIGHT - 80);
+      const fl = 18 + Math.sin(phase) * 10;
+      ctx.beginPath(); ctx.moveTo(0, fy - 6); ctx.lineTo(-fl, fy); ctx.lineTo(0, fy + 6); ctx.fill();
+      // 右边缘
+      ctx.beginPath(); ctx.moveTo(DESIGN_WIDTH, fy - 6); ctx.lineTo(DESIGN_WIDTH + fl, fy); ctx.lineTo(DESIGN_WIDTH, fy + 6); ctx.fill();
+      // 上边缘
+      const fx = 40 + (i / flameCount) * (DESIGN_WIDTH - 80);
+      ctx.beginPath(); ctx.moveTo(fx - 6, 0); ctx.lineTo(fx, -fl); ctx.lineTo(fx + 6, 0); ctx.fill();
+      // 下边缘
+      ctx.beginPath(); ctx.moveTo(fx - 6, DESIGN_HEIGHT); ctx.lineTo(fx, DESIGN_HEIGHT + fl); ctx.lineTo(fx + 6, DESIGN_HEIGHT); ctx.fill();
+    }
+
+    // Layer 3: 内收暖色渐变
+    ctx.globalAlpha = Math.min(0.35, alpha * 0.45);
+    const ig = 30;
+    // 上
+    const gradTop = ctx.createLinearGradient(0, 0, 0, ig);
+    gradTop.addColorStop(0, '#ff9944'); gradTop.addColorStop(1, 'rgba(255,153,68,0)');
+    ctx.fillStyle = gradTop; ctx.fillRect(0, 0, DESIGN_WIDTH, ig);
+    // 下
+    const gradBot = ctx.createLinearGradient(0, DESIGN_HEIGHT, 0, DESIGN_HEIGHT - ig);
+    gradBot.addColorStop(0, '#ff9944'); gradBot.addColorStop(1, 'rgba(255,153,68,0)');
+    ctx.fillStyle = gradBot; ctx.fillRect(0, DESIGN_HEIGHT - ig, DESIGN_WIDTH, ig);
+    // 左
+    const gradL = ctx.createLinearGradient(0, 0, ig, 0);
+    gradL.addColorStop(0, '#ff7733'); gradL.addColorStop(1, 'rgba(255,119,51,0)');
+    ctx.fillStyle = gradL; ctx.fillRect(0, 0, ig, DESIGN_HEIGHT);
+    // 右
+    const gradR = ctx.createLinearGradient(DESIGN_WIDTH, 0, DESIGN_WIDTH - ig, 0);
+    gradR.addColorStop(0, '#ff7733'); gradR.addColorStop(1, 'rgba(255,119,51,0)');
+    ctx.fillStyle = gradR; ctx.fillRect(DESIGN_WIDTH - ig, 0, ig, DESIGN_HEIGHT);
+
     ctx.restore();
   }
 
@@ -10658,9 +10692,15 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.fillRect(eBarX + eBarW * seg.x0, eBarY, eBarW * (seg.x1 - seg.x0), eBarH);
     }
 
+    // 0807-11D-4B-1: 爆发时刀势条随倒计时缩减
+    const burstRemaining = this._momentumState === 'bursting' ? this._burstRemaining : undefined;
+    const burstRatio = burstRemaining !== undefined ? burstRemaining / 5.0 : undefined;
+    const displayEnergy = burstRatio !== undefined ? Math.round(BALANCE.swordEnergy.max * burstRatio) : this.energy;
+    const displayPct = burstRatio !== undefined ? burstRatio : energyPct;
+
     // 能量填充
     const fillX = eBarX;
-    const fillW = eBarW * energyPct;
+    const fillW = eBarW * displayPct;
     if (fillW > 0) {
       // 渐变填充：按统一档位走色
       const grad = ctx.createLinearGradient(fillX, 0, fillX + fillW, 0);
@@ -10710,25 +10750,20 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
     // V0730001: 百分比 + 统一档位名
     ctx.textAlign = "center";
-    ctx.fillStyle = bandColors[bmBand];
     ctx.font = '700 12px "Microsoft YaHei", sans-serif';
-    const pctText = `${Math.floor(energyPct * 100)}% ${bandNames[bmBand]}`;
-    ctx.fillText(pctText, DESIGN_WIDTH / 2, eBarY - 4);
-
-    // 0807-11D-4B: 爆发倒计时显示在刀势条上
     if (this._momentumState === 'bursting') {
-      const burstRatio = this._burstRemaining / 5.0;
-      const urgency = this._burstRemaining < 1.0 ? 1.5 : 1;
-      ctx.save();
-      // 倒计时数字
+      // 爆发倒计时
+      const urgency = this._burstRemaining < 1.0 ? 1 + (1 - this._burstRemaining) * 2 : 1;
+      ctx.fillStyle = `rgba(255, 180, 60, ${0.85 * urgency})`;
+      ctx.font = `900 ${Math.round(14 + urgency * 4)}px "Microsoft YaHei", sans-serif`;
+      ctx.fillText(`⚡${this._burstRemaining.toFixed(1)}s`, DESIGN_WIDTH / 2, eBarY - 6);
+    } else if (this._momentumState === 'armed') {
       ctx.fillStyle = '#ffd35a';
-      ctx.font = '900 16px "Microsoft YaHei", sans-serif';
-      ctx.textAlign = 'right';
-      ctx.fillText(`⚡${Math.ceil(this._burstRemaining)}s`, eBarX + eBarW + 50, eBarY + 14);
-      // 进度条叠加
-      ctx.fillStyle = `rgba(255, 211, 90, ${0.5 * urgency})`;
-      ctx.fillRect(eBarX, eBarY - 6, eBarW * burstRatio, 3);
-      ctx.restore();
+      ctx.fillText('满势待发', DESIGN_WIDTH / 2, eBarY - 6);
+    } else {
+      ctx.fillStyle = bandColors[bmBand];
+      const pctText = `${Math.floor(energyPct * 100)}% ${bandNames[bmBand]}`;
+      ctx.fillText(pctText, DESIGN_WIDTH / 2, eBarY - 4);
     }
 
     // P4.1A.10：一刀斩"下一刀×2"小状态（仅oneBladeModeTimer>0时显示）
