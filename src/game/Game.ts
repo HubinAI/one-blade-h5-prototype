@@ -2133,12 +2133,13 @@ export class Game {
         if (t.points.length>2) { const a=t.points[t.points.length-2],b=t.points[t.points.length-1];
           for (const enemy of this.enemies) {
             if (!enemy.alive||this._tripleSlashHitEnemyIds.has(enemy.id)) continue;
+            if (!isEnemyCombatTargetable(enemy)) continue; // 0807-11D-3G
             const abx=b.x-a.x,aby=b.y-a.y,eax=a.x-enemy.x,eay=a.y-enemy.y,rad=enemy.radius+12;
             const dot=abx*abx+aby*aby; if(dot<1)continue;
             const tt=clamp(-(eax*abx+eay*aby)/dot,0,1);
             if(Math.sqrt((a.x+abx*tt-enemy.x)**2+(a.y+aby*tt-enemy.y)**2)>rad)continue;
             this._tripleSlashHitEnemyIds.add(enemy.id);
-            const r = resolveDamage({actionId:this.nextId("dmg"),parentActionId:t.id,sourceType:"TRIPLE_DERIVED_1",sourceConfig:DAMAGE_SOURCE_REGISTRY.MAIN_SLASH,attackerId:"player",targetId:enemy.id,targetCategory:"ENEMY",skillCoefficient:DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient,stats:t._damageSnapshot!,bladeBand:"mid",tags:["triple"],hitPos:{x:enemy.x,y:enemy.y},timestamp:this.elapsed},enemy.hp,enemy.maxHp,enemy.alive,!!enemy.eliteKind);
+            const r = resolveDamage({actionId:this.nextId("dmg"),parentActionId:t.id,sourceType:"TRIPLE_DERIVED_1",sourceConfig:DAMAGE_SOURCE_REGISTRY.MAIN_SLASH,attackerId:"player",targetId:enemy.id,targetCategory:"ENEMY",skillCoefficient:DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient,stats:t._damageSnapshot!,bladeBand:"mid",tags:["triple"],hitPos:{x:enemy.x,y:enemy.y},timestamp:this.elapsed,targetDirectorEntryState:enemy._directorEntryState},enemy.hp,enemy.maxHp,enemy.alive,!!enemy.eliteKind);
             if(r?.isAccepted&&r.resolvedDamage>0){this.damageEnemy(enemy,r.resolvedDamage,t,false,"triple");this.aggregateAndMaybeFlush(`${t.id}_${enemy.id}`,r.resolvedDamage,{x:enemy.x,y:enemy.y},'TRIPLE_DERIVED_1','ENEMY',100,t._damageSnapshot!.entryAttack,false,false);}
           }
         }
@@ -2989,6 +2990,7 @@ export class Game {
       if (!bestSnap || !bestTrail) continue;
 
       const targetIsImmune = this._eliteInvuln && enemy.eliteKind === "fireRing";
+      if (!isEnemyCombatTargetable(enemy)) continue; // 0807-11D-3G: 影化不可战斗
       const r = resolveDamage({
         actionId: this.nextId("scorch"), parentActionId: "scorch",
         sourceType: "SCORCH_BURN", sourceConfig: DAMAGE_SOURCE_REGISTRY.SCORCH_BURN,
@@ -2996,6 +2998,7 @@ export class Game {
         skillCoefficient: 0.12, stats: bestSnap,
         bladeBand: "mid", tags: ["scorch", "burn", "dot"],
         hitPos: { x: enemy.x, y: enemy.y }, timestamp: this.elapsed,
+        targetDirectorEntryState: enemy._directorEntryState,
       }, enemy.hp, enemy.maxHp, enemy.alive, targetIsImmune);
       if (this.debugEnabled) {
         const hpBefore = enemy.hp;
@@ -3650,6 +3653,7 @@ export class Game {
           skillCoefficient: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient, stats: s,
           bladeBand: s.bladeDamageBonus >= 0.25 ? "high" : s.bladeDamageBonus >= 0.10 ? "mid" : "low",
           tags: ["main", "debug"], hitPos: { x: t.x, y: t.y }, timestamp: this.elapsed,
+          targetDirectorEntryState: t._directorEntryState,
         }, t.hp, t.maxHp, t.alive, false);
         if (r && r.isAccepted && r.effectiveHpLoss > 0) {
           this._slashDedupTestTarget = trail.id;
@@ -3969,6 +3973,7 @@ export class Game {
     const canBreakAll = oneBladeMul > 1 ? true : stage.canBreakShield;
 
     if (enemy.kind === "infantry") {
+      if (!isEnemyCombatTargetable(enemy)) return; // 0807-11D-3G: 影化不可战斗
       // 0807-11B-1: 统一伤害 — 真实HP结算
       const stats = trail._damageSnapshot ?? this.captureDamageSnapshot();
       const req: DamageRequest = {
@@ -3985,6 +3990,7 @@ export class Game {
         tags: ["main", "player"],
         hitPos: { x: enemy.x, y: enemy.y },
         timestamp: this.elapsed,
+        targetDirectorEntryState: enemy._directorEntryState,
       };
       const result = resolveDamage(req, enemy.hp, enemy.maxHp, enemy.alive, false);
       if (result && result.isAccepted && result.effectiveHpLoss > 0) {
@@ -4145,6 +4151,7 @@ export class Game {
           tags: ["main", "player"],
           hitPos: { x: enemy.x, y: enemy.y },
           timestamp: this.elapsed,
+          targetDirectorEntryState: enemy._directorEntryState,
         };
         const result = resolveDamage(req, enemy.hp, enemy.maxHp, enemy.alive, false);
         eliteDmg = result ? result.effectiveHpLoss : 0;
