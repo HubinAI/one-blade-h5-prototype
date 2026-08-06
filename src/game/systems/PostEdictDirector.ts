@@ -117,6 +117,64 @@ export const FORMATION_ANCHORS: Record<string, string> = {
   scattered_walls:  'center',
 };
 
+// ═══════════════════ 0807-11D-3E: 阵型错列偏移 ═══════════════════
+
+type FormationCategory = 'broad' | 'slant' | 'dual';
+
+const FORMATION_CATEGORY: Record<string, FormationCategory> = {
+  front_wide: 'broad', back_wide: 'broad', center_expand: 'broad',
+  left_expand: 'broad', right_expand: 'broad',
+  left_high_diag: 'slant', left_low_diag: 'slant', right_high_diag: 'slant', right_low_diag: 'slant',
+  left_slant_back: 'slant', right_slant_back: 'slant',
+  left_front: 'dual', right_back: 'dual', front_tough: 'dual', scattered_walls: 'dual',
+};
+
+/** 确定性哈希: beatId+mbIdx → 数值 */
+function formationSeed(beatId: string, mbIdx: number): number {
+  let h = 0;
+  for (let i = 0; i < beatId.length; i++) h = (h * 31 + beatId.charCodeAt(i)) | 0;
+  return ((h * 17 + mbIdx) | 0) >>> 0;
+}
+
+/** 咬定至安全区 */
+function clampToSafeX(x: number): number {
+  return Math.max(BATTLE_SAFE_X.normalMin + 8, Math.min(BATTLE_SAFE_X.normalMax - 8, x));
+}
+
+/** 根据 formation + spawnOrder 生成确定性偏移 */
+export function getFormationOffset(
+  formationId: string, beatId: string, mbIdx: number, spawnOrder: number, count: number,
+): { dx: number; dy: number } {
+  const cat = FORMATION_CATEGORY[formationId] || 'broad';
+  const seed = formationSeed(beatId, mbIdx);
+  // 确定性伪随机: seed→[0,1)
+  const prng = (i: number) => { const s = ((seed + i * 2654435761) | 0) >>> 0; return (s % 10000) / 10000; };
+
+  if (cat === 'broad') {
+    // 横幕: 2-3 纵深层, Y跨度 ~28-36px
+    const layerPattern = spawnOrder < 2 ? -14 : spawnOrder < 5 ? 0 : 14;
+    const layerJitter = Math.floor(prng(spawnOrder) * 6) - 3; // ±3px
+    const dy = layerPattern + layerJitter;
+    const dx = Math.floor(prng(spawnOrder + 100) * 14) - 7; // ±7px
+    return { dx, dy };
+  }
+
+  if (cat === 'slant') {
+    // 斜幕: 保持主方向, 轻微错落
+    const dy = Math.floor(prng(spawnOrder) * 16) - 8; // ±8px
+    const dx = Math.floor(prng(spawnOrder + 100) * 12) - 6; // ±6px
+    return { dx, dy };
+  }
+
+  // dual: 前后双层/左右双团 — 组内错列
+  const groupIdx = Math.floor(spawnOrder / 3);
+  const groupDy = (groupIdx % 2 === 0) ? -8 : 8;
+  const withinDy = Math.floor(prng(spawnOrder) * 6) - 3;
+  const dy = groupDy + withinDy;
+  const dx = Math.floor(prng(spawnOrder + 100) * 16) - 8; // ±8px
+  return { dx, dy };
+}
+
 // 入场时长常量 (秒) — 0807-11D-3D: 惯性沉降
 export const SHADOW_MOVE_DURATION = 0.85;   // spawn→最终阵位
 export const MATERIALIZE_DURATION = 0.15;   // 凝实
@@ -483,6 +541,7 @@ export class PostEdictDirector {
       if (cnt <= 0) continue;
       const xPositions = this._calcXPositions(cnt, mb.xRange);
       for (let i = 0; i < cnt; i++) {
+        const offset = getFormationOffset(mb.formationId, beat.id, this._microBatchIndex, i, cnt);
         items.push({
           x: Math.round(xPositions[i] + jitter()),
           y: -20 + (mb.row === 'back' ? 0 : mb.row === 'mid' ? -5 : -10),
@@ -490,8 +549,8 @@ export class PostEdictDirector {
           hpTier: tier,
           hpOverride: HP_TIERS[tier].hp,
           formationId: mb.formationId,
-          entryTargetX: xPositions[i],
-          entryEndYOverride: rowEnd + jitter(),
+          entryTargetX: Math.round(clampToSafeX(xPositions[i] + offset.dx)),
+          entryEndYOverride: rowEnd + offset.dy + jitter() * 0.4,
           directorPhase: beat.phase,
           directorBeatId: beat.id,
           directorMicroBatchId: mbId,
@@ -570,6 +629,7 @@ export class PostEdictDirector {
     for (const [tier, cnt] of mb.tiers) {
       if (cnt <= 0) continue;
       for (let j = 0; j < cnt; j++) {
+        const offset = getFormationOffset(mb.formationId, beat.id, this._microBatchIndex - 1, i, mb.count);
         items.push({
           x: Math.round(xPositions[i] + jitter()),
           y: -20 + (mb.row === 'back' ? 0 : mb.row === 'mid' ? -5 : -10),
@@ -577,8 +637,8 @@ export class PostEdictDirector {
           hpTier: tier,
           hpOverride: HP_TIERS[tier].hp,
           formationId: mb.formationId,
-          entryTargetX: xPositions[i],
-          entryEndYOverride: rowEnd + jitter(),
+          entryTargetX: Math.round(clampToSafeX(xPositions[i] + offset.dx)),
+          entryEndYOverride: rowEnd + offset.dy + jitter() * 0.4,
           directorPhase: beat.phase,
           directorBeatId: beat.id,
           directorMicroBatchId: `${beat.id}_mb${this._microBatchIndex - 1}`,
