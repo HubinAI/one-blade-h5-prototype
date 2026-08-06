@@ -6447,13 +6447,24 @@ export class Game {
     if (item.dirFormationId !== undefined) { (enemy as any)._dirFormationId = item.dirFormationId; }
     if (item.entryTargetX !== undefined) { (enemy as any)._dirEntryTargetX = item.entryTargetX; }
     if (item.entryEndYOverride !== undefined) { (enemy as any)._dirEntryEndYOverride = item.entryEndYOverride; }
-    // 0807-11D-3C: 初始化影化入场 — 虚影直接落位
+    // 0807-11D-3H: P1-1直接落位，shadowSkip时立即放置到最终阵位
     if (item.shadowAnchorX !== undefined && !(item.shadowSkip)) {
       enemy._directorEntryState = 'shadow_move';
       enemy._directorEntryTimer = 0;
       enemy._directorTargetX = item.entryTargetX ?? item.x;
       enemy._directorTargetY = item.entryEndYOverride ?? (ENTRY_PROFILE_EDICT_BURST.entryEndY);
       (enemy as any)._spawnOrder = item.spawnOrder ?? 0;
+    } else if (item.shadowSkip) {
+      // P1-1: 直接落位到最终阵位，不经过顶部下落
+      const tx = item.entryTargetX ?? item.x;
+      const ty = item.entryEndYOverride ?? (ENTRY_PROFILE_EDICT_BURST.entryEndY);
+      enemy.x = tx;
+      enemy.y = ty;
+      enemy._directorEntryState = 'active';
+      (enemy as any)._shadowAlpha = 1;
+      // 清除 entryPhase，防止 createEnemy 预设的下落逻辑
+      if (enemy.entryPhase) enemy.entryPhase.active = false;
+      enemy.entryPhase = undefined;
     }
     if (this._currentWaveEvent) {
       enemy.spawnedWithEvent = this._currentWaveEvent;
