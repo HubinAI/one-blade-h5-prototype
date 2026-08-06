@@ -30,6 +30,8 @@ dist_e2e/
 dist_prod_clean*/
 dist_e2e_clean*/
 dist_prod_check*/
+dist_prod_chk*/
 dist_check/
 dist_chk/
+dist_chk2/
 test_output*.txt
