@@ -7559,80 +7559,112 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.restore();
   }
 
-  /** 0807-11D-4B-1: 满势爆发三层气场 */
+  /** 0807-11D-4B-4: 连续能量波边 */
   private _drawBurstFlame(ctx: CanvasRenderingContext2D) {
     if (this._momentumState !== 'bursting') return;
     const t = this._burstRemaining;
     const elapsed = 5.0 - t;
-    const fadeIn = Math.min(1, elapsed / 0.2);           // 0→0.2s 亮起
-    const urgency = t < 1.0 ? 1 + (1 - t) * 2 : 1;      // 最后1秒加速
+    const fadeIn = Math.min(1, elapsed / 0.2);
+    const urgency = t < 1.0 ? 1 + (1 - t) * 2 : 1;
     const pulse = Math.sin(this.elapsed * 4) * 0.15 + 0.85;
     const alpha = fadeIn * pulse * urgency * 0.55;
 
     ctx.save();
     ctx.globalAlpha = Math.min(0.75, alpha);
 
-    // Layer 1: 四边金橙能量边缘 (10-14px)
-    const ew = 10 + Math.sin(this.elapsed * 3.7) * 4;
-    ctx.fillStyle = '#ff8820';
-    ctx.fillRect(0, 0, ew, DESIGN_HEIGHT);
-    ctx.fillRect(DESIGN_WIDTH - ew, 0, ew, DESIGN_HEIGHT);
-    ctx.fillRect(0, 0, DESIGN_WIDTH, ew);
-    ctx.fillRect(0, DESIGN_HEIGHT - ew, DESIGN_WIDTH, ew);
+    // 连续波浪能量边 (基础10-12px + 3-6px波动)
+    this._drawWaveEdge(ctx, 0, DESIGN_WIDTH, DESIGN_HEIGHT, this.elapsed);
 
-    // Layer 2: 短焰尖 (4-6个尖端向内伸出)
-    ctx.fillStyle = '#ffcc44';
-    const flameCount = 6;
-    for (let i = 0; i < flameCount; i++) {
-      const phase = this.elapsed * 2 + i * 1.1;
-      const sparkAlpha = 0.4 + Math.sin(phase) * 0.2;
-      ctx.globalAlpha = Math.min(0.75, alpha * sparkAlpha);
-      const fl = 12 + Math.sin(phase) * 5; // 10~17px, 软短
-      // 左边缘 → 向内弧线火舌
-      const fy = 40 + (i / flameCount) * (DESIGN_HEIGHT - 80);
-      ctx.beginPath(); ctx.moveTo(0, fy - 8);
-      ctx.quadraticCurveTo(fl * 0.7, fy - 2, fl, fy);
-      ctx.quadraticCurveTo(fl * 0.7, fy + 2, 0, fy + 8);
-      ctx.fill();
-      // 右边缘 → 向内弧线火舌
-      ctx.beginPath(); ctx.moveTo(DESIGN_WIDTH, fy - 8);
-      ctx.quadraticCurveTo(DESIGN_WIDTH - fl * 0.7, fy - 2, DESIGN_WIDTH - fl, fy);
-      ctx.quadraticCurveTo(DESIGN_WIDTH - fl * 0.7, fy + 2, DESIGN_WIDTH, fy + 8);
-      ctx.fill();
-      // 上边缘 → 向内弧线火舌
-      const fx = 40 + (i / flameCount) * (DESIGN_WIDTH - 80);
-      ctx.beginPath(); ctx.moveTo(fx - 8, 0);
-      ctx.quadraticCurveTo(fx - 2, fl * 0.7, fx, fl);
-      ctx.quadraticCurveTo(fx + 2, fl * 0.7, fx + 8, 0);
-      ctx.fill();
-      // 下边缘 → 向内弧线火舌
-      ctx.beginPath(); ctx.moveTo(fx - 8, DESIGN_HEIGHT);
-      ctx.quadraticCurveTo(fx - 2, DESIGN_HEIGHT - fl * 0.7, fx, DESIGN_HEIGHT - fl);
-      ctx.quadraticCurveTo(fx + 2, DESIGN_HEIGHT - fl * 0.7, fx + 8, DESIGN_HEIGHT);
-      ctx.fill();
-    }
-
-    // Layer 3: 内收暖色渐变
+    // Layer 2: 内收暖色渐变
     ctx.globalAlpha = Math.min(0.35, alpha * 0.45);
     const ig = 30;
-    // 上
     const gradTop = ctx.createLinearGradient(0, 0, 0, ig);
     gradTop.addColorStop(0, '#ff9944'); gradTop.addColorStop(1, 'rgba(255,153,68,0)');
     ctx.fillStyle = gradTop; ctx.fillRect(0, 0, DESIGN_WIDTH, ig);
-    // 下
     const gradBot = ctx.createLinearGradient(0, DESIGN_HEIGHT, 0, DESIGN_HEIGHT - ig);
     gradBot.addColorStop(0, '#ff9944'); gradBot.addColorStop(1, 'rgba(255,153,68,0)');
     ctx.fillStyle = gradBot; ctx.fillRect(0, DESIGN_HEIGHT - ig, DESIGN_WIDTH, ig);
-    // 左
     const gradL = ctx.createLinearGradient(0, 0, ig, 0);
     gradL.addColorStop(0, '#ff7733'); gradL.addColorStop(1, 'rgba(255,119,51,0)');
     ctx.fillStyle = gradL; ctx.fillRect(0, 0, ig, DESIGN_HEIGHT);
-    // 右
     const gradR = ctx.createLinearGradient(DESIGN_WIDTH, 0, DESIGN_WIDTH - ig, 0);
     gradR.addColorStop(0, '#ff7733'); gradR.addColorStop(1, 'rgba(255,119,51,0)');
     ctx.fillStyle = gradR; ctx.fillRect(DESIGN_WIDTH - ig, 0, ig, DESIGN_HEIGHT);
 
     ctx.restore();
+  }
+
+  /** 绘制单边波浪能量带 */
+  private _drawWaveEdge(ctx: CanvasRenderingContext2D, _topX: number, w: number, h: number, t: number) {
+    ctx.fillStyle = '#ff8820';
+    const baseW = 11;
+    const amp = 4;
+    const waves = 8; // 每条边8个波
+    const phaseOffset = t * 1.5;
+
+    // 左边缘
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    for (let i = 0; i < waves; i++) {
+      const y0 = (i / waves) * h;
+      const y1 = ((i + 1) / waves) * h;
+      const cp = y0 + (y1 - y0) / 2;
+      const w0 = baseW + Math.sin(phaseOffset + i * 1.3) * amp;
+      const w1 = baseW + Math.sin(phaseOffset + (i + 0.5) * 1.3) * amp;
+      ctx.lineTo(w0, cp);
+      ctx.lineTo(w1, y1);
+    }
+    ctx.lineTo(0, h);
+    ctx.closePath();
+    ctx.fill();
+
+    // 右边缘
+    ctx.beginPath();
+    ctx.moveTo(w, 0);
+    for (let i = 0; i < waves; i++) {
+      const y0 = (i / waves) * h;
+      const y1 = ((i + 1) / waves) * h;
+      const cp = y0 + (y1 - y0) / 2;
+      const w0 = baseW + Math.sin(phaseOffset + 3 + i * 1.7) * amp;
+      const w1 = baseW + Math.sin(phaseOffset + 3 + (i + 0.5) * 1.7) * amp;
+      ctx.lineTo(w - w0, cp);
+      ctx.lineTo(w - w1, y1);
+    }
+    ctx.lineTo(w, h);
+    ctx.closePath();
+    ctx.fill();
+
+    // 上边缘
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    for (let i = 0; i < waves; i++) {
+      const x0 = (i / waves) * w;
+      const x1 = ((i + 1) / waves) * w;
+      const cp = x0 + (x1 - x0) / 2;
+      const w0 = baseW + Math.sin(phaseOffset + 1.5 + i * 1.1) * amp;
+      const w1 = baseW + Math.sin(phaseOffset + 1.5 + (i + 0.5) * 1.1) * amp;
+      ctx.lineTo(cp, w0);
+      ctx.lineTo(x1, w1);
+    }
+    ctx.lineTo(w, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    // 下边缘
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    for (let i = 0; i < waves; i++) {
+      const x0 = (i / waves) * w;
+      const x1 = ((i + 1) / waves) * w;
+      const cp = x0 + (x1 - x0) / 2;
+      const w0 = baseW + Math.sin(phaseOffset + 4.5 + i * 1.5) * amp;
+      const w1 = baseW + Math.sin(phaseOffset + 4.5 + (i + 0.5) * 1.5) * amp;
+      ctx.lineTo(cp, h - w0);
+      ctx.lineTo(x1, h - w1);
+    }
+    ctx.lineTo(w, h);
+    ctx.closePath();
+    ctx.fill();
   }
 
   /** P3.8：绘制军令弹窗（紫色框体完整版） */
