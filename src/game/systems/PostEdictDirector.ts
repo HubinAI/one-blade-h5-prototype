@@ -1,136 +1,108 @@
 /**
- * 0807-11D-1 导演节奏与难度断点首轮修正
+ * 0807-11D-2 导演不变量收口与纵向通解修正
  *
- * D = 125 (标准主刀伤害: entryAttack=100 × skillCoeff=1.00 × (1+bladeBonus=0.25))
- *
- * HP 断点：
- *   杂兵 = 100 (0.80D) → 一刀击杀
- *   韧兵 = 170 (1.36D) → 两刀击杀
- *   压阵 = 260 (2.08D) → 三刀击杀
- *
- * 总量：P1(48) + P2(64) + P3(80) = 192
+ * D=125, HP: trash=100(0.80D), tough=170(1.36D), wall=260(2.08D)
+ * 总量 192: trash=112, tough=68, wall=12
+ * P1=64(5beats,all trash) P2=56(5beats,32+24) P3=72(6beats,16+44+12)
  */
 
 import { BATTLEFIELD_ZONES, BATTLE_SAFE_X } from '../config/balance';
+import { randomRange } from '../../utils/math';
 
-// ═══════════════════════════════════════
-// 类型定义
-// ═══════════════════════════════════════
+// ═══════════════════ 类型 ═══════════════════
 
 export type DirectorPhase = 'P1' | 'P2' | 'P3';
 export type HpTier = 'trash' | 'tough' | 'elite_wall';
+export type FormationId = string;
 
-/** 单个敌人生成指令 */
 export interface SpawnItem {
-  x: number;
-  y: number;
+  x: number; y: number;
   speedMul: number;
+
+  // HP
   hpTier: HpTier;
+  hpOverride: number;
+
+  // 队形
+  formationId: FormationId;
+  entryTargetX: number;
+  entryEndYOverride: number;
+
+  // 不可变元数据
+  directorPhase: DirectorPhase;
+  directorBeatId: string;
+  directorMicroBatchId: string;
 }
 
-/** 导演返回的生成批次 */
 export interface DirectorSpawnRequest {
   phase: DirectorPhase;
   items: SpawnItem[];
+  /** 桥接微批次：标记该微批次已被消费，到期不得重复生成 */
+  consumedMicroBatchId?: string;
 }
 
 export interface DirectorDebugInfo {
-  phase: string;
-  beat: string;
-  generated: number;
-  total: number;
-  aliveTrash: number;
-  aliveTough: number;
-  aliveWall: number;
-  aliveTotal: number;
-  approachingCount: number;
-  combatReadyCount: number;
-  pendingSpawnCount: number;
-  notBeforeRemaining: number;
-  nextState: string;
+  phase: string; beat: string;
+  generated: number; total: number;
+  aliveTrash: number; aliveTough: number; aliveWall: number;
+  beatSpawned: number; beatApproaching: number; beatCombatReady: number; beatAlive: number;
+  approachingCount: number; combatReadyCount: number; pendingCount: number;
+  notBeforeRemaining: number; microDelayRemaining: number;
+  nextState: string; formationId: string;
   phaseElapsed: number;
 }
 
-// ═══════════════════════════════════════
-// 有效战斗区判定
-// ═══════════════════════════════════════
+// ═══════════════════ 区域判定 ═══════════════════
 
 export function isInCombatZone(y: number): boolean {
   return y >= BATTLEFIELD_ZONES.midfieldStartY && y <= BATTLEFIELD_ZONES.harvestEndY;
 }
-
-/** 敌人在接近区（已生成但未进入战斗区） */
 export function isApproaching(y: number): boolean {
   return y >= -30 && y < BATTLEFIELD_ZONES.midfieldStartY;
 }
 
-// ═══════════════════════════════════════
-// HP 档位配置
-// ═══════════════════════════════════════
+// ═══════════════════ HP 配置 ═══════════════════
 
 export const HP_TIERS: Record<HpTier, { hp: number; hpMul: number; scale: number; ringWidth: number }> = {
-  trash:      { hp: 100, hpMul: 1.33, scale: 1.00, ringWidth: 1.0 },  // 杂兵 0.80D
-  tough:      { hp: 170, hpMul: 2.27, scale: 1.06, ringWidth: 1.4 },  // 韧兵 1.36D
-  elite_wall: { hp: 260, hpMul: 3.47, scale: 1.11, ringWidth: 2.0 },  // 压阵 2.08D
+  trash:      { hp: 100, hpMul: 1.33, scale: 1.00, ringWidth: 1.0 },
+  tough:      { hp: 170, hpMul: 2.27, scale: 1.06, ringWidth: 1.4 },
+  elite_wall: { hp: 260, hpMul: 3.47, scale: 1.11, ringWidth: 2.0 },
 };
-
-/** 主刀伤害 D */
 export const STANDARD_SLASH_DAMAGE = 125;
 
-// ═══════════════════════════════════════
-// X 布局工具
-// ═══════════════════════════════════════
-
-const WIDE_X: [number, number] = [BATTLE_SAFE_X.normalMin, BATTLE_SAFE_X.normalMax];
-const CENTER_X: [number, number] = [120, 280];
-
-type XLayout = 'wide' | 'left' | 'right' | 'center' | 'leftFront' | 'rightBack' | 'twoColumns';
-
-function generateX(count: number, layout: XLayout, xRange: [number, number]): number[] {
-  const [minX, maxX] = xRange;
-  const range = maxX - minX;
-  const result: number[] = [];
-  const jitter = () => (Math.random() - 0.5) * 14;
-
-  switch (layout) {
-    case 'wide':
-      for (let i = 0; i < count; i++) result.push(minX + (range * (i + 0.5)) / count + jitter());
-      break;
-    case 'left':
-      for (let i = 0; i < count; i++) result.push(minX + (range * 0.45 * (i + 0.5)) / count + jitter());
-      break;
-    case 'right':
-      for (let i = 0; i < count; i++) result.push(minX + range * 0.55 + (range * 0.45 * (i + 0.5)) / count + jitter());
-      break;
-    case 'center':
-      for (let i = 0; i < count; i++) result.push(minX + range * 0.25 + (range * 0.5 * (i + 0.5)) / count + jitter());
-      break;
-    case 'leftFront':
-      for (let i = 0; i < count; i++) result.push(minX + (range * 0.65 * (i + 0.5)) / count + jitter());
-      break;
-    case 'rightBack':
-      for (let i = 0; i < count; i++) result.push(minX + range * 0.35 + (range * 0.65 * (i + 0.5)) / count + jitter());
-      break;
-    case 'twoColumns':
-      for (let i = 0; i < count; i++) {
-        result.push(i % 2 === 0 ? minX + range * 0.22 : minX + range * 0.73);
-        result[i] += jitter();
-      }
-      break;
-  }
-  return result;
+/** 由 HP 反推 hpTier (仅用于敌人受伤前) */
+export function hpToTier(hp: number): HpTier {
+  if (hp >= 220) return 'elite_wall';
+  if (hp >= 136) return 'tough';
+  return 'trash';
 }
 
-// ═══════════════════════════════════════
-// 导演节拍与微批次
-// ═══════════════════════════════════════
+// ═══════════════════ 队形常量 ═══════════════════
+
+/** 站位高度 */
+const BACK_ROW   = { min: 350, max: 390 };
+const MID_ROW    = { min: 420, max: 460 };
+const FRONT_ROW  = { min: 500, max: 540 };
+
+/** X 锚点 */
+const X_WIDE   = [BATTLE_SAFE_X.normalMin, BATTLE_SAFE_X.normalMax] as [number, number];
+const X_LEFT   = [BATTLE_SAFE_X.normalMin, 200] as [number, number];
+const X_RIGHT  = [200, BATTLE_SAFE_X.normalMax] as [number, number];
+const X_CENTER = [130, 270] as [number, number];
+
+function rowEndY(row: 'back' | 'mid' | 'front', jitter = true): number {
+  const r = row === 'back' ? BACK_ROW : row === 'mid' ? MID_ROW : FRONT_ROW;
+  return jitter ? r.min + Math.random() * (r.max - r.min) : (r.min + r.max) / 2;
+}
+
+// ═══════════════════ 微批次配置 ═══════════════════
 
 interface MicroBatch {
   count: number;
-  hpTiers: [HpTier, number][];  // [(tier, count), ...]
-  xLayout: XLayout;
+  tiers: [HpTier, number][];
+  formationId: FormationId;
   xRange: [number, number];
-  yOffset: number;
+  row: 'back' | 'mid' | 'front';
   internalDelay: number;
   speedBonus: number;
 }
@@ -139,150 +111,133 @@ interface DirectorBeat {
   id: string;
   phase: DirectorPhase;
   notBeforeMs: number;
-  totalCount: number;
   microBatches: MicroBatch[];
 }
 
-// ═══════════════════════════════════════
-// P1/P2/P3 导演配置
-// ═══════════════════════════════════════
+// ═══════════════════ P1 P2 P3 节拍配置 ═══════════════════
 
 const BEATS: DirectorBeat[] = [
-  // ═══ P1: 4个节拍 48名 全部杂兵 ═══
+  // ═══ P1: 5节拍 64全杂兵 ═══
   {
-    id: 'P1-1', phase: 'P1', notBeforeMs: 0, totalCount: 12,
+    id: 'P1-1', phase: 'P1', notBeforeMs: 0,
     microBatches: [
-      { count: 6, hpTiers: [['trash', 6]], xLayout: 'wide', xRange: WIDE_X, yOffset: 0, internalDelay: 0, speedBonus: 0 },
-      { count: 6, hpTiers: [['trash', 6]], xLayout: 'wide', xRange: WIDE_X, yOffset: 8, internalDelay: 0.30, speedBonus: 0 },
+      { count: 6, tiers: [['trash',6]], formationId: 'front_wide',  xRange: X_WIDE,  row: 'front', internalDelay: 0,    speedBonus: 0 },
+      { count: 6, tiers: [['trash',6]], formationId: 'front_wide',  xRange: X_WIDE,  row: 'front', internalDelay: 0.30, speedBonus: 0 },
     ],
   },
   {
-    id: 'P1-2', phase: 'P1', notBeforeMs: 1800, totalCount: 12,
+    id: 'P1-2', phase: 'P1', notBeforeMs: 1800,
     microBatches: [
-      { count: 5, hpTiers: [['trash', 5]], xLayout: 'left', xRange: WIDE_X, yOffset: 0, internalDelay: 0, speedBonus: 0 },
-      { count: 5, hpTiers: [['trash', 5]], xLayout: 'right', xRange: WIDE_X, yOffset: 6, internalDelay: 0.35, speedBonus: 0 },
-      { count: 2, hpTiers: [['trash', 2]], xLayout: 'center', xRange: CENTER_X, yOffset: -10, internalDelay: 0.25, speedBonus: 0 },
+      { count: 7, tiers: [['trash',7]], formationId: 'back_wide',   xRange: X_WIDE,  row: 'back',  internalDelay: 0,    speedBonus: 0 },
+      { count: 6, tiers: [['trash',6]], formationId: 'back_wide',   xRange: X_WIDE,  row: 'back',  internalDelay: 0.32, speedBonus: 0 },
     ],
   },
   {
-    id: 'P1-3', phase: 'P1', notBeforeMs: 3600, totalCount: 12,
+    id: 'P1-3', phase: 'P1', notBeforeMs: 3600,
     microBatches: [
-      { count: 5, hpTiers: [['trash', 5]], xLayout: 'wide', xRange: WIDE_X, yOffset: 0, internalDelay: 0, speedBonus: 0 },
-      { count: 4, hpTiers: [['trash', 4]], xLayout: 'wide', xRange: WIDE_X, yOffset: -12, internalDelay: 0.28, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 3]], xLayout: 'center', xRange: CENTER_X, yOffset: -20, internalDelay: 0.22, speedBonus: 0 },
+      { count: 6, tiers: [['trash',6]], formationId: 'left_high_diag',  xRange: X_LEFT,  row: 'front', internalDelay: 0,    speedBonus: 0 },
+      { count: 6, tiers: [['trash',6]], formationId: 'right_low_diag',  xRange: X_RIGHT, row: 'back',  internalDelay: 0.35, speedBonus: 0 },
     ],
   },
   {
-    id: 'P1-4', phase: 'P1', notBeforeMs: 5400, totalCount: 12,
+    id: 'P1-4', phase: 'P1', notBeforeMs: 5400,
     microBatches: [
-      { count: 6, hpTiers: [['trash', 6]], xLayout: 'wide', xRange: WIDE_X, yOffset: 0, internalDelay: 0, speedBonus: 0 },
-      { count: 6, hpTiers: [['trash', 6]], xLayout: 'twoColumns', xRange: WIDE_X, yOffset: -8, internalDelay: 0.20, speedBonus: 0 },
-    ],
-  },
-
-  // ═══ P2: 5个节拍 64名 44杂兵+20韧兵 ═══
-  {
-    id: 'P2-1', phase: 'P2', notBeforeMs: 0, totalCount: 12,
-    microBatches: [
-      { count: 5, hpTiers: [['trash', 5]], xLayout: 'leftFront', xRange: WIDE_X, yOffset: 0, internalDelay: 0, speedBonus: 0 },
-      { count: 5, hpTiers: [['trash', 5]], xLayout: 'rightBack', xRange: WIDE_X, yOffset: 10, internalDelay: 0.35, speedBonus: 0 },
-      { count: 2, hpTiers: [['trash', 2]], xLayout: 'center', xRange: CENTER_X, yOffset: -5, internalDelay: 0.20, speedBonus: 0 },
+      { count: 6, tiers: [['trash',6]], formationId: 'right_high_diag', xRange: X_RIGHT, row: 'front', internalDelay: 0,    speedBonus: 0 },
+      { count: 7, tiers: [['trash',7]], formationId: 'left_low_diag',   xRange: X_LEFT,  row: 'back',  internalDelay: 0.32, speedBonus: 0 },
     ],
   },
   {
-    id: 'P2-2', phase: 'P2', notBeforeMs: 2200, totalCount: 12,
+    id: 'P1-5', phase: 'P1', notBeforeMs: 7200,
     microBatches: [
-      { count: 5, hpTiers: [['trash', 5]], xLayout: 'center', xRange: WIDE_X, yOffset: 0, internalDelay: 0, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 3]], xLayout: 'center', xRange: WIDE_X, yOffset: -10, internalDelay: 0.30, speedBonus: 0 },
-      { count: 2, hpTiers: [['trash', 1], ['tough', 1]], xLayout: 'twoColumns', xRange: WIDE_X, yOffset: -16, internalDelay: 0.25, speedBonus: 0 },
-      { count: 2, hpTiers: [['trash', 1], ['tough', 1]], xLayout: 'center', xRange: CENTER_X, yOffset: 5, internalDelay: 0, speedBonus: 0 },
-    ],
-  },
-  {
-    id: 'P2-3', phase: 'P2', notBeforeMs: 4400, totalCount: 13,
-    microBatches: [
-      { count: 4, hpTiers: [['trash', 3], ['tough', 1]], xLayout: 'center', xRange: [140, 260], yOffset: 0, internalDelay: 0, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 1], ['tough', 2]], xLayout: 'left', xRange: WIDE_X, yOffset: 8, internalDelay: 0.30, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 1], ['tough', 2]], xLayout: 'right', xRange: WIDE_X, yOffset: 8, internalDelay: 0, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 1], ['tough', 2]], xLayout: 'wide', xRange: WIDE_X, yOffset: -14, internalDelay: 0.35, speedBonus: 0 },
-    ],
-  },
-  {
-    id: 'P2-4', phase: 'P2', notBeforeMs: 6600, totalCount: 13,
-    microBatches: [
-      { count: 4, hpTiers: [['trash', 2], ['tough', 2]], xLayout: 'wide', xRange: WIDE_X, yOffset: 0, internalDelay: 0, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 1], ['tough', 2]], xLayout: 'wide', xRange: WIDE_X, yOffset: -8, internalDelay: 0.32, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 1], ['tough', 2]], xLayout: 'wide', xRange: WIDE_X, yOffset: -16, internalDelay: 0.25, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 1], ['tough', 2]], xLayout: 'center', xRange: CENTER_X, yOffset: 5, internalDelay: 0.20, speedBonus: 0 },
-    ],
-  },
-  {
-    id: 'P2-5', phase: 'P2', notBeforeMs: 8800, totalCount: 14,
-    microBatches: [
-      { count: 5, hpTiers: [['trash', 2], ['tough', 3]], xLayout: 'wide', xRange: WIDE_X, yOffset: 0, internalDelay: 0, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 1], ['tough', 2]], xLayout: 'leftFront', xRange: WIDE_X, yOffset: -10, internalDelay: 0.28, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 1], ['tough', 2]], xLayout: 'rightBack', xRange: WIDE_X, yOffset: -10, internalDelay: 0, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 0], ['tough', 3]], xLayout: 'twoColumns', xRange: WIDE_X, yOffset: -20, internalDelay: 0.35, speedBonus: 0 },
+      { count: 7, tiers: [['trash',7]], formationId: 'front_wide',     xRange: X_WIDE, row: 'front', internalDelay: 0,    speedBonus: 0 },
+      { count: 7, tiers: [['trash',7]], formationId: 'back_wide',      xRange: X_WIDE, row: 'back',  internalDelay: 0.28, speedBonus: 0 },
     ],
   },
 
-  // ═══ P3: 6个节拍 80名 28杂兵+44韧兵+8压阵 ═══
+  // ═══ P2: 5节拍 56 (32杂+24韧) ═══
   {
-    id: 'P3-1', phase: 'P3', notBeforeMs: 0, totalCount: 12,
+    id: 'P2-1', phase: 'P2', notBeforeMs: 0,
     microBatches: [
-      { count: 6, hpTiers: [['trash', 4], ['tough', 2]], xLayout: 'wide', xRange: WIDE_X, yOffset: 0, internalDelay: 0, speedBonus: 0 },
-      { count: 6, hpTiers: [['trash', 3], ['tough', 3]], xLayout: 'wide', xRange: WIDE_X, yOffset: 10, internalDelay: 0.30, speedBonus: 0 },
+      { count: 6, tiers: [['trash',6]],           formationId: 'left_front',     xRange: X_LEFT,  row: 'front', internalDelay: 0,    speedBonus: 0 },
+      { count: 6, tiers: [['trash',6]],           formationId: 'right_back',     xRange: X_RIGHT, row: 'back',  internalDelay: 0.35, speedBonus: 0 },
     ],
   },
   {
-    id: 'P3-2', phase: 'P3', notBeforeMs: 2200, totalCount: 13,
+    id: 'P2-2', phase: 'P2', notBeforeMs: 2400,
     microBatches: [
-      { count: 5, hpTiers: [['trash', 3], ['tough', 2]], xLayout: 'leftFront', xRange: WIDE_X, yOffset: 0, internalDelay: 0, speedBonus: 0 },
-      { count: 4, hpTiers: [['trash', 2], ['tough', 2]], xLayout: 'rightBack', xRange: WIDE_X, yOffset: -6, internalDelay: 0.30, speedBonus: 0 },
-      { count: 4, hpTiers: [['trash', 1], ['tough', 3]], xLayout: 'center', xRange: CENTER_X, yOffset: -14, internalDelay: 0.25, speedBonus: 0 },
+      { count: 5, tiers: [['trash',4],['tough',1]], formationId: 'left_high_diag', xRange: X_LEFT,  row: 'front', internalDelay: 0,    speedBonus: 0 },
+      { count: 4, tiers: [['trash',3],['tough',1]], formationId: 'right_low_diag', xRange: X_RIGHT, row: 'back',  internalDelay: 0.30, speedBonus: 0 },
     ],
   },
   {
-    id: 'P3-3', phase: 'P3', notBeforeMs: 4400, totalCount: 13,
+    id: 'P2-3', phase: 'P2', notBeforeMs: 4800,
     microBatches: [
-      { count: 4, hpTiers: [['trash', 2], ['tough', 2]], xLayout: 'wide', xRange: WIDE_X, yOffset: 0, internalDelay: 0, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 1], ['tough', 2]], xLayout: 'center', xRange: WIDE_X, yOffset: -8, internalDelay: 0.25, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 1], ['tough', 2]], xLayout: 'center', xRange: WIDE_X, yOffset: -16, internalDelay: 0.20, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 1], ['tough', 1], ['elite_wall', 1]], xLayout: 'wide', xRange: WIDE_X, yOffset: 5, internalDelay: 0.28, speedBonus: 0 },
+      { count: 5, tiers: [['trash',3],['tough',2]], formationId: 'right_high_diag', xRange: X_RIGHT, row: 'front', internalDelay: 0,    speedBonus: 0 },
+      { count: 4, tiers: [['trash',2],['tough',2]], formationId: 'left_low_diag',   xRange: X_LEFT,  row: 'back',  internalDelay: 0.32, speedBonus: 0 },
     ],
   },
   {
-    id: 'P3-4', phase: 'P3', notBeforeMs: 6600, totalCount: 14,
+    id: 'P2-4', phase: 'P2', notBeforeMs: 7200,
     microBatches: [
-      { count: 4, hpTiers: [['trash', 1], ['tough', 2], ['elite_wall', 1]], xLayout: 'wide', xRange: [100, 300], yOffset: 0, internalDelay: 0, speedBonus: 0.08 },
-      { count: 3, hpTiers: [['trash', 1], ['tough', 1], ['elite_wall', 1]], xLayout: 'wide', xRange: WIDE_X, yOffset: -12, internalDelay: 0.28, speedBonus: 0 },
-      { count: 4, hpTiers: [['trash', 1], ['tough', 3]], xLayout: 'wide', xRange: WIDE_X, yOffset: -22, internalDelay: 0.22, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 0], ['tough', 2], ['elite_wall', 1]], xLayout: 'twoColumns', xRange: WIDE_X, yOffset: 5, internalDelay: 0.30, speedBonus: 0 },
+      { count: 6, tiers: [['trash',4],['tough',2]], formationId: 'center_expand',  xRange: X_CENTER, row: 'mid',   internalDelay: 0,    speedBonus: 0 },
+      { count: 4, tiers: [['trash',2],['tough',2]], formationId: 'left_expand',    xRange: X_LEFT,   row: 'mid',   internalDelay: 0.28, speedBonus: 0 },
+      { count: 4, tiers: [['trash',2],['tough',2]], formationId: 'right_expand',   xRange: X_RIGHT,  row: 'mid',   internalDelay: 0,    speedBonus: 0 },
     ],
   },
   {
-    id: 'P3-5', phase: 'P3', notBeforeMs: 8800, totalCount: 14,
+    id: 'P2-5', phase: 'P2', notBeforeMs: 9600,
     microBatches: [
-      { count: 4, hpTiers: [['trash', 1], ['tough', 2], ['elite_wall', 1]], xLayout: 'center', xRange: CENTER_X, yOffset: 0, internalDelay: 0, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 0], ['tough', 2], ['elite_wall', 1]], xLayout: 'left', xRange: WIDE_X, yOffset: 10, internalDelay: 0.25, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 0], ['tough', 3]], xLayout: 'right', xRange: WIDE_X, yOffset: 10, internalDelay: 0, speedBonus: 0 },
-      { count: 4, hpTiers: [['trash', 1], ['tough', 2], ['elite_wall', 1]], xLayout: 'wide', xRange: WIDE_X, yOffset: -16, internalDelay: 0.32, speedBonus: 0 },
+      { count: 6, tiers: [['trash',0],['tough',6]], formationId: 'front_wide',  xRange: X_WIDE, row: 'front', internalDelay: 0,    speedBonus: 0 },
+      { count: 6, tiers: [['trash',0],['tough',6]], formationId: 'back_wide',   xRange: X_WIDE, row: 'back',  internalDelay: 0.30, speedBonus: 0 },
+    ],
+  },
+
+  // ═══ P3: 6节拍 72 (16杂+44韧+12压阵) ═══
+  {
+    id: 'P3-1', phase: 'P3', notBeforeMs: 0,
+    microBatches: [
+      { count: 6, tiers: [['trash',3],['tough',3]],           formationId: 'front_wide',   xRange: X_WIDE,  row: 'front', internalDelay: 0,    speedBonus: 0 },
+      { count: 6, tiers: [['trash',3],['tough',3]],           formationId: 'back_wide',    xRange: X_WIDE,  row: 'back',  internalDelay: 0.30, speedBonus: 0 },
     ],
   },
   {
-    id: 'P3-6', phase: 'P3', notBeforeMs: 11000, totalCount: 14,
+    id: 'P3-2', phase: 'P3', notBeforeMs: 2400,
     microBatches: [
-      { count: 4, hpTiers: [['trash', 1], ['tough', 2], ['elite_wall', 1]], xLayout: 'center', xRange: CENTER_X, yOffset: 0, internalDelay: 0, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 0], ['tough', 2], ['elite_wall', 1]], xLayout: 'left', xRange: WIDE_X, yOffset: 8, internalDelay: 0.25, speedBonus: 0 },
-      { count: 3, hpTiers: [['trash', 0], ['tough', 3]], xLayout: 'right', xRange: WIDE_X, yOffset: 8, internalDelay: 0, speedBonus: 0 },
-      { count: 4, hpTiers: [['trash', 0], ['tough', 3], ['elite_wall', 1]], xLayout: 'twoColumns', xRange: WIDE_X, yOffset: -14, internalDelay: 0.28, speedBonus: 0 },
+      { count: 6, tiers: [['trash',2],['tough',4]],           formationId: 'left_front',   xRange: X_LEFT,  row: 'front', internalDelay: 0,    speedBonus: 0 },
+      { count: 6, tiers: [['trash',1],['tough',5]],           formationId: 'right_back',   xRange: X_RIGHT, row: 'back',  internalDelay: 0.32, speedBonus: 0 },
+    ],
+  },
+  {
+    id: 'P3-3', phase: 'P3', notBeforeMs: 4800,
+    microBatches: [
+      { count: 6, tiers: [['trash',1],['tough',5]],           formationId: 'right_front',  xRange: X_RIGHT, row: 'front', internalDelay: 0,    speedBonus: 0 },
+      { count: 6, tiers: [['trash',1],['tough',4],['elite_wall',1]], formationId: 'left_back', xRange: X_LEFT, row: 'back', internalDelay: 0.30, speedBonus: 0 },
+    ],
+  },
+  {
+    id: 'P3-4', phase: 'P3', notBeforeMs: 7200,
+    microBatches: [
+      { count: 6, tiers: [['trash',1],['tough',3],['elite_wall',2]], formationId: 'left_slant_back', xRange: X_LEFT,  row: 'back', internalDelay: 0, speedBonus: 0 },
+      { count: 6, tiers: [['trash',0],['tough',4],['elite_wall',2]], formationId: 'front_tough',     xRange: X_WIDE,  row: 'front', internalDelay: 0.28, speedBonus: 0.06 },
+    ],
+  },
+  {
+    id: 'P3-5', phase: 'P3', notBeforeMs: 9600,
+    microBatches: [
+      { count: 6, tiers: [['trash',1],['tough',3],['elite_wall',2]], formationId: 'right_slant_back', xRange: X_RIGHT, row: 'back',  internalDelay: 0,    speedBonus: 0 },
+      { count: 6, tiers: [['trash',0],['tough',4],['elite_wall',2]], formationId: 'scattered_walls',  xRange: X_WIDE,  row: 'mid',   internalDelay: 0.30, speedBonus: 0 },
+    ],
+  },
+  {
+    id: 'P3-6', phase: 'P3', notBeforeMs: 12000,
+    microBatches: [
+      { count: 6, tiers: [['trash',2],['tough',3],['elite_wall',1]], formationId: 'front_wide',   xRange: X_WIDE, row: 'front', internalDelay: 0,    speedBonus: 0 },
+      { count: 6, tiers: [['trash',1],['tough',3],['elite_wall',2]], formationId: 'back_wide',    xRange: X_WIDE, row: 'back',  internalDelay: 0.28, speedBonus: 0 },
     ],
   },
 ];
 
-// ═══════════════════════════════════════
-// 阶段配置
-// ═══════════════════════════════════════
+// ═══════════════════ 阶段配置 ═══════════════════
 
 interface PhaseConfig {
   phase: DirectorPhase;
@@ -290,30 +245,23 @@ interface PhaseConfig {
   speedMul: number;
   targetOnScreen: [number, number];
   hardCap: number;
-  /** 接近区容量 */
   approachCap: number;
 }
 
 const PHASES: Record<DirectorPhase, PhaseConfig> = {
-  P1: { phase: 'P1', totalEnemies: 48, speedMul: 1.00, targetOnScreen: [10, 14], hardCap: 16, approachCap: 12 },
-  P2: { phase: 'P2', totalEnemies: 64, speedMul: 1.12, targetOnScreen: [14, 18], hardCap: 20, approachCap: 14 },
-  P3: { phase: 'P3', totalEnemies: 80, speedMul: 1.25, targetOnScreen: [18, 22], hardCap: 24, approachCap: 16 },
+  P1: { phase:'P1', totalEnemies:64, speedMul:1.00, targetOnScreen:[10,14], hardCap:16, approachCap:12 },
+  P2: { phase:'P2', totalEnemies:56, speedMul:1.12, targetOnScreen:[14,18], hardCap:20, approachCap:14 },
+  P3: { phase:'P3', totalEnemies:72, speedMul:1.25, targetOnScreen:[18,22], hardCap:24, approachCap:16 },
 };
 
-// ═══════════════════════════════════════
-// 半动态补怪常量
-// ═══════════════════════════════════════
+// ═══════════════════ 常量 ═══════════════════
 
-const BRIDGE_MIN_EMPTY_SEC = 0.25;
-const BRIDGE_MAX_EMPTY_SEC = 0.35;
-const BRIDGE_COUNT_MIN = 3;
-const BRIDGE_COUNT_MAX = 4;
 const PHASE_GAP_SEC = 0.30;
 const FINAL_AFTERGLOW_SEC = 0.28;
+const BRIDGE_EARLY_SEC = 0.25;  // 桥接: 提前25~350ms释放
+const BRIDGE_EARLY_JITTER = 0.10;
 
-// ═══════════════════════════════════════
-// 导演类
-// ═══════════════════════════════════════
+// ═══════════════════ 导演类 ═══════════════════
 
 export class PostEdictDirector {
   readonly beats = BEATS;
@@ -322,55 +270,39 @@ export class PostEdictDirector {
   private _active = false;
   private _allComplete = false;
 
-  // 当前进度
-  private _beatIndex = 0;         // 全局节拍索引 (0-14)
-  private _microBatchIndex = 0;   // 当前节拍内的微批次索引
-  private _phaseGenerated = 0;    // 当前阶段已生成总数
-  private _phaseBridgeCount = 0;  // 当前阶段桥接补员数
-  private _phaseBeatBridgeUsed: Set<number> = new Set(); // 已桥接的节拍索引
+  private _beatIndex = 0;
+  private _microBatchIndex = 0;
+  private _phaseGenerated = 0;
+  private _phaseBridgeCount = 0;
 
   // 计时
   private _phaseElapsed = 0;
   private _phaseStartMs = 0;
-  private _emptyTime = 0;
+  private _lastMbTime = 0;        // 上一微批次生成时间(ms)
   private _phaseGapTimer = 0;
   private _finalAfterglowTimer = 0;
 
-  // 当前节拍缓存
-  private _currentBeatBridgeDone = false; // 当前节拍是否已桥接过
-  private _currentBeatBridged = 0;        // 当前节拍已桥接数量（从预算中扣）
+  // 桥接
+  private _bridgeMicroBatchId: string | null = null;  // 被桥接消费的微批次 ID
+  private _bridgeBeatIdx = -1;
 
   private _nextState = 'READY';
   private _lastReason = '';
+  private _currentFormationId = '';
 
   // ═══ 公开方法 ═══
 
   reset(): void {
-    this._active = false;
-    this._allComplete = false;
-    this._beatIndex = 0;
-    this._microBatchIndex = 0;
-    this._phaseGenerated = 0;
-    this._phaseBridgeCount = 0;
-    this._phaseBeatBridgeUsed.clear();
-    this._phaseElapsed = 0;
-    this._phaseStartMs = 0;
-    this._emptyTime = 0;
-    this._phaseGapTimer = 0;
-    this._finalAfterglowTimer = 0;
-    this._currentBeatBridgeDone = false;
-    this._currentBeatBridged = 0;
-    this._partialBatchDeduction = 0;
-    this._nextState = 'READY';
-    this._lastReason = '';
+    this._active = false; this._allComplete = false;
+    this._beatIndex = 0; this._microBatchIndex = 0;
+    this._phaseGenerated = 0; this._phaseBridgeCount = 0;
+    this._phaseElapsed = 0; this._phaseStartMs = 0; this._lastMbTime = 0;
+    this._phaseGapTimer = 0; this._finalAfterglowTimer = 0;
+    this._bridgeMicroBatchId = null; this._bridgeBeatIdx = -1;
+    this._nextState = 'READY'; this._lastReason = ''; this._currentFormationId = '';
   }
 
-  start(): void {
-    this.reset();
-    this._active = true;
-    this._nextState = 'READY';
-    this._lastReason = 'start';
-  }
+  start(): void { this.reset(); this._active = true; this._lastReason = 'start'; }
 
   get active(): boolean { return this._active; }
   get allComplete(): boolean { return this._allComplete; }
@@ -380,366 +312,311 @@ export class PostEdictDirector {
     if (!this._active || this._beatIndex >= this.beats.length) return null;
     return this.beats[this._beatIndex].phase;
   }
-
   get currentBeatId(): string {
     if (!this._active || this._beatIndex >= this.beats.length) return '-';
     return this.beats[this._beatIndex].id;
   }
+  setPhaseStartMs(ms: number): void { this._phaseStartMs = ms; }
 
-  /** 由 Game.ts 在阶段切换时同步，用于 notBefore 计时 */
-  setPhaseStartMs(ms: number): void {
-    this._phaseStartMs = ms;
-  }
-
-  canSpawnElite(): boolean {
-    return this._allComplete && this._finalAfterglowTimer >= FINAL_AFTERGLOW_SEC;
-  }
+  canSpawnElite(): boolean { return this._allComplete && this._finalAfterglowTimer >= FINAL_AFTERGLOW_SEC; }
 
   /**
    * 每帧 tick
-   *
-   * @param dt 帧间隔(秒)
-   * @param aliveInZone 有效战斗区存活数
-   * @param aliveTotal 全部存活数（含接近区）
-   * @param approachingCount 接近区存活数（已生成但未入战斗区）
-   * @param subSpawnQueueLength 待生成队列长度
-   * @param elapsedMs 游戏时间(毫秒)
    */
   tick(
     dt: number,
-    aliveInZone: number,
-    aliveTotal: number,
-    approachingCount: number,
-    subSpawnQueueLength: number,
+    aliveInZone: number, aliveTotal: number,
+    approachingCount: number, subSpawnQueueLength: number,
     elapsedMs: number,
+    // Per-beat 统计
+    beatSpawned: number, beatApproaching: number, beatCombatReady: number, beatAlive: number,
   ): DirectorSpawnRequest[] {
     if (!this._active) return [];
 
     this._phaseElapsed += dt;
 
-    // 全部完成 → 处理余韵
-    if (this._allComplete) {
-      this._finalAfterglowTimer += dt;
-      return [];
-    }
+    if (this._allComplete) { this._finalAfterglowTimer += dt; return []; }
 
-    // 所有节拍完成 → 等全部清场 + afterglow
+    // 所有节拍完成 → afterglow
     if (this._beatIndex >= this.beats.length) {
       this._finalAfterglowTimer += dt;
       if (this._finalAfterglowTimer >= FINAL_AFTERGLOW_SEC) {
-        this._active = false;
-        this._allComplete = true;
-        this._lastReason = 'all_beats_done';
+        this._active = false; this._allComplete = true; this._lastReason = 'all_beats_done';
       }
       return [];
     }
 
     const beat = this.beats[this._beatIndex];
     const phase = this.phases[beat.phase];
-    const phaseElapsedMs = elapsedMs - this._phaseStartMs;
 
-    // 检查阶段完成 → 进入阶段间隙
+    // 阶段完成
     if (this._phaseGenerated >= phase.totalEnemies) {
       if (aliveTotal === 0 && subSpawnQueueLength === 0) {
         this._phaseGapTimer += dt;
         if (this._phaseGapTimer >= PHASE_GAP_SEC) {
-          this._advanceToNextPhase();
-          this._lastReason = `phase_${phase.phase}_cleared`;
+          this._advanceToNextPhase(); this._lastReason = `phase_${phase.phase}_cleared`;
         }
       }
       return [];
     }
 
-    // 当前节拍全部微批次已入队，检查是否推进到下一节拍
+    // 当前节拍完成 → 尝试推进
     if (this._microBatchIndex >= beat.microBatches.length) {
       return this._tryAdvanceBeat(
-        dt, beat, phase, phaseElapsedMs, aliveInZone, aliveTotal,
-        approachingCount, subSpawnQueueLength, elapsedMs,
+        dt, beat, phase, elapsedMs,
+        aliveInZone, aliveTotal, approachingCount, subSpawnQueueLength,
+        beatSpawned, beatApproaching, beatCombatReady, beatAlive,
       );
     }
 
-    // 检查 notBefore
-    if (elapsedMs - this._phaseStartMs < beat.notBeforeMs) {
+    // notBefore
+    const phaseElapsedMs = elapsedMs - this._phaseStartMs;
+    if (phaseElapsedMs < beat.notBeforeMs) {
       this._nextState = 'WAIT_TIME';
-      return this._tryBridge(dt, beat, phase, aliveInZone, aliveTotal, approachingCount, subSpawnQueueLength);
+      return this._tryBridge(beat, phase, elapsedMs, aliveInZone, aliveTotal, approachingCount, subSpawnQueueLength);
     }
 
-    // 检查同屏硬上限（含接近区）
-    const totalOccupancy = aliveTotal + subSpawnQueueLength;
-    if (totalOccupancy >= phase.hardCap) {
-      this._nextState = 'WAIT_CAP';
-      return [];
-    }
-
-    // 检查接近区容量
-    if (approachingCount + subSpawnQueueLength >= phase.approachCap) {
-      this._nextState = 'WAIT_APPROACH';
-      return [];
-    }
-
-    // 可以生成下一微批次
-    this._nextState = 'SPAWN';
+    // internalDelay: 微批次间距
     const mb = beat.microBatches[this._microBatchIndex];
-    this._microBatchIndex += 1;
-    const items = this._generateMicroBatchItems(mb, phase, 0);
-    this._phaseGenerated += items.length;
-    this._lastReason = `spawn_${beat.id}_mb${this._microBatchIndex - 1}`;
-
-    if (this._microBatchIndex >= beat.microBatches.length) {
-      this._nextState = 'READY'; // 等待下一节拍推进条件
+    if (this._microBatchIndex > 0) {
+      const mbElapsed = elapsedMs - this._lastMbTime;
+      if (mbElapsed < mb.internalDelay * 1000) { this._nextState = 'WAIT_INTERNAL'; return []; }
     }
 
-    return [{ phase: beat.phase, items }];
+    // 硬上限
+    if (aliveTotal + subSpawnQueueLength >= phase.hardCap) { this._nextState = 'WAIT_CAP'; return []; }
+    // 接近区容量
+    if (approachingCount + subSpawnQueueLength >= phase.approachCap) { this._nextState = 'WAIT_APPROACH'; return []; }
+
+    // 生成微批次
+    return this._spawnMicroBatch(beat, phase, elapsedMs);
   }
 
   // ═══ 内部方法 ═══
 
-  /** 检查推进到下一节拍的条件 */
-  private _tryAdvanceBeat(
-    dt: number,
-    beat: DirectorBeat,
-    phase: PhaseConfig,
-    phaseElapsedMs: number,
-    aliveInZone: number,
-    aliveTotal: number,
-    approachingCount: number,
-    subSpawnQueueLength: number,
-    elapsedMs: number,
-  ): DirectorSpawnRequest[] {
-    const nextBeatIndex = this._beatIndex + 1;
-    if (nextBeatIndex >= this.beats.length) return [];
-
-    const nextBeat = this.beats[nextBeatIndex];
-    if (nextBeat.phase !== beat.phase) {
-      // 跨阶段，不允许推进（需等清场）
+  private _spawnMicroBatch(beat: DirectorBeat, phase: PhaseConfig, elapsedMs: number): DirectorSpawnRequest[] {
+    // 检查是否被桥接消费
+    const mbId = `${beat.id}_mb${this._microBatchIndex}`;
+    if (this._bridgeMicroBatchId === mbId) {
+      this._bridgeMicroBatchId = null; // 已消费，不重复生成
+      this._microBatchIndex += 1;
+      this._nextState = 'READY';
       return [];
     }
 
-    // 条件1: 已到 notBefore
-    if (elapsedMs - this._phaseStartMs < nextBeat.notBeforeMs) {
-      this._nextState = 'WAIT_TIME';
-      return this._tryBridge(dt, beat, phase, aliveInZone, aliveTotal, approachingCount, subSpawnQueueLength);
-    }
-
-    // 条件2: 上一节拍至少有 50% 进入战斗区 或 存活量降至 50% 以下
-    // aliveInZone 包含所有存活敌人（含前拍残留），需 clamp 防止 >1.0 绕过门控
-    const beatEnteredRatio = beat.totalCount > 0 ? Math.min(1, aliveInZone / beat.totalCount) : 0;
-    const beatAliveRatio = beat.totalCount > 0 ? Math.min(1, aliveTotal / beat.totalCount) : 0;
-    if (beatEnteredRatio < 0.50 && beatAliveRatio > 0.50) {
-      this._nextState = 'WAIT_APPROACH';
-      return this._tryBridge(dt, beat, phase, aliveInZone, aliveTotal, approachingCount, subSpawnQueueLength);
-    }
-
-    // 条件3: 不突破硬上限
-    const totalOccupancy = aliveTotal + subSpawnQueueLength;
-    if (totalOccupancy >= phase.hardCap) {
-      this._nextState = 'WAIT_CAP';
-      return [];
-    }
-
-    // 条件4: 没有待生成的批次（queue 不为空）
-    if (subSpawnQueueLength > 0) {
-      this._nextState = 'WAIT_CAP';
-      return [];
-    }
-
-    // 可以推进
-    this._advanceToNextBeat(nextBeatIndex);
-    this._lastReason = `adv_${beat.id}→${nextBeat.id}`;
-    return this._spawnFirstMicroBatch(nextBeat, phase);
-  }
-
-  /** 桥接补员 */
-  private _tryBridge(
-    dt: number,
-    beat: DirectorBeat,
-    phase: PhaseConfig,
-    aliveInZone: number,
-    aliveTotal: number,
-    approachingCount: number,
-    subSpawnQueueLength: number,
-  ): DirectorSpawnRequest[] {
-    // 仅当战斗区人数低于目标下限时考虑桥接
-    if (aliveInZone >= phase.targetOnScreen[0]) return [];
-
-    // 累积空屏时间
-    this._emptyTime += dt;
-
-    if (this._emptyTime < BRIDGE_MIN_EMPTY_SEC) return [];
-    if (this._emptyTime > BRIDGE_MAX_EMPTY_SEC) this._emptyTime = BRIDGE_MAX_EMPTY_SEC;
-
-    // 当前节拍已桥接过 → 跳过
-    if (this._currentBeatBridgeDone) return [];
-    // 阶段内该节拍已桥接过 → 跳过
-    if (this._phaseBeatBridgeUsed.has(this._beatIndex)) return [];
-
-    // 硬上限检查
-    const totalOccupancy = aliveTotal + subSpawnQueueLength;
-    if (totalOccupancy + BRIDGE_COUNT_MIN >= phase.hardCap) return [];
-
-    // 执行桥接：从下一完整节拍预算中提前释放 3~4 名
-    this._emptyTime = 0;
-    this._currentBeatBridgeDone = true;
-    this._phaseBeatBridgeUsed.add(this._beatIndex);
-
-    const bridgeCount = BRIDGE_COUNT_MIN + Math.floor(Math.random() * (BRIDGE_COUNT_MAX - BRIDGE_COUNT_MIN + 1));
-    // 以阶段剩余预算为上限, 而非单节拍
-    const actualCount = Math.min(bridgeCount, phase.totalEnemies - this._phaseGenerated);
-
-    if (actualCount <= 0) return [];
-
-    this._currentBeatBridged = actualCount;
-    this._phaseGenerated += actualCount;
-    this._phaseBridgeCount += actualCount;
-    this._nextState = 'BRIDGE';
-    this._lastReason = `bridge_${beat.id}_${actualCount}`;
-
-    // 桥接只生成杂兵
-    const xs = generateX(actualCount, 'wide', WIDE_X);
-    const items: SpawnItem[] = xs.map(x => ({
-      x: Math.round(x),
-      y: -20 + (Math.random() - 0.5) * 10,
-      speedMul: phase.speedMul,
-      hpTier: 'trash' as HpTier,
-    }));
-
-    return [{ phase: beat.phase, items }];
-  }
-
-  /** 推进到下一节拍，考虑桥接扣除 */
-  private _advanceToNextBeat(nextBeatIndex: number): void {
-    this._beatIndex = nextBeatIndex;
-    this._emptyTime = 0; // 重置空屏计时，节拍间不延续
-    const bridged = this._currentBeatBridged;
-    if (bridged > 0) {
-      const nextBeat = this.beats[nextBeatIndex];
-      let remaining = bridged;
-      let skipIdx = 0;
-      // 跳过完整的微批次（budget 扣除）
-      while (remaining > 0 && skipIdx < nextBeat.microBatches.length) {
-        const mb = nextBeat.microBatches[skipIdx];
-        const mbCount = mb.hpTiers.reduce((s, [, c]) => s + c, 0);
-        if (remaining >= mbCount) {
-          remaining -= mbCount;
-          skipIdx++;
-        } else {
-          break; // 不足一个完整微批次，从该批次内扣
-        }
-      }
-      // 记录还需要从当前微批次扣除的数量（剩余不足一个完整批次）
-      this._partialBatchDeduction = remaining;
-      this._microBatchIndex = skipIdx;
-      // 不重复减 _phaseGenerated：桥接时已加回，此处只跳过微批次防止重复计入
-    } else {
-      this._microBatchIndex = 0;
-      this._partialBatchDeduction = 0;
-    }
-    this._currentBeatBridgeDone = false;
-    this._currentBeatBridged = 0;
-  }
-
-  /** 桥接扣除后还需要从当前微批次扣的数量 */
-  private _partialBatchDeduction = 0;
-
-  /** 推进到下一阶段 */
-  private _advanceToNextPhase(): void {
-    // 找到下一个不同 phase 的节拍
-    const currentPhase = this._beatIndex < this.beats.length ? this.beats[this._beatIndex].phase : null;
-    let next = this._beatIndex;
-    while (next < this.beats.length && this.beats[next].phase === currentPhase) {
-      next++;
-    }
-    this._beatIndex = next;
-    this._microBatchIndex = 0;
-    this._currentBeatBridgeDone = false;
-    this._currentBeatBridged = 0;
-    this._partialBatchDeduction = 0;
-    this._phaseGenerated = 0;
-    this._phaseBridgeCount = 0;
-    this._phaseBeatBridgeUsed.clear();
-    this._phaseElapsed = 0;
-    this._phaseStartMs = 0; // 下一帧由 Game.ts 设置
-    this._phaseGapTimer = 0;
-    this._emptyTime = 0;
-    this._nextState = 'READY';
-  }
-
-  /** 生成节拍的第一个微批次（含桥接部分扣除） */
-  private _spawnFirstMicroBatch(beat: DirectorBeat, phase: PhaseConfig): DirectorSpawnRequest[] {
-    const startIdx = this._microBatchIndex;
-    if (startIdx >= beat.microBatches.length) return [];
-    const mb = beat.microBatches[startIdx];
-    this._microBatchIndex = startIdx + 1;
-
-    // 桥接部分扣除：减少该微批次实际生成数
-    let partialSkip = 0;
-    if (this._partialBatchDeduction > 0) {
-      partialSkip = this._partialBatchDeduction;
-      this._partialBatchDeduction = 0;
-    }
-
-    const items = this._generateMicroBatchItems(mb, phase, partialSkip);
-    this._phaseGenerated += items.length;
+    const mb = beat.microBatches[this._microBatchIndex];
+    this._microBatchIndex += 1;
+    this._lastMbTime = elapsedMs;
     this._nextState = 'SPAWN';
-    return [{ phase: beat.phase, items }];
-  }
+    this._currentFormationId = mb.formationId;
 
-  /** 生成微批次敌人 */
-  private _generateMicroBatchItems(mb: MicroBatch, phase: PhaseConfig, skipCount: number): SpawnItem[] {
     const items: SpawnItem[] = [];
-    for (const [tier, cnt] of mb.hpTiers) {
+    const rowEnd = rowEndY(mb.row);
+    const jitter = () => (Math.random() - 0.5) * 12;
+
+    for (const [tier, cnt] of mb.tiers) {
       if (cnt <= 0) continue;
-      const actualCount = Math.max(0, cnt - skipCount);
-      skipCount = Math.max(0, skipCount - cnt);
-      if (actualCount <= 0) continue;
-      const xs = generateX(actualCount, mb.xLayout, mb.xRange);
-      for (let i = 0; i < actualCount; i++) {
+      const xPositions = this._calcXPositions(cnt, mb.xRange);
+      for (let i = 0; i < cnt; i++) {
         items.push({
-          x: Math.round(xs[i]),
-          y: -20 + mb.yOffset + (Math.random() - 0.5) * 8,
+          x: Math.round(xPositions[i] + jitter()),
+          y: -20 + (mb.row === 'back' ? 0 : mb.row === 'mid' ? -5 : -10),
           speedMul: phase.speedMul + mb.speedBonus,
           hpTier: tier,
+          hpOverride: HP_TIERS[tier].hp,
+          formationId: mb.formationId,
+          entryTargetX: xPositions[i],
+          entryEndYOverride: rowEnd + jitter(),
+          directorPhase: beat.phase,
+          directorBeatId: beat.id,
+          directorMicroBatchId: mbId,
         });
+      }
+    }
+
+    this._phaseGenerated += items.length;
+    this._lastReason = `spawn_${mbId}`;
+
+    if (this._microBatchIndex >= beat.microBatches.length) this._nextState = 'READY';
+    return [{ phase: beat.phase, items }];
+  }
+
+  private _calcXPositions(count: number, range: [number, number]): number[] {
+    const [min, max] = range;
+    const span = max - min;
+    const result: number[] = [];
+    for (let i = 0; i < count; i++) result.push(min + span * (i + 0.5) / count);
+    return result;
+  }
+
+  /** 桥接：提前 0.25~0.35s 释放下一微批次，保留原始档位/队形 */
+  private _tryBridge(
+    beat: DirectorBeat, phase: PhaseConfig, elapsedMs: number,
+    aliveInZone: number, aliveTotal: number, approachingCount: number, subSpawnQueueLength: number,
+  ): DirectorSpawnRequest[] {
+    if (aliveInZone >= phase.targetOnScreen[0]) return [];
+
+    // 检查是否有可提前的微批次
+    const nextIdx = this._microBatchIndex;
+    if (nextIdx >= beat.microBatches.length) return []; // 当前节拍无更多微批次
+
+    const mbId = `${beat.id}_mb${nextIdx}`;
+    if (this._bridgeMicroBatchId === mbId) return []; // 已被桥接消费
+
+    const mb = beat.microBatches[nextIdx];
+    const earliestTime = mb.internalDelay > 0 ? 0 : 0; // 桥接提前量
+    const bridgeTime = BRIDGE_EARLY_SEC + Math.random() * BRIDGE_EARLY_JITTER;
+    const phaseElapsedMs = elapsedMs - this._phaseStartMs;
+
+    // 距 notBefore 还有足够时间才桥接
+    if (phaseElapsedMs + bridgeTime * 1000 > beat.notBeforeMs) return [];
+
+    // 硬上限检查
+    if (aliveTotal + subSpawnQueueLength + mb.count >= phase.hardCap) return [];
+
+    // 执行桥接: 提前消费该微批次
+    this._bridgeMicroBatchId = mbId;
+    this._bridgeBeatIdx = this._beatIndex;
+    this._microBatchIndex += 1;
+    this._lastMbTime = elapsedMs;
+    this._phaseGenerated += mb.count;
+    this._phaseBridgeCount += mb.count;
+    this._nextState = 'BRIDGE';
+    this._currentFormationId = mb.formationId;
+    this._lastReason = `bridge_${mbId}`;
+
+    const items = this._makeItems(mb, beat, phase);
+    if (this._microBatchIndex >= beat.microBatches.length) this._nextState = 'READY';
+    return [{ phase: beat.phase, items, consumedMicroBatchId: mbId }];
+  }
+
+  private _makeItems(mb: MicroBatch, beat: DirectorBeat, phase: PhaseConfig): SpawnItem[] {
+    const items: SpawnItem[] = [];
+    const rowEnd = rowEndY(mb.row);
+    const jitter = () => (Math.random() - 0.5) * 12;
+    const xPositions = this._calcXPositions(mb.count, mb.xRange);
+    let i = 0;
+
+    for (const [tier, cnt] of mb.tiers) {
+      if (cnt <= 0) continue;
+      for (let j = 0; j < cnt; j++) {
+        items.push({
+          x: Math.round(xPositions[i] + jitter()),
+          y: -20 + (mb.row === 'back' ? 0 : mb.row === 'mid' ? -5 : -10),
+          speedMul: phase.speedMul + mb.speedBonus,
+          hpTier: tier,
+          hpOverride: HP_TIERS[tier].hp,
+          formationId: mb.formationId,
+          entryTargetX: xPositions[i],
+          entryEndYOverride: rowEnd + jitter(),
+          directorPhase: beat.phase,
+          directorBeatId: beat.id,
+          directorMicroBatchId: `${beat.id}_mb${this._microBatchIndex - 1}`,
+        });
+        i++;
       }
     }
     return items;
   }
 
+  // ═══ 节拍推进 ═══
+
+  private _tryAdvanceBeat(
+    dt: number, beat: DirectorBeat, phase: PhaseConfig, elapsedMs: number,
+    aliveInZone: number, aliveTotal: number, approachingCount: number, subSpawnQueueLength: number,
+    beatSpawned: number, beatApproaching: number, beatCombatReady: number, beatAlive: number,
+  ): DirectorSpawnRequest[] {
+    const nextIdx = this._beatIndex + 1;
+    if (nextIdx >= this.beats.length) return [];
+    const nextBeat = this.beats[nextIdx];
+    if (nextBeat.phase !== beat.phase) return []; // 跨阶段: 等清场
+
+    const phaseElapsedMs = elapsedMs - this._phaseStartMs;
+    if (phaseElapsedMs < nextBeat.notBeforeMs) {
+      this._nextState = 'WAIT_TIME';
+      return this._tryBridge(beat, phase, elapsedMs, aliveInZone, aliveTotal, approachingCount, subSpawnQueueLength);
+    }
+
+    // 条件: 当前节拍 ≥50% 进入战斗区 或 存活≤50%
+    const combatRatio = beatSpawned > 0 ? beatCombatReady / beatSpawned : 0;
+    const aliveRatio  = beatSpawned > 0 ? beatAlive / beatSpawned : 0;
+    if (combatRatio < 0.50 && aliveRatio > 0.50) {
+      this._nextState = 'WAIT_APPROACH';
+      return this._tryBridge(beat, phase, elapsedMs, aliveInZone, aliveTotal, approachingCount, subSpawnQueueLength);
+    }
+
+    // 硬上限
+    if (aliveTotal + subSpawnQueueLength >= phase.hardCap) { this._nextState = 'WAIT_CAP'; return []; }
+    if (subSpawnQueueLength > 0) { this._nextState = 'WAIT_CAP'; return []; }
+
+    // 推进
+    this._advanceToNextBeat(nextIdx);
+    this._lastReason = `adv_${beat.id}→${nextBeat.id}`;
+    return this._spawnMicroBatch(nextBeat, phase, elapsedMs);
+  }
+
+  private _advanceToNextBeat(nextIdx: number): void {
+    this._beatIndex = nextIdx;
+    this._microBatchIndex = 0;
+    this._lastMbTime = 0;
+    // 清理桥接标记（如果关联的节拍在之前的节拍）
+    if (this._bridgeBeatIdx < nextIdx) {
+      this._bridgeMicroBatchId = null;
+      this._bridgeBeatIdx = -1;
+    }
+    this._currentFormationId = '';
+  }
+
+  private _advanceToNextPhase(): void {
+    const currentPhase = this._beatIndex < this.beats.length ? this.beats[this._beatIndex].phase : null;
+    let next = this._beatIndex;
+    while (next < this.beats.length && this.beats[next].phase === currentPhase) next++;
+    this._beatIndex = next;
+    this._microBatchIndex = 0;
+    this._phaseGenerated = 0;
+    this._phaseBridgeCount = 0;
+    this._bridgeMicroBatchId = null;
+    this._bridgeBeatIdx = -1;
+    this._lastMbTime = 0;
+    this._phaseElapsed = 0;
+    this._phaseStartMs = 0;
+    this._phaseGapTimer = 0;
+    this._currentFormationId = '';
+    this._nextState = 'READY';
+  }
+
   // ═══ Debug ═══
 
   getDebugInfo(
-    aliveTrash: number,
-    aliveTough: number,
-    aliveWall: number,
-    aliveTotal: number,
-    approachingCount: number,
-    combatReadyCount: number,
-    pendingSpawnCount: number,
+    aliveTrash: number, aliveTough: number, aliveWall: number,
+    aliveTotal: number, approachingCount: number, combatReadyCount: number, pendingCount: number,
     elapsedMs: number,
+    beatSpawned = 0, beatApproaching = 0, beatCombatReady = 0, beatAlive = 0,
   ): DirectorDebugInfo {
     if (!this._active) {
-      return {
-        phase: '-', beat: '-', generated: 0, total: 0,
-        aliveTrash: 0, aliveTough: 0, aliveWall: 0, aliveTotal: 0,
-        approachingCount: 0, combatReadyCount: 0, pendingSpawnCount: 0,
-        notBeforeRemaining: 0, nextState: '-', phaseElapsed: 0,
-      };
+      return { phase:'-', beat:'-', generated:0, total:0, aliveTrash:0, aliveTough:0, aliveWall:0,
+        beatSpawned:0, beatApproaching:0, beatCombatReady:0, beatAlive:0,
+        approachingCount:0, combatReadyCount:0, pendingCount:0,
+        notBeforeRemaining:0, microDelayRemaining:0, nextState:'-', formationId:'', phaseElapsed:0 };
     }
-
     const beat = this._beatIndex < this.beats.length ? this.beats[this._beatIndex] : null;
     const phase = beat ? this.phases[beat.phase] : null;
     const phaseElapsedMs = elapsedMs - this._phaseStartMs;
-    const notBeforeRemaining = beat ? Math.max(0, beat.notBeforeMs - phaseElapsedMs) : 0;
+    const nbRemain = beat ? Math.max(0, beat.notBeforeMs - phaseElapsedMs) : 0;
+    const mbElapsed = this._lastMbTime > 0 ? elapsedMs - this._lastMbTime : 0;
+    const mb = beat && this._microBatchIndex < beat.microBatches.length ? beat.microBatches[this._microBatchIndex] : null;
+    const mdRemain = mb ? Math.max(0, mb.internalDelay * 1000 - mbElapsed) : 0;
 
     return {
-      phase: phase?.phase ?? '-',
-      beat: this.currentBeatId,
-      generated: this._phaseGenerated,
-      total: phase?.totalEnemies ?? 0,
-      aliveTrash, aliveTough, aliveWall, aliveTotal,
-      approachingCount, combatReadyCount, pendingSpawnCount,
-      notBeforeRemaining: Math.round(notBeforeRemaining),
+      phase: phase?.phase ?? '-', beat: this.currentBeatId,
+      generated: this._phaseGenerated, total: phase?.totalEnemies ?? 0,
+      aliveTrash, aliveTough, aliveWall,
+      beatSpawned, beatApproaching, beatCombatReady, beatAlive,
+      approachingCount, combatReadyCount, pendingCount,
+      notBeforeRemaining: Math.round(nbRemain),
+      microDelayRemaining: Math.round(mdRemain),
       nextState: this._nextState,
+      formationId: this._currentFormationId,
       phaseElapsed: Math.round(this._phaseElapsed * 100) / 100,
     };
   }

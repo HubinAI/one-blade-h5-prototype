@@ -28,7 +28,7 @@ import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles"
 import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, resolveDamage, resolveThreatDamage, type PlayerRunStats, type DamageRequest, type DamageResult, type DamageSourceType } from "./systems/damageSystem";
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
-import { postEdictDirector, isInCombatZone, isApproaching, type DirectorDebugInfo, type DirectorSpawnRequest, type HpTier, HP_TIERS } from "./systems/PostEdictDirector";
+import { postEdictDirector, isInCombatZone, isApproaching, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS } from "./systems/PostEdictDirector";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
@@ -215,7 +215,7 @@ export class Game {
     attackEndPos: Vec2;
   }[] = [];
   // 多波多次刷新队列：每个子刷新有时间戳，到时间就spawn
-  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; stageNode?: string; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number; isTailCatchup?: boolean; hpOverride?: number }[] = [];
+  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; stageNode?: string; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number; isTailCatchup?: boolean; hpOverride?: number; dirPhase?: string; dirBeatId?: string; dirMbId?: string; dirHpTier?: string; dirFormationId?: string; entryTargetX?: number; entryEndYOverride?: number }[] = [];
 
   private pointerDown = false;
   private pointerPos?: Vec2;
@@ -5928,7 +5928,7 @@ export class Game {
     }
   }
 
-  /** 0807-11D-1: 导演式怪潮 — 节拍/断点/桥接版 */
+  /** 0807-11D-2: 导演式怪潮 — per-beat 统计 + 元数据贯通 */
   private _updatePostEdictDirector(dt: number) {
     if (this.postChestSequenceState === 'inactive' || this.postChestSequenceState === 'complete') return;
     if (this.gameMode !== "normal") return;
@@ -5938,7 +5938,6 @@ export class Game {
     const approachingCount = this.enemies.filter(e => e.alive && isApproaching(e.y)).length;
     const elapsedMs = this.elapsed * 1000;
 
-    // 导演完成时 _active=false
     if (!postEdictDirector.active) {
       if (postEdictDirector.allComplete) {
         this.allPostChestWavesSpawned = true;
@@ -5950,7 +5949,7 @@ export class Game {
       return;
     }
 
-    // 检测阶段变化 → 更新 phaseStartMs
+    // 阶段变化检测
     const prevPhase = this._hpTierTracker?.phase ?? '';
     const currPhase = postEdictDirector.currentPhase ?? '';
     if (currPhase && currPhase !== prevPhase) {
@@ -5960,8 +5959,16 @@ export class Game {
       this._hpTierTracker.phase = currPhase;
     }
 
+    // Per-beat 统计: 只统计当前 beat 的敌人
+    const curBeat = postEdictDirector.currentBeatId;
+    const beatEnemies = this.enemies.filter(e => e.alive && (e as any)._dirBeatId === curBeat);
+    const beatSpawned = beatEnemies.length + this.subSpawnQueue.filter(q => (q as any).dirBeatId === curBeat).length;
+    const beatApproaching = beatEnemies.filter(e => isApproaching(e.y)).length;
+    const beatCombat = beatEnemies.filter(e => isInCombatZone(e.y)).length;
+
     const spawnRequests = postEdictDirector.tick(
       dt, aliveInZone, aliveTotal, approachingCount, this.subSpawnQueue.length, elapsedMs,
+      beatSpawned, beatApproaching, beatCombat, beatEnemies.length,
     );
 
     for (const req of spawnRequests) {
@@ -5970,11 +5977,8 @@ export class Game {
     }
   }
 
-  /** 0807-11D-1: 将导演 SpawnItem 入队，支持 hpTier → hpOverride */
   private _directorPhaseNodes: Record<string, string> = {
-    'P1': 'post_edict_director_p1',
-    'P2': 'post_edict_director_p2',
-    'P3': 'post_edict_director_p3',
+    'P1': 'post_edict_director_p1', 'P2': 'post_edict_director_p2', 'P3': 'post_edict_director_p3',
   };
   private _hpTierTracker: { phase: string } | null = null;
 
@@ -5985,10 +5989,6 @@ export class Game {
 
     for (let i = 0; i < req.items.length; i++) {
       const item = req.items[i];
-      const hpTier = item.hpTier;
-      const tierCfg = HP_TIERS[hpTier];
-      const hpOverride = tierCfg.hp;
-
       this.subSpawnQueue.push({
         time: this.elapsed + 0.02 + i * 0.01,
         kind: 'infantry' as any,
@@ -6000,10 +6000,17 @@ export class Game {
         flowRole: 'main',
         spawnGroupId: `director:${req.phase}`,
         spawnOrder: i,
-        entryEndYOffset: 0,
+        entryEndYOffset: (item.entryEndYOverride - ENTRY_PROFILE_EDICT_BURST.entryEndY),
         source: 'edict',
         roundIndex: 0,
-        hpOverride,
+        hpOverride: item.hpOverride,
+        dirPhase: item.directorPhase,
+        dirBeatId: item.directorBeatId,
+        dirMbId: item.directorMicroBatchId,
+        dirHpTier: item.hpTier,
+        dirFormationId: item.formationId,
+        entryTargetX: item.entryTargetX,
+        entryEndYOverride: item.entryEndYOverride,
       });
     }
   }
@@ -6362,6 +6369,14 @@ export class Game {
       enemy.hp = item.hpOverride;
       enemy.maxHp = item.hpOverride;
     }
+    // 0807-11D-2: 导演不可变元数据贯通
+    if (item.dirPhase !== undefined) { (enemy as any)._dirPhase    = item.dirPhase; }
+    if (item.dirBeatId !== undefined) { (enemy as any)._dirBeatId   = item.dirBeatId; }
+    if (item.dirMbId !== undefined)   { (enemy as any)._dirMbId     = item.dirMbId; }
+    if (item.dirHpTier !== undefined) { (enemy as any)._dirHpTier   = item.dirHpTier; }
+    if (item.dirFormationId !== undefined) { (enemy as any)._dirFormationId = item.dirFormationId; }
+    if (item.entryTargetX !== undefined) { (enemy as any)._dirEntryTargetX = item.entryTargetX; }
+    if (item.entryEndYOverride !== undefined) { (enemy as any)._dirEntryEndYOverride = item.entryEndYOverride; }
     if (this._currentWaveEvent) {
       enemy.spawnedWithEvent = this._currentWaveEvent;
     }
@@ -10839,7 +10854,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private _drawDebugCompact(ctx: CanvasRenderingContext2D): void {
     // 0807-11D: 导演信息扩展高度
     const hasDirector = postEdictDirector.active && postEdictDirector.isRunning;
-    const directorRows = hasDirector ? 7 : 0;
+    const directorRows = hasDirector ? 6 : 0;
     const cardW = 148; const cardH = this._showHpOverlay ? 168 + directorRows * 15 : 102;
     const x = 6; const topY = 10;
     ctx.save();
@@ -10855,16 +10870,24 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const tier = getBladeTier(this.energy);
     const stage = getTierConfig(tier);
     const levelId = typeof this.level.id === 'number' ? this.level.id : parseInt(String(this.level.id), 10) || 1;
-    // 0807-11D-1: 导演 debug 数据（扫描存活敌人的实际 HP 档位）
+    // 0807-11D-2: 导演 debug — 使用不可变 _dirHpTier 而非 HP 反推
     const zoneCount = this.enemies.filter(e => e.alive && isInCombatZone(e.y)).length;
     const apprCount = this.enemies.filter(e => e.alive && isApproaching(e.y)).length;
-    // 通过 HP 反推档位 (杂兵≈100, 韧兵≈170, 压阵≈260)
-    const aliveTrash = this.enemies.filter(e => e.alive && e.hp <= 135).length;
-    const aliveTough = this.enemies.filter(e => e.alive && e.hp > 135 && e.hp <= 220).length;
-    const aliveWall = this.enemies.filter(e => e.alive && e.hp > 220).length;
+    const aliveTrash = this.enemies.filter(e => e.alive && (e as any)._dirHpTier === 'trash').length;
+    const aliveTough = this.enemies.filter(e => e.alive && (e as any)._dirHpTier === 'tough').length;
+    const aliveWall  = this.enemies.filter(e => e.alive && (e as any)._dirHpTier === 'elite_wall').length;
+
+    // Per-beat 统计
+    const curBeat = postEdictDirector.currentBeatId;
+    const beatEnemies = this.enemies.filter(e => e.alive && (e as any)._dirBeatId === curBeat);
+    const beatSpawned = beatEnemies.length + this.subSpawnQueue.filter(q => (q as any).dirBeatId === curBeat).length;
+    const beatAppr   = beatEnemies.filter(e => isApproaching(e.y)).length;
+    const beatCombat = beatEnemies.filter(e => isInCombatZone(e.y)).length;
+
     const di: DirectorDebugInfo = postEdictDirector.getDebugInfo(
       aliveTrash, aliveTough, aliveWall, aliveCount, apprCount, zoneCount,
       this.subSpawnQueue.length, this.elapsed * 1000,
+      beatSpawned, beatAppr, beatCombat, beatEnemies.length,
     );
     const rowData = [
       { l: 'level', v: `${levelId}`, c: '#fff' },
@@ -10880,14 +10903,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         { l: 'seq', v: `${this.postChestSequenceState}`, c: '#f39c12' },
         { l: 'pci', v: `${this.postChestWaveIndex}`, c: '#888' },
         { l: 'gate', v: this._lastEliteGateBlocked ? 'BLOCK' : 'ALLOW', c: this._lastEliteGateBlocked ? '#e74c3c' : '#2ecc71' },
-        // 0807-11D-1: 导演 debug 信息
+        // 0807-11D-2: 导演 debug
         ...(hasDirector ? [
-          { l: 'dir', v: `${di.phase} ${di.beat}`, c: '#9b6dff' },
-          { l: 'gen', v: `${di.generated}/${di.total}`, c: '#ffd35a' },
-          { l: 'HP', v: `T${di.aliveTrash} t${di.aliveTough} W${di.aliveWall}`, c: '#ffd35a' },
-          { l: 'zone', v: `cbt${di.combatReadyCount} app${di.approachingCount} q${di.pendingSpawnCount}`, c: '#888' },
-          { l: 'nb4', v: `nb${di.notBeforeRemaining}ms ${di.nextState}`, c: '#ffd35a' },
-          { l: 'ela', v: `${di.phaseElapsed}s`, c: '#888' },
+          { l: 'dir', v: `${di.phase} ${di.beat} ${di.formationId}`, c: '#9b6dff' },
+          { l: 'gen', v: `${di.generated}/${di.total} T${di.aliveTrash}t${di.aliveTough}W${di.aliveWall}`, c: '#ffd35a' },
+          { l: 'beat', v: `s${di.beatSpawned} a${di.beatApproaching} c${di.beatCombatReady} v${di.beatAlive}`, c: '#888' },
+          { l: 'nb/md', v: `${di.notBeforeRemaining}/${di.microDelayRemaining}ms`, c: '#f39c12' },
+          { l: 'que', v: `app${di.approachingCount} cbt${di.combatReadyCount} q${di.pendingCount}`, c: '#888' },
+          { l: 'next', v: `${di.nextState}`, c: di.nextState === 'SPAWN' ? '#2ecc71' : di.nextState === 'WAIT_CAP' ? '#e74c3c' : '#ffd35a' },
         ] : []),
       ] : []),
       { l: 'enemies', v: `${aliveCount}`, c: '#fff' },
