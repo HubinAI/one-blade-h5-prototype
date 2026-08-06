@@ -416,14 +416,12 @@ export class PostEdictDirector {
 
     // 当前阶段完成 → 阶段衔接
     if (this._phaseIndex >= this.phases.length) {
-      // 所有阶段完成
-      if (this._finalAfterglowTimer > 0) {
-        // 正在等余韵
-        if (this._finalAfterglowTimer >= FINAL_AFTERGLOW_SEC) {
-          this._active = false;
-          this._allComplete = true;
-          this._lastReason = 'all_phases_done';
-        }
+      // 所有阶段完成，累计余韵
+      this._finalAfterglowTimer += dt;
+      if (this._finalAfterglowTimer >= FINAL_AFTERGLOW_SEC) {
+        this._active = false;
+        this._allComplete = true;
+        this._lastReason = 'all_phases_done';
       }
       return [];
     }
@@ -551,8 +549,9 @@ export class PostEdictDirector {
     }
 
     const currentSubWave = phase.subWaves[this._subWaveIndex];
+    // 用实际存活数估算剩余比例（当前子潮敌人为主力），而非仅看入队状态
     const remainingRatio = currentSubWave
-      ? (currentSubWave.totalCount - this._phaseSpawned + this._batchIndex) / currentSubWave.totalCount
+      ? Math.min(1, aliveTotal / currentSubWave.totalCount)
       : 1;
 
     // 条件1: 有效战斗区人数低于目标下限

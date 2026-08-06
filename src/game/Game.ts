@@ -5928,25 +5928,27 @@ export class Game {
   private _updatePostEdictDirector(dt: number) {
     if (this.postChestSequenceState === 'inactive' || this.postChestSequenceState === 'complete') return;
     if (this.gameMode !== "normal") return;
-    if (!postEdictDirector.active) return;
 
     const aliveInZone = this.enemies.filter(e => e.alive && isInCombatZone(e.y)).length;
     const aliveTotal = this.enemies.filter(e => e.alive).length;
+
+    // 0807-11D: 导演完成时 _active=false，需要在此之前检查完成状态
+    if (!postEdictDirector.active) {
+      if (postEdictDirector.allComplete) {
+        this.allPostChestWavesSpawned = true;
+        this.edictBurstRoundIndex = this.edictBurstRoundTotal;
+        if (aliveTotal === 0 && this.subSpawnQueue.length === 0) {
+          this.setPostChestSequenceState('complete', 'director_all_done');
+        }
+      }
+      return;
+    }
 
     const spawnRequests = postEdictDirector.tick(dt, aliveInZone, aliveTotal, this.subSpawnQueue.length, this.elapsed);
 
     for (const req of spawnRequests) {
       this.setPostChestSequenceState('fighting', 'director_spawning');
       this._enqueueDirectorBatch(req);
-    }
-
-    // 导演生命周期管理
-    if (!postEdictDirector.active && postEdictDirector.allComplete) {
-      this.allPostChestWavesSpawned = true;
-      this.edictBurstRoundIndex = this.edictBurstRoundTotal;
-      if (aliveTotal === 0 && this.subSpawnQueue.length === 0) {
-        this.setPostChestSequenceState('complete', 'director_all_done');
-      }
     }
   }
 

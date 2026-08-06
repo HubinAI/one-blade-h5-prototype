@@ -147,6 +147,43 @@ describe('PostEdictDirector', () => {
     expect(director.canSpawnElite()).toBe(false);
   });
 
+  // ═══ 完成流程（死锁修复验证） ═══
+
+  it('P3完成后经过 afterglow 进入 allComplete', () => {
+    director.start();
+    let elapsed = 0;
+
+    // 快速模拟完整流程：生成→清场→advance→afterglow
+    for (let step = 0; step < 500; step++) {
+      // 始终传 alive=0 模拟快速清场
+      director.tick(0.016, 0, 0, 0, elapsed);
+      elapsed += 0.016;
+      if (!director.active && director.allComplete) break;
+    }
+
+    expect(director.active).toBe(false);
+    expect(director.allComplete).toBe(true);
+    expect(director.isRunning).toBe(false);
+    expect(director.canSpawnElite()).toBe(true);
+  });
+
+  it('afterglow 完成后 _finalAfterglowTimer 正常累积', () => {
+    director.start();
+    let elapsed = 0;
+
+    // 快速清场到完成
+    for (let step = 0; step < 500; step++) {
+      director.tick(0.016, 0, 0, 0, elapsed);
+      elapsed += 0.016;
+      if (!director.active && director.allComplete) break;
+    }
+
+    // afterglow 时长应 >= FINAL_AFTERGLOW_SEC (0.28)
+    // 实际经过时间应远大于 0.28（有阶段间隙和清场时间）
+    expect(elapsed).toBeGreaterThanOrEqual(0.28);
+    expect(director.allComplete).toBe(true);
+  });
+
   // ═══ 子潮数量 ═══
 
   it('P1 有 3 个子潮', () => {
@@ -330,6 +367,52 @@ describe('Game 导演集成', () => {
     (g as any).spawnEnemyFromQueueItem(item);
     const e = g.enemies[g.enemies.length - 1];
     expect(e.maxHp).toBe(75);
+  });
+
+  it('导演完成→清场→postChestSequenceState=complete', () => {
+    const g = mk();
+    g.chestDone = false;
+    g.edictRewardApplied = false;
+    g.edictRewardState = 'flying';
+    g.completeEliteChestReward();
+
+    // 模拟快速清场：每帧 tick 后直接清空 enemies 和队列
+    for (let i = 0; i < 200; i++) {
+      (g as any)._updatePostEdictDirector(0.016);
+      g.enemies = [];
+      g.subSpawnQueue = [];
+      // 手动推进 elapsed 避免 time-based spawn 不触发
+      (g as any).elapsed += 0.5;
+      if (g.postChestSequenceState === 'complete') break;
+    }
+
+    expect(g.postChestSequenceState).toBe('complete');
+  });
+
+  it('导演完成→精英门最终放行', () => {
+    const g = mk();
+    g.chestDone = false;
+    g.edictRewardApplied = false;
+    g.edictRewardState = 'flying';
+    g.completeEliteChestReward();
+
+    // 模拟导演完整运行到完成
+    // 清空现场并推进到 allComplete
+    for (let i = 0; i < 300; i++) {
+      (g as any)._updatePostEdictDirector(0.016);
+      g.enemies = [];
+      g.subSpawnQueue = [];
+      (g as any).elapsed += 0.5;
+      if (g.postChestSequenceState === 'complete') break;
+    }
+
+    g.eliteSpawned = false;
+    g.elitePreviewShown = false;
+    (g as any)._eliteClearanceAt = g.elapsed - 1;
+
+    g.updateEliteSpawn();
+    expect(g.eliteSpawned).toBe(true);
+    expect(g._eliteGateReason).toBe('yes(state=complete)');
   });
 });
 
