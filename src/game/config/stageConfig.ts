@@ -43,7 +43,7 @@ export function getEnemyTypeHpMultiplier(type: EnemyType): number {
 // 节点配置
 // ═══════════════════════════════════════
 
-export type StageNode = 'tutorial' | 'pre_edict_early' | 'pre_edict_late' | 'post_edict_release' | 'post_edict_understand' | 'post_edict_adapt' | 'elite';
+export type StageNode = 'tutorial' | 'pre_edict_early' | 'pre_edict_late' | 'post_edict_release' | 'post_edict_understand' | 'post_edict_adapt' | 'post_edict_director_p1' | 'post_edict_director_p2' | 'post_edict_director_p3' | 'elite';
 
 export interface NodeConfig {
   hpMultiplier: number;
@@ -59,6 +59,9 @@ const NODE_CONFIGS: Record<StageNode, NodeConfig> = {
   post_edict_release:   { hpMultiplier: 1.00, attackMultiplier: 1.0, speedMultiplier: 1.0, densityMultiplier: 1.0 },
   post_edict_understand:{ hpMultiplier: 1.10, attackMultiplier: 1.0, speedMultiplier: 1.0, densityMultiplier: 1.0 },
   post_edict_adapt:     { hpMultiplier: 1.15, attackMultiplier: 1.0, speedMultiplier: 1.0, densityMultiplier: 1.0 },
+  post_edict_director_p1: { hpMultiplier: 1.00, attackMultiplier: 1.0, speedMultiplier: 1.0, densityMultiplier: 1.0 }, // HP 75
+  post_edict_director_p2: { hpMultiplier: 1.20, attackMultiplier: 1.0, speedMultiplier: 1.0, densityMultiplier: 1.0 }, // HP 90
+  post_edict_director_p3: { hpMultiplier: 1.33, attackMultiplier: 1.0, speedMultiplier: 1.0, densityMultiplier: 1.0 }, // HP 100 (Math.round(75*1.33)=100)
   elite:                { hpMultiplier: 1.0,  attackMultiplier: 1.0, speedMultiplier: 1.0, densityMultiplier: 1.0 }, // 精英独立HP
 };
 

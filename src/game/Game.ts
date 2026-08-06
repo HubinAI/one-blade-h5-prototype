@@ -28,6 +28,7 @@ import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles"
 import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, resolveDamage, resolveThreatDamage, type PlayerRunStats, type DamageRequest, type DamageResult, type DamageSourceType } from "./systems/damageSystem";
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
+import { postEdictDirector, isInCombatZone, type DirectorDebugInfo } from "./systems/PostEdictDirector";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
@@ -1072,6 +1073,7 @@ export class Game {
     this.wavesSpawned = 0; this.allNormalWavesSpawned = false;
     this._lastWaveElapsed = 0; this.waveAdvanceLockedUntil = 0;
     this.edictRewardState = "none"; this.edictPostWavesQueued = false; this.allPostChestWavesSpawned = false;
+    postEdictDirector.reset(); // 0807-11D: 导演重置
     this.setPostChestSequenceState('inactive', 'resetRunState');
     this._stateRecoveryCount = 0;
     this.postChestStartAt = null;
@@ -1296,7 +1298,7 @@ export class Game {
 
     this.updateEdictIconFly(frameDt);
     this.updateEdictStatusIcon(frameDt);
-    this.updatePostChestWaves(scaledDt);
+    this._updatePostEdictDirector(scaledDt);
     // P4.3A.5: 尾队加速（最后一轮队列提前）
     this.updateEdictTailCatchup(scaledDt);
     // P4.2: 统一播报更新
@@ -5922,6 +5924,63 @@ export class Game {
     }
   }
 
+  /** 0807-11D: 导演式怪潮 — 替代旧 updatePostChestWaves */
+  private _updatePostEdictDirector(dt: number) {
+    if (this.postChestSequenceState === 'inactive' || this.postChestSequenceState === 'complete') return;
+    if (this.gameMode !== "normal") return;
+    if (!postEdictDirector.active) return;
+
+    const aliveInZone = this.enemies.filter(e => e.alive && isInCombatZone(e.y)).length;
+    const aliveTotal = this.enemies.filter(e => e.alive).length;
+
+    const spawnRequests = postEdictDirector.tick(dt, aliveInZone, aliveTotal, this.subSpawnQueue.length, this.elapsed);
+
+    for (const req of spawnRequests) {
+      this.setPostChestSequenceState('fighting', 'director_spawning');
+      this._enqueueDirectorBatch(req);
+    }
+
+    // 导演生命周期管理
+    if (!postEdictDirector.active && postEdictDirector.allComplete) {
+      this.allPostChestWavesSpawned = true;
+      this.edictBurstRoundIndex = this.edictBurstRoundTotal;
+      if (aliveTotal === 0 && this.subSpawnQueue.length === 0) {
+        this.setPostChestSequenceState('complete', 'director_all_done');
+      }
+    }
+  }
+
+  /** 0807-11D: 将导演批次的敌人入队到 subSpawnQueue */
+  private _enqueueDirectorBatch(req: { batches: Array<{ x: number; y: number; speedMul: number }>; phase: string; hp: number }) {
+    const phaseMap: Record<string, string> = {
+      'P1': 'post_edict_director_p1',
+      'P2': 'post_edict_director_p2',
+      'P3': 'post_edict_director_p3',
+    };
+    const stageNode = phaseMap[req.phase] ?? 'post_edict_release';
+    this._spawnBatchId += 1;
+    this._lastSpawnSource = `edict_${req.phase}`;
+
+    for (let i = 0; i < req.batches.length; i++) {
+      const pos = req.batches[i];
+      this.subSpawnQueue.push({
+        time: this.elapsed + 0.02 + i * 0.01,
+        kind: 'infantry' as any,
+        x: pos.x,
+        speedMultiplier: pos.speedMul,
+        yOffset: ENTRY_PROFILE_EDICT_BURST.spawnY - pos.y,
+        battlePhase: 'edict_burst',
+        stageNode: stageNode as any,
+        flowRole: 'main',
+        spawnGroupId: `director:${req.phase}`,
+        spawnOrder: i,
+        entryEndYOffset: 0,
+        source: 'edict',
+        roundIndex: 0,
+      });
+    }
+  }
+
   /** P4.3A.3: 军令波改为截止时间+压力提前接力 */
   private updatePostChestWaves(dt: number) {
     if (this.postChestSequenceState === 'inactive' || this.postChestSequenceState === 'complete') return;
@@ -6743,7 +6802,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private updateBattlePhase() {
     if (this.finished) { this.battlePhase = 'result'; return; }
     // V0804003: 自愈 — edictPostWavesQueued=true 但 state=inactive，最多恢复 5 次
-    if (this.edictPostWavesQueued && this.postChestSequenceState === 'inactive' && this.getEffectivePostChestWaves().length > 0 && this._stateRecoveryCount < 5) {
+    // 0807-11D: 导演启动后不再需要 getEffectivePostChestWaves
+    if (this.edictPostWavesQueued && this.postChestSequenceState === 'inactive' && this._stateRecoveryCount < 5) {
       this._stateRecoveryCount += 1;
       this.setPostChestSequenceState('waiting_spawn', 'recovery_after_reset');
       if (this.debugEnabled && this._stateRecoveryCount === 1) {
@@ -6758,6 +6818,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       this.startEdictBurstOnce();
     }
     // V0731006: 新流程精英后怪潮期间保持 edict_burst
+    // 0807-11D: 导演运行中优先检查
+    if (postEdictDirector.active && postEdictDirector.isRunning) {
+      this.battlePhase = 'edict_burst'; return;
+    }
     if (this.edictPostWavesQueued && (!this.allPostChestWavesSpawned || this.subSpawnQueue.length > 0 || this.enemies.some(e => e.alive))) {
       this.battlePhase = 'edict_burst'; return;
     }
@@ -7480,7 +7544,16 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       return;
     }
 
-    this.startEdictBurstOnce();
+    // 启动导演系统（P1→P2→P3）
+    postEdictDirector.start();
+    this.edictPostWavesQueued = true;
+    this.battlePhase = "edict_burst";
+    this.postChestStartAt = this.elapsed;
+    this.postChestWaveIndex = 0;
+    this.allPostChestWavesSpawned = false;
+    this.edictBurstRoundIndex = 1;
+    this.edictBurstRoundTotal = 3; // P1, P2, P3
+    this._edictArrivalTimer = 0;
   }
 
   /** P3.5：军令爆发只入队一次，状态统一由 postChestSequenceState 管理 */
@@ -10732,7 +10805,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   }
 
   private _drawDebugCompact(ctx: CanvasRenderingContext2D): void {
-    const cardW = 148; const cardH = this._showHpOverlay ? 168 : 102;
+    // 0807-11D: 导演信息扩展高度
+    const hasDirector = postEdictDirector.active && postEdictDirector.isRunning;
+    const directorRows = hasDirector ? 7 : 0;
+    const cardW = 148; const cardH = this._showHpOverlay ? 168 + directorRows * 15 : 102;
     const x = 6; const topY = 10;
     ctx.save();
     ctx.fillStyle = 'rgba(13, 16, 17, 0.78)';
@@ -10747,6 +10823,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const tier = getBladeTier(this.energy);
     const stage = getTierConfig(tier);
     const levelId = typeof this.level.id === 'number' ? this.level.id : parseInt(String(this.level.id), 10) || 1;
+    // 0807-11D: 导演 debug 数据
+    const zoneCount = this.enemies.filter(e => e.alive && isInCombatZone(e.y)).length;
+    const di: DirectorDebugInfo = postEdictDirector.getDebugInfo(zoneCount, aliveCount);
     const rowData = [
       { l: 'level', v: `${levelId}`, c: '#fff' },
       { l: 'phase', v: `${this.phase}`, c: '#fff' },
@@ -10761,6 +10840,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         { l: 'seq', v: `${this.postChestSequenceState}`, c: '#f39c12' },
         { l: 'pci', v: `${this.postChestWaveIndex}`, c: '#888' },
         { l: 'gate', v: this._lastEliteGateBlocked ? 'BLOCK' : 'ALLOW', c: this._lastEliteGateBlocked ? '#e74c3c' : '#2ecc71' },
+        // 0807-11D: 导演 debug 信息
+        ...(hasDirector ? [
+          { l: 'dir', v: `${di.phase} ${di.subWave}`, c: '#9b6dff' },
+          { l: 'gen', v: `${di.generated}/${di.total}`, c: '#ffd35a' },
+          { l: 'alive', v: `${di.alive} (zone:${di.aliveInZone})`, c: '#fff' },
+          { l: 'next', v: `${di.nextBatchState}`, c: di.nextBatchState === 'SPAWNED' ? '#2ecc71' : di.nextBatchState === 'WAIT_CAP' ? '#e74c3c' : '#ffd35a' },
+          { l: 'elapsed', v: `${di.phaseElapsed}s`, c: '#888' },
+        ] : []),
       ] : []),
       { l: 'enemies', v: `${aliveCount}`, c: '#fff' },
       { l: 'playerHP', v: `${this.hp}`, c: '#e74c3c' },
@@ -10799,6 +10886,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       let srcLabel = '';
       if (esrc.startsWith('post_chest_wave_')) {
         srcLabel = esrc.replace('post_chest_wave_', 'P');
+      } else if (esrc.startsWith('director_')) {
+        srcLabel = 'D-' + esrc.replace('director_', '');
       } else if (esrc.startsWith('normal_wave_')) {
         srcLabel = 'N' + esrc.replace('normal_wave_', '');
       } else if (esrc === 'elite') {
@@ -10959,7 +11048,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private updateEliteSpawn() {
     if (this.eliteSpawned || !this.level.eliteSpawnAt || !this.level.eliteKind) return;
     if (!this.allNormalWavesSpawned) { this._eliteGateReason = 'no(not_all_waves)'; this._lastEliteGateBlocked = true; return; }
-    // V0803036+0803039: 军令后验证潮 — inactive/complete 仅在实际不要求验证潮时放行
+    // V0803036+0803039: 军令后验证潮 — 导演优先检查
+    // 0807-11D: 导演运行中时禁止精英
+    if (postEdictDirector.active && postEdictDirector.isRunning) {
+      this._eliteGateReason = 'no(director_running)'; this._lastEliteGateBlocked = true; return;
+    }
     const hasPostWaves = this.getEffectivePostChestWaves().length > 0;
     if (this.postChestSequenceState === 'inactive' && hasPostWaves) {
       this._eliteGateReason = 'no(inactive+hasPostWaves)'; this._lastEliteGateBlocked = true; return;
