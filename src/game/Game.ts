@@ -2908,6 +2908,7 @@ export class Game {
   private _applyFrostToTrailHits(trail: SlashTrail) {
     for (const enemy of this.enemies) {
       if (!enemy.alive) continue;
+      if (!isEnemyCombatTargetable(enemy)) continue; // 0807-11D-3I: 影化不可冻结
       let hit = false;
       for (let i = 0; i < trail.points.length - 1 && !hit; i++) {
         const a = trail.points[i], b = trail.points[i + 1];
@@ -2934,6 +2935,12 @@ export class Game {
   private _updateFrostStates(dt: number) {
     for (const enemy of this.enemies) {
       if (!enemy.alive) { (enemy as any)._frostState = undefined; (enemy as any)._frostY = undefined; continue; }
+      // 0807-11D-3I: 影化期间清除任何霜冻残留
+      if (!isEnemyCombatTargetable(enemy)) {
+        (enemy as any)._frostState = undefined;
+        (enemy as any)._frostY = undefined;
+        continue;
+      }
       const fs = (enemy as any)._frostState as { frozenLeft: number; slowLeft: number; wasFrozen: boolean } | undefined;
       if (!fs) continue;
       if (fs.frozenLeft > 0) { fs.frozenLeft -= dt; if (fs.frozenLeft <= 0) { fs.wasFrozen = true; (enemy as any)._frostShatterTimer = 0.20; } continue; }
