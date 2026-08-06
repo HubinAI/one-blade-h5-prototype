@@ -9422,6 +9422,28 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.restore();
   }
 
+  /** 0807-11D-3J: 虚影墨影绘制 — 简化墨色笔画代替完整敌人 */
+  private _drawInkShadow(ctx: CanvasRenderingContext2D, enemy: Enemy, stretch = 1.5, alpha = 0.40) {
+    const r = enemy.radius;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    // 2-3 条纵向拉伸墨色笔画
+    for (let s = 0; s < 3; s++) {
+      const sx = (s - 1) * r * 0.35 + (Math.sin(enemy.id.charCodeAt(s) * 0.7) * r * 0.15);
+      const h = r * 1.35 * stretch;
+      const w = r * 0.22;
+      ctx.fillStyle = `rgba(22, 18, 24, ${0.55 + s * 0.08})`;
+      ctx.beginPath();
+      ctx.ellipse(sx, 0, w, h, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 轻微边缘光亮
+      ctx.strokeStyle = `rgba(80, 70, 100, ${0.12 + s * 0.04})`;
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   private drawEnemies(ctx: CanvasRenderingContext2D) {
     // P4.1A.12: 第一遍 — 只画怪物主体（不含血条/名牌）
     const sorted = [...this.enemies].sort((a, b) => a.y - b.y);
@@ -9438,6 +9460,19 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         const scale = layer === "rear" ? dd.rearScale : layer === "front" ? dd.frontScale : dd.midScale;
         ctx.scale(scale, scale);
         ctx.globalAlpha = layer === "rear" ? dd.rearAlpha : 1;
+      }
+      // 0807-11D-3J: 影化敌人墨影绘制 (替代完整敌人)
+      const dirState = enemy._directorEntryState;
+      if (dirState === 'shadow_move') {
+        this._drawInkShadow(ctx, enemy);
+        ctx.restore();
+        continue;
+      }
+      if (dirState === 'materializing') {
+        // 墨影收束: 先画墨影底层 + 敌人主体逐渐显现
+        const matP = (enemy._directorEntryTimer || 0) / MATERIALIZE_DURATION;
+        const inkAlpha = Math.max(0, 1 - matP);
+        this._drawInkShadow(ctx, enemy, 1.6 - matP * 0.6, inkAlpha);
       }
       // 0807-11D-3A: 影化透明度 (叠加到现有 globalAlpha)
       const shadowAlpha = (enemy as any)._shadowAlpha;
