@@ -18,20 +18,14 @@ export type FormationId = string;
 export interface SpawnItem {
   x: number; y: number;
   speedMul: number;
-
-  // HP
-  hpTier: HpTier;
-  hpOverride: number;
-
-  // 队形
+  hpTier: HpTier; hpOverride: number;
   formationId: FormationId;
-  entryTargetX: number;
-  entryEndYOverride: number;
-
-  // 不可变元数据
+  entryTargetX: number; entryEndYOverride: number;
   directorPhase: DirectorPhase;
-  directorBeatId: string;
-  directorMicroBatchId: string;
+  directorBeatId: string; directorMicroBatchId: string;
+  /** 0807-11D-3: 影化锚点 */
+  anchorId: string; anchorX: number; anchorY: number;
+  skipShadow: boolean;
 }
 
 export interface DirectorSpawnRequest {
@@ -60,6 +54,61 @@ export function isInCombatZone(y: number): boolean {
 export function isApproaching(y: number): boolean {
   return y >= -30 && y < BATTLEFIELD_ZONES.midfieldStartY;
 }
+
+/** 0807-11D-3: 统一不可战斗判定 */
+export function isEnemyCombatTargetable(enemy: { _directorEntryState?: string; alive?: boolean }): boolean {
+  if (!enemy.alive) return false;
+  const s = enemy._directorEntryState;
+  if (!s) return true; // 非导演敌人，正常可战斗
+  return s === 'active';
+}
+
+/** 导演敌人是否处于影化状态（不可战斗） */
+export function isShadowState(enemy: { _directorEntryState?: string }): boolean {
+  const s = enemy._directorEntryState;
+  return s === 'shadow_fall' || s === 'shadow_deploy' || s === 'materializing';
+}
+
+// ═══════════════════ 集结锚点配置 ═══════════════════
+
+export interface AnchorConfig {
+  id: string;
+  x: number;
+  y: number;
+}
+
+/** 集结锚点Y: midfieldStartY 上方约 30px */
+const ANCHOR_Y = BATTLEFIELD_ZONES.midfieldStartY - 30;
+
+export const ANCHORS: Record<string, AnchorConfig> = {
+  center:       { id: 'center',       x: BATTLE_SAFE_X.normalMin + (BATTLE_SAFE_X.normalMax - BATTLE_SAFE_X.normalMin) / 2, y: ANCHOR_Y },
+  left_center:  { id: 'left_center',  x: BATTLE_SAFE_X.normalMin + 60,  y: ANCHOR_Y },
+  right_center: { id: 'right_center', x: BATTLE_SAFE_X.normalMax - 60,  y: ANCHOR_Y },
+};
+
+/** 每个formation的锚点映射 */
+export const FORMATION_ANCHORS: Record<string, string> = {
+  front_wide:       'center',
+  back_wide:        'center',
+  left_high_diag:   'left_center',
+  right_low_diag:   'left_center',
+  right_high_diag:  'right_center',
+  left_low_diag:    'right_center',
+  left_front:       'left_center',
+  right_back:       'right_center',
+  center_expand:    'center',
+  left_expand:      'center',
+  right_expand:     'center',
+  left_slant_back:  'left_center',
+  right_slant_back: 'right_center',
+  front_tough:      'center',
+  scattered_walls:  'center',
+};
+
+// 入场时长常量 (秒)
+export const SHADOW_FALL_DURATION = 0.33;
+export const SHADOW_DEPLOY_DURATION = 0.28;
+export const MATERIALIZE_DURATION = 0.10;
 
 // ═══════════════════ HP 配置 ═══════════════════
 
@@ -413,6 +462,9 @@ export class PostEdictDirector {
     const items: SpawnItem[] = [];
     const rowEnd = rowEndY(mb.row);
     const jitter = () => (Math.random() - 0.5) * 12;
+    const anchorId = FORMATION_ANCHORS[mb.formationId] || 'center';
+    const anchor = ANCHORS[anchorId];
+    const skipShadow = beat.phase === 'P1' && beat.id === 'P1-1';
 
     for (const [tier, cnt] of mb.tiers) {
       if (cnt <= 0) continue;
@@ -430,6 +482,8 @@ export class PostEdictDirector {
           directorPhase: beat.phase,
           directorBeatId: beat.id,
           directorMicroBatchId: mbId,
+          anchorId, anchorX: anchor.x, anchorY: anchor.y,
+          skipShadow,
         });
       }
     }
@@ -494,6 +548,9 @@ export class PostEdictDirector {
     const items: SpawnItem[] = [];
     const rowEnd = rowEndY(mb.row);
     const jitter = () => (Math.random() - 0.5) * 12;
+    const anchorId = FORMATION_ANCHORS[mb.formationId] || 'center';
+    const anchor = ANCHORS[anchorId];
+    const skipShadow = beat.phase === 'P1' && beat.id === 'P1-1';
     const xPositions = this._calcXPositions(mb.count, mb.xRange);
     let i = 0;
 
@@ -512,6 +569,8 @@ export class PostEdictDirector {
           directorPhase: beat.phase,
           directorBeatId: beat.id,
           directorMicroBatchId: `${beat.id}_mb${this._microBatchIndex - 1}`,
+          anchorId, anchorX: anchor.x, anchorY: anchor.y,
+          skipShadow,
         });
         i++;
       }

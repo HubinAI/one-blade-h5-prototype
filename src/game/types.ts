@@ -268,6 +268,20 @@ export type Enemy = {
   spawnSource?: "normal" | "edict" | "split" | "elite" | "direct" | "daily" | "boss_supply";
   /** P4.3A: 战场流动状态 */
   flow?: EnemyFlowState;
+  /** 0807-11D-3: 导演入场状态 */
+  _directorEntryState?: 'shadow_fall' | 'shadow_deploy' | 'materializing' | 'active';
+  _directorEntryTimer?: number;
+  _directorEntryAnchorX?: number;
+  _directorEntryAnchorY?: number;
+  _directorTargetX?: number;
+  _directorTargetY?: number;
+  _dirBeatId?: string;
+  _dirHpTier?: string;
+  _dirFormationId?: string;
+  _dirMbId?: string;
+  _dirPhase?: string;
+  _dirEntryTargetX?: number;
+  _dirEntryEndYOverride?: number;
 };
 
 export type Pickup = {

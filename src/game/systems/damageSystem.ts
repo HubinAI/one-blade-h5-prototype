@@ -105,6 +105,8 @@ export interface DamageRequest {
   hitPos: Vec2;
   /** 时间戳 */
   timestamp: number;
+  /** 0807-11D-3: 导演敌人入场状态 (shadow时不可伤害) */
+  targetDirectorEntryState?: string;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -216,6 +218,26 @@ export function resolveDamage(
       hpAfter: targetHp,
       isAccepted: false,
       isImmune: true,
+      isKill: false,
+      isDestroy: false,
+      isOverkill: false,
+      killCreditSource: null,
+    };
+  }
+
+  // 0807-11D-3: 导演影子状态不可战斗 (shadow_fall/deploy/materializing)
+  if (request.targetDirectorEntryState && request.targetDirectorEntryState !== 'active') {
+    return {
+      actionId: request.actionId,
+      sourceType: request.sourceType,
+      targetId: request.targetId,
+      rawDamage: 0,
+      resolvedDamage: 0,
+      effectiveHpLoss: 0,
+      hpBefore: targetHp,
+      hpAfter: targetHp,
+      isAccepted: false,
+      isImmune: false,
       isKill: false,
       isDestroy: false,
       isOverkill: false,

@@ -28,7 +28,7 @@ import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles"
 import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, resolveDamage, resolveThreatDamage, type PlayerRunStats, type DamageRequest, type DamageResult, type DamageSourceType } from "./systems/damageSystem";
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
-import { postEdictDirector, isInCombatZone, isApproaching, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS } from "./systems/PostEdictDirector";
+import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS, SHADOW_FALL_DURATION, SHADOW_DEPLOY_DURATION, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
@@ -215,7 +215,7 @@ export class Game {
     attackEndPos: Vec2;
   }[] = [];
   // 多波多次刷新队列：每个子刷新有时间戳，到时间就spawn
-  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; stageNode?: string; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number; isTailCatchup?: boolean; hpOverride?: number; dirPhase?: string; dirBeatId?: string; dirMbId?: string; dirHpTier?: string; dirFormationId?: string; entryTargetX?: number; entryEndYOverride?: number }[] = [];
+  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; stageNode?: string; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number; isTailCatchup?: boolean; hpOverride?: number; dirPhase?: string; dirBeatId?: string; dirMbId?: string; dirHpTier?: string; dirFormationId?: string; entryTargetX?: number; entryEndYOverride?: number; shadowAnchorX?: number; shadowAnchorY?: number; shadowSkip?: boolean }[] = [];
 
   private pointerDown = false;
   private pointerPos?: Vec2;
@@ -4564,6 +4564,46 @@ export class Game {
       // 正常下落（未蓄力时或冲刺后）
       const isCharging = enemy.chargeTimer !== undefined && enemy.chargeTimer >= 0;
       if (!isCharging) {
+
+        // ═══ 0807-11D-3: 影化入场生命周期 ═══
+        if (enemy._directorEntryState === 'shadow_fall') {
+          enemy._directorEntryTimer = (enemy._directorEntryTimer || 0) + dt;
+          const progress = Math.min(1, enemy._directorEntryTimer / (SHADOW_FALL_DURATION));
+          const ax = enemy._directorEntryAnchorX ?? enemy.x;
+          const ay = enemy._directorEntryAnchorY ?? (BATTLEFIELD_ZONES.midfieldStartY - 30);
+          enemy.x = enemy.x + (ax - enemy.x) * progress * 3;
+          enemy.y = enemy.y + (ay - enemy.y) * progress * 3;
+          if (enemy._directorEntryTimer >= SHADOW_FALL_DURATION) {
+            enemy._directorEntryState = 'shadow_deploy';
+            enemy._directorEntryTimer = 0;
+          }
+          continue; // shadow fall: 不参与正常移动
+        }
+
+        if (enemy._directorEntryState === 'shadow_deploy') {
+          enemy._directorEntryTimer = (enemy._directorEntryTimer || 0) + dt;
+          const progress = Math.min(1, enemy._directorEntryTimer / (SHADOW_DEPLOY_DURATION));
+          const ease = 1 - Math.pow(1 - progress, 2); // ease-out
+          const tx = enemy._directorTargetX ?? enemy.x;
+          const ty = enemy._directorTargetY ?? enemy.y;
+          enemy.x = enemy.x + (tx - enemy.x) * ease * 3;
+          enemy.y = enemy.y + (ty - enemy.y) * ease * 3;
+          if (enemy._directorEntryTimer >= SHADOW_DEPLOY_DURATION) {
+            enemy._directorEntryState = 'materializing';
+            enemy._directorEntryTimer = 0;
+          }
+          continue; // shadow deploy: 不参与正常移动
+        }
+
+        if (enemy._directorEntryState === 'materializing') {
+          enemy._directorEntryTimer = (enemy._directorEntryTimer || 0) + dt;
+          if (enemy._directorEntryTimer >= (MATERIALIZE_DURATION)) {
+            enemy._directorEntryState = 'active';
+          }
+          continue; // materializing: 不参与正常移动
+        }
+        // ═══ END 影化生命周期 ═══
+
         // P4.3A: 动态flow倍率替代固定harvestSlow
         const flowMul = enemy.flow?.currentSpeedMultiplier ?? 1;
         enemy.y += enemy.speed * entryMultiplier * rushMultiplier * statusSlow * fortressSlow * flowMul * dt;
@@ -6011,6 +6051,10 @@ export class Game {
         dirFormationId: item.formationId,
         entryTargetX: item.entryTargetX,
         entryEndYOverride: item.entryEndYOverride,
+        // 0807-11D-3: 影化锚点
+        shadowAnchorX: item.anchorX,
+        shadowAnchorY: item.anchorY,
+        shadowSkip: item.skipShadow,
       });
     }
   }
@@ -6377,6 +6421,15 @@ export class Game {
     if (item.dirFormationId !== undefined) { (enemy as any)._dirFormationId = item.dirFormationId; }
     if (item.entryTargetX !== undefined) { (enemy as any)._dirEntryTargetX = item.entryTargetX; }
     if (item.entryEndYOverride !== undefined) { (enemy as any)._dirEntryEndYOverride = item.entryEndYOverride; }
+    // 0807-11D-3: 初始化影化入场状态
+    if (item.shadowAnchorX !== undefined && !(item.shadowSkip)) {
+      enemy._directorEntryState = 'shadow_fall';
+      enemy._directorEntryTimer = 0;
+      enemy._directorEntryAnchorX = item.shadowAnchorX;
+      enemy._directorEntryAnchorY = item.shadowAnchorY;
+      enemy._directorTargetX = item.entryTargetX ?? item.x;
+      enemy._directorTargetY = item.entryEndYOverride ?? (ENTRY_PROFILE_EDICT_BURST.entryEndY);
+    }
     if (this._currentWaveEvent) {
       enemy.spawnedWithEvent = this._currentWaveEvent;
     }
