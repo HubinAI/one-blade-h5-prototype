@@ -7582,6 +7582,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
   /** P3.5：军令爆发只入队一次，状态统一由 postChestSequenceState 管理 */
   private startEdictBurstOnce() {
+    // 0807-11D: 防止导演双重重置
+    if (postEdictDirector.active) return;
     const postWaves = this.getEffectivePostChestWaves();
     if (postWaves.length <= 0) {
       this.allPostChestWavesSpawned = true;

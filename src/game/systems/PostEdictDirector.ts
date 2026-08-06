@@ -522,8 +522,9 @@ export class PostEdictDirector {
     }
 
     // 条件2: 上一节拍至少有 50% 进入战斗区 或 存活量降至 50% 以下
-    const beatEnteredRatio = beat.totalCount > 0 ? aliveInZone / beat.totalCount : 0;
-    const beatAliveRatio = beat.totalCount > 0 ? aliveTotal / beat.totalCount : 0;
+    // aliveInZone 包含所有存活敌人（含前拍残留），需 clamp 防止 >1.0 绕过门控
+    const beatEnteredRatio = beat.totalCount > 0 ? Math.min(1, aliveInZone / beat.totalCount) : 0;
+    const beatAliveRatio = beat.totalCount > 0 ? Math.min(1, aliveTotal / beat.totalCount) : 0;
     if (beatEnteredRatio < 0.50 && beatAliveRatio > 0.50) {
       this._nextState = 'WAIT_APPROACH';
       return this._tryBridge(dt, beat, phase, aliveInZone, aliveTotal, approachingCount, subSpawnQueueLength);
