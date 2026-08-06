@@ -9422,25 +9422,29 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.restore();
   }
 
-  /** 0807-11D-3J-1: 虚影墨影 — 高可见灰紫墨色 + 加宽笔画 */
-  private _drawInkShadow(ctx: CanvasRenderingContext2D, enemy: Enemy, stretch = 1.5, alpha = 0.62) {
+  /** 0807-11D-3J-2: 轻量墨影 — 2条细断续墨痕 */
+  private _drawInkShadow(ctx: CanvasRenderingContext2D, enemy: Enemy, stretch = 1.3, alpha = 0.55) {
     const r = enemy.radius;
+    const seed = enemy.id.charCodeAt(0) + (enemy.id.charCodeAt(1) || 0);
     ctx.save();
     ctx.globalAlpha = alpha;
-    for (let s = 0; s < 3; s++) {
-      const sx = (s - 1) * r * 0.35 + (Math.sin(enemy.id.charCodeAt(s) * 0.7) * r * 0.15);
-      const h = r * 1.35 * stretch;
-      const w = r * 0.36;
-      // 灰紫墨色主体
-      ctx.fillStyle = `rgba(86, 78, 102, ${0.82 + s * 0.06})`;
-      ctx.beginPath();
-      ctx.ellipse(sx, 0, w, h, 0, 0, Math.PI * 2);
-      ctx.fill();
-      // 边缘微光
-      ctx.strokeStyle = `rgba(140, 130, 160, ${0.26 + s * 0.04})`;
-      ctx.lineWidth = 1.0;
-      ctx.stroke();
-    }
+    // 主墨痕: 较高较粗
+    const h1 = r * 1.25 * stretch;
+    const w1 = r * 0.28;
+    const x1 = (Math.sin(seed * 0.7) * r * 0.12);
+    ctx.fillStyle = `rgba(72, 65, 80, 0.78)`;
+    ctx.beginPath();
+    ctx.ellipse(x1, 0, w1, h1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 副墨痕: 较短较细，上下错开
+    const h2 = h1 * 0.55;
+    const w2 = r * 0.20;
+    const x2 = (Math.cos(seed * 0.7) * r * 0.22);
+    const yOff = (seed % 3 === 0) ? h1 * 0.25 : -h1 * 0.25;
+    ctx.fillStyle = `rgba(68, 60, 76, 0.65)`;
+    ctx.beginPath();
+    ctx.ellipse(x2, yOff, w2, h2, 0, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
 
@@ -9469,17 +9473,17 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         continue;
       }
       if (dirState === 'materializing') {
-        // 墨影收束: stretch 1.6→1.0, alpha逐渐降低
+        // 墨影收束: stretch 1.3→1.0, alpha逐渐降低
         const matP = (enemy._directorEntryTimer || 0) / MATERIALIZE_DURATION;
-        const inkAlpha = Math.max(0.08, 1 - matP * 1.2);
-        this._drawInkShadow(ctx, enemy, 1.6 - matP * 0.6, inkAlpha);
-        // active 切换前短促轮廓亮起
-        if (matP > 0.75) {
-          const flash = (matP - 0.75) / 0.25; // 0→1 during last 25%
-          ctx.strokeStyle = `rgba(200, 180, 220, ${flash * 0.55})`;
-          ctx.lineWidth = 2.0;
+        const inkAlpha = Math.max(0.06, (1 - matP) * 0.55);
+        this._drawInkShadow(ctx, enemy, 1.3 - matP * 0.3, inkAlpha);
+        // 最后60-90ms敌人轮廓轻微提亮一次
+        if (matP > 0.88) {
+          const flash = (matP - 0.88) / 0.12;
+          ctx.strokeStyle = `rgba(255, 230, 180, ${flash * 0.30})`;
+          ctx.lineWidth = 1.5;
           const r = enemy.radius;
-          ctx.beginPath(); ctx.arc(0, 0, r + 2, 0, Math.PI * 2); ctx.stroke();
+          ctx.beginPath(); ctx.arc(0, 0, r + 1, 0, Math.PI * 2); ctx.stroke();
         }
       }
       // 0807-11D-3A: 影化透明度 (叠加到现有 globalAlpha)
