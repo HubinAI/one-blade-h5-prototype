@@ -10715,6 +10715,22 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const pctText = `${Math.floor(energyPct * 100)}% ${bandNames[bmBand]}`;
     ctx.fillText(pctText, DESIGN_WIDTH / 2, eBarY - 4);
 
+    // 0807-11D-4B: 爆发倒计时显示在刀势条上
+    if (this._momentumState === 'bursting') {
+      const burstRatio = this._burstRemaining / 5.0;
+      const urgency = this._burstRemaining < 1.0 ? 1.5 : 1;
+      ctx.save();
+      // 倒计时数字
+      ctx.fillStyle = '#ffd35a';
+      ctx.font = '900 16px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(`⚡${Math.ceil(this._burstRemaining)}s`, eBarX + eBarW + 50, eBarY + 14);
+      // 进度条叠加
+      ctx.fillStyle = `rgba(255, 211, 90, ${0.5 * urgency})`;
+      ctx.fillRect(eBarX, eBarY - 6, eBarW * burstRatio, 3);
+      ctx.restore();
+    }
+
     // P4.1A.10：一刀斩"下一刀×2"小状态（仅oneBladeModeTimer>0时显示）
     if (this.oneBladeModeTimer > 0) {
       ctx.save();
