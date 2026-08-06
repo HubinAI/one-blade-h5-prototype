@@ -1250,6 +1250,12 @@ export class Game {
     } else if (this._momentumState === 'charging' && this.energy >= BALANCE.swordEnergy.max) {
       this._momentumState = 'armed';
       this.energy = BALANCE.swordEnergy.max;
+      // 武装提示
+      this.addText(DESIGN_WIDTH / 2, 180, '满势', '#ffd35a', 22, 1.2);
+    }
+    // 爆发倒计时显示
+    if (this._momentumState === 'bursting' && Math.floor(this._burstRemaining * 2) % 2 === 0) {
+      this.addText(DESIGN_WIDTH / 2, 160, `${Math.ceil(this._burstRemaining)}s`, '#ff9944', 18, 0.3);
     }
 
     // V0730001: high档位就绪提示（ratio ≥ 70%）
@@ -7565,21 +7571,21 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const remain = this._burstRemaining;
     const urgency = remain < 1.0 ? 1 + (1 - remain) * 3 : 1;
     const pulse = Math.sin(this.elapsed * 6) * 0.3 + 0.7;
-    const alpha = 0.22 * pulse * urgency;
+    const alpha = 0.35 * pulse * urgency;
     ctx.save();
-    ctx.globalAlpha = Math.min(0.5, alpha);
-    // 四边金白焰 (渐变窄带)
-    const edgeW = 6;
+    ctx.globalAlpha = Math.min(0.7, alpha);
+    // 四边金白焰
+    const edgeW = 8;
     const grad = ctx.createLinearGradient(0, 0, 0, DESIGN_HEIGHT);
-    grad.addColorStop(0, '#ffd35a'); grad.addColorStop(0.5, '#ff9944'); grad.addColorStop(1, '#ffd35a');
+    grad.addColorStop(0, '#ffcc44'); grad.addColorStop(0.5, '#ff7733'); grad.addColorStop(1, '#ffcc44');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, edgeW, DESIGN_HEIGHT);        // 左
-    ctx.fillRect(DESIGN_WIDTH - edgeW, 0, edgeW, DESIGN_HEIGHT); // 右
+    ctx.fillRect(0, 0, edgeW, DESIGN_HEIGHT);
+    ctx.fillRect(DESIGN_WIDTH - edgeW, 0, edgeW, DESIGN_HEIGHT);
     const gradH = ctx.createLinearGradient(0, 0, DESIGN_WIDTH, 0);
-    gradH.addColorStop(0, '#ffd35a'); gradH.addColorStop(0.5, '#ff9944'); gradH.addColorStop(1, '#ffd35a');
+    gradH.addColorStop(0, '#ffcc44'); gradH.addColorStop(0.5, '#ff7733'); gradH.addColorStop(1, '#ffcc44');
     ctx.fillStyle = gradH;
-    ctx.fillRect(0, 0, DESIGN_WIDTH, 4);              // 上
-    ctx.fillRect(0, DESIGN_HEIGHT - 4, DESIGN_WIDTH, 4); // 下
+    ctx.fillRect(0, 0, DESIGN_WIDTH, 5);
+    ctx.fillRect(0, DESIGN_HEIGHT - 5, DESIGN_WIDTH, 5);
     ctx.restore();
   }
 
