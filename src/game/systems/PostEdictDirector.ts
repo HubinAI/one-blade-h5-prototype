@@ -453,7 +453,7 @@ export class PostEdictDirector {
     // 当前节拍全部微批次已入队，检查是否推进到下一节拍
     if (this._microBatchIndex >= beat.microBatches.length) {
       return this._tryAdvanceBeat(
-        beat, phase, phaseElapsedMs, aliveInZone, aliveTotal,
+        dt, beat, phase, phaseElapsedMs, aliveInZone, aliveTotal,
         approachingCount, subSpawnQueueLength, elapsedMs,
       );
     }
@@ -461,7 +461,7 @@ export class PostEdictDirector {
     // 检查 notBefore
     if (elapsedMs - this._phaseStartMs < beat.notBeforeMs) {
       this._nextState = 'WAIT_TIME';
-      return this._tryBridge(beat, phase, aliveInZone, aliveTotal, approachingCount, subSpawnQueueLength);
+      return this._tryBridge(dt, beat, phase, aliveInZone, aliveTotal, approachingCount, subSpawnQueueLength);
     }
 
     // 检查同屏硬上限（含接近区）
@@ -496,6 +496,7 @@ export class PostEdictDirector {
 
   /** 检查推进到下一节拍的条件 */
   private _tryAdvanceBeat(
+    dt: number,
     beat: DirectorBeat,
     phase: PhaseConfig,
     phaseElapsedMs: number,
@@ -517,7 +518,7 @@ export class PostEdictDirector {
     // 条件1: 已到 notBefore
     if (elapsedMs - this._phaseStartMs < nextBeat.notBeforeMs) {
       this._nextState = 'WAIT_TIME';
-      return this._tryBridge(beat, phase, aliveInZone, aliveTotal, approachingCount, subSpawnQueueLength);
+      return this._tryBridge(dt, beat, phase, aliveInZone, aliveTotal, approachingCount, subSpawnQueueLength);
     }
 
     // 条件2: 上一节拍至少有 50% 进入战斗区 或 存活量降至 50% 以下
@@ -525,7 +526,7 @@ export class PostEdictDirector {
     const beatAliveRatio = beat.totalCount > 0 ? aliveTotal / beat.totalCount : 0;
     if (beatEnteredRatio < 0.50 && beatAliveRatio > 0.50) {
       this._nextState = 'WAIT_APPROACH';
-      return this._tryBridge(beat, phase, aliveInZone, aliveTotal, approachingCount, subSpawnQueueLength);
+      return this._tryBridge(dt, beat, phase, aliveInZone, aliveTotal, approachingCount, subSpawnQueueLength);
     }
 
     // 条件3: 不突破硬上限
@@ -549,6 +550,7 @@ export class PostEdictDirector {
 
   /** 桥接补员 */
   private _tryBridge(
+    dt: number,
     beat: DirectorBeat,
     phase: PhaseConfig,
     aliveInZone: number,
@@ -560,7 +562,7 @@ export class PostEdictDirector {
     if (aliveInZone >= phase.targetOnScreen[0]) return [];
 
     // 累积空屏时间
-    this._emptyTime += 0.016; // ~60fps
+    this._emptyTime += dt;
 
     if (this._emptyTime < BRIDGE_MIN_EMPTY_SEC) return [];
     if (this._emptyTime > BRIDGE_MAX_EMPTY_SEC) this._emptyTime = BRIDGE_MAX_EMPTY_SEC;
@@ -606,6 +608,7 @@ export class PostEdictDirector {
   /** 推进到下一节拍，考虑桥接扣除 */
   private _advanceToNextBeat(nextBeatIndex: number): void {
     this._beatIndex = nextBeatIndex;
+    this._emptyTime = 0; // 重置空屏计时，节拍间不延续
     const bridged = this._currentBeatBridged;
     if (bridged > 0) {
       const nextBeat = this.beats[nextBeatIndex];
