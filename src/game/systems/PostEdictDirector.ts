@@ -360,6 +360,7 @@ export class PostEdictDirector {
     this._finalAfterglowTimer = 0;
     this._currentBeatBridgeDone = false;
     this._currentBeatBridged = 0;
+    this._partialBatchDeduction = 0;
     this._nextState = 'READY';
     this._lastReason = '';
   }
@@ -381,7 +382,7 @@ export class PostEdictDirector {
   }
 
   get currentBeatId(): string {
-    if (this._beatIndex >= this.beats.length) return '-';
+    if (!this._active || this._beatIndex >= this.beats.length) return '-';
     return this.beats[this._beatIndex].id;
   }
 
@@ -482,24 +483,7 @@ export class PostEdictDirector {
     this._nextState = 'SPAWN';
     const mb = beat.microBatches[this._microBatchIndex];
     this._microBatchIndex += 1;
-
-    const items: SpawnItem[] = [];
-    for (const [tier, cnt] of mb.hpTiers) {
-      if (cnt <= 0) continue;
-      const xs = generateX(cnt, mb.xLayout, mb.xRange);
-      const baseY = -20;
-      for (let i = 0; i < cnt; i++) {
-        const yJitter = (Math.random() - 0.5) * 8;
-        const y = baseY + mb.yOffset + yJitter + i * mb.internalDelay * 15;
-        items.push({
-          x: Math.round(xs[i]),
-          y,
-          speedMul: phase.speedMul + mb.speedBonus,
-          hpTier: tier,
-        });
-      }
-    }
-
+    const items = this._generateMicroBatchItems(mb, phase, 0);
     this._phaseGenerated += items.length;
     this._lastReason = `spawn_${beat.id}_mb${this._microBatchIndex - 1}`;
 
@@ -624,26 +608,36 @@ export class PostEdictDirector {
   /** 推进到下一节拍，考虑桥接扣除 */
   private _advanceToNextBeat(nextBeatIndex: number): void {
     this._beatIndex = nextBeatIndex;
-    // 桥接扣除：跳过已被桥接占用的微批次
     const bridged = this._currentBeatBridged;
     if (bridged > 0) {
       const nextBeat = this.beats[nextBeatIndex];
       let remaining = bridged;
       let skipIdx = 0;
+      // 跳过完整的微批次（budget 扣除）
       while (remaining > 0 && skipIdx < nextBeat.microBatches.length) {
         const mb = nextBeat.microBatches[skipIdx];
         const mbCount = mb.hpTiers.reduce((s, [, c]) => s + c, 0);
-        remaining -= mbCount;
-        skipIdx++;
+        if (remaining >= mbCount) {
+          remaining -= mbCount;
+          skipIdx++;
+        } else {
+          break; // 不足一个完整微批次，从该批次内扣
+        }
       }
-      this._microBatchIndex = skipIdx; // 从第一个未桥接的微批次开始
-      this._phaseGenerated -= bridged;
+      // 记录还需要从当前微批次扣除的数量（剩余不足一个完整批次）
+      this._partialBatchDeduction = remaining;
+      this._microBatchIndex = skipIdx;
+      // 不重复减 _phaseGenerated：桥接时已加回，此处只跳过微批次防止重复计入
     } else {
       this._microBatchIndex = 0;
+      this._partialBatchDeduction = 0;
     }
     this._currentBeatBridgeDone = false;
     this._currentBeatBridged = 0;
   }
+
+  /** 桥接扣除后还需要从当前微批次扣的数量 */
+  private _partialBatchDeduction = 0;
 
   /** 推进到下一阶段 */
   private _advanceToNextPhase(): void {
@@ -657,6 +651,7 @@ export class PostEdictDirector {
     this._microBatchIndex = 0;
     this._currentBeatBridgeDone = false;
     this._currentBeatBridged = 0;
+    this._partialBatchDeduction = 0;
     this._phaseGenerated = 0;
     this._phaseBridgeCount = 0;
     this._phaseBeatBridgeUsed.clear();
@@ -667,18 +662,36 @@ export class PostEdictDirector {
     this._nextState = 'READY';
   }
 
-  /** 生成节拍的第一个微批次 */
+  /** 生成节拍的第一个微批次（含桥接部分扣除） */
   private _spawnFirstMicroBatch(beat: DirectorBeat, phase: PhaseConfig): DirectorSpawnRequest[] {
     const startIdx = this._microBatchIndex;
     if (startIdx >= beat.microBatches.length) return [];
     const mb = beat.microBatches[startIdx];
     this._microBatchIndex = startIdx + 1;
 
+    // 桥接部分扣除：减少该微批次实际生成数
+    let partialSkip = 0;
+    if (this._partialBatchDeduction > 0) {
+      partialSkip = this._partialBatchDeduction;
+      this._partialBatchDeduction = 0;
+    }
+
+    const items = this._generateMicroBatchItems(mb, phase, partialSkip);
+    this._phaseGenerated += items.length;
+    this._nextState = 'SPAWN';
+    return [{ phase: beat.phase, items }];
+  }
+
+  /** 生成微批次敌人 */
+  private _generateMicroBatchItems(mb: MicroBatch, phase: PhaseConfig, skipCount: number): SpawnItem[] {
     const items: SpawnItem[] = [];
     for (const [tier, cnt] of mb.hpTiers) {
       if (cnt <= 0) continue;
-      const xs = generateX(cnt, mb.xLayout, mb.xRange);
-      for (let i = 0; i < cnt; i++) {
+      const actualCount = Math.max(0, cnt - skipCount);
+      skipCount = Math.max(0, skipCount - cnt);
+      if (actualCount <= 0) continue;
+      const xs = generateX(actualCount, mb.xLayout, mb.xRange);
+      for (let i = 0; i < actualCount; i++) {
         items.push({
           x: Math.round(xs[i]),
           y: -20 + mb.yOffset + (Math.random() - 0.5) * 8,
@@ -687,10 +700,7 @@ export class PostEdictDirector {
         });
       }
     }
-
-    this._phaseGenerated += items.length;
-    this._nextState = 'SPAWN';
-    return [{ phase: beat.phase, items }];
+    return items;
   }
 
   // ═══ Debug ═══
