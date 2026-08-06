@@ -10854,18 +10854,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private _drawDebugCompact(ctx: CanvasRenderingContext2D): void {
     // 0807-11D: 导演信息扩展高度
     const hasDirector = postEdictDirector.active && postEdictDirector.isRunning;
-    const directorRows = hasDirector ? 6 : 0;
-    const cardW = 148; const cardH = this._showHpOverlay ? 168 + directorRows * 15 : 102;
+    const cardW = 148;
     const x = 6; const topY = 10;
     ctx.save();
-    ctx.fillStyle = 'rgba(13, 16, 17, 0.78)';
-    ctx.beginPath(); ctx.roundRect(x, topY, cardW, cardH, 6); ctx.fill();
-    ctx.fillStyle = '#ffd35a';
-    ctx.font = 'bold 10px "Microsoft YaHei", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Debug', x + cardW / 2, topY + 14);
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-    ctx.beginPath(); ctx.moveTo(x + 8, topY + 19); ctx.lineTo(x + cardW - 8, topY + 19); ctx.stroke();
     const aliveCount = this.enemies.filter(e => e.alive).length;
     const tier = getBladeTier(this.energy);
     const stage = getTierConfig(tier);
@@ -10927,10 +10918,22 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const s = this._aggDebugScorch;
       if (s) rowData.push({ l: 'scorch', v: `t${s.ticks} p${s.pending} ${s.flushReason}`, c: '#f39c12' });
     }
+    // 动态卡片高度
+    const cardH = 30 + rowData.length * 15;
+    ctx.fillStyle = 'rgba(13, 16, 17, 0.78)';
+    ctx.beginPath(); ctx.roundRect(x, topY, cardW, cardH, 6); ctx.fill();
+    ctx.fillStyle = '#ffd35a';
+    ctx.font = 'bold 10px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Debug', x + cardW / 2, topY + 14);
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.beginPath(); ctx.moveTo(x + 8, topY + 19); ctx.lineTo(x + cardW - 8, topY + 19); ctx.stroke();
     ctx.font = '10px "Consolas", monospace';
     const lx = x + 8; const vx = x + cardW - 8; const rh = 15;
-    [6, 5, 5, 4, 4, 4, 4].forEach((cap, i) => {
-      const row = rowData[i] ?? { l: '', v: '', c: '#888' };
+    // 动态渲染所有行 (cap: 短标签6, 长标签5, 默认4)
+    const defaultCaps = [6, 5, 5, 4];
+    rowData.forEach((row, i) => {
+      const cap = i < defaultCaps.length ? defaultCaps[i] : (row.l.length <= 3 ? 5 : 4);
       const ry = topY + 30 + i * rh;
       ctx.textAlign = 'left'; ctx.fillStyle = '#888'; ctx.fillText(row.l.slice(0, cap), lx, ry);
       ctx.textAlign = 'right'; ctx.fillStyle = row.c; ctx.fillText(row.v, vx, ry);
