@@ -28,7 +28,7 @@ import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles"
 import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, resolveDamage, resolveThreatDamage, type PlayerRunStats, type DamageRequest, type DamageResult, type DamageSourceType } from "./systems/damageSystem";
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
-import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, easeOutQuad, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS, SHADOW_FALL_DURATION, SHADOW_DEPLOY_DURATION, SHADOW_DEPLOY_HOLD, SHADOW_DEPLOY_SPREAD, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
+import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, easeOutQuad, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS, SHADOW_MOVE_DURATION, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
@@ -4568,40 +4568,10 @@ export class Game {
       const isCharging = enemy.chargeTimer !== undefined && enemy.chargeTimer >= 0;
       if (!isCharging) {
 
-        // ═══ 0807-11D-3A: 影化入场 — 固定起终点lerp ═══
-        if (enemy._directorEntryState === 'shadow_fall') {
+        // ═══ 0807-11D-3C: 影化入场 — 虚影直接落位成阵 ═══
+        if (enemy._directorEntryState === 'shadow_move') {
           enemy._directorEntryTimer = (enemy._directorEntryTimer || 0) + dt;
-          // 首次进入记录起终点
-          if (!(enemy as any)._shadowStartX) {
-            (enemy as any)._shadowStartX = enemy.x;
-            (enemy as any)._shadowStartY = enemy.y;
-            (enemy as any)._shadowTargetX = enemy._directorEntryAnchorX ?? enemy.x;
-            (enemy as any)._shadowTargetY = enemy._directorEntryAnchorY ?? (BATTLEFIELD_ZONES.midfieldStartY - 30);
-          }
-          const sx = (enemy as any)._shadowStartX;
-          const sy = (enemy as any)._shadowStartY;
-          const tx = (enemy as any)._shadowTargetX;
-          const ty = (enemy as any)._shadowTargetY;
-          const p = Math.min(1, enemy._directorEntryTimer / SHADOW_FALL_DURATION);
-          const ep = easeOutQuad(p);
-          enemy.x = sx + (tx - sx) * ep;
-          enemy.y = sy + (ty - sy) * ep;
-          (enemy as any)._shadowAlpha = 0.30 + p * 0.12;
-          if (p >= 1) {
-            enemy.x = tx; enemy.y = ty; // 强制吸附
-            enemy._directorEntryState = 'shadow_deploy';
-            enemy._directorEntryTimer = 0;
-            // 清理fall记录，deploy将重录
-            delete (enemy as any)._shadowStartX;
-            delete (enemy as any)._shadowStartY;
-          }
-          continue;
-        }
-
-        if (enemy._directorEntryState === 'shadow_deploy') {
-          enemy._directorEntryTimer = (enemy._directorEntryTimer || 0) + dt;
-          const elapsed = enemy._directorEntryTimer;
-          // 首次进入记录起终点（当前锚点→最终队形位置）
+          // 首次进入记录起终点 (spawn位置 → 最终阵位)
           if (!(enemy as any)._shadowStartX) {
             (enemy as any)._shadowStartX = enemy.x;
             (enemy as any)._shadowStartY = enemy.y;
@@ -4612,19 +4582,13 @@ export class Game {
           const sy = (enemy as any)._shadowStartY;
           const tx = (enemy as any)._shadowTargetX;
           const ty = (enemy as any)._shadowTargetY;
-          if (elapsed < SHADOW_DEPLOY_HOLD) {
-            // 保持集结点位置
-            (enemy as any)._shadowAlpha = 0.42;
-          } else {
-            const spreadElapsed = elapsed - SHADOW_DEPLOY_HOLD;
-            const p = Math.min(1, spreadElapsed / SHADOW_DEPLOY_SPREAD);
-            const ep = easeOutQuad(p);
-            enemy.x = sx + (tx - sx) * ep;
-            enemy.y = sy + (ty - sy) * ep;
-            (enemy as any)._shadowAlpha = 0.42;
-          }
-          if (elapsed >= SHADOW_DEPLOY_DURATION) {
-            enemy.x = tx; enemy.y = ty; // 强制吸附
+          const p = Math.min(1, enemy._directorEntryTimer / SHADOW_MOVE_DURATION);
+          const ep = easeOutQuad(p);
+          enemy.x = sx + (tx - sx) * ep;
+          enemy.y = sy + (ty - sy) * ep;
+          (enemy as any)._shadowAlpha = 0.38 + p * 0.14; // 0.38→0.52
+          if (p >= 1) {
+            enemy.x = tx; enemy.y = ty;
             enemy._directorEntryState = 'materializing';
             enemy._directorEntryTimer = 0;
             delete (enemy as any)._shadowStartX;
@@ -4636,7 +4600,7 @@ export class Game {
         if (enemy._directorEntryState === 'materializing') {
           enemy._directorEntryTimer = (enemy._directorEntryTimer || 0) + dt;
           const p = Math.min(1, enemy._directorEntryTimer / MATERIALIZE_DURATION);
-          (enemy as any)._shadowAlpha = 0.42 + p * 0.58;
+          (enemy as any)._shadowAlpha = 0.52 + p * 0.48; // 0.52→1.0
           if (p >= 1) {
             enemy._directorEntryState = 'active';
             (enemy as any)._shadowAlpha = 1;
@@ -6462,12 +6426,10 @@ export class Game {
     if (item.dirFormationId !== undefined) { (enemy as any)._dirFormationId = item.dirFormationId; }
     if (item.entryTargetX !== undefined) { (enemy as any)._dirEntryTargetX = item.entryTargetX; }
     if (item.entryEndYOverride !== undefined) { (enemy as any)._dirEntryEndYOverride = item.entryEndYOverride; }
-    // 0807-11D-3: 初始化影化入场状态
+    // 0807-11D-3C: 初始化影化入场 — 虚影直接落位
     if (item.shadowAnchorX !== undefined && !(item.shadowSkip)) {
-      enemy._directorEntryState = 'shadow_fall';
+      enemy._directorEntryState = 'shadow_move';
       enemy._directorEntryTimer = 0;
-      enemy._directorEntryAnchorX = item.shadowAnchorX;
-      enemy._directorEntryAnchorY = item.shadowAnchorY;
       enemy._directorTargetX = item.entryTargetX ?? item.x;
       enemy._directorTargetY = item.entryEndYOverride ?? (ENTRY_PROFILE_EDICT_BURST.entryEndY);
     }
@@ -10961,8 +10923,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const stage = getTierConfig(tier);
     const levelId = typeof this.level.id === 'number' ? this.level.id : parseInt(String(this.level.id), 10) || 1;
     // 0807-11D-2: 导演 debug — 使用不可变 _dirHpTier 而非 HP 反推
-    const shadowFall = this.enemies.filter(e => e.alive && e._directorEntryState === 'shadow_fall').length;
-    const shadowDeploy = this.enemies.filter(e => e.alive && e._directorEntryState === 'shadow_deploy').length;
+    const shadowMove = this.enemies.filter(e => e.alive && e._directorEntryState === 'shadow_move').length;
     const matCount = this.enemies.filter(e => e.alive && e._directorEntryState === 'materializing').length;
     const activeCount = this.enemies.filter(e => e.alive && e._directorEntryState === 'active').length;
     const zoneCount = this.enemies.filter(e => e.alive && isInCombatZone(e.y)).length;
@@ -11001,7 +10962,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ...(hasDirector ? [
           { l: 'dir', v: `${di.phase} ${di.beat} ${di.formationId}`, c: '#9b6dff' },
           { l: 'gen', v: `${di.generated}/${di.total} T${di.aliveTrash}t${di.aliveTough}W${di.aliveWall}`, c: '#ffd35a' },
-          { l: 'shadow', v: `F${shadowFall} D${shadowDeploy} M${matCount} A${activeCount}`, c: '#7ec8e3' },
+          { l: 'shadow', v: `M${shadowMove} G${matCount} A${activeCount}`, c: '#7ec8e3' },
           { l: 'beat', v: `s${di.beatSpawned} a${di.beatApproaching} c${di.beatCombatReady} v${di.beatAlive}`, c: '#888' },
           { l: 'nb/md', v: `${di.notBeforeRemaining}/${di.microDelayRemaining}ms`, c: '#f39c12' },
           { l: 'que', v: `app${di.approachingCount} cbt${di.combatReadyCount} q${di.pendingCount}`, c: '#888' },

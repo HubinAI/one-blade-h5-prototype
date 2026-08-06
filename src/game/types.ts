@@ -268,8 +268,8 @@ export type Enemy = {
   spawnSource?: "normal" | "edict" | "split" | "elite" | "direct" | "daily" | "boss_supply";
   /** P4.3A: 战场流动状态 */
   flow?: EnemyFlowState;
-  /** 0807-11D-3: 导演入场状态 */
-  _directorEntryState?: 'shadow_fall' | 'shadow_deploy' | 'materializing' | 'active';
+  /** 0807-11D-3C: 导演入场状态 */
+  _directorEntryState?: 'shadow_move' | 'shadow_fall' | 'shadow_deploy' | 'materializing' | 'active';
   _directorEntryTimer?: number;
   _directorEntryAnchorX?: number;
   _directorEntryAnchorY?: number;

@@ -59,21 +59,20 @@ export function isApproaching(y: number): boolean {
 export function isEnemyCombatTargetable(enemy: { _directorEntryState?: string; alive?: boolean }): boolean {
   if (!enemy.alive) return false;
   const s = enemy._directorEntryState;
-  if (!s) return true; // 非导演敌人，正常可战斗
+  if (!s) return true;
   return s === 'active';
 }
 
-/** 导演敌人是否处于影化状态（不可战斗） */
-/** 0807-11D-3A: ease-out quad (p 0→1) */
+/** 0807-11D-3A: ease-out quad */
 export function easeOutQuad(t: number): number {
   const p = Math.max(0, Math.min(1, t));
   return 1 - (1 - p) * (1 - p);
 }
 
-/** 导演敌人是否处于影化状态（不可战斗） */
+/** 影化状态判定（不可战斗） */
 export function isShadowState(enemy: { _directorEntryState?: string }): boolean {
   const s = enemy._directorEntryState;
-  return s === 'shadow_fall' || s === 'shadow_deploy' || s === 'materializing';
+  return s === 'shadow_move' || s === 'materializing';
 }
 
 // ═══════════════════ 集结锚点配置 ═══════════════════
@@ -112,12 +111,9 @@ export const FORMATION_ANCHORS: Record<string, string> = {
   scattered_walls:  'center',
 };
 
-// 入场时长常量 (秒) — 0807-11D-3A
-export const SHADOW_FALL_DURATION = 0.60;
-export const SHADOW_DEPLOY_HOLD = 0.10;    // 集结点停留
-export const SHADOW_DEPLOY_SPREAD = 0.40;  // 散阵
-export const SHADOW_DEPLOY_DURATION = SHADOW_DEPLOY_HOLD + SHADOW_DEPLOY_SPREAD; // 0.50
-export const MATERIALIZE_DURATION = 0.15;
+// 入场时长常量 (秒) — 0807-11D-3C: 虚影直接落位
+export const SHADOW_MOVE_DURATION = 0.55;   // spawn→最终阵位
+export const MATERIALIZE_DURATION = 0.15;   // 凝实
 
 // ═══════════════════ HP 配置 ═══════════════════
 
