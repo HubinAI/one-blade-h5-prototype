@@ -7546,16 +7546,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       return;
     }
 
-    // 启动导演系统（P1→P2→P3）
-    postEdictDirector.start();
-    this.edictPostWavesQueued = true;
-    this.battlePhase = "edict_burst";
-    this.postChestStartAt = this.elapsed;
-    this.postChestWaveIndex = 0;
-    this.allPostChestWavesSpawned = false;
-    this.edictBurstRoundIndex = 1;
-    this.edictBurstRoundTotal = 3; // P1, P2, P3
-    this._edictArrivalTimer = 0;
+    // 启动导演系统（P1→P2→P3）+ 旧流程状态初始化
+    this.startEdictBurstOnce();
   }
 
   /** P3.5：军令爆发只入队一次，状态统一由 postChestSequenceState 管理 */
@@ -7577,6 +7569,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.allPostChestWavesSpawned = false;
     this.edictBurstRoundIndex = 1;
     this.edictBurstRoundTotal = postWaves.length;
+    // 0807-11D: 同时启动导演系统（chest_closed / chest_paused_skip 路径也会触发）
+    postEdictDirector.start();
+    this._edictArrivalTimer = 0;
     // state 统一由 completeEliteChestReward 设置，此处不重复
   }
 
