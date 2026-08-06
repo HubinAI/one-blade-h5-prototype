@@ -9422,23 +9422,23 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.restore();
   }
 
-  /** 0807-11D-3J: 虚影墨影绘制 — 简化墨色笔画代替完整敌人 */
-  private _drawInkShadow(ctx: CanvasRenderingContext2D, enemy: Enemy, stretch = 1.5, alpha = 0.40) {
+  /** 0807-11D-3J-1: 虚影墨影 — 高可见灰紫墨色 + 加宽笔画 */
+  private _drawInkShadow(ctx: CanvasRenderingContext2D, enemy: Enemy, stretch = 1.5, alpha = 0.62) {
     const r = enemy.radius;
     ctx.save();
     ctx.globalAlpha = alpha;
-    // 2-3 条纵向拉伸墨色笔画
     for (let s = 0; s < 3; s++) {
       const sx = (s - 1) * r * 0.35 + (Math.sin(enemy.id.charCodeAt(s) * 0.7) * r * 0.15);
       const h = r * 1.35 * stretch;
-      const w = r * 0.22;
-      ctx.fillStyle = `rgba(22, 18, 24, ${0.55 + s * 0.08})`;
+      const w = r * 0.36;
+      // 灰紫墨色主体
+      ctx.fillStyle = `rgba(86, 78, 102, ${0.82 + s * 0.06})`;
       ctx.beginPath();
       ctx.ellipse(sx, 0, w, h, 0, 0, Math.PI * 2);
       ctx.fill();
-      // 轻微边缘光亮
-      ctx.strokeStyle = `rgba(80, 70, 100, ${0.12 + s * 0.04})`;
-      ctx.lineWidth = 0.8;
+      // 边缘微光
+      ctx.strokeStyle = `rgba(140, 130, 160, ${0.26 + s * 0.04})`;
+      ctx.lineWidth = 1.0;
       ctx.stroke();
     }
     ctx.restore();
@@ -9469,10 +9469,18 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         continue;
       }
       if (dirState === 'materializing') {
-        // 墨影收束: 先画墨影底层 + 敌人主体逐渐显现
+        // 墨影收束: stretch 1.6→1.0, alpha逐渐降低
         const matP = (enemy._directorEntryTimer || 0) / MATERIALIZE_DURATION;
-        const inkAlpha = Math.max(0, 1 - matP);
+        const inkAlpha = Math.max(0.08, 1 - matP * 1.2);
         this._drawInkShadow(ctx, enemy, 1.6 - matP * 0.6, inkAlpha);
+        // active 切换前短促轮廓亮起
+        if (matP > 0.75) {
+          const flash = (matP - 0.75) / 0.25; // 0→1 during last 25%
+          ctx.strokeStyle = `rgba(200, 180, 220, ${flash * 0.55})`;
+          ctx.lineWidth = 2.0;
+          const r = enemy.radius;
+          ctx.beginPath(); ctx.arc(0, 0, r + 2, 0, Math.PI * 2); ctx.stroke();
+        }
       }
       // 0807-11D-3A: 影化透明度 (叠加到现有 globalAlpha)
       const shadowAlpha = (enemy as any)._shadowAlpha;
