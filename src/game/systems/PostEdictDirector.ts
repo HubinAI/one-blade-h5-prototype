@@ -175,8 +175,11 @@ export function getFormationOffset(
   return { dx, dy };
 }
 
-// 入场时长常量 (秒) — 0807-11D-3D: 惯性沉降
-export const SHADOW_MOVE_DURATION = 0.85;   // spawn→最终阵位
+// 入场时长常量 (秒) — 0807-11D-3F: 按距离统一速度
+export const SHADOW_MOVE_DURATION = 0.85;   // 默认 (回退)
+export const SHADOW_SPEED_REF = 500;        // px/s 参考速度
+export const SHADOW_MOVE_DURATION_MIN = 0.90;
+export const SHADOW_MOVE_DURATION_MAX = 1.10;
 export const MATERIALIZE_DURATION = 0.15;   // 凝实
 /** 确定性错峰 (ms) — 按 spawnOrder 循环 */
 export const SHADOW_STAGGER_MS = [0, 40, 80];

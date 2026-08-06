@@ -28,7 +28,7 @@ import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles"
 import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, resolveDamage, resolveThreatDamage, type PlayerRunStats, type DamageRequest, type DamageResult, type DamageSourceType } from "./systems/damageSystem";
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
-import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, inertiaEase, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS, SHADOW_MOVE_DURATION, SHADOW_STAGGER_MS, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
+import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, inertiaEase, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS, SHADOW_MOVE_DURATION, SHADOW_SPEED_REF, SHADOW_MOVE_DURATION_MIN, SHADOW_MOVE_DURATION_MAX, SHADOW_STAGGER_MS, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
@@ -4568,22 +4568,27 @@ export class Game {
       const isCharging = enemy.chargeTimer !== undefined && enemy.chargeTimer >= 0;
       if (!isCharging) {
 
-        // ═══ 0807-11D-3D: 影化入场 — 惯性沉降 + 错峰 ═══
+        // ═══ 0807-11D-3F: 影化入场 — 距离驱动速度 + 惯性 + 错峰 ═══
         if (enemy._directorEntryState === 'shadow_move') {
           enemy._directorEntryTimer = (enemy._directorEntryTimer || 0) + dt;
-          // 首次进入记录起终点
+          // 首次进入记录起终点 + 锁定 moveDuration
           if (!(enemy as any)._shadowStartX) {
             (enemy as any)._shadowStartX = enemy.x;
             (enemy as any)._shadowStartY = enemy.y;
             (enemy as any)._shadowTargetX = enemy._directorTargetX ?? enemy.x;
             (enemy as any)._shadowTargetY = enemy._directorTargetY ?? enemy.y;
+            const dx = (enemy as any)._shadowTargetX - enemy.x;
+            const dy = (enemy as any)._shadowTargetY - enemy.y;
+            const dist = Math.hypot(dx, dy);
+            (enemy as any)._shadowMoveDuration = Math.min(SHADOW_MOVE_DURATION_MAX,
+              Math.max(SHADOW_MOVE_DURATION_MIN, dist / SHADOW_SPEED_REF));
           }
-          // 错峰延迟 (spawnOrder 3循环: 0/40/80ms)
+          const moveDur = (enemy as any)._shadowMoveDuration || SHADOW_MOVE_DURATION;
+          // 错峰延迟
           const staggerMs = SHADOW_STAGGER_MS[(enemy as any)._spawnOrder !== undefined
-            ? (enemy as any)._spawnOrder % SHADOW_STAGGER_MS.length
-            : 0];
+            ? (enemy as any)._spawnOrder % SHADOW_STAGGER_MS.length : 0];
           const effectiveTimer = Math.max(0, enemy._directorEntryTimer - staggerMs / 1000);
-          const p = Math.min(1, effectiveTimer / SHADOW_MOVE_DURATION);
+          const p = Math.min(1, effectiveTimer / moveDur);
           if (p > 0) {
             const sx = (enemy as any)._shadowStartX;
             const sy = (enemy as any)._shadowStartY;
@@ -4593,7 +4598,7 @@ export class Game {
             enemy.x = sx + (tx - sx) * ep;
             enemy.y = sy + (ty - sy) * ep;
           }
-          (enemy as any)._shadowAlpha = 0.38 + Math.max(0, effectiveTimer / SHADOW_MOVE_DURATION) * 0.14;
+          (enemy as any)._shadowAlpha = 0.38 + Math.max(0, effectiveTimer / moveDur) * 0.14;
           if (p >= 1) {
             enemy.x = (enemy as any)._shadowTargetX;
             enemy.y = (enemy as any)._shadowTargetY;
@@ -4601,6 +4606,7 @@ export class Game {
             enemy._directorEntryTimer = 0;
             delete (enemy as any)._shadowStartX;
             delete (enemy as any)._shadowStartY;
+            delete (enemy as any)._shadowMoveDuration;
           }
           continue;
         }
