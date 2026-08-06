@@ -459,8 +459,6 @@ export class PostEdictDirector {
     }
 
     // 检查 notBefore
-    const notBeforeMs = beat.notBeforeMs + (beat.phase === 'P1' ? 0 :
-                         beat.phase === 'P2' ? 0 : 0);
     if (elapsedMs - this._phaseStartMs < beat.notBeforeMs) {
       this._nextState = 'WAIT_TIME';
       return this._tryBridge(beat, phase, aliveInZone, aliveTotal, approachingCount, subSpawnQueueLength);
