@@ -1388,6 +1388,7 @@ export class Game {
       ctx.restore();
     }
     this.drawChestDrop(ctx);
+    this._drawBurstGlow(ctx); // 0807-11D-4B-6
     this.drawEdictRewardModal(ctx);
     this._drawChestOpeningFlow(ctx); // V0731008
     this.drawMidfieldEventBorder(ctx);
@@ -7558,6 +7559,38 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.restore();
   }
 
+
+  /** 0807-11D-4B-6: 无形状金暖氛围层 */
+  private _drawBurstGlow(ctx: CanvasRenderingContext2D) {
+    if (this._momentumState !== 'bursting') return;
+    const elapsed = 5.0 - this._burstRemaining;
+    const fadeIn = Math.min(1, elapsed / 0.15);
+    const lastSecBoost = this._burstRemaining < 1.0 ? 1 + (1 - this._burstRemaining) * 0.5 : 1;
+    const alpha = fadeIn * lastSecBoost * 0.10;
+
+    ctx.save();
+    ctx.globalAlpha = Math.min(0.15, alpha);
+
+    // 左右柔和渐变
+    const lr = 28;
+    const gradL = ctx.createLinearGradient(0, 0, lr, 0);
+    gradL.addColorStop(0, '#ff9944'); gradL.addColorStop(1, 'rgba(255,153,68,0)');
+    ctx.fillStyle = gradL; ctx.fillRect(0, 0, lr, DESIGN_HEIGHT);
+    const gradR = ctx.createLinearGradient(DESIGN_WIDTH, 0, DESIGN_WIDTH - lr, 0);
+    gradR.addColorStop(0, '#ff9944'); gradR.addColorStop(1, 'rgba(255,153,68,0)');
+    ctx.fillStyle = gradR; ctx.fillRect(DESIGN_WIDTH - lr, 0, lr, DESIGN_HEIGHT);
+
+    // 上下柔和渐变
+    const tb = 22;
+    const gradT = ctx.createLinearGradient(0, 0, 0, tb);
+    gradT.addColorStop(0, '#ff9944'); gradT.addColorStop(1, 'rgba(255,153,68,0)');
+    ctx.fillStyle = gradT; ctx.fillRect(0, 0, DESIGN_WIDTH, tb);
+    const gradB = ctx.createLinearGradient(0, DESIGN_HEIGHT, 0, DESIGN_HEIGHT - tb);
+    gradB.addColorStop(0, '#ff9944'); gradB.addColorStop(1, 'rgba(255,153,68,0)');
+    ctx.fillStyle = gradB; ctx.fillRect(0, DESIGN_HEIGHT - tb, DESIGN_WIDTH, tb);
+
+    ctx.restore();
+  }
 
   /** P3.8：绘制军令弹窗（紫色框体完整版） */
   private drawEdictRewardModal(ctx: CanvasRenderingContext2D) {
