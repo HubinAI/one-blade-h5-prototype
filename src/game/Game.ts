@@ -217,6 +217,9 @@ export class Game {
   // 多波多次刷新队列：每个子刷新有时间戳，到时间就spawn
   private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; stageNode?: string; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number; isTailCatchup?: boolean; hpOverride?: number; dirPhase?: string; dirBeatId?: string; dirMbId?: string; dirHpTier?: string; dirFormationId?: string; entryTargetX?: number; entryEndYOverride?: number; shadowAnchorX?: number; shadowAnchorY?: number; shadowSkip?: boolean }[] = [];
 
+  // 0807-11D-3: debug-only 手势伤害观测
+  private _gestureObs?: { phase: string; toughHit: number; toughKill: number; wallHit: number; wallKill: number; hits: Record<string,number> };
+
   private pointerDown = false;
   private pointerPos?: Vec2;
   private wavesSpawned = 0;
@@ -4573,6 +4576,7 @@ export class Game {
           const ay = enemy._directorEntryAnchorY ?? (BATTLEFIELD_ZONES.midfieldStartY - 30);
           enemy.x = enemy.x + (ax - enemy.x) * progress * 3;
           enemy.y = enemy.y + (ay - enemy.y) * progress * 3;
+          (enemy as any)._shadowAlpha = 0.30 + progress * 0.12;
           if (enemy._directorEntryTimer >= SHADOW_FALL_DURATION) {
             enemy._directorEntryState = 'shadow_deploy';
             enemy._directorEntryTimer = 0;
@@ -4588,6 +4592,7 @@ export class Game {
           const ty = enemy._directorTargetY ?? enemy.y;
           enemy.x = enemy.x + (tx - enemy.x) * ease * 3;
           enemy.y = enemy.y + (ty - enemy.y) * ease * 3;
+          (enemy as any)._shadowAlpha = 0.42;
           if (enemy._directorEntryTimer >= SHADOW_DEPLOY_DURATION) {
             enemy._directorEntryState = 'materializing';
             enemy._directorEntryTimer = 0;
@@ -4597,8 +4602,11 @@ export class Game {
 
         if (enemy._directorEntryState === 'materializing') {
           enemy._directorEntryTimer = (enemy._directorEntryTimer || 0) + dt;
+          const prog = Math.min(1, enemy._directorEntryTimer / (MATERIALIZE_DURATION));
+          (enemy as any)._shadowAlpha = 0.42 + prog * 0.58;
           if (enemy._directorEntryTimer >= (MATERIALIZE_DURATION)) {
             enemy._directorEntryState = 'active';
+            (enemy as any)._shadowAlpha = 1;
           }
           continue; // materializing: 不参与正常移动
         }
@@ -10915,6 +10923,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const stage = getTierConfig(tier);
     const levelId = typeof this.level.id === 'number' ? this.level.id : parseInt(String(this.level.id), 10) || 1;
     // 0807-11D-2: 导演 debug — 使用不可变 _dirHpTier 而非 HP 反推
+    const shadowFall = this.enemies.filter(e => e.alive && e._directorEntryState === 'shadow_fall').length;
+    const shadowDeploy = this.enemies.filter(e => e.alive && e._directorEntryState === 'shadow_deploy').length;
+    const matCount = this.enemies.filter(e => e.alive && e._directorEntryState === 'materializing').length;
+    const activeCount = this.enemies.filter(e => e.alive && e._directorEntryState === 'active').length;
     const zoneCount = this.enemies.filter(e => e.alive && isInCombatZone(e.y)).length;
     const apprCount = this.enemies.filter(e => e.alive && isApproaching(e.y)).length;
     const aliveTrash = this.enemies.filter(e => e.alive && (e as any)._dirHpTier === 'trash').length;
@@ -10951,6 +10963,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ...(hasDirector ? [
           { l: 'dir', v: `${di.phase} ${di.beat} ${di.formationId}`, c: '#9b6dff' },
           { l: 'gen', v: `${di.generated}/${di.total} T${di.aliveTrash}t${di.aliveTough}W${di.aliveWall}`, c: '#ffd35a' },
+          { l: 'shadow', v: `F${shadowFall} D${shadowDeploy} M${matCount} A${activeCount}`, c: '#7ec8e3' },
           { l: 'beat', v: `s${di.beatSpawned} a${di.beatApproaching} c${di.beatCombatReady} v${di.beatAlive}`, c: '#888' },
           { l: 'nb/md', v: `${di.notBeforeRemaining}/${di.microDelayRemaining}ms`, c: '#f39c12' },
           { l: 'que', v: `app${di.approachingCount} cbt${di.combatReadyCount} q${di.pendingCount}`, c: '#888' },
