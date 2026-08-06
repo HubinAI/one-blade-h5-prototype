@@ -8830,12 +8830,23 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       case 'edict_modal':
         phaseText = "";
         break;
-      case 'edict_burst':
-        const postWaves = this.getEffectivePostChestWaves();
-        const total = this.edictBurstRoundTotal || postWaves.length || 0;
-        const current = Math.min(Math.max(this.edictBurstRoundIndex || 1, 1), total);
-        phaseText = `军令爆发 ${current}/${total}`;
+      case 'edict_burst': {
+        // 0807-11D-3C-UI: 优先读取导演真实阶段
+        const dPhase = postEdictDirector.currentPhase;
+        if (dPhase) {
+          const rnd = dPhase === 'P1' ? 1 : dPhase === 'P2' ? 2 : 3;
+          phaseText = `军令爆发 ${rnd}/3`;
+        } else if (postEdictDirector.allComplete) {
+          phaseText = '军令爆发 3/3';
+        } else {
+          // fallback: 旧流程索引
+          const postWaves = this.getEffectivePostChestWaves();
+          const total = this.edictBurstRoundTotal || postWaves.length || 0;
+          const current = Math.min(Math.max(this.edictBurstRoundIndex || 1, 1), total);
+          phaseText = `军令爆发 ${current}/${total}`;
+        }
         break;
+      }
       case 'result':
         phaseText = "";
         break;
