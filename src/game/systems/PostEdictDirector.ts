@@ -635,6 +635,7 @@ export class PostEdictDirector {
       this._bridgeMicroBatchId = null; this._microBatchIndex += 1; this._nextState = 'READY'; return [];
     }
     const mb = beat.microBatches[this._microBatchIndex];
+    const mbIdx = this._microBatchIndex; // 递增前锁定，与_makeItems对齐
     this._microBatchIndex += 1;
     this._lastMbTime = elapsedMs;
     this._nextState = 'SPAWN';
@@ -642,10 +643,10 @@ export class PostEdictDirector {
 
     // P1-1 强制 special
     const isP11 = beat.phase === 'P1' && beat.id === 'P1-1';
-    const mode = isP11 ? 'special' : (mb.placementMode || inferPlacementMode(beat.id, this._microBatchIndex));
+    const mode = isP11 ? 'special' : (mb.placementMode || inferPlacementMode(beat.id, mbIdx));
     const effectiveMb = isP11 ? { ...mb, placementMode: 'special' as const } : mb;
 
-    const placements = buildMicroBatchPlacements(effectiveMb, beat.phase, beat.id, this._microBatchIndex, this._placementSeed);
+    const placements = buildMicroBatchPlacements(effectiveMb, beat.phase, beat.id, mbIdx, this._placementSeed);
     const items: SpawnItem[] = [];
     const anchorId = FORMATION_ANCHORS[mb.formationId] || 'center';
     const anchor = ANCHORS[anchorId];
@@ -717,6 +718,7 @@ export class PostEdictDirector {
     // 执行桥接: 提前消费该微批次
     this._bridgeMicroBatchId = mbId;
     this._bridgeBeatIdx = this._beatIndex;
+    const bridgeMbIdx = this._microBatchIndex;
     this._microBatchIndex += 1;
     this._lastMbTime = elapsedMs;
     this._phaseGenerated += mb.count;
@@ -725,20 +727,20 @@ export class PostEdictDirector {
     this._currentFormationId = mb.formationId;
     this._lastReason = `bridge_${mbId}`;
 
-    const items = this._makeItems(mb, beat, phase);
+    const items = this._makeItems(mb, beat, phase, bridgeMbIdx);
     if (this._microBatchIndex >= beat.microBatches.length) this._nextState = 'READY';
     return [{ phase: beat.phase, items, consumedMicroBatchId: mbId }];
   }
 
-  private _makeItems(mb: MicroBatch, beat: DirectorBeat, phase: PhaseConfig): SpawnItem[] {
+  private _makeItems(mb: MicroBatch, beat: DirectorBeat, phase: PhaseConfig, mbIdx: number): SpawnItem[] {
     const items: SpawnItem[] = [];
     const anchorId = FORMATION_ANCHORS[mb.formationId] || 'center';
     const anchor = ANCHORS[anchorId];
     const isP11 = beat.phase === 'P1' && beat.id === 'P1-1';
-    const mode = isP11 ? 'special' : (mb.placementMode || inferPlacementMode(beat.id, this._microBatchIndex - 1));
+    const mode = isP11 ? 'special' : (mb.placementMode || inferPlacementMode(beat.id, mbIdx));
     const effectiveMb = isP11 ? { ...mb, placementMode: 'special' as const } : mb;
 
-    const placements = buildMicroBatchPlacements(effectiveMb, beat.phase, beat.id, this._microBatchIndex - 1, this._placementSeed);
+    const placements = buildMicroBatchPlacements(effectiveMb, beat.phase, beat.id, mbIdx, this._placementSeed);
     let idx = 0;
 
     for (const [tier, cnt] of mb.tiers) {
