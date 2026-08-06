@@ -5956,7 +5956,7 @@ export class Game {
     if (currPhase && currPhase !== prevPhase) {
       this._directorPhaseStartMs = elapsedMs;
       postEdictDirector.setPhaseStartMs(elapsedMs);
-      if (!this._hpTierTracker) this._hpTierTracker = { phase: currPhase, trash: 0, tough: 0, wall: 0 };
+      if (!this._hpTierTracker) this._hpTierTracker = { phase: currPhase };
       this._hpTierTracker.phase = currPhase;
     }
 
@@ -5976,7 +5976,7 @@ export class Game {
     'P2': 'post_edict_director_p2',
     'P3': 'post_edict_director_p3',
   };
-  private _hpTierTracker: { phase: string; trash: number; tough: number; wall: number } | null = null;
+  private _hpTierTracker: { phase: string } | null = null;
 
   private _enqueueDirectorBatch(req: DirectorSpawnRequest) {
     const stageNode = this._directorPhaseNodes[req.phase] ?? 'post_edict_release';
@@ -5988,13 +5988,6 @@ export class Game {
       const hpTier = item.hpTier;
       const tierCfg = HP_TIERS[hpTier];
       const hpOverride = tierCfg.hp;
-
-      // 追踪 HP tier 计数
-      if (this._hpTierTracker && this._hpTierTracker.phase === req.phase) {
-        if (hpTier === 'trash') this._hpTierTracker.trash++;
-        else if (hpTier === 'tough') this._hpTierTracker.tough++;
-        else if (hpTier === 'elite_wall') this._hpTierTracker.wall++;
-      }
 
       this.subSpawnQueue.push({
         time: this.elapsed + 0.02 + i * 0.01,
@@ -7610,7 +7603,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     postEdictDirector.start();
     postEdictDirector.setPhaseStartMs(this.elapsed * 1000);
     this._directorPhaseStartMs = this.elapsed * 1000;
-    this._hpTierTracker = { phase: 'P1', trash: 0, tough: 0, wall: 0 };
+    this._hpTierTracker = { phase: 'P1' };
     this._edictArrivalTimer = 0;
     // state 统一由 completeEliteChestReward 设置，此处不重复
   }
@@ -10860,12 +10853,15 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const tier = getBladeTier(this.energy);
     const stage = getTierConfig(tier);
     const levelId = typeof this.level.id === 'number' ? this.level.id : parseInt(String(this.level.id), 10) || 1;
-    // 0807-11D-1: 导演 debug 数据（含 HP 档位统计）
+    // 0807-11D-1: 导演 debug 数据（扫描存活敌人的实际 HP 档位）
     const zoneCount = this.enemies.filter(e => e.alive && isInCombatZone(e.y)).length;
     const apprCount = this.enemies.filter(e => e.alive && isApproaching(e.y)).length;
-    const tracker = this._hpTierTracker ?? { trash: 0, tough: 0, wall: 0 };
+    // 通过 HP 反推档位 (杂兵≈100, 韧兵≈170, 压阵≈260)
+    const aliveTrash = this.enemies.filter(e => e.alive && e.hp <= 135).length;
+    const aliveTough = this.enemies.filter(e => e.alive && e.hp > 135 && e.hp <= 220).length;
+    const aliveWall = this.enemies.filter(e => e.alive && e.hp > 220).length;
     const di: DirectorDebugInfo = postEdictDirector.getDebugInfo(
-      tracker.trash, tracker.tough, tracker.wall, aliveCount, apprCount, zoneCount,
+      aliveTrash, aliveTough, aliveWall, aliveCount, apprCount, zoneCount,
       this.subSpawnQueue.length, this.elapsed * 1000,
     );
     const rowData = [
