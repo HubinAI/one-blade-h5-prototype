@@ -28,7 +28,7 @@ import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles"
 import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, resolveDamage, resolveThreatDamage, type PlayerRunStats, type DamageRequest, type DamageResult, type DamageSourceType } from "./systems/damageSystem";
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
-import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, easeOutQuad, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS, SHADOW_MOVE_DURATION, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
+import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, inertiaEase, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS, SHADOW_MOVE_DURATION, SHADOW_STAGGER_MS, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
@@ -4568,27 +4568,35 @@ export class Game {
       const isCharging = enemy.chargeTimer !== undefined && enemy.chargeTimer >= 0;
       if (!isCharging) {
 
-        // ═══ 0807-11D-3C: 影化入场 — 虚影直接落位成阵 ═══
+        // ═══ 0807-11D-3D: 影化入场 — 惯性沉降 + 错峰 ═══
         if (enemy._directorEntryState === 'shadow_move') {
           enemy._directorEntryTimer = (enemy._directorEntryTimer || 0) + dt;
-          // 首次进入记录起终点 (spawn位置 → 最终阵位)
+          // 首次进入记录起终点
           if (!(enemy as any)._shadowStartX) {
             (enemy as any)._shadowStartX = enemy.x;
             (enemy as any)._shadowStartY = enemy.y;
             (enemy as any)._shadowTargetX = enemy._directorTargetX ?? enemy.x;
             (enemy as any)._shadowTargetY = enemy._directorTargetY ?? enemy.y;
           }
-          const sx = (enemy as any)._shadowStartX;
-          const sy = (enemy as any)._shadowStartY;
-          const tx = (enemy as any)._shadowTargetX;
-          const ty = (enemy as any)._shadowTargetY;
-          const p = Math.min(1, enemy._directorEntryTimer / SHADOW_MOVE_DURATION);
-          const ep = easeOutQuad(p);
-          enemy.x = sx + (tx - sx) * ep;
-          enemy.y = sy + (ty - sy) * ep;
-          (enemy as any)._shadowAlpha = 0.38 + p * 0.14; // 0.38→0.52
+          // 错峰延迟 (spawnOrder 3循环: 0/40/80ms)
+          const staggerMs = SHADOW_STAGGER_MS[(enemy as any)._spawnOrder !== undefined
+            ? (enemy as any)._spawnOrder % SHADOW_STAGGER_MS.length
+            : 0];
+          const effectiveTimer = Math.max(0, enemy._directorEntryTimer - staggerMs / 1000);
+          const p = Math.min(1, effectiveTimer / SHADOW_MOVE_DURATION);
+          if (p > 0) {
+            const sx = (enemy as any)._shadowStartX;
+            const sy = (enemy as any)._shadowStartY;
+            const tx = (enemy as any)._shadowTargetX;
+            const ty = (enemy as any)._shadowTargetY;
+            const ep = inertiaEase(p);
+            enemy.x = sx + (tx - sx) * ep;
+            enemy.y = sy + (ty - sy) * ep;
+          }
+          (enemy as any)._shadowAlpha = 0.38 + Math.max(0, effectiveTimer / SHADOW_MOVE_DURATION) * 0.14;
           if (p >= 1) {
-            enemy.x = tx; enemy.y = ty;
+            enemy.x = (enemy as any)._shadowTargetX;
+            enemy.y = (enemy as any)._shadowTargetY;
             enemy._directorEntryState = 'materializing';
             enemy._directorEntryTimer = 0;
             delete (enemy as any)._shadowStartX;
@@ -6432,6 +6440,7 @@ export class Game {
       enemy._directorEntryTimer = 0;
       enemy._directorTargetX = item.entryTargetX ?? item.x;
       enemy._directorTargetY = item.entryEndYOverride ?? (ENTRY_PROFILE_EDICT_BURST.entryEndY);
+      (enemy as any)._spawnOrder = item.spawnOrder ?? 0;
     }
     if (this._currentWaveEvent) {
       enemy.spawnedWithEvent = this._currentWaveEvent;

@@ -69,6 +69,12 @@ export function easeOutQuad(t: number): number {
   return 1 - (1 - p) * (1 - p);
 }
 
+/** 0807-11D-3D: 惯性衰减曲线 p = 1.5t - 0.5t³ */
+export function inertiaEase(t: number): number {
+  const p = Math.max(0, Math.min(1, t));
+  return 1.5 * p - 0.5 * p * p * p;
+}
+
 /** 影化状态判定（不可战斗） */
 export function isShadowState(enemy: { _directorEntryState?: string }): boolean {
   const s = enemy._directorEntryState;
@@ -111,9 +117,11 @@ export const FORMATION_ANCHORS: Record<string, string> = {
   scattered_walls:  'center',
 };
 
-// 入场时长常量 (秒) — 0807-11D-3C: 虚影直接落位
-export const SHADOW_MOVE_DURATION = 0.55;   // spawn→最终阵位
+// 入场时长常量 (秒) — 0807-11D-3D: 惯性沉降
+export const SHADOW_MOVE_DURATION = 0.85;   // spawn→最终阵位
 export const MATERIALIZE_DURATION = 0.15;   // 凝实
+/** 确定性错峰 (ms) — 按 spawnOrder 循环 */
+export const SHADOW_STAGGER_MS = [0, 40, 80];
 
 // ═══════════════════ HP 配置 ═══════════════════
 
