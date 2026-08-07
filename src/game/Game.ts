@@ -170,6 +170,7 @@ export class Game {
   /** 0807-11D-4B: 满势爆发状态 */
   private _momentumState: 'charging' | 'armed' | 'bursting' = 'charging';
   private _burstRemaining = 0;  // 爆发倒计时(秒)
+  private _burstFadeoutTimer = 0; // 0807-11D-4B-7: 视觉退场计时
   /** V0723014: Reactive 模式肉鸽修正器 */
   private reactiveBladeRunModifiers: BladeRunModifiers = { ...DEFAULT_BLADE_RUN_MODIFIERS };
   /** V0730001: 统一刀势上限（普通关用，默认 100，可成长） */
@@ -1246,11 +1247,14 @@ export class Game {
         this._momentumState = 'charging';
         this.energy = Math.round(BALANCE.swordEnergy.max * 0.35);
         this._burstRemaining = 0;
+        this._burstFadeoutTimer = 0.22; // 视觉退场
       }
     } else if (this._momentumState === 'charging' && this.energy >= BALANCE.swordEnergy.max) {
       this._momentumState = 'armed';
       this.energy = BALANCE.swordEnergy.max;
     }
+    // 视觉退场计时
+    if (this._burstFadeoutTimer > 0) { this._burstFadeoutTimer = Math.max(0, this._burstFadeoutTimer - scaledDt); }
 
     // V0730001: high档位就绪提示（ratio ≥ 70%）
     const bmStateNow = createBladeMomentumState(this.energy, this.bladeMomentumMax);
@@ -7560,18 +7564,37 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   }
 
 
-  /** 0807-11D-4B-6: 无形状金暖氛围层 */
+  /** 0807-11D-4B-7: 爆发氛围层 (呼吸+退场) */
   private _drawBurstGlow(ctx: CanvasRenderingContext2D) {
-    if (this._momentumState !== 'bursting') return;
-    const elapsed = 5.0 - this._burstRemaining;
-    const fadeIn = Math.min(1, elapsed / 0.15);
-    const lastSecBoost = this._burstRemaining < 1.0 ? 1 + (1 - this._burstRemaining) * 0.5 : 1;
-    const alpha = fadeIn * lastSecBoost * 0.10;
+    const isActive = this._momentumState === 'bursting';
+    const isFading = this._burstFadeoutTimer > 0;
+    if (!isActive && !isFading) return;
 
+    const elapsed = isActive ? (5.0 - this._burstRemaining) : 5.0;
+    const remainder = isActive ? this._burstRemaining : 0;
+    const fadeProgress = isFading ? (0.22 - this._burstFadeoutTimer) / 0.22 : 1;
+
+    // 呼吸计算
+    const isLastSec = isActive && remainder < 1.0;
+    const breathFreq = isLastSec ? 2.8 : 1.4;
+    const breathBase = isLastSec ? 0.09 : 0.07;
+    const breathRange = isLastSec ? 0.06 : 0.05;
+    const breath = breathBase + (Math.sin(this.elapsed * Math.PI * 2 * breathFreq) * 0.5 + 0.5) * breathRange;
+
+    // 启动亮起
+    let brightness = breath;
+    if (isActive && elapsed < 0.18) {
+      brightness = (elapsed / 0.18) * 0.15;  // 0→0.15
+    }
+    if (isFading) {
+      brightness = breathBase * (1 - fadeProgress);  // 淡出
+    }
+
+    const alpha = Math.min(0.16, brightness);
     ctx.save();
-    ctx.globalAlpha = Math.min(0.15, alpha);
 
-    // 左右柔和渐变
+    // 边缘渐变
+    ctx.globalAlpha = alpha;
     const lr = 28;
     const gradL = ctx.createLinearGradient(0, 0, lr, 0);
     gradL.addColorStop(0, '#ff9944'); gradL.addColorStop(1, 'rgba(255,153,68,0)');
@@ -7579,8 +7602,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const gradR = ctx.createLinearGradient(DESIGN_WIDTH, 0, DESIGN_WIDTH - lr, 0);
     gradR.addColorStop(0, '#ff9944'); gradR.addColorStop(1, 'rgba(255,153,68,0)');
     ctx.fillStyle = gradR; ctx.fillRect(DESIGN_WIDTH - lr, 0, lr, DESIGN_HEIGHT);
-
-    // 上下柔和渐变
     const tb = 22;
     const gradT = ctx.createLinearGradient(0, 0, 0, tb);
     gradT.addColorStop(0, '#ff9944'); gradT.addColorStop(1, 'rgba(255,153,68,0)');
@@ -7588,6 +7609,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const gradB = ctx.createLinearGradient(0, DESIGN_HEIGHT, 0, DESIGN_HEIGHT - tb);
     gradB.addColorStop(0, '#ff9944'); gradB.addColorStop(1, 'rgba(255,153,68,0)');
     ctx.fillStyle = gradB; ctx.fillRect(0, DESIGN_HEIGHT - tb, DESIGN_WIDTH, tb);
+
+    // 全局暖色温层
+    ctx.globalAlpha = alpha * 0.22;
+    ctx.fillStyle = '#ff9944';
+    ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
 
     ctx.restore();
   }
@@ -10745,8 +10771,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.font = `900 ${Math.round(14 + urgency * 4)}px "Microsoft YaHei", sans-serif`;
       ctx.fillText(`⚡${this._burstRemaining.toFixed(1)}s`, DESIGN_WIDTH / 2, eBarY - 6);
     } else if (this._momentumState === 'armed') {
+      // 0807-11D-4B-7: armed呼吸
+      const breath = 0.85 + Math.sin(this.elapsed * Math.PI * 2 * 1.2) * 0.15;
+      ctx.globalAlpha = breath;
       ctx.fillStyle = '#ffd35a';
       ctx.fillText('满势待发', DESIGN_WIDTH / 2, eBarY - 6);
+      ctx.globalAlpha = 1;
     } else {
       ctx.fillStyle = bandColors[bmBand];
       const pctText = `${Math.floor(energyPct * 100)}% ${bandNames[bmBand]}`;
