@@ -338,12 +338,12 @@ export class Game {
   private elitePreviewShown = false;
   private eliteSpawnAnnounced = false;
   /** V0801008: 火环精英战斗状态 */
-  private _eliteFireRings: Array<{ x: number; y: number; r: number; speed: number; alive: boolean; hasHit: boolean; hp: number }> = [];
+  private _eliteFireRings: Array<{ x: number; y: number; r: number; speed: number; alive: boolean; hasHit: boolean; hp: number; _touchedLine?: boolean }> = [];
   private _eliteBattleActive = false;
   private _eliteInvuln = false;
   private _eliteGuardSpawned = false;
   private _eliteCyclesDone = 0;
-  private _eliteCyclePhase: "telegraph" | "fire" | "cooldown" = "telegraph";
+  private _eliteCyclePhase: "idle" | "telegraph" | "fire" | "stun" = "idle";
   private _eliteCycleTimer = 0;
   /** V0730002: 第1关精英预告时间戳（用于清场衔接计时） */
   private _elitePreviewAt = 0;
@@ -1077,7 +1077,7 @@ export class Game {
     this.eliteSpawned = false; this.eliteKilled = false; this.elitePreviewShown = false; this.eliteSpawnAnnounced = false;
     this._eliteClearanceAt = 0; this._elitePreviewAt = 0;
     this._eliteBattleActive = false; this._eliteInvuln = false; this._eliteGuardSpawned = false;
-    this._eliteCyclesDone = 0; this._eliteCyclePhase = "telegraph"; this._eliteCycleTimer = 0;
+    this._eliteCyclesDone = 0; this._eliteCyclePhase = "idle"; this._eliteCycleTimer = 0;
     this._eliteFireRings = [];
     this._eliteDefeatedHandled = false;
     // 通用战斗
@@ -4450,7 +4450,13 @@ export class Game {
 
   private damageEnemy(enemy: Enemy, damage: number, trail: SlashTrail, chainKill: boolean, source: string) {
     if (!enemy.alive) return false;
-    enemy.hp -= damage;
+    // 0807-11E-1: 火环将护体减伤
+    let effectiveDamage = damage;
+    if (enemy.eliteKind === "fireRing" && this._eliteCyclePhase === "fire") {
+      const aliveRings = this._eliteFireRings.filter(fr => fr.alive).length;
+      if (aliveRings > 0) effectiveDamage = Math.max(1, Math.ceil(damage * 0.30));
+    }
+    enemy.hp -= effectiveDamage;
     enemy.flash = 0.25;
     if (enemy.hp <= 0) {
       // 0807-11D-6F-5: 火药兵进入引信而非直接死亡
@@ -11775,7 +11781,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._eliteGuardSpawned = false;
     this._eliteCyclesDone = 0;
     this._eliteCycleTimer = 0;
-    this._eliteCyclePhase = "telegraph";
+    this._eliteCyclePhase = "idle";
     this._eliteFireRings = [];
     logEvent("elite_spawn", { levelId: this.level.id, eliteKind: ek, time: this.elapsed });
   }
@@ -11791,9 +11797,18 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (this._eliteBattleActive && this._eliteCyclePhase === "telegraph") {
       const elite = this.enemies.find(e => e.kind === "elite" && e.eliteKind === "fireRing" && e.alive);
       if (elite) {
-        const alpha = 0.3 + 0.3 * Math.sin(this.elapsed * 8);
-        ctx.beginPath(); ctx.arc(elite.x, elite.y + 20, 35 * (1 + this._eliteCycleTimer / 0.5), 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(230,126,34,${alpha})`; ctx.lineWidth = 3; ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]);
+        const alpha = 0.3 + 0.3 * Math.sin(this.elapsed * 6);
+        // 3团火焰预警
+        for (let i = 0; i < 3; i++) {
+          const angle = -0.25 + i * 0.25;
+          const rx = elite.x + Math.sin(angle) * 50;
+          const ry = elite.y + 15;
+          const r = 20 + this._eliteCycleTimer / 0.6 * 10;
+          ctx.beginPath(); ctx.arc(rx, ry, r, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(230,126,34,${alpha + 0.2})`; ctx.lineWidth = 3;
+          ctx.setLineDash([4, 3]); ctx.stroke(); ctx.setLineDash([]);
+          ctx.fillStyle = `rgba(255,140,30,${alpha * 0.3})`; ctx.fill();
+        }
       }
     }
   }
@@ -11804,52 +11819,69 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const elite = this.enemies.find(e => e.kind === "elite" && e.eliteKind === "fireRing" && e.alive);
     if (!elite) return;
 
-    // 入场保护：精英到达midfield后才开放伤害
+    // 0807-11E-1: 入场保护 — entryPhase完成才开战
     if (this._eliteInvuln) {
-      if (elite.y <= BATTLEFIELD_ZONES.midfieldStartY + 40) {
+      if ((elite as any)._entryPhase === "completed") {
         this._eliteInvuln = false;
         this.showBattleNotice({ text: "火环将·开战", priority: "A", category: "elite", style: "danger", duration: 0.7, dedupeKey: "elite:fireRing:battle", cooldown: 3, interrupt: false });
-      }
-      // 入场期间孵化守卫
-      if (!this._eliteGuardSpawned && elite.y <= BATTLEFIELD_ZONES.midfieldStartY + 60) {
-        this._eliteGuardSpawned = true;
-        const gx = elite.x;
-        for (let side = -1; side <= 1; side += 2) {
-          for (let i = 0; i < 2; i++) {
-            this.subSpawnQueue.push({ kind: "infantry", x: gx + side * (40 + i * 30), yOffset: 20 + i * 15, time: this.elapsed + i * 0.15, source: "normal", speedMultiplier: 1, battlePhase: "main_waves" as BattlePhase });
-          }
-        }
+        this._eliteCycleTimer = 0;
+        this._eliteCyclePhase = "telegraph";
       }
       return;
     }
 
-    // 技能循环: telegraph → fire → cooldown
+    // 0807-11E-1: 循环: telegraph(0.6s) → fire(动态) → stun(0.8s)
+    const aliveRings = this._eliteFireRings.filter(fr => fr.alive);
     this._eliteCycleTimer += dt;
     switch (this._eliteCyclePhase) {
       case "telegraph": {
-        if (this._eliteCycleTimer >= 0.5) {
+        if (this._eliteCycleTimer >= 0.6) {
           this._eliteCyclePhase = "fire";
           this._eliteCycleTimer = 0;
-          // 生成1-2个火环
-          const count = this._eliteCyclesDone >= 1 ? 2 : 1;
-          for (let i = 0; i < count; i++) {
-            this._eliteFireRings.push({ x: elite.x + (i - 0.5) * 60, y: elite.y + 10, r: 16, speed: 70 + Math.random() * 20, alive: true, hasHit: false, hp: 80 });
+          // 固定3火环, r=24, speed=160-190
+          for (let i = 0; i < 3; i++) {
+            const angle = -0.25 + i * 0.25;
+            this._eliteFireRings.push({
+              x: elite.x + Math.sin(angle) * 50, y: elite.y + 15,
+              r: 24, speed: 160 + Math.random() * 30, alive: true, hasHit: false, hp: 1,
+            });
           }
         }
         break;
       }
       case "fire": {
-        if (this._eliteCycleTimer >= 1.0) {
-          this._eliteCyclePhase = "cooldown";
-          this._eliteCycleTimer = 0;
-          this._eliteCyclesDone++;
+        // 火环存在时Boss减伤70%
+        (elite as any)._eliteDamageReduction = 0.70;
+        if (aliveRings.length === 0) {
+          // 所有火环清除(broken or hit line)
+          const allBroken = this._eliteFireRings.every(fr => !fr.alive && !(fr as any)._touchedLine);
+          (elite as any)._eliteDamageReduction = 0;
+          if (allBroken) {
+            // 成功破环: stun 0.8s
+            this._eliteCyclePhase = "stun";
+            this._eliteCycleTimer = 0;
+            this._eliteCyclesDone++;
+            this.particles.push(...sparkBurst(elite, 20, "#f39c12"), glowParticle(elite, "#ff8c00", 0.15, 22));
+            this.screenShake = Math.max(this.screenShake, 0.3);
+            this.addText(elite.x, elite.y - 30, "破环", "#f39c12", 16);
+          } else {
+            // 有环触线: 直接进入下一轮telegraph(无硬直奖励)
+            this._eliteCyclePhase = "telegraph";
+            this._eliteCycleTimer = 0.3; // 短缓冲
+            this._eliteFireRings.length = 0;
+          }
+        } else if (this._eliteCycleTimer >= 2.0) {
+          // 超时强制结束(环未处理完)
+          this._eliteCyclePhase = "telegraph";
+          this._eliteCycleTimer = 0.2;
+          (elite as any)._eliteDamageReduction = 0;
         }
         break;
       }
-      case "cooldown": {
-        if (this._eliteCycleTimer >= 1.5) {
+      case "stun": {
+        if (this._eliteCycleTimer >= 0.8) {
           this._eliteCyclePhase = "telegraph";
-          this._eliteCycleTimer = 0;
+          this._eliteCycleTimer = 0.3;
         }
         break;
       }
@@ -11860,6 +11892,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       if (!fr.alive) continue;
       fr.y += fr.speed * dt;
       if (fr.y >= BALANCE.battlefield.bottomDefenseY) {
+        fr._touchedLine = true; // 0807-11E-1: 标记触线不计入破环
         if (!fr.hasHit) {
           fr.hasHit = true;
           // 0807-11B-1: SAFE VERIFY — Debug火环验证时不扣玩家HP
