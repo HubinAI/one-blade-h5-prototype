@@ -387,6 +387,7 @@ export class Game {
   /** V0803025: 主刀伤害收集 buffer */
   private _currentMainSlashHits: { damage: number; x: number; y: number; isKill: boolean; isElite: boolean }[] | null = null;
   private _mainSlashBurstTimer: ReturnType<typeof setTimeout> | null = null;
+  private _mainDirectFloatCount = 0; // 0807-11E-1C: 每手势直接飘字计数
   /** V0803026: 连斩独立表现 */
 /** V0803027: 实时连击计数器 */
   private _comboCount = 0;
@@ -2016,6 +2017,7 @@ export class Game {
     if (this._momentumState === 'armed') { this._momentumState = 'bursting'; this._burstRemaining = 5.0; }
     // 0807-11D-4C: 清空本刀命中计数
     this._slashDirectHitIds = new Set();
+    this._mainDirectFloatCount = 0; // 0807-11E-1C
     this._lastSlashUniqueHits = 0;
     this._lastSlashMomentumDelta = 0;
     this._directHitDedupCount = 0;
@@ -8290,24 +8292,21 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     isKill: boolean,
     options?: { sourceType?: string; isDot?: boolean; isDerived?: boolean; sizeMultiplier?: number; priorityOverlay?: FloatPriority; duration?: number; }
   ): void {
-    // V0803025: MAIN_SLASH 收集到 burst buffer + 实时连击
+    // 0807-11E-1C: MAIN_SLASH 直接同步反馈(废弃80ms timer簇)
     if (options?.sourceType === 'MAIN_SLASH' && !options?.isDot && !options?.isDerived) {
-      this._comboCount += 1;
-      this._comboResetTimer = 0;
-      this._comboHitFlash = 0.15;
-      this._comboScale = 1.18;
-      if (!this._currentMainSlashHits) this._currentMainSlashHits = [];
-      const slashId = `m${Date.now()}`;
-      this._currentMainSlashHits.push({ damage, x, y, isKill, isElite: targetType === 'ELITE' || targetType === 'BOSS' });
-      if (!this._mainSlashBurstTimer) {
-        this._mainSlashBurstTimer = setTimeout(() => {
-          const hits = this._currentMainSlashHits ?? [];
-          this._currentMainSlashHits = [];
-          this._mainSlashBurstTimer = null;
-          if (hits.length > 0) this.clusterSlashFloats(hits, referenceAttack, slashId);
-        }, 80);
+      this._comboCount += 1; this._comboResetTimer = 0; this._comboHitFlash = 0.15; this._comboScale = 1.18;
+      const isElite = targetType === 'ELITE' || targetType === 'BOSS';
+      // 精英: 每手势独立直接数字
+      if (isElite) {
+        this.addText(x, y - 14, `${Math.round(damage)}`, "#ffd35a", 21, 0.65);
+        return;
       }
-      return; // 不直接显示，由聚类爆发统一处理
+      // 普通敌人: 前6个唯一目标
+      if (this._mainDirectFloatCount < 6) {
+        this._mainDirectFloatCount++;
+        this.addText(x, y - 14, `${Math.round(damage)}`, "#fff", 18, 0.55);
+      }
+      return;
     }
     const ratioR = referenceAttack > 0 ? damage / referenceAttack : 0;
     const tier = resolveDamageTier(ratioR);
@@ -11850,7 +11849,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
     // 0807-11E-1: 入场保护 — entryPhase完成才开战
     if (this._eliteInvuln) {
-      if ((elite as any)._entryPhase === "completed") {
+      if (elite.entryPhase?.completed === true) {
         this._eliteInvuln = false;
         // 0807-11E-1B: 开场最低50刀势(仅charging)
         if (!this._eliteEntryBoostDone && this._momentumState === 'charging' && this.energy < 50) {
