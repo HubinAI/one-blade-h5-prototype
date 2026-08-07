@@ -573,6 +573,7 @@ export class PostEdictDirector {
     this._beatIndex = 0; this._microBatchIndex = 0;
     this._phaseGenerated = 0; this._phaseBridgeCount = 0;
     this._phaseElapsed = 0; this._phaseStartMs = 0; this._lastMbTime = 0;
+    this._lastBurstAssistMs = 0; // 0807-11D-5A-Final
     this._phaseGapTimer = 0; this._finalAfterglowTimer = 0;
     this._bridgeMicroBatchId = null; this._bridgeBeatIdx = -1;
     this._nextState = 'READY'; this._lastReason = ''; this._currentFormationId = '';
@@ -658,7 +659,8 @@ export class PostEdictDirector {
     if (burstAssist && this._microBatchIndex < beat.microBatches.length) {
       const burstFloor = beat.phase === 'P1' ? 6 : beat.phase === 'P2' ? 8 : 10;
       if (combatReadyCount < burstFloor && (elapsedMs - this._lastBurstAssistMs) >= 450) {
-        if (aliveTotal + subSpawnQueueLength < phase.hardCap) {
+        const assistMb = beat.microBatches[this._microBatchIndex];
+        if (aliveTotal + subSpawnQueueLength + assistMb.count <= phase.hardCap) {
           this._lastBurstAssistMs = elapsedMs;
           this._lastReason = `burst_assist_${beat.id}_mb${this._microBatchIndex}`;
           return this._spawnMicroBatch(beat, phase, elapsedMs);
