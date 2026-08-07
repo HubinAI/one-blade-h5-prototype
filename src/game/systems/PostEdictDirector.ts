@@ -658,7 +658,6 @@ export class PostEdictDirector {
     if (burstAssist && this._microBatchIndex < beat.microBatches.length) {
       const burstFloor = beat.phase === 'P1' ? 6 : beat.phase === 'P2' ? 8 : 10;
       if (combatReadyCount < burstFloor && (elapsedMs - this._lastBurstAssistMs) >= 450) {
-        const assistMb = beat.microBatches[this._microBatchIndex];
         if (aliveTotal + subSpawnQueueLength < phase.hardCap) {
           this._lastBurstAssistMs = elapsedMs;
           this._lastReason = `burst_assist_${beat.id}_mb${this._microBatchIndex}`;
