@@ -9807,23 +9807,32 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       }
 
       if (enemy.kind === "powder") {
-        // 火药兵："火"字 橙红，点燃时火星粒子
-        ctx.fillStyle = enemy.ignited ? "#ffd67c" : baseColor;
-        ctx.font = `800 ${enemy.radius * 1.6}px "Microsoft YaHei", "SimHei", sans-serif`;
+        // 0807-11D-6F-2: 火药兵"爆"字，橙黄/赭橙，点燃呼吸+爆发闪
+        const ignited = enemy.ignited;
+        const breath = ignited ? 0.6 + Math.sin(this.elapsed * 6) * 0.4 : 1;
+        const pFlash = ignited ? `rgba(255, 220, 100, ${breath * breath})` : "#f0a235";
+        ctx.fillStyle = pFlash;
+        ctx.font = `800 ${enemy.radius * 1.75}px "Microsoft YaHei", "SimHei", sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText("火", 0, 0);
-        // 点燃状态火星粒子
-        if (enemy.ignited) {
-          ctx.shadowBlur = 0;
-          const sparkCount = 3;
+        // 引爆前瞬间白黄闪
+        if (ignited) {
+          ctx.shadowColor = `rgba(255, 180, 40, ${0.3 + breath * 0.6})`;
+          ctx.shadowBlur = 8 + breath * 6;
+          ctx.shadowOffsetY = 2;
+        }
+        ctx.fillText("爆", 0, 0);
+        // 点燃状态火花
+        if (ignited) {
+          ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+          const sparkCount = 4;
           for (let i = 0; i < sparkCount; i++) {
-            const a = this.elapsed * 4 + i * 2.1;
-            const sx = Math.cos(a) * enemy.radius * 0.8;
-            const sy = Math.sin(a + 1) * enemy.radius * 0.6 - 2;
-            ctx.fillStyle = `rgba(255, 150, 50, ${0.4 + Math.sin(this.elapsed * 6 + i) * 0.3})`;
+            const a = this.elapsed * 4 + i * 1.6;
+            const sx = Math.cos(a) * enemy.radius * 0.9;
+            const sy = Math.sin(a + 1) * enemy.radius * 0.7 - 2;
+            ctx.fillStyle = `rgba(255, 150, 40, ${0.4 + Math.sin(this.elapsed * 6 + i) * 0.4})`;
             ctx.beginPath();
-            ctx.arc(sx, sy, 3, 0, Math.PI * 2);
+            ctx.arc(sx, sy, 3.5, 0, Math.PI * 2);
             ctx.fill();
           }
           ctx.shadowBlur = 6;
