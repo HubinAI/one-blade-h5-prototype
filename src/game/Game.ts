@@ -2107,8 +2107,10 @@ export class Game {
         this._chaseSlashHitBarrages.clear();
       }
     } else {
-      // V0730001: 统一刀势 — 固定挥刀消耗 8 点
-      this.energy = spendBladeMomentum(this.energy, this.bladeMomentumMax, BLADE_MOMENTUM_CONFIG.slash.baseCost);
+      // V0730001: 统一刀势 — 固定挥刀消耗 8 点（0807-11D-4C-1: L1改用挥刀结束统一结算，不预扣）
+      if (!this.isLogicalLevel1()) {
+        this.energy = spendBladeMomentum(this.energy, this.bladeMomentumMax, BLADE_MOMENTUM_CONFIG.slash.baseCost);
+      }
     }
     this.regenDelayTimer = BALANCE.swordEnergy.regenDelayAfterSlash;
     this._eliteDamageDedup.clear(); // V0731003: 每刀开始时清除去重
