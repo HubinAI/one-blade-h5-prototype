@@ -172,6 +172,10 @@ export class Game {
   private _burstRemaining = 0;  // 爆发倒计时(秒)
   private _burstFadeoutTimer = 0; // 视觉退场计时
   private _burstEnding = false; // Final: 末刀完成标志
+  /** 0807-11D-4C: 本刀唯一命中敌人数 */
+  private _slashUniqueHitIds: Set<string> = new Set();
+  private _lastSlashUniqueHits = 0;
+  private _lastSlashMomentumDelta = 0;
   /** V0723014: Reactive 模式肉鸽修正器 */
   private reactiveBladeRunModifiers: BladeRunModifiers = { ...DEFAULT_BLADE_RUN_MODIFIERS };
   /** V0730001: 统一刀势上限（普通关用，默认 100，可成长） */
@@ -1987,6 +1991,10 @@ export class Game {
     if (this._burstEnding) return;
     // 0807-11D-4B: armed → bursting
     if (this._momentumState === 'armed') { this._momentumState = 'bursting'; this._burstRemaining = 5.0; }
+    // 0807-11D-4C: 清空本刀命中计数
+    this._slashUniqueHitIds = new Set();
+    this._lastSlashUniqueHits = 0;
+    this._lastSlashMomentumDelta = 0;
     const lockedEnergy = pending ? pending.lockedEnergy : clamp(this.energy, 0, BALANCE.swordEnergy.max);
     // V0723014-Final.1 P0-1: Reactive 模式起刀时继承 pending.lockedMomentum（PointerDown 时锁定）。
     // 禁止重新调用 this.getReactiveBladeMomentum()，避免 pending 期间 max 变化导致快照不一致。
@@ -2282,25 +2290,15 @@ export class Game {
     if (isLevel1) {
       // V0730015: 统一结算改用 directMainKills（不含连锁/爆炸/副刀）
       const hitCount = trail.directMainKills;
-      const killCount = trail.directMainKills;
-      const hitGain = hitCount * normalProfile.gains.hitBasic;
-      const killGain = killCount * normalProfile.gains.killBasic;
-      const multiBonus = resolveMultiSlashBonus(killCount);
-      const totalGain = hitGain + killGain + multiBonus;
-      const gm = resolveBladeGainMultiplier(this.bladeMomentumMax);
-
-      const momentumBefore = createBladeMomentumState(this.energy, this.bladeMomentumMax);
-      const settleResult = resolveBladeMomentumAfterSlash({
-        momentumBefore,
-        baseCost: 0, // 基础消耗已在 startSlash 时扣除
-        activeGain: totalGain,
-        penalty: 0,
-        gainMultiplier: gm,
-      });
-      this.energy = settleResult.current;
-      // Debug 日志
+      // 0807-11D-4C: 基于唯一命中数统一结算
+      const uniqueHits = this._slashUniqueHitIds.size;
+      this._lastSlashUniqueHits = uniqueHits;
+      const netDelta = uniqueHits === 0 ? -8 : uniqueHits <= 2 ? 4 : uniqueHits <= 5 ? 8 : 12;
+      this._lastSlashMomentumDelta = netDelta;
+      const newEnergy = clamp(this.energy + netDelta, 0, BALANCE.swordEnergy.max);
+      this.energy = (this._momentumState === 'bursting') ? this.energy : newEnergy;
       if (this.debugEnabled) {
-        console.log(`[BladeMomentum] L1 slash: kills=${killCount} hitGain=${hitGain} killGain=${killGain} multiBonus=${multiBonus} gm=${gm.toFixed(2)} energyBefore=${momentumBefore.current} energyAfter=${settleResult.current} netChange=${settleResult.netChange}`);
+        console.log(`[4C] L1 slash done: uniqueHits=${uniqueHits} netDelta=${netDelta} energy=${this.energy}`);
       }
     } else {
       // 新刀势返还：基于击杀数和段位的阶梯返还（第2～10关保持旧逻辑）
@@ -4023,6 +4021,8 @@ export class Game {
 
     if (enemy.kind === "infantry") {
       if (!isEnemyCombatTargetable(enemy)) return; // 0807-11D-3G: 影化不可战斗
+      // 0807-11D-4C: 本刀唯一命中统计
+      this._slashUniqueHitIds.add(enemy.id);
       // 0807-11B-1: 统一伤害 — 真实HP结算
       const stats = trail._damageSnapshot ?? this.captureDamageSnapshot();
       const req: DamageRequest = {
@@ -12342,9 +12342,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         this.particles.push(...sparkBurst(ev.hitPoint, pc * 2.5, "#ffd700", 60 + (tier === "high" ? 40 : 0)));
         this.particles.push(...sparkBurst(ev.hitPoint, pc, "#ffffff", 30 + (tier === "high" ? 20 : 0)));  // 白闪
         this.particles.push(glowParticle(ev.hitPoint, "#ffd700", 2.0, 40 + (tier === "high" ? 30 : tier === "mid" ? 15 : 5)));
-        // V0730001: 刀势回流 — 使用统���接口
-        const momentumGain = tier === "high" ? 22 : tier === "mid" ? 15 : 10;
-        this.energy = gainBladeMomentum(this.energy, BLADE_MOMENTUM_CONFIG.baseMax, momentumGain);
+        // V0730001: 刀势回流 — 使用统一接口（0807-11D-4C: L1改用挥刀结束统一结算）
+        if (!this.isLogicalLevel1()) {
+          const momentumGain = tier === "high" ? 22 : tier === "mid" ? 15 : 10;
+          this.energy = gainBladeMomentum(this.energy, BLADE_MOMENTUM_CONFIG.baseMax, momentumGain);
+        }
       } else if (ev.kind === "shell_hit") {
         this.screenShake = Math.max(this.screenShake, 0.15); this.flash = Math.max(this.flash, 0.08);
         this.particles.push(...sparkBurst(ev.position, 3, "#9b59b6", 15));
