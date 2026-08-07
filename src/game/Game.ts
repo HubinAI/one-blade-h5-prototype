@@ -2016,10 +2016,23 @@ export class Game {
     }
     const stage = SWORD_STAGE_BY_ID[tier];
     const pathMultiplier = (pending && pending.hasSoul ? PICKUP_BALANCE.soul.pathLengthMultiplier ?? 1 : (this.nextSoul ? PICKUP_BALANCE.soul.pathLengthMultiplier ?? 1 : 1)) * this.getPathLengthMultiplier();
+    // 0807-11D-4D: 刀势决定有效刀路长度 (仅L1普通, 起刀时锁定)
+    let lockedMomentumRatio = 0;
+    let momentumPathMul = 1.0;
+    if (this.isLogicalLevel1() && !isReactiveMode) {
+      if (this._momentumState === 'bursting') {
+        momentumPathMul = 1.20;
+        lockedMomentumRatio = 1.0;
+      } else {
+        lockedMomentumRatio = clamp(this.energy / Math.max(1, BALANCE.swordEnergy.max), 0, 1);
+        const progress = clamp((lockedMomentumRatio - 0.35) / 0.65, 0, 1);
+        momentumPathMul = 0.60 + 0.40 * progress;
+      }
+    }
     const widthMultiplier = pending && pending.hasSoul ? PICKUP_BALANCE.soul.widthMultiplier ?? 1 : (this.nextSoul ? PICKUP_BALANCE.soul.widthMultiplier ?? 1 : 1);
     // P1-A: reactive 模式用独立刀路配置（0.9s/360px），不读旧段位；刀势不影响能否完成基础刀路
     const reactiveSlashCfg = REACTIVE_BOSS_CONFIG.reactiveSlash;
-    const maxPathLength = isReactiveMode ? reactiveSlashCfg.maxPathLength : stage.maxPathLength * pathMultiplier;
+    const maxPathLength = (isReactiveMode ? reactiveSlashCfg.maxPathLength : stage.maxPathLength * pathMultiplier) * momentumPathMul;
     const point = { x: pos.x, y: pos.y, t: this.elapsed, energyRatio: 1 };
 
     // P4.1A.7：使用已锁定的一刀斩倍率
