@@ -2212,9 +2212,8 @@ export class Game {
               continue;
             }
             this._tripleSlashHitEnemyIds.add(enemy.id);
-            this._slashDirectHitIds.add(enemy.id); // 副刀先命中, 写入共享集
             const r = resolveDamage({actionId:this.nextId("dmg"),parentActionId:t.id,sourceType:"TRIPLE_DERIVED_1",sourceConfig:DAMAGE_SOURCE_REGISTRY.MAIN_SLASH,attackerId:"player",targetId:enemy.id,targetCategory:"ENEMY",skillCoefficient:DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient,stats:t._damageSnapshot!,bladeBand:"mid",tags:["triple"],hitPos:{x:enemy.x,y:enemy.y},timestamp:this.elapsed,targetDirectorEntryState:enemy._directorEntryState},enemy.hp,enemy.maxHp,enemy.alive,!!enemy.eliteKind);
-            if(r?.isAccepted&&r.resolvedDamage>0){this.damageEnemy(enemy,r.resolvedDamage,t,false,"triple");this.aggregateAndMaybeFlush(`${t.id}_${enemy.id}`,r.resolvedDamage,{x:enemy.x,y:enemy.y},'TRIPLE_DERIVED_1','ENEMY',100,t._damageSnapshot!.entryAttack,false,false);}
+            if(r?.isAccepted&&r.resolvedDamage>0){this.damageEnemy(enemy,r.resolvedDamage,t,false,"triple");this.aggregateAndMaybeFlush(`${t.id}_${enemy.id}`,r.resolvedDamage,{x:enemy.x,y:enemy.y},'TRIPLE_DERIVED_1','ENEMY',100,t._damageSnapshot!.entryAttack,false,false);this._slashDirectHitIds.add(enemy.id);}
           }
         }
       }
