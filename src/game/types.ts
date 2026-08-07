@@ -273,6 +273,7 @@ export type Enemy = {
   _directorEntryTimer?: number;
   _directorEntryAnchorX?: number;
   _directorEntryAnchorY?: number;
+  _condenseTotalTime?: number; // 0807-11D-6B: P3原地凝实时长
   _directorTargetX?: number;
   _directorTargetY?: number;
   _dirBeatId?: string;

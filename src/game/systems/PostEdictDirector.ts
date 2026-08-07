@@ -28,6 +28,8 @@ export interface SpawnItem {
   skipShadow: boolean;
   /** 0807-11D-4A: 放置模式 */
   placementMode?: 'clustered' | 'special';
+  /** 0807-11D-6B: P3原地凝实 */
+  spawnInPlace?: boolean;
 }
 
 export interface DirectorSpawnRequest {
@@ -721,6 +723,7 @@ export class PostEdictDirector {
           directorMicroBatchId: mbId,
           anchorId, anchorX: anchor.x, anchorY: anchor.y,
           skipShadow, placementMode: mode,
+          spawnInPlace: beat.phase === 'P3',
         });
         idx++;
       }

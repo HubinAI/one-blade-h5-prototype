@@ -226,7 +226,7 @@ export class Game {
     attackEndPos: Vec2;
   }[] = [];
   // 多波多次刷新队列：每个子刷新有时间戳，到时间就spawn
-  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; stageNode?: string; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number; isTailCatchup?: boolean; hpOverride?: number; dirPhase?: string; dirBeatId?: string; dirMbId?: string; dirHpTier?: string; dirFormationId?: string; entryTargetX?: number; entryEndYOverride?: number; shadowAnchorX?: number; shadowAnchorY?: number; shadowSkip?: boolean }[] = [];
+  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; stageNode?: string; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number; isTailCatchup?: boolean; hpOverride?: number; dirPhase?: string; dirBeatId?: string; dirMbId?: string; dirHpTier?: string; dirFormationId?: string; entryTargetX?: number; entryEndYOverride?: number; shadowAnchorX?: number; shadowAnchorY?: number; shadowSkip?: boolean; spawnInPlace?: boolean }[] = [];
 
   // 0807-11D-3: debug-only 手势伤害观测
   private _gestureObs?: { phase: string; toughHit: number; toughKill: number; wallHit: number; wallKill: number; hits: Record<string,number> };
@@ -4703,8 +4703,11 @@ export class Game {
 
         if (enemy._directorEntryState === 'materializing') {
           enemy._directorEntryTimer = (enemy._directorEntryTimer || 0) + dt;
-          const p = Math.min(1, enemy._directorEntryTimer / MATERIALIZE_DURATION);
-          (enemy as any)._shadowAlpha = 0.52 + p * 0.48; // 0.52→1.0
+          const matDuration = enemy._condenseTotalTime || MATERIALIZE_DURATION;
+          const p = Math.min(1, enemy._directorEntryTimer / matDuration);
+          // 0807-11D-6B: 凝实中 alpha 0.3→1.0
+          const startAlpha = enemy._condenseTotalTime ? 0.30 : 0.52;
+          (enemy as any)._shadowAlpha = startAlpha + p * (1 - startAlpha);
           if (p >= 1) {
             enemy._directorEntryState = 'active';
             (enemy as any)._shadowAlpha = 1;
@@ -6167,6 +6170,7 @@ export class Game {
         shadowAnchorX: item.anchorX,
         shadowAnchorY: item.anchorY,
         shadowSkip: item.skipShadow,
+        spawnInPlace: item.spawnInPlace,
       });
     }
   }
@@ -6539,6 +6543,16 @@ export class Game {
       enemy._directorEntryTimer = 0;
       enemy._directorTargetX = item.entryTargetX ?? item.x;
       enemy._directorTargetY = item.entryEndYOverride ?? (ENTRY_PROFILE_EDICT_BURST.entryEndY);
+      (enemy as any)._spawnOrder = item.spawnOrder ?? 0;
+    } else if (item.spawnInPlace) {
+      // 0807-11D-6B: P3原地凝实
+      const tx = item.entryTargetX ?? item.x;
+      const ty = item.entryEndYOverride ?? (ENTRY_PROFILE_EDICT_BURST.entryEndY);
+      enemy.x = tx;
+      enemy.y = ty;
+      enemy._directorEntryState = 'materializing';
+      enemy._directorEntryTimer = 0;
+      enemy._condenseTotalTime = 0.50; // 0.30 预兆 + 0.20 凝实
       (enemy as any)._spawnOrder = item.spawnOrder ?? 0;
     } else if (item.shadowSkip) {
       // P1-1: 直接落位到最终阵位，不经过顶部下落
