@@ -552,6 +552,9 @@ export class PostEdictDirector {
   private _lastBurstAssistMs = 0; // 0807-11D-5A: 最近辅助刷新时间
   // 桥接
   private _bridgeMicroBatchId: string | null = null;  // 被桥接消费的微批次 ID
+  // 0807-11D-6G-2: P3纵向band防重复
+  private _lastP3Band: 'top' | 'mid' | 'bottom' | null = null;
+  private _recentBottomCount = 0; // 最近pulse下区次数(用于3pulse限1)
   private _bridgeBeatIdx = -1;
 
   /** 0807-11D-4A: 阵位种子 (局内唯一, start时生成) */
@@ -566,6 +569,7 @@ export class PostEdictDirector {
     this._active = false; this._allComplete = false;
     this._beatIndex = 0; this._microBatchIndex = 0;
     this._phaseGenerated = 0; this._phaseBridgeCount = 0;
+    this._lastP3Band = null; this._recentBottomCount = 0; // 0807-11D-6G-2
     this._phaseElapsed = 0; this._phaseStartMs = 0; this._lastMbTime = 0;
     this._lastBurstAssistMs = 0; // 0807-11D-5A-Final
     this._phaseGapTimer = 0; this._finalAfterglowTimer = 0;
@@ -710,22 +714,37 @@ export class PostEdictDirector {
     for (let i = tierPool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [tierPool[i], tierPool[j]] = [tierPool[j], tierPool[i]]; }
     let poolIdx = 0;
     let pulseDelayAccum = 0;
+    // 0807-11D-6G-2: 纵向三区
+    const bands = [
+      { band: 'top' as const, weight: 45, yMin: 300, yRange: 90 },
+      { band: 'mid' as const, weight: 40, yMin: 400, yRange: 85 },
+      { band: 'bottom' as const, weight: 15, yMin: 500, yRange: 55 },
+    ];
     const results: DirectorSpawnRequest[] = [];
     for (const pc of pulses) {
+      // 0807-11D-6G-2: 每pulse独立选纵向band
+      let yPulse = 520; // fallback
+      const availBands = [...bands].filter(b => b.band !== this._lastP3Band);
+      let useBands = availBands.length > 0 ? availBands : [...bands];
+      // 0807-11D-6G-2: 下区3pulse限1 — 检查最近2pulse
+      const recentBottom = (this._lastP3Band === 'bottom' ? 1 : 0) + this._recentBottomCount;
+      if (recentBottom >= 1) useBands = useBands.filter(b => b.band !== 'bottom');
+      if (useBands.length === 0) useBands = [{ band: 'mid' as const, weight: 100, yMin: 400, yRange: 85 }];
+      const totalW = useBands.reduce((s, b) => s + b.weight, 0);
+      let r = Math.random() * totalW, picked = useBands[0];
+      for (const b of useBands) { r -= b.weight; if (r <= 0) { picked = b; break; } }
+      yPulse = picked.yMin + Math.random() * picked.yRange;
+      // 0807-11D-6G-2: 更新bottom历史(滑动窗口, 只记最近2pulse的bottom次数)
+      this._recentBottomCount = (this._lastP3Band === 'bottom' ? 1 : 0);
+      this._lastP3Band = picked.band;
+
       const items: SpawnItem[] = [];
+      const enemyKind0 = (tierPool[poolIdx] as string) === 'splitter' ? 'splitter' : 'infantry';
       for (let k = 0; k < pc; k++) {
         const tier = tierPool[poolIdx++ % tierPool.length];
-        const x = mb.xRange[0] + Math.random() * (mb.xRange[1] - mb.xRange[0]);
-        // 0807-11D-6G-1: Y权重: 远35%/中45%/近20%, 硬安全线590
-        const P3_SAFE_Y = Math.min(P3_ENTRY_Y_MAX, 590); // harvestEndY-110
-        const yRand = Math.random();
-        const y = yRand < 0.35
-          ? P3_ENTRY_Y_MIN + Math.random() * 60          // 远: 385~445
-          : yRand < 0.80
-          ? P3_ENTRY_Y_MIN + 80 + Math.random() * 90     // 中: 465~555
-          : P3_ENTRY_Y_MIN + 170 + Math.random() *       // 近: 555~min(630,590)
-            Math.max(0, P3_SAFE_Y - P3_ENTRY_Y_MIN - 170);
         const enemyKind = (tier as string) === 'splitter' ? 'splitter' : 'infantry';
+        const x = mb.xRange[0] + Math.random() * (mb.xRange[1] - mb.xRange[0]);
+        const y = yPulse + (Math.random() - 0.5) * 6; // 微抖        const enemyKind = (tier as string) === 'splitter' ? 'splitter' : 'infantry';
         items.push({
           x: Math.round(x + (Math.random() - 0.5) * 6), y: y - 20,
           speedMul: phase.speedMul + mb.speedBonus,
@@ -954,6 +973,7 @@ export class PostEdictDirector {
     this._microBatchIndex = 0;
     this._phaseGenerated = 0;
     this._phaseBridgeCount = 0;
+    this._lastP3Band = null; this._recentBottomCount = 0; // 0807-11D-6G-2
     this._bridgeMicroBatchId = null;
     this._bridgeBeatIdx = -1;
     this._lastMbTime = 0;

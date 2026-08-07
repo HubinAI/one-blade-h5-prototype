@@ -210,3 +210,74 @@ describe('0807-11D-6G-1 出生安全线', () => {
     expect(maxX).toBeLessThan(360);
   });
 });
+
+describe('0807-11D-6G-2 P3纵向band', () => {
+  it('P3出生Y在300~555', () => {
+    const d = new PostEdictDirector(); d.start(); let ms = 0;
+    for (let i = 0; i < 5000; i++) {
+      ms += 500;
+      const reqs = tick(d, 0.5, 0, 0, 0, 0, ms, 0, 0, 0, 0);
+      for (const r of reqs) {
+        for (const item of r.items) {
+          if (r.phase === 'P3' && item.spawnInPlace && item.entryEndYOverride) {
+            expect(item.entryEndYOverride).toBeGreaterThanOrEqual(300);
+            expect(item.entryEndYOverride).toBeLessThanOrEqual(555);
+          }
+        }
+      }
+      if (!d.active && d.allComplete) break;
+    }
+  });
+
+  it('P3 3 band不连续重复(按pulse)', () => {
+    const d = new PostEdictDirector(); d.start(); let ms = 0;
+    const bands: string[] = [];
+    let lastMbId = '';
+    for (let i = 0; i < 5000; i++) {
+      ms += 500;
+      const reqs = tick(d, 0.5, 0, 0, 0, 0, ms, 0, 0, 0, 0);
+      for (const r of reqs) {
+        if (r.phase !== 'P3') continue;
+        for (const item of r.items) {
+          if (!item.entryEndYOverride) continue;
+          // 按microBatchId分组: 同pulse同band
+          const mbId = (item as any).directorMicroBatchId || '';
+          if (mbId === '') continue;
+          const y = item.entryEndYOverride;
+          const band = y < 390 ? 'top' : y < 486 ? 'mid' : 'bottom';
+          if (mbId !== lastMbId) { bands.push(band); lastMbId = mbId; }
+        }
+      }
+      if (!d.active && d.allComplete) break;
+    }
+    for (let i = 1; i < bands.length; i++) {
+      expect(bands[i]).not.toBe(bands[i - 1]);
+    }
+  });
+
+  it('P3下区每3 pulse最多1次', () => {
+    const d = new PostEdictDirector(); d.start(); let ms = 0;
+    const bands: string[] = [];
+    let lastMbId = '';
+    for (let i = 0; i < 5000; i++) {
+      ms += 500;
+      const reqs = tick(d, 0.5, 0, 0, 0, 0, ms, 0, 0, 0, 0);
+      for (const r of reqs) {
+        if (r.phase !== 'P3') continue;
+        for (const item of r.items) {
+          if (!item.entryEndYOverride) continue;
+          const mbId = (item as any).directorMicroBatchId || '';
+          if (mbId === '') continue;
+          const y = item.entryEndYOverride;
+          const band = y < 390 ? 'top' : y < 486 ? 'mid' : 'bottom';
+          if (mbId !== lastMbId) { bands.push(band); lastMbId = mbId; }
+        }
+      }
+      if (!d.active && d.allComplete) break;
+    }
+    for (let i = 2; i < bands.length; i++) {
+      const bottomCount = bands.slice(i - 2, i + 1).filter(b => b === 'bottom').length;
+      expect(bottomCount).toBeLessThanOrEqual(1);
+    }
+  });
+});
