@@ -4107,8 +4107,8 @@ export class Game {
     }
 
     if (enemy.kind === "powder") {
-      // 0807-11D-6F-4: 启动引信替代立即加入爆炸队列
-      if (!enemy._fuseDetonated && enemy._fuseState !== 'arming') {
+      // 0807-11D-6F-5: HP归零触发引信,不再在hit时进入arming
+      if (false) { // disabled in 6F-5, now HP<=0 triggers fuse
         enemy._fuseState = 'arming'; enemy._fuseTimer = 0;
         enemy.ignited = true; (enemy as any)._ignitedAt = this.elapsed;
       }
@@ -4453,6 +4453,12 @@ export class Game {
     enemy.hp -= damage;
     enemy.flash = 0.25;
     if (enemy.hp <= 0) {
+      // 0807-11D-6F-5: 火药兵进入引信而非直接死亡
+      if (enemy.kind === 'powder' && !enemy._fuseDetonated) {
+        enemy.hp = 0;
+        this._startPowderFuse(enemy, source);
+        return true;
+      }
       return this.killEnemy(enemy, trail, chainKill, source);
     }
     this.particles.push(...sparkBurst(enemy, 8, "#ffd67c"));
@@ -6920,15 +6926,15 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   /** 0807-11D-6F-4: 引信更新与引爆 */
   private _updateFuseEnemies(dt: number) {
     for (const enemy of this.enemies) {
-      if (enemy.kind !== 'powder' || !enemy.alive || enemy._fuseDetonated) continue;
+      if (enemy.kind !== 'powder' || enemy._fuseDetonated) continue;
       if (enemy._fuseState === 'arming') {
         enemy._fuseTimer = (enemy._fuseTimer || 0) + dt;
         const t = enemy._fuseTimer;
         // 三阶段视觉标记
         enemy._fusePhaseA = Math.min(1, t / 0.40);
-        enemy._fusePhaseB = Math.min(1, Math.max(0, (t - 0.40) / 0.32));
-        enemy._fusePhaseC = Math.min(1, Math.max(0, (t - 0.72) / 0.18));
-        if (t >= 0.90) {
+        enemy._fusePhaseB = Math.min(1, Math.max(0, (t - 0.40) / 0.35));
+        enemy._fusePhaseC = Math.min(1, Math.max(0, (t - 0.75) / 0.25));
+        if (t >= 1.0) {
           // 引爆
           enemy._fuseState = 'detonating'; enemy._fuseDetonated = true;
           this._detonatePowder(enemy);
@@ -6947,6 +6953,17 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       enemy.x += (dx / dist) * step;
       enemy.y += (dy / dist) * step;
     }
+  }
+
+  /** 0807-11D-6F-5: 开启火药兵引信 */
+  private _startPowderFuse(enemy: Enemy, source: string) {
+    if (enemy._fuseDetonated || enemy._fuseState === 'arming') return;
+    enemy._fuseState = 'arming'; enemy._fuseTimer = 0;
+    enemy.ignited = true; (enemy as any)._ignitedAt = this.elapsed;
+    this.stats.kills += 1; this.score += enemy.score;
+    this.registerEnemyKillForProgressChest(enemy.id, source);
+    this.particles.push(...sparkBurst(enemy, 12, "#ff8c28"), glowParticle(enemy, "#ffaa44", 0.15, 16));
+    this.addText(enemy.x, enemy.y - 22, "引爆", "#ff8c28", 15);
   }
 
   /** 0807-11D-6F-4: 引爆火药兵 */
@@ -9907,30 +9924,36 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       }
 
       if (enemy.kind === "powder") {
-        // 0807-11D-6F-4: 三阶段引信递增预警
-        const ignited = enemy.ignited;
+        // 0807-11D-6F-5: 1.0s三阶段蓄爆 + 压缩
         const t = enemy._fuseTimer || 0;
-        const phaseA = enemy._fusePhaseA || 0; // 0~1
+        const phaseA = enemy._fusePhaseA || 0;
         const phaseB = enemy._fusePhaseB || 0;
         const phaseC = enemy._fusePhaseC || 0;
         const inFuse = enemy._fuseState === 'arming';
         if (inFuse) {
-          // 临界压缩: 最后0.08s缩小
-          const compress = t > 0.82 ? Math.min(1, (t - 0.82) / 0.08) : 0;
-          const freq = 2.5 + phaseB * 2.5 + phaseC * 5; // 2.5→5→10Hz
+          const compress = t > 0.92 ? Math.min(1, (t - 0.92) / 0.08) : 0;
+          const freq = 2.5 + phaseB * 2.5 + phaseC * 5;
           const breath = 0.5 + Math.sin(this.elapsed * freq * 6.28) * 0.5;
-          const scaleMax = 1.10 + phaseB * 0.12 + phaseC * 0.23; // 1.0→1.22→1.35
+          const scaleMax = 1.12 + phaseB * 0.13 + phaseC * 0.28;
           const scale = compress > 0
-            ? (1 + (scaleMax - 1) * breath) * (1 - compress * 0.18) // 压缩到0.82倍
+            ? (1 + (scaleMax - 1) * breath) * (1 - compress * 0.20)
             : 1 + (scaleMax - 1) * breath;
-          const r = 240 - phaseC * 25;
-          const g = 160 - phaseC * 30 + breath * 50;
+          const r = 240 - phaseC * 20; const g = 160 - phaseC * 30 + breath * 50;
           const b = 50 + phaseC * 60 + breath * 80;
           ctx.fillStyle = `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},1)`;
           ctx.font = `800 ${enemy.radius * 1.75 * scale}px "Microsoft YaHei", "SimHei", sans-serif`;
-          ctx.shadowColor = `rgba(255,${180-phaseC*50},30,${0.15+breath*0.8})`;
-          ctx.shadowBlur = 4 + phaseC * 18 + breath * 8;
+          ctx.shadowColor = `rgba(255,${180-phaseC*60},30,${0.15+breath*0.85})`;
+          ctx.shadowBlur = 4 + phaseC * 20 + breath * 10;
           ctx.shadowOffsetY = 2;
+          // 压缩吸入粒子
+          if (compress > 0) {
+            for (let j = 0; j < 4; j++) {
+              const a = j * Math.PI * 0.5, rDist = enemy.radius * 1.5 * (1 - compress * 0.7);
+              const sx = Math.cos(a) * rDist, sy = Math.sin(a) * rDist;
+              ctx.fillStyle = `rgba(255,200,60,${compress*0.6})`;
+              ctx.beginPath(); ctx.arc(sx, sy, 2.5, 0, Math.PI*2); ctx.fill();
+            }
+          }
         } else {
           ctx.fillStyle = "#f0a235";
           ctx.font = `800 ${enemy.radius * 1.75}px "Microsoft YaHei", "SimHei", sans-serif`;
@@ -9938,13 +9961,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText("爆", 0, 0);
-        // 火花
         if (inFuse) {
           ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
           const sparkCount = 4 + Math.floor(phaseB * 3 + phaseC * 4);
           for (let i = 0; i < sparkCount; i++) {
-            const a = this.elapsed * (3 + phaseC * 6) + i * 1.6;
-            const sx = Math.cos(a) * enemy.radius * 0.9;
+            const a = this.elapsed * (2.5 + phaseC * 6) + i * 1.6;
+            const sx = Math.cos(a) * enemy.radius * (0.9 + phaseC * 0.3);
             const sy = Math.sin(a + 1) * enemy.radius * 0.7 - 2;
             ctx.fillStyle = `rgba(255,${150-phaseC*40},30,${0.3+Math.sin(this.elapsed*6+i)*0.5})`;
             ctx.beginPath(); ctx.arc(sx, sy, 3.5, 0, Math.PI * 2); ctx.fill();

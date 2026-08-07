@@ -67,8 +67,9 @@ export function isApproaching(y: number): boolean {
 }
 
 /** 0807-11D-3: 统一不可战斗判定 */
-export function isEnemyCombatTargetable(enemy: { _directorEntryState?: string; alive?: boolean }): boolean {
+export function isEnemyCombatTargetable(enemy: { _directorEntryState?: string; alive?: boolean; _fuseState?: string }): boolean {
   if (!enemy.alive) return false;
+  if ((enemy as any)._fuseState === 'arming') return false; // 0807-11D-6F-5
   const s = enemy._directorEntryState;
   if (!s) return true;
   return s === 'active';
