@@ -429,90 +429,84 @@ const BEATS: DirectorBeat[] = [
     ],
   },
 
-  // ═══ P2: 5节拍 56 (32杂+24韧) ═══
   {
     id: 'P2-1', phase: 'P2', notBeforeMs: 0,
     microBatches: [
-      { count: 6, tiers: [['trash',6]],           formationId: 'left_front',     xRange: X_LEFT,  row: 'front', internalDelay: 0,    speedBonus: 0 },
-      { count: 6, tiers: [['trash',6]],           formationId: 'right_back',     xRange: X_RIGHT, row: 'back',  internalDelay: 0.35, speedBonus: 0 },
+      { count: 4, tiers: [["trash",4]], formationId: 'left_front',  xRange: X_LEFT,  row: 'front', internalDelay: 0, speedBonus: 0 },
+      { count: 4, tiers: [["trash",4]], formationId: 'right_back',  xRange: X_RIGHT, row: 'back',  internalDelay: 0.30, speedBonus: 0 },
     ],
   },
   {
-    id: 'P2-2', phase: 'P2', notBeforeMs: 2400,
+    id: 'P2-2', phase: 'P2', notBeforeMs: 1800,
     microBatches: [
-      { count: 5, tiers: [['trash',4],['tough',1]], formationId: 'left_high_diag', xRange: X_LEFT,  row: 'front', internalDelay: 0,    speedBonus: 0, powders: 1 },
-      { count: 4, tiers: [['trash',3],['tough',1]], formationId: 'right_low_diag', xRange: X_RIGHT, row: 'back',  internalDelay: 0.30, speedBonus: 0 },
+      { count: 4, tiers: [["trash",3],["tough",1]], formationId: 'right_high_diag', xRange: X_RIGHT, row: 'mid', internalDelay: 0, speedBonus: 0, powders: 1 },
+      { count: 4, tiers: [["trash",4]],              formationId: 'left_low_diag',  xRange: X_LEFT,  row: 'mid', internalDelay: 0.28, speedBonus: 0 },
     ],
   },
   {
-    id: 'P2-3', phase: 'P2', notBeforeMs: 4800,
+    id: 'P2-3', phase: 'P2', notBeforeMs: 3600,
     microBatches: [
-      { count: 5, tiers: [['trash',3],['tough',2]], formationId: 'right_high_diag', xRange: X_RIGHT, row: 'front', internalDelay: 0,    speedBonus: 0, powders: 1 },
-      { count: 4, tiers: [['trash',2],['tough',2]], formationId: 'left_low_diag',   xRange: X_LEFT,  row: 'back',  internalDelay: 0.32, speedBonus: 0 },
+      { count: 4, tiers: [["trash",2],["tough",2]], formationId: 'left_expand',  xRange: X_LEFT,  row: 'front', internalDelay: 0, speedBonus: 0, powders: 1 },
+      { count: 4, tiers: [["trash",3],["tough",1]], formationId: 'right_expand', xRange: X_RIGHT, row: 'back',  internalDelay: 0.28, speedBonus: 0 },
     ],
   },
   {
-    id: 'P2-4', phase: 'P2', notBeforeMs: 7200,
+    id: 'P2-4', phase: 'P2', notBeforeMs: 5400,
     microBatches: [
-      { count: 6, tiers: [['trash',4],['tough',2]], formationId: 'center_expand',  xRange: X_CENTER, row: 'mid',   internalDelay: 0,    speedBonus: 0 },
-      { count: 4, tiers: [['trash',2],['tough',2]], formationId: 'left_expand',    xRange: X_LEFT,   row: 'mid',   internalDelay: 0.28, speedBonus: 0 },
-      { count: 4, tiers: [['trash',2],['tough',2]], formationId: 'right_expand',   xRange: X_RIGHT,  row: 'mid',   internalDelay: 0,    speedBonus: 0 },
+      { count: 5, tiers: [["trash",2],["tough",3]], formationId: 'front_wide', xRange: X_WIDE, row: 'front', internalDelay: 0, speedBonus: 0, powders: 1 },
+      { count: 5, tiers: [["trash",3],["tough",2]], formationId: 'back_wide',  xRange: X_WIDE, row: 'back',  internalDelay: 0.26, speedBonus: 0 },
     ],
   },
   {
-    id: 'P2-5', phase: 'P2', notBeforeMs: 9600,
+    id: 'P2-5', phase: 'P2', notBeforeMs: 7200,
     microBatches: [
-      { count: 6, tiers: [['trash',0],['tough',6]], formationId: 'front_wide',  xRange: X_WIDE, row: 'front', internalDelay: 0,    speedBonus: 0, powders: 1 },
-      { count: 6, tiers: [['trash',0],['tough',6]], formationId: 'back_wide',   xRange: X_WIDE, row: 'back',  internalDelay: 0.30, speedBonus: 0 },
+      { count: 6, tiers: [["trash",4],["tough",2]], formationId: 'center_expand', xRange: X_CENTER, row: 'mid', internalDelay: 0.22, speedBonus: 0.04 },
     ],
   },
 
-  // ═══ P3: 6节拍 72 (16杂+44韧+12压阵) ═══
+  // P3 6 beat 44 rapidPulse + 2 splitter
   {
     id: 'P3-1', phase: 'P3', notBeforeMs: 0,
     microBatches: [
-      { count: 6, tiers: [['trash',3],['tough',3]],           formationId: 'front_wide',   xRange: X_WIDE,  row: 'front', internalDelay: 0,    speedBonus: 0 },
-      { count: 6, tiers: [['trash',3],['tough',3]],           formationId: 'back_wide',    xRange: X_WIDE,  row: 'back',  internalDelay: 0.30, speedBonus: 0, rapidPulse: true },
+      { count: 4, tiers: [["trash",4]],             formationId: 'scatter_sparse', xRange: X_WIDE, row: 'mid',   internalDelay: 0, speedBonus: 0, rapidPulse: true, splitters: 1 },
+      { count: 4, tiers: [["trash",3],["tough",1]], formationId: 'right_expand',   xRange: X_RIGHT, row: 'front', internalDelay: 0, speedBonus: 0, rapidPulse: true },
     ],
   },
   {
-    id: 'P3-2', phase: 'P3', notBeforeMs: 2400,
+    id: 'P3-2', phase: 'P3', notBeforeMs: 1500,
     microBatches: [
-      { count: 6, tiers: [['trash',2],['tough',4]],           formationId: 'left_front',   xRange: X_LEFT,  row: 'front', internalDelay: 0,    speedBonus: 0 },
-      { count: 6, tiers: [['trash',1],['tough',5]],           formationId: 'right_back',   xRange: X_RIGHT, row: 'back',  internalDelay: 0.32, speedBonus: 0, rapidPulse: true },
+      { count: 4, tiers: [["trash",2],["tough",2]], formationId: 'left_expand',  xRange: X_LEFT,  row: 'back', internalDelay: 0.28, speedBonus: 0, rapidPulse: true },
+      { count: 4, tiers: [["trash",1],["tough",3]], formationId: 'right_expand', xRange: X_RIGHT, row: 'mid',  internalDelay: 0,    speedBonus: 0, rapidPulse: true },
     ],
   },
   {
-    id: 'P3-3', phase: 'P3', notBeforeMs: 4800,
+    id: 'P3-3', phase: 'P3', notBeforeMs: 3000,
     microBatches: [
-      { count: 6, tiers: [['trash',1],['tough',5]],           formationId: 'right_front',  xRange: X_RIGHT, row: 'front', internalDelay: 0,    speedBonus: 0 },
-      { count: 6, tiers: [['trash',1],['tough',4],['elite_wall',1]], formationId: 'left_back', xRange: X_LEFT, row: 'back', internalDelay: 0.30, speedBonus: 0, rapidPulse: true, splitters: 1 },
+      { count: 4, tiers: [["trash",2],["tough",2]], formationId: 'back_wide',  xRange: X_WIDE, row: 'back',  internalDelay: 0,    speedBonus: 0, rapidPulse: true },
+      { count: 4, tiers: [["trash",1],["tough",3]], formationId: 'left_expand', xRange: X_LEFT, row: 'mid',   internalDelay: 0.28, speedBonus: 0, rapidPulse: true },
     ],
   },
   {
-    id: 'P3-4', phase: 'P3', notBeforeMs: 7200,
+    id: 'P3-4', phase: 'P3', notBeforeMs: 4500,
     microBatches: [
-      { count: 6, tiers: [['trash',1],['tough',3],['elite_wall',2]], formationId: 'left_slant_back', xRange: X_LEFT,  row: 'back', internalDelay: 0, speedBonus: 0 },
-      { count: 6, tiers: [['trash',0],['tough',4],['elite_wall',2]], formationId: 'front_tough',     xRange: X_WIDE,  row: 'front', internalDelay: 0.28, speedBonus: 0.06, rapidPulse: true },
+      { count: 4, tiers: [["trash",1],["tough",3]], formationId: 'front_wide', xRange: X_WIDE, row: 'front', internalDelay: 0,    speedBonus: 0.06, rapidPulse: true },
+      { count: 4, tiers: [["trash",2],["tough",2]], formationId: 'back_wide',  xRange: X_WIDE, row: 'back',  internalDelay: 0.26, speedBonus: 0,    rapidPulse: true },
     ],
   },
   {
-    id: 'P3-5', phase: 'P3', notBeforeMs: 9600,
+    id: 'P3-5', phase: 'P3', notBeforeMs: 6000,
     microBatches: [
-      { count: 6, tiers: [['trash',1],['tough',3],['elite_wall',2]], formationId: 'right_slant_back', xRange: X_RIGHT, row: 'back',  internalDelay: 0,    speedBonus: 0 },
-      { count: 6, tiers: [['trash',0],['tough',4],['elite_wall',2]], formationId: 'scattered_walls',  xRange: X_WIDE,  row: 'mid',   internalDelay: 0.30, speedBonus: 0, rapidPulse: true, splitters: 1 },
+      { count: 4, tiers: [["trash",1],["tough",3]], formationId: 'scattered_walls', xRange: X_WIDE, row: 'mid',   internalDelay: 0.30, speedBonus: 0, rapidPulse: true },
+      { count: 4, tiers: [["trash",2],["tough",2]], formationId: 'front_tough',     xRange: X_WIDE, row: 'front', internalDelay: 0,    speedBonus: 0, rapidPulse: true },
     ],
   },
   {
-    id: 'P3-6', phase: 'P3', notBeforeMs: 12000,
+    id: 'P3-6', phase: 'P3', notBeforeMs: 7500,
     microBatches: [
-      { count: 6, tiers: [['trash',2],['tough',3],['elite_wall',1]], formationId: 'front_wide',   xRange: X_WIDE, row: 'front', internalDelay: 0,    speedBonus: 0 },
-      { count: 6, tiers: [['trash',1],['tough',3],['elite_wall',2]], formationId: 'back_wide',    xRange: X_WIDE, row: 'back',  internalDelay: 0.28, speedBonus: 0, rapidPulse: true },
+      { count: 4, tiers: [["tough",4]], formationId: 'front_tough', xRange: X_WIDE, row: 'front', internalDelay: 0, speedBonus: 0.04, rapidPulse: true, splitters: 1 },
     ],
   },
 ];
-
-// ═══════════════════ 阶段配置 ═══════════════════
 
 interface PhaseConfig {
   phase: DirectorPhase;
@@ -525,8 +519,8 @@ interface PhaseConfig {
 
 const PHASES: Record<DirectorPhase, PhaseConfig> = {
   P1: { phase:'P1', totalEnemies:36, speedMul:1.00, targetOnScreen:[10,14], hardCap:16, approachCap:12 },
-  P2: { phase:'P2', totalEnemies:56, speedMul:1.12, targetOnScreen:[14,18], hardCap:20, approachCap:14 },
-  P3: { phase:'P3', totalEnemies:72, speedMul:1.25, targetOnScreen:[18,22], hardCap:24, approachCap:16 },
+  P2: { phase:'P2', totalEnemies:40, speedMul:1.40, targetOnScreen:[12,16], hardCap:18, approachCap:12 },
+  P3: { phase:'P3', totalEnemies:44, speedMul:1.75, targetOnScreen:[14,18], hardCap:22, approachCap:14 },
 };
 
 // ═══════════════════ 常量 ═══════════════════
@@ -723,7 +717,13 @@ export class PostEdictDirector {
       for (let k = 0; k < pc; k++) {
         const tier = tierPool[poolIdx++ % tierPool.length];
         const x = mb.xRange[0] + Math.random() * (mb.xRange[1] - mb.xRange[0]);
-        const y = P3_ENTRY_Y_MIN + Math.random() * (P3_ENTRY_Y_MAX - P3_ENTRY_Y_MIN);
+        // 0807-11D-6G: Y权重: 远20%/中35%/近45%
+        const yRand = Math.random();
+        const y = yRand < 0.20
+          ? P3_ENTRY_Y_MIN + Math.random() * 60
+          : yRand < 0.55
+          ? P3_ENTRY_Y_MIN + 60 + Math.random() * 110
+          : P3_ENTRY_Y_MIN + 170 + Math.random() * 75;
         const enemyKind = (tier as string) === 'splitter' ? 'splitter' : 'infantry';
         items.push({
           x: Math.round(x + (Math.random() - 0.5) * 6), y: y - 20,

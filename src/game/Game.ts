@@ -6589,7 +6589,7 @@ export class Game {
       enemy.y = ty;
       enemy._directorEntryState = 'materializing';
       enemy._directorEntryTimer = 0;
-      enemy._condenseTotalTime = 0.50;
+      enemy._condenseTotalTime = 0.30; // 0807-11D-6G: P3快速压近
       (enemy as any)._spawnOrder = item.spawnOrder ?? 0;
     } else if (item.shadowAnchorX !== undefined && !(item.shadowSkip)) {
       // P1-1: 直接落位到最终阵位，不经过顶部下落
