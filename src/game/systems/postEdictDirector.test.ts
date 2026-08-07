@@ -150,3 +150,27 @@ describe('0807-11D-6F-4 引信与爆炸', () => {
     }
   });
 });
+
+describe('0807-11D-6F-6 确定性脉冲', () => {
+  const calcFuseScale = (t: number): number => {
+    if (t > 0.96) { const cp = Math.min(1, (t - 0.96) / 0.12); return 1.60 * (1 - cp) + 0.70 * cp; }
+    if (t < 0.30) { return 1.0 + 0.24 * Math.sin((t / 0.30) * Math.PI); }
+    if (t < 0.55) { return 1.06 + 0.28 * Math.sin(((t - 0.30) / 0.25) * Math.PI); }
+    if (t < 0.76) { return 1.10 + 0.36 * Math.sin(((t - 0.55) / 0.21) * Math.PI); }
+    return 1.14 + 0.46 * ((t - 0.76) / 0.20);
+  };
+  it('脉冲1峰值≈1.24', () => expect(calcFuseScale(0.15)).toBeCloseTo(1.24, 1));
+  it('脉冲2峰值≈1.34', () => expect(calcFuseScale(0.425)).toBeCloseTo(1.34, 1));
+  it('脉冲3峰值≈1.46', () => expect(calcFuseScale(0.655)).toBeCloseTo(1.46, 1));
+  it('脉冲4峰值≈1.60', () => expect(calcFuseScale(0.96)).toBeCloseTo(1.60, 1));
+  it('压缩≈0.70', () => expect(calcFuseScale(1.08)).toBeCloseTo(0.70, 1));
+  it('峰值递增', () => {
+    const p = [calcFuseScale(0.15), calcFuseScale(0.425), calcFuseScale(0.655), calcFuseScale(0.96)];
+    for (let i = 1; i < p.length; i++) expect(p[i]).toBeGreaterThan(p[i - 1]);
+  });
+  it('火药兵总量仍=3', () => {
+    const d = new PostEdictDirector(); d.start(); let ms = 0, c = 0;
+    for (let i = 0; i < 5000; i++) { ms += 500; for (const r of tick(d, 0.5, 0, 0, 0, 0, ms, 0, 0, 0, 0)) for (const it of r.items) if (it.enemyKind === 'powder') c++; if (!d.active && d.allComplete) break; }
+    expect(c).toBe(3);
+  });
+});
