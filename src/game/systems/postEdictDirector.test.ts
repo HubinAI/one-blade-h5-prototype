@@ -220,8 +220,8 @@ describe('0807-11D-6G-2 P3纵向band', () => {
       for (const r of reqs) {
         for (const item of r.items) {
           if (r.phase === 'P3' && item.spawnInPlace && item.entryEndYOverride) {
-            expect(item.entryEndYOverride).toBeGreaterThanOrEqual(300);
-            expect(item.entryEndYOverride).toBeLessThanOrEqual(555);
+            expect(item.entryEndYOverride).toBeGreaterThanOrEqual(298);
+            expect(item.entryEndYOverride).toBeLessThanOrEqual(558); // band bottom=500~555 ±3抖动
           }
         }
       }
