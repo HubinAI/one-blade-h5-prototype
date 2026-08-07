@@ -716,13 +716,15 @@ export class PostEdictDirector {
       for (let k = 0; k < pc; k++) {
         const tier = tierPool[poolIdx++ % tierPool.length];
         const x = mb.xRange[0] + Math.random() * (mb.xRange[1] - mb.xRange[0]);
-        // 0807-11D-6G: Y权重: 远20%/中35%/近45%
+        // 0807-11D-6G-1: Y权重: 远35%/中45%/近20%, 硬安全线590
+        const P3_SAFE_Y = Math.min(P3_ENTRY_Y_MAX, 590); // harvestEndY-110
         const yRand = Math.random();
-        const y = yRand < 0.20
-          ? P3_ENTRY_Y_MIN + Math.random() * 60
-          : yRand < 0.55
-          ? P3_ENTRY_Y_MIN + 60 + Math.random() * 110
-          : P3_ENTRY_Y_MIN + 170 + Math.random() * 75;
+        const y = yRand < 0.35
+          ? P3_ENTRY_Y_MIN + Math.random() * 60          // 远: 385~445
+          : yRand < 0.80
+          ? P3_ENTRY_Y_MIN + 80 + Math.random() * 90     // 中: 465~555
+          : P3_ENTRY_Y_MIN + 170 + Math.random() *       // 近: 555~min(630,590)
+            Math.max(0, P3_SAFE_Y - P3_ENTRY_Y_MIN - 170);
         const enemyKind = (tier as string) === 'splitter' ? 'splitter' : 'infantry';
         items.push({
           x: Math.round(x + (Math.random() - 0.5) * 6), y: y - 20,

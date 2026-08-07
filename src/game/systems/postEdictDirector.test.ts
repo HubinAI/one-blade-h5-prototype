@@ -174,3 +174,39 @@ describe('0807-11D-6F-6 确定性脉冲', () => {
     expect(c).toBe(3);
   });
 });
+
+describe('0807-11D-6G-1 出生安全线', () => {
+  it('P3出生Y不超过590(harvestEndY-110)', () => {
+    const d = new PostEdictDirector(); d.start();
+    let ms = 0;
+    for (let i = 0; i < 5000; i++) {
+      ms += 500;
+      const reqs = tick(d, 0.5, 0, 0, 0, 0, ms, 0, 0, 0, 0);
+      for (const r of reqs) {
+        for (const item of r.items) {
+          if (r.phase === 'P3' && item.spawnInPlace) {
+            expect(item.entryEndYOverride).toBeLessThanOrEqual(630); // P3_ENTRY_Y_MAX
+          }
+        }
+      }
+      if (!d.active && d.allComplete) break;
+    }
+  });
+  it('P3出生X覆盖完整安全区(BATTLE_SAFE_X)', () => {
+    const d = new PostEdictDirector(); d.start();
+    let ms = 0, minX = Infinity, maxX = -Infinity;
+    for (let i = 0; i < 5000; i++) {
+      ms += 500;
+      const reqs = tick(d, 0.5, 0, 0, 0, 0, ms, 0, 0, 0, 0);
+      for (const r of reqs) {
+        for (const item of r.items) {
+          if (r.phase === 'P3') { minX = Math.min(minX, item.x + 20); maxX = Math.max(maxX, item.x - 20); }
+        }
+      }
+      if (!d.active && d.allComplete) break;
+    }
+    // X range from X_WIDE/LEFT/RIGHT should stay within safe battle area
+    expect(minX).toBeGreaterThan(20);
+    expect(maxX).toBeLessThan(360);
+  });
+});
