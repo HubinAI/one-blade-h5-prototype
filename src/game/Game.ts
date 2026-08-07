@@ -1261,10 +1261,6 @@ export class Game {
       this._momentumState = 'armed';
       this.energy = BALANCE.swordEnergy.max;
     }
-    // 末刀结束后清理
-    if (this._burstEnding && this._momentumState === 'bursting') {
-      if (!this.currentSlash?.active) { this._finalizeBurst(); }
-    }
     // 视觉退场计时
     if (this._burstFadeoutTimer > 0) { this._burstFadeoutTimer = Math.max(0, this._burstFadeoutTimer - scaledDt); }
 
@@ -1987,8 +1983,10 @@ export class Game {
   }
 
   private startSlash(pos: Vec2, pending?: NonNullable<typeof this.pendingSlash>) {
+    // 0807-11D-4B-Final-1: 末刀期禁止新建挥刀
+    if (this._burstEnding) return;
     // 0807-11D-4B: armed → bursting
-    if (this._momentumState === 'armed' && !this._burstEnding) { this._momentumState = 'bursting'; this._burstRemaining = 5.0; }
+    if (this._momentumState === 'armed') { this._momentumState = 'bursting'; this._burstRemaining = 5.0; }
     const lockedEnergy = pending ? pending.lockedEnergy : clamp(this.energy, 0, BALANCE.swordEnergy.max);
     // V0723014-Final.1 P0-1: Reactive 模式起刀时继承 pending.lockedMomentum（PointerDown 时锁定）。
     // 禁止重新调用 this.getReactiveBladeMomentum()，避免 pending 期间 max 变化导致快照不一致。
