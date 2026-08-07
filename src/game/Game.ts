@@ -6888,6 +6888,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       if (enemy.y >= SPLITTER_CONFIG.triggerY) {
         enemy.splitState = "warning";
         enemy.splitTimer = SPLITTER_CONFIG.chargeDuration;
+        // 0807-11D-6E: 分裂兵进入蓄力时橙色碎裂爆点
+        this.particles.push(
+          ...sparkBurst({ x: enemy.x, y: enemy.y }, 8, "#ff8c28", 16),
+          glowParticle({ x: enemy.x, y: enemy.y }, "#ff6a33", 0.4, 20),
+        );
         // P3.4：教学分裂兵短暂保护，保证玩家看到蓄力
         if (enemy.isTutorialSplitter) {
           enemy.mechanicProtectedTimer = SPLITTER_CONFIG.tutorialProtectedSeconds;
@@ -9621,10 +9626,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         // 最后60-90ms敌人轮廓轻微提亮一次
         if (matP > 0.88) {
           const flash = (matP - 0.88) / 0.12;
-          ctx.strokeStyle = `rgba(255, 230, 180, ${flash * 0.30})`;
-          ctx.lineWidth = 1.5;
+          const isSplitter = enemy.kind === 'splitter';
+          const glowR = isSplitter ? 255 : 0;
+          ctx.strokeStyle = isSplitter
+            ? `rgba(255, 140, 40, ${flash * 0.70})`
+            : `rgba(255, 230, 180, ${flash * 0.30})`;
+          ctx.lineWidth = isSplitter ? 3.5 : 1.5;
           const r = enemy.radius;
-          ctx.beginPath(); ctx.arc(0, 0, r + 1, 0, Math.PI * 2); ctx.stroke();
+          ctx.beginPath(); ctx.arc(0, 0, r + (isSplitter ? 4 : 1), 0, Math.PI * 2); ctx.stroke();
         }
       }
       // 0807-11D-3A: 影化透明度 (叠加到现有 globalAlpha)
@@ -9676,6 +9685,26 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ctx.moveTo(0, -7); ctx.lineTo(0, 7);
         ctx.stroke();
         ctx.shadowBlur = 0;
+      }
+
+      // 0807-11D-6E: 分裂兵视觉增强
+      if (enemy.kind === "splitter") {
+        const isWarning = (enemy.splitState === "warning");
+        const breath = isWarning ? 0.5 + Math.sin(this.elapsed * 8) * 0.5 : 0.5 + Math.sin(this.elapsed * 3) * 0.3;
+        // 橙色呼吸亮边
+        ctx.strokeStyle = `rgba(255, 140, 40, ${0.25 + breath * 0.35})`;
+        ctx.lineWidth = 2.5;
+        const r = enemy.radius + 2 + breath * 3;
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+        // 外层辉光
+        const glowGrad = ctx.createRadialGradient(0, 0, enemy.radius * 0.5, 0, 0, enemy.radius + 6);
+        glowGrad.addColorStop(0, 'rgba(255, 160, 60, 0)');
+        glowGrad.addColorStop(0.7, `rgba(255, 120, 30, ${0.10 + breath * 0.15})`);
+        glowGrad.addColorStop(1, 'rgba(255, 80, 20, 0)');
+        ctx.fillStyle = glowGrad;
+        ctx.beginPath(); ctx.arc(0, 0, enemy.radius + 6, 0, Math.PI * 2); ctx.fill();
+        // 1.15x放大（仅视觉，不改碰撞）
+        ctx.scale(1.15, 1.15);
       }
 
       // ═════════════════════════════════════
