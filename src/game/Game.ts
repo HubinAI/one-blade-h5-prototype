@@ -342,6 +342,8 @@ export class Game {
   private _eliteBattleActive = false;
   private _eliteInvuln = false;
   private _eliteGuardSpawned = false;
+  private _eliteEntryBoostDone = false; // 0807-11E-1B: 开场50一次性格挡
+  private _eliteDeadLockRescueDone = false; // 0807-11E-1A/B: 低势救援触发标记
   private _eliteCyclesDone = 0;
   private _eliteCyclePhase: "idle" | "telegraph" | "fire" | "stun" = "idle";
   private _eliteCycleTimer = 0;
@@ -1235,10 +1237,19 @@ export class Game {
     // 三次修正：chest_first_clear 的刀势回涌用一个虚拟 drumTimer 注入到 recoverEnergy
     const effectiveDrumTimer = this.drumTimer + this.chestMomentumTimer;
     // V0730001: 第1关使用统一被动恢复（20%封顶，2%/秒），其余关卡保持旧逻辑
-    // 0807-11E-1A: 精英战防死锁保护
+    // 0807-11E-1B: 精英战低势救援(30/秒到25)
     const minSlash = BALANCE.swordEnergy.minSlashEnergy;
-    if (this._eliteBattleActive && this._momentumState === 'charging' && this.energy < minSlash) {
-      this.energy = Math.min(this.energy + 25 * scaledDt, minSlash + 3);
+    if (this._eliteBattleActive && this._momentumState === 'charging') {
+      if (this.energy < 20) {
+        this._eliteDeadLockRescueDone = false;
+        this.energy = Math.min(this.energy + 30 * scaledDt, 25);
+      } else if (this.energy >= 25) {
+        this._eliteDeadLockRescueDone = true;
+      }
+      // burst结束后一次性补50(如果还没享受过)
+      if (!this._eliteEntryBoostDone && this.energy < 50) {
+        this.energy = 50; this._eliteEntryBoostDone = true;
+      }
     }
     const isLevel1 = this.isLogicalLevel1();
     if (!this.currentSlash?.active && !this.pendingSlash && this.regenDelayTimer <= 0 && this.warDrumNoDecayTimer <= 0 && this._momentumState !== 'bursting') {
@@ -2332,7 +2343,17 @@ export class Game {
       // 0807-11D-4C: 基于唯一命中数统一结算
       const uniqueHits = this._slashDirectHitIds.size;
       this._lastSlashUniqueHits = uniqueHits;
-      const netDelta = uniqueHits === 0 ? -8 : uniqueHits <= 2 ? 4 : uniqueHits <= 5 ? 8 : 12;
+      // 0807-11E-1B: 精英阶段权重化计数
+      let weightedHits = uniqueHits;
+      if (this._eliteBattleActive) {
+        weightedHits = 0;
+        for (const id of this._slashDirectHitIds) {
+          if (this.enemies.some(e => e.eliteKind === "fireRing" && e.id === id)) weightedHits += 4;
+          else if (id.includes('_')) weightedHits += 2; // fire ring keys
+          else weightedHits += 1;
+        }
+      }
+      const netDelta = weightedHits === 0 ? -8 : weightedHits <= 2 ? 4 : weightedHits <= 5 ? 8 : 12;
       this._lastSlashMomentumDelta = netDelta;
       const newEnergy = clamp(this.energy + netDelta, 0, BALANCE.swordEnergy.max);
       this.energy = (this._momentumState === 'bursting') ? this.energy : newEnergy;
@@ -2777,7 +2798,7 @@ export class Game {
     this._eliteBattleActive = false;
     this._eliteInvuln = false;
     this._eliteFireRings = [];
-    this._eliteGuardSpawned = false;
+    this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false;
 
     if (this.debugEnabled) {
       console.log("[elite defeated]", {
@@ -11786,7 +11807,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // V0801008: 激活火环战斗 + 入场保护
     this._eliteBattleActive = true;
     this._eliteInvuln = true;
-    this._eliteGuardSpawned = false;
+    this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false;
     this._eliteCyclesDone = 0;
     this._eliteCycleTimer = 0;
     this._eliteCyclePhase = "idle";
@@ -11831,6 +11852,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (this._eliteInvuln) {
       if ((elite as any)._entryPhase === "completed") {
         this._eliteInvuln = false;
+        // 0807-11E-1B: 开场最低50刀势(仅charging)
+        if (!this._eliteEntryBoostDone && this._momentumState === 'charging' && this.energy < 50) {
+          this.energy = 50; this._eliteEntryBoostDone = true;
+        }
         this.showBattleNotice({ text: "火环将·开战", priority: "A", category: "elite", style: "danger", duration: 0.7, dedupeKey: "elite:fireRing:battle", cooldown: 3, interrupt: false });
         this._eliteCycleTimer = 0;
         this._eliteCyclePhase = "telegraph";
