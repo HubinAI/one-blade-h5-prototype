@@ -37,6 +37,32 @@ describe('测试总量精确 164 (84+68+12)', () => {
     expect(tough).toBe(68);
     expect(wall).toBe(12);
   });
+
+  it('rapidPulse HP档位正确(trash=100,tough=170,wall=260,splitter=170)', () => {
+    const d = new PostEdictDirector(); d.start();
+    let ms = 0;
+    for (let i = 0; i < 5000; i++) {
+      ms += 500;
+      const reqs = tick(d, 0.5, 0, 0, 0, 0, ms, 0, 0, 0, 0);
+      for (const r of reqs) {
+        for (const item of r.items) {
+          // P3 rapidPulse: splitter=170, trash=100, tough=170, wall=260
+          expect(item.hpOverride).toBeGreaterThan(0);
+          if (item.enemyKind === 'splitter') {
+            expect(item.hpTier).toBe('tough');
+            expect(item.hpOverride).toBe(170);
+          } else if (item.hpTier === 'trash') {
+            expect(item.hpOverride).toBe(100);
+          } else if (item.hpTier === 'tough') {
+            expect(item.hpOverride).toBe(170);
+          } else if (item.hpTier === 'elite_wall') {
+            expect(item.hpOverride).toBe(260);
+          }
+        }
+      }
+      if (!d.active && d.allComplete) break;
+    }
+  });
 });
 
 describe('基础生命周期', () => {

@@ -725,7 +725,8 @@ export class PostEdictDirector {
         items.push({
           x: Math.round(x + (Math.random() - 0.5) * 6), y: y - 20,
           speedMul: phase.speedMul + mb.speedBonus,
-          hpTier: (tier as string) === 'splitter' ? ('tough' as HpTier) : tier, hpOverride: HP_TIERS.tough.hp,
+          hpTier: (tier as string) === 'splitter' ? ('tough' as HpTier) : tier,
+          hpOverride: (tier as string) === 'splitter' ? HP_TIERS.tough.hp : HP_TIERS[tier].hp,
           formationId: mb.formationId,
           entryTargetX: Math.round(x), entryEndYOverride: Math.round(y),
           directorPhase: beat.phase, directorBeatId: mbId, directorMicroBatchId: `${mbId}_p${Math.round(pulseDelayAccum)}`,
