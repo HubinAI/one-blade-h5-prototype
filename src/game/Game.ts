@@ -1235,6 +1235,11 @@ export class Game {
     // 三次修正：chest_first_clear 的刀势回涌用一个虚拟 drumTimer 注入到 recoverEnergy
     const effectiveDrumTimer = this.drumTimer + this.chestMomentumTimer;
     // V0730001: 第1关使用统一被动恢复（20%封顶，2%/秒），其余关卡保持旧逻辑
+    // 0807-11E-1A: 精英战防死锁保护
+    const minSlash = BALANCE.swordEnergy.minSlashEnergy;
+    if (this._eliteBattleActive && this._momentumState === 'charging' && this.energy < minSlash) {
+      this.energy = Math.min(this.energy + 25 * scaledDt, minSlash + 3);
+    }
     const isLevel1 = this.isLogicalLevel1();
     if (!this.currentSlash?.active && !this.pendingSlash && this.regenDelayTimer <= 0 && this.warDrumNoDecayTimer <= 0 && this._momentumState !== 'bursting') {
       if (isLevel1) {
@@ -3713,6 +3718,7 @@ export class Game {
         if (r && r.isAccepted && r.effectiveHpLoss > 0) {
           this._slashDedupFireRings.add(frKey);
           this._debugFireRingHits = (this._debugFireRingHits ?? 0) + 1;
+          this._slashDirectHitIds.add(frKey); // 0807-11E-1A: 火环计入手势目标
           this._threatVerifyLastHpBefore = fr.hp; fr.hp -= r.effectiveHpLoss;
           this._threatVerifyLastHpAfter = fr.hp;
           this._threatVerifyLastResult = fr.hp <= 0 ? 'DESTROYED' : 'DAMAGED';
@@ -4180,7 +4186,8 @@ export class Game {
     if (enemy.kind === "elite" && enemy.eliteKind) {
       const eliteConf = ELITE_CONFIG[enemy.eliteKind];
       if (enemy.eliteKind === "fireRing") {
-        // 火环将：火焰碰刀芒会损耗刀势
+        // 0807-11E-1A: 已禁用火环灼刀逻辑, 火环已是独立破环威胁
+        if (false) {
         const flameDist = 40; // 火焰旋转半径
         const trailPoints = trail.points;
         if (trailPoints.length > 1) {
@@ -4196,6 +4203,7 @@ export class Game {
             AudioService.defenseHit();
           }
         }
+        } // 0807-11E-1A: 禁用块结束
       }
       if (enemy.eliteKind === "aura") {
         // 氛围将：护盾机制 - 强锋以上可一次扣2护盾
