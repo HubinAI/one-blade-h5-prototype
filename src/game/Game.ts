@@ -6144,7 +6144,7 @@ export class Game {
     for (let i = 0; i < req.items.length; i++) {
       const item = req.items[i];
       this.subSpawnQueue.push({
-        time: this.elapsed + 0.02 + i * 0.01,
+        time: this.elapsed + (req.pulseDelayMs ?? 0) / 1000 + 0.02 + i * 0.01,
         kind: 'infantry' as any,
         x: item.x,
         speedMultiplier: item.speedMul,

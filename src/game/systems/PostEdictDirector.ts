@@ -39,6 +39,8 @@ export interface DirectorSpawnRequest {
   items: SpawnItem[];
   /** 桥接微批次：标记该微批次已被消费，到期不得重复生成 */
   consumedMicroBatchId?: string;
+  /** 0807-11D-6C-1: 脉冲延迟(ms) */
+  pulseDelayMs?: number;
 }
 
 export interface DirectorDebugInfo {
@@ -700,8 +702,7 @@ export class PostEdictDirector {
     for (const [tier, n] of mb.tiers) for (let i = 0; i < n; i++) tierPool.push(tier);
     for (let i = tierPool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [tierPool[i], tierPool[j]] = [tierPool[j], tierPool[i]]; }
     let poolIdx = 0;
-    const intervalMs = (0.18 + Math.random() * 0.10) * 1000;
-    let pulseTime = 0;
+    let pulseDelayAccum = 0;
     const results: DirectorSpawnRequest[] = [];
     for (const pc of pulses) {
       const items: SpawnItem[] = [];
@@ -715,14 +716,15 @@ export class PostEdictDirector {
           hpTier: tier, hpOverride: HP_TIERS[tier].hp,
           formationId: mb.formationId,
           entryTargetX: Math.round(x), entryEndYOverride: Math.round(y),
-          directorPhase: beat.phase, directorBeatId: mbId, directorMicroBatchId: `${mbId}_p${pulseTime}`,
+          directorPhase: beat.phase, directorBeatId: mbId, directorMicroBatchId: `${mbId}_p${Math.round(pulseDelayAccum)}`,
           anchorId: mbId, anchorX: x, anchorY: y,
           skipShadow: false, spawnInPlace: true,
         });
       }
       this._phaseGenerated += items.length;
-      results.push({ phase: beat.phase, items });
-      pulseTime += intervalMs;
+      const delayMs = pulseDelayAccum > 0 ? pulseDelayAccum : 0;
+      results.push({ phase: beat.phase, items, pulseDelayMs: delayMs > 0 ? delayMs : undefined });
+      pulseDelayAccum += (0.18 + Math.random() * 0.10) * 1000;
     }
     this._lastReason = `rapidPulse_${mbId}_${pulses.length}pulses`;
     return results;
