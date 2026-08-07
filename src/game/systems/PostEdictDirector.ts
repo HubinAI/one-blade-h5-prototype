@@ -554,7 +554,7 @@ export class PostEdictDirector {
   private _lastMbTime = 0;        // 上一微批次生成时间(ms)
   private _phaseGapTimer = 0;
   private _finalAfterglowTimer = 0;
-
+  private _lastBurstAssistMs = 0; // 0807-11D-5A: 最近辅助刷新时间
   // 桥接
   private _bridgeMicroBatchId: string | null = null;  // 被桥接消费的微批次 ID
   private _bridgeBeatIdx = -1;
@@ -613,6 +613,8 @@ export class PostEdictDirector {
     elapsedMs: number,
     // Per-beat 统计
     beatSpawned: number, beatApproaching: number, beatCombatReady: number, beatAlive: number,
+    /** 0807-11D-5A: 满势辅助刷新 */
+    burstAssist = false, combatReadyCount = 0,
   ): DirectorSpawnRequest[] {
     if (!this._active) return [];
 
@@ -650,6 +652,19 @@ export class PostEdictDirector {
         aliveInZone, aliveTotal, approachingCount, subSpawnQueueLength,
         beatSpawned, beatApproaching, beatCombatReady, beatAlive,
       );
+    }
+
+    // 0807-11D-5A: burst辅助提前释放微批次
+    if (burstAssist && this._microBatchIndex < beat.microBatches.length) {
+      const burstFloor = beat.phase === 'P1' ? 6 : beat.phase === 'P2' ? 8 : 10;
+      if (combatReadyCount < burstFloor && (elapsedMs - this._lastBurstAssistMs) >= 450) {
+        const assistMb = beat.microBatches[this._microBatchIndex];
+        if (aliveTotal + subSpawnQueueLength < phase.hardCap) {
+          this._lastBurstAssistMs = elapsedMs;
+          this._lastReason = `burst_assist_${beat.id}_mb${this._microBatchIndex}`;
+          return this._spawnMicroBatch(beat, phase, elapsedMs);
+        }
+      }
     }
 
     // notBefore

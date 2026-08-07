@@ -6102,9 +6102,12 @@ export class Game {
     const beatApproaching = beatEnemies.filter(e => isApproaching(e.y)).length;
     const beatCombat = beatEnemies.filter(e => isInCombatZone(e.y)).length;
 
+    const burstAssist = this._momentumState === 'armed' || this._momentumState === 'bursting';
+    const combatReadyForBurst = this.enemies.filter(e => e.alive && e._directorEntryState === 'active').length;
     const spawnRequests = postEdictDirector.tick(
       dt, aliveInZone, aliveTotal, approachingCount, this.subSpawnQueue.length, elapsedMs,
       beatSpawned, beatApproaching, beatCombat, beatEnemies.length,
+      burstAssist, combatReadyForBurst,
     );
 
     for (const req of spawnRequests) {

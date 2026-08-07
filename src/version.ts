@@ -1,5 +1,5 @@
 /** 对外展示版本号（UI / 页面标题 / README 等） */
-export const APP_VERSION = "V0807004";
+export const APP_VERSION = "V0807005";
 
 /** 构建版本号（package.json / 埋点 build_version） */
-export const BUILD_VERSION = "0807.004";
+export const BUILD_VERSION = "0807.005";
