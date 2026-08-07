@@ -6537,24 +6537,17 @@ export class Game {
     if (item.dirFormationId !== undefined) { (enemy as any)._dirFormationId = item.dirFormationId; }
     if (item.entryTargetX !== undefined) { (enemy as any)._dirEntryTargetX = item.entryTargetX; }
     if (item.entryEndYOverride !== undefined) { (enemy as any)._dirEntryEndYOverride = item.entryEndYOverride; }
-    // 0807-11D-3H: P1-1直接落位，shadowSkip时立即放置到最终阵位
-    if (item.shadowAnchorX !== undefined && !(item.shadowSkip)) {
-      enemy._directorEntryState = 'shadow_move';
-      enemy._directorEntryTimer = 0;
-      enemy._directorTargetX = item.entryTargetX ?? item.x;
-      enemy._directorTargetY = item.entryEndYOverride ?? (ENTRY_PROFILE_EDICT_BURST.entryEndY);
-      (enemy as any)._spawnOrder = item.spawnOrder ?? 0;
-    } else if (item.spawnInPlace) {
-      // 0807-11D-6B: P3原地凝实
+    // 0807-11D-6B: P3原地凝实（优先级最高）
+    if (item.spawnInPlace) {
       const tx = item.entryTargetX ?? item.x;
       const ty = item.entryEndYOverride ?? (ENTRY_PROFILE_EDICT_BURST.entryEndY);
       enemy.x = tx;
       enemy.y = ty;
       enemy._directorEntryState = 'materializing';
       enemy._directorEntryTimer = 0;
-      enemy._condenseTotalTime = 0.50; // 0.30 预兆 + 0.20 凝实
+      enemy._condenseTotalTime = 0.50;
       (enemy as any)._spawnOrder = item.spawnOrder ?? 0;
-    } else if (item.shadowSkip) {
+    } else if (item.shadowAnchorX !== undefined && !(item.shadowSkip)) {
       // P1-1: 直接落位到最终阵位，不经过顶部下落
       const tx = item.entryTargetX ?? item.x;
       const ty = item.entryEndYOverride ?? (ENTRY_PROFILE_EDICT_BURST.entryEndY);
