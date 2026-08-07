@@ -865,6 +865,7 @@ export class PostEdictDirector {
           directorMicroBatchId: `${beat.id}_mb${this._microBatchIndex - 1}`,
           anchorId, anchorX: anchor.x, anchorY: anchor.y,
           skipShadow: isP11, placementMode: mode,
+          spawnInPlace: beat.phase === 'P3',
         });
         idx++;
       }
