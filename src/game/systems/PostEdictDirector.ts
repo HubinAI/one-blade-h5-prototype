@@ -9,6 +9,8 @@
 import { BATTLEFIELD_ZONES, BATTLE_SAFE_X } from '../config/balance';
 import { randomRange } from '../../utils/math';
 
+const P3_ENTRY_END_Y = 520; // P3战斗区基准Y (替代ENTRY_PROFILE_EDICT_BURST.entryEndY)
+
 // ═══════════════════ 类型 ═══════════════════
 
 export type DirectorPhase = 'P1' | 'P2' | 'P3';
@@ -380,6 +382,8 @@ interface MicroBatch {
   speedBonus: number;
   /** 0807-11D-4A: 放置模式 */
   placementMode?: 'clustered' | 'special';
+  /** 0807-11D-6C: 快速点刷 */
+  rapidPulse?: true;
 }
 
 interface DirectorBeat {
@@ -458,42 +462,42 @@ const BEATS: DirectorBeat[] = [
     id: 'P3-1', phase: 'P3', notBeforeMs: 0,
     microBatches: [
       { count: 6, tiers: [['trash',3],['tough',3]],           formationId: 'front_wide',   xRange: X_WIDE,  row: 'front', internalDelay: 0,    speedBonus: 0 },
-      { count: 6, tiers: [['trash',3],['tough',3]],           formationId: 'back_wide',    xRange: X_WIDE,  row: 'back',  internalDelay: 0.30, speedBonus: 0 },
+      { count: 6, tiers: [['trash',3],['tough',3]],           formationId: 'back_wide',    xRange: X_WIDE,  row: 'back',  internalDelay: 0.30, speedBonus: 0, rapidPulse: true },
     ],
   },
   {
     id: 'P3-2', phase: 'P3', notBeforeMs: 2400,
     microBatches: [
       { count: 6, tiers: [['trash',2],['tough',4]],           formationId: 'left_front',   xRange: X_LEFT,  row: 'front', internalDelay: 0,    speedBonus: 0 },
-      { count: 6, tiers: [['trash',1],['tough',5]],           formationId: 'right_back',   xRange: X_RIGHT, row: 'back',  internalDelay: 0.32, speedBonus: 0 },
+      { count: 6, tiers: [['trash',1],['tough',5]],           formationId: 'right_back',   xRange: X_RIGHT, row: 'back',  internalDelay: 0.32, speedBonus: 0, rapidPulse: true },
     ],
   },
   {
     id: 'P3-3', phase: 'P3', notBeforeMs: 4800,
     microBatches: [
       { count: 6, tiers: [['trash',1],['tough',5]],           formationId: 'right_front',  xRange: X_RIGHT, row: 'front', internalDelay: 0,    speedBonus: 0 },
-      { count: 6, tiers: [['trash',1],['tough',4],['elite_wall',1]], formationId: 'left_back', xRange: X_LEFT, row: 'back', internalDelay: 0.30, speedBonus: 0 },
+      { count: 6, tiers: [['trash',1],['tough',4],['elite_wall',1]], formationId: 'left_back', xRange: X_LEFT, row: 'back', internalDelay: 0.30, speedBonus: 0, rapidPulse: true },
     ],
   },
   {
     id: 'P3-4', phase: 'P3', notBeforeMs: 7200,
     microBatches: [
       { count: 6, tiers: [['trash',1],['tough',3],['elite_wall',2]], formationId: 'left_slant_back', xRange: X_LEFT,  row: 'back', internalDelay: 0, speedBonus: 0 },
-      { count: 6, tiers: [['trash',0],['tough',4],['elite_wall',2]], formationId: 'front_tough',     xRange: X_WIDE,  row: 'front', internalDelay: 0.28, speedBonus: 0.06 },
+      { count: 6, tiers: [['trash',0],['tough',4],['elite_wall',2]], formationId: 'front_tough',     xRange: X_WIDE,  row: 'front', internalDelay: 0.28, speedBonus: 0.06, rapidPulse: true },
     ],
   },
   {
     id: 'P3-5', phase: 'P3', notBeforeMs: 9600,
     microBatches: [
       { count: 6, tiers: [['trash',1],['tough',3],['elite_wall',2]], formationId: 'right_slant_back', xRange: X_RIGHT, row: 'back',  internalDelay: 0,    speedBonus: 0 },
-      { count: 6, tiers: [['trash',0],['tough',4],['elite_wall',2]], formationId: 'scattered_walls',  xRange: X_WIDE,  row: 'mid',   internalDelay: 0.30, speedBonus: 0 },
+      { count: 6, tiers: [['trash',0],['tough',4],['elite_wall',2]], formationId: 'scattered_walls',  xRange: X_WIDE,  row: 'mid',   internalDelay: 0.30, speedBonus: 0, rapidPulse: true },
     ],
   },
   {
     id: 'P3-6', phase: 'P3', notBeforeMs: 12000,
     microBatches: [
       { count: 6, tiers: [['trash',2],['tough',3],['elite_wall',1]], formationId: 'front_wide',   xRange: X_WIDE, row: 'front', internalDelay: 0,    speedBonus: 0 },
-      { count: 6, tiers: [['trash',1],['tough',3],['elite_wall',2]], formationId: 'back_wide',    xRange: X_WIDE, row: 'back',  internalDelay: 0.28, speedBonus: 0 },
+      { count: 6, tiers: [['trash',1],['tough',3],['elite_wall',2]], formationId: 'back_wide',    xRange: X_WIDE, row: 'back',  internalDelay: 0.28, speedBonus: 0, rapidPulse: true },
     ],
   },
 ];
@@ -553,7 +557,6 @@ export class PostEdictDirector {
   private _nextState = 'READY';
   private _lastReason = '';
   private _currentFormationId = '';
-
   // ═══ 公开方法 ═══
 
   reset(): void {
@@ -605,7 +608,7 @@ export class PostEdictDirector {
     /** 0807-11D-5A: 满势辅助刷新 */
     burstAssist = false, combatReadyCount = 0,
   ): DirectorSpawnRequest[] {
-    if (!this._active) return [];
+    if (!this._active) { this._lastReason = 'inactive'; return []; }
 
     this._phaseElapsed += dt;
 
@@ -681,6 +684,50 @@ export class PostEdictDirector {
 
   // ═══ 内部方法 ═══
 
+  /** 0807-11D-6C: rapidPulse拆分 */
+  private _spawnRapidPulseBatch(mb: MicroBatch, beat: DirectorBeat, phase: PhaseConfig, elapsedMs: number): DirectorSpawnRequest[] {
+    const mbId = `${beat.id}_mb${this._microBatchIndex}`;
+    this._microBatchIndex += 1; this._lastMbTime = elapsedMs; this._nextState = 'SPAWN';
+    // 按1~3拆成脉冲
+    const pulses: number[] = [];
+    let remaining = mb.count;
+    while (remaining > 0) {
+      const n = Math.min(1 + Math.floor(Math.random() * 3), remaining);
+      pulses.push(n); remaining -= n;
+    }
+    // 构建tier池
+    const tierPool: HpTier[] = [];
+    for (const [tier, n] of mb.tiers) for (let i = 0; i < n; i++) tierPool.push(tier);
+    for (let i = tierPool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [tierPool[i], tierPool[j]] = [tierPool[j], tierPool[i]]; }
+    let poolIdx = 0;
+    const intervalMs = (0.18 + Math.random() * 0.10) * 1000;
+    let pulseTime = 0;
+    const results: DirectorSpawnRequest[] = [];
+    for (const pc of pulses) {
+      const items: SpawnItem[] = [];
+      for (let k = 0; k < pc; k++) {
+        const tier = tierPool[poolIdx++ % tierPool.length];
+        const x = mb.xRange[0] + Math.random() * (mb.xRange[1] - mb.xRange[0]);
+        const y = P3_ENTRY_END_Y + Math.random() * 60 - 30;
+        items.push({
+          x: Math.round(x + (Math.random() - 0.5) * 6), y: y - 20,
+          speedMul: phase.speedMul + mb.speedBonus,
+          hpTier: tier, hpOverride: HP_TIERS[tier].hp,
+          formationId: mb.formationId,
+          entryTargetX: Math.round(x), entryEndYOverride: Math.round(y),
+          directorPhase: beat.phase, directorBeatId: mbId, directorMicroBatchId: `${mbId}_p${pulseTime}`,
+          anchorId: mbId, anchorX: x, anchorY: y,
+          skipShadow: false, spawnInPlace: true,
+        });
+      }
+      this._phaseGenerated += items.length;
+      results.push({ phase: beat.phase, items });
+      pulseTime += intervalMs;
+    }
+    this._lastReason = `rapidPulse_${mbId}_${pulses.length}pulses`;
+    return results;
+  }
+
   private _spawnMicroBatch(beat: DirectorBeat, phase: PhaseConfig, elapsedMs: number): DirectorSpawnRequest[] {
     // 检查是否被桥接消费
     const mbId = `${beat.id}_mb${this._microBatchIndex}`;
@@ -688,6 +735,10 @@ export class PostEdictDirector {
       this._bridgeMicroBatchId = null; this._microBatchIndex += 1; this._nextState = 'READY'; return [];
     }
     const mb = beat.microBatches[this._microBatchIndex];
+    // 0807-11D-6C: rapidPulse — 拆成连续脉冲请求
+    if (mb.rapidPulse) {
+      return this._spawnRapidPulseBatch(mb, beat, phase, elapsedMs);
+    }
     const mbIdx = this._microBatchIndex; // 递增前锁定，与_makeItems对齐
     this._microBatchIndex += 1;
     this._lastMbTime = elapsedMs;
