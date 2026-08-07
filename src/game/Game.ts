@@ -4055,8 +4055,6 @@ export class Game {
         this._directHitDedupCount++;
         return;
       }
-      // 0807-11D-4C: 本刀唯一命中统计
-      this._slashDirectHitIds.add(enemy.id);
       // 0807-11B-1: 统一伤害 — 真实HP结算
       const stats = trail._damageSnapshot ?? this.captureDamageSnapshot();
       const req: DamageRequest = {
@@ -4079,6 +4077,7 @@ export class Game {
       if (result && result.isAccepted && result.effectiveHpLoss > 0) {
         this._lastDamageResult = result;
         this.damageEnemy(enemy, result.effectiveHpLoss, trail, false, "paper");
+        this._slashDirectHitIds.add(enemy.id); // 0807-11D-5B-2: 伤害成功后标记
         const curAttack = getCurrentAttack(stats);
         this.emitDamageFloat(result.resolvedDamage, curAttack, enemy.x, enemy.y - 14, 'NORMAL', result.isKill ?? false, { sourceType: 'MAIN_SLASH' });
       }
