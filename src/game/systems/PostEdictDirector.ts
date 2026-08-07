@@ -555,6 +555,9 @@ export class PostEdictDirector {
   // 0807-11D-6G-2: P3纵向band防重复
   private _lastP3Band: 'top' | 'mid' | 'bottom' | null = null;
   private _recentBottomCount = 0; // 最近pulse下区次数(用于3pulse限1)
+  // 0807-11D-6H: P3→精英无缝交接
+  private _p3HandoffReady = false;
+  private _p3HandoffTriggered = false;
   private _bridgeBeatIdx = -1;
 
   /** 0807-11D-4A: 阵位种子 (局内唯一, start时生成) */
@@ -570,6 +573,7 @@ export class PostEdictDirector {
     this._beatIndex = 0; this._microBatchIndex = 0;
     this._phaseGenerated = 0; this._phaseBridgeCount = 0;
     this._lastP3Band = null; this._recentBottomCount = 0; // 0807-11D-6G-2
+    this._p3HandoffReady = false; this._p3HandoffTriggered = false; // 0807-11D-6H
     this._phaseElapsed = 0; this._phaseStartMs = 0; this._lastMbTime = 0;
     this._lastBurstAssistMs = 0; // 0807-11D-5A-Final
     this._phaseGapTimer = 0; this._finalAfterglowTimer = 0;
@@ -589,6 +593,10 @@ export class PostEdictDirector {
   get active(): boolean { return this._active; }
   get allComplete(): boolean { return this._allComplete; }
   get isRunning(): boolean { return this._active && !this._allComplete; }
+  /** 0807-11D-6H: P3已完成且所有pulse已发出, 可交接精英 */
+  get p3HandoffReady(): boolean { return this._p3HandoffReady && !this._p3HandoffTriggered; }
+  /** 0807-11D-6H: 标记交接已消费(禁止重复) */
+  consumeHandoff(): void { this._p3HandoffTriggered = true; }
 
   get currentPhase(): DirectorPhase | null {
     if (!this._active || this._beatIndex >= this.beats.length) return null;
@@ -775,7 +783,10 @@ export class PostEdictDirector {
     const mb = beat.microBatches[this._microBatchIndex];
     // 0807-11D-6C: rapidPulse — 拆成连续脉冲请求
     if (mb.rapidPulse) {
-      return this._spawnRapidPulseBatch(mb, beat, phase, elapsedMs);
+      const result = this._spawnRapidPulseBatch(mb, beat, phase, elapsedMs);
+      // 0807-11D-6H: rapidPulse beat完成时检查P3交接
+      if (beat.phase === 'P3') { const n = this._beatIndex + 1; if (n >= this.beats.length || this.beats[n].phase !== 'P3') this._p3HandoffReady = true; }
+      return result;
     }
     const mbIdx = this._microBatchIndex; // 递增前锁定，与_makeItems对齐
     this._microBatchIndex += 1;
@@ -827,7 +838,10 @@ export class PostEdictDirector {
     this._phaseGenerated += items.length;
     this._lastReason = `spawn_${mbId}`;
 
-    if (this._microBatchIndex >= beat.microBatches.length) this._nextState = 'READY';
+    if (this._microBatchIndex >= beat.microBatches.length) {
+      this._nextState = 'READY';
+      if (beat.phase === 'P3') { const n = this._beatIndex + 1; if (n >= this.beats.length || this.beats[n].phase !== 'P3') this._p3HandoffReady = true; }
+    }
     return [{ phase: beat.phase, items }];
   }
 
@@ -877,7 +891,10 @@ export class PostEdictDirector {
     this._lastReason = `bridge_${mbId}`;
 
     const items = this._makeItems(mb, beat, phase, bridgeMbIdx);
-    if (this._microBatchIndex >= beat.microBatches.length) this._nextState = 'READY';
+    if (this._microBatchIndex >= beat.microBatches.length) {
+      this._nextState = 'READY';
+      if (beat.phase === 'P3') { const n = this._beatIndex + 1; if (n >= this.beats.length || this.beats[n].phase !== 'P3') this._p3HandoffReady = true; }
+    }
     return [{ phase: beat.phase, items, consumedMicroBatchId: mbId }];
   }
 
@@ -974,6 +991,7 @@ export class PostEdictDirector {
     this._phaseGenerated = 0;
     this._phaseBridgeCount = 0;
     this._lastP3Band = null; this._recentBottomCount = 0; // 0807-11D-6G-2
+    this._p3HandoffReady = false; this._p3HandoffTriggered = false; // 0807-11D-6H
     this._bridgeMicroBatchId = null;
     this._bridgeBeatIdx = -1;
     this._lastMbTime = 0;

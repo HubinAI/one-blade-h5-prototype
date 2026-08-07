@@ -11713,8 +11713,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (this.eliteSpawned || !this.level.eliteSpawnAt || !this.level.eliteKind) return;
     if (!this.allNormalWavesSpawned) { this._eliteGateReason = 'no(not_all_waves)'; this._lastEliteGateBlocked = true; return; }
     // V0803036+0803039: 军令后验证潮 — 导演优先检查
-    // 0807-11D: 导演运行中时禁止精英
-    if (postEdictDirector.active && postEdictDirector.isRunning) {
+    // 0807-11D: 导演运行中时禁止精英(handoff允许)
+    if (postEdictDirector.active && postEdictDirector.isRunning && !postEdictDirector.p3HandoffReady) {
       this._eliteGateReason = 'no(director_running)'; this._lastEliteGateBlocked = true; return;
     }
     const hasPostWaves = this.getEffectivePostChestWaves().length > 0;
@@ -11727,9 +11727,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._eliteGateReason = `yes(state=${this.postChestSequenceState})`; this._lastEliteGateBlocked = false;
 
     // V0801008: 统一清场后0.6s精英入场（全关卡，覆盖spawnAt）
+    // 0807-11D-6H: P3 handoff 忽略 alive 检查
+    const handoff = postEdictDirector.p3HandoffReady;
     const aliveEnemies = this.enemies.filter(e => e.alive).length;
-    if (aliveEnemies > 0 || this.subSpawnQueue.length > 0) return;
-    if (this._eliteClearanceAt === 0) { this._eliteClearanceAt = this.elapsed; return; }
+    if (!handoff && (aliveEnemies > 0 || this.subSpawnQueue.length > 0)) return;
+    if (this._eliteClearanceAt === 0) { this._eliteClearanceAt = this.elapsed; if (handoff) postEdictDirector.consumeHandoff(); return; }
     if (this.elapsed - this._eliteClearanceAt < 0.6) {
       if (!this.elitePreviewShown) {
         this.elitePreviewShown = true;

@@ -281,3 +281,26 @@ describe('0807-11D-6G-2 P3纵向band', () => {
     }
   });
 });
+
+describe('0807-11D-6H P3→精英交接', () => {
+  it('P3完成时handoffReady=true', () => {
+    const d = new PostEdictDirector(); d.start(); let ms = 0, found = false;
+    for (let i = 0; i < 5000; i++) { ms += 500; const reqs = tick(d, 0.5, 0, 0, 0, 0, ms, 0, 0, 0, 0); if (d.p3HandoffReady) { found = true; break; } if (!d.active && d.allComplete) break; }
+    expect(found).toBe(true);
+  });
+  it('consumeHandoff后不再ready', () => {
+    const d = new PostEdictDirector(); d.start(); let ms = 0;
+    for (let i = 0; i < 5000; i++) { ms += 500; tick(d, 0.5, 0, 0, 0, 0, ms, 0, 0, 0, 0); if (d.p3HandoffReady) d.consumeHandoff(); if (!d.active && d.allComplete) break; }
+    expect(d.p3HandoffReady).toBe(false);
+  });
+  it('start()重置handoff', () => {
+    const d = new PostEdictDirector(); d.start(); let ms = 0;
+    for (let i = 0; i < 5000; i++) { ms += 500; tick(d, 0.5, 0, 0, 0, 0, ms, 0, 0, 0, 0); if (!d.active && d.allComplete) break; }
+    d.start(); expect(d.p3HandoffReady).toBe(false);
+  });
+  it('P2进行时handoffNotReady', () => {
+    const d = new PostEdictDirector(); d.start(); let ms = 0;
+    for (let i = 0; i < 2000; i++) { ms += 100; tick(d, 0.5, 0, 0, 0, 0, ms, 0, 0, 0, 0); }
+    expect(d.p3HandoffReady).toBe(false);
+  });
+});
