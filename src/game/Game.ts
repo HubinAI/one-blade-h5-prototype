@@ -172,10 +172,12 @@ export class Game {
   private _burstRemaining = 0;  // 爆发倒计时(秒)
   private _burstFadeoutTimer = 0; // 视觉退场计时
   private _burstEnding = false; // Final: 末刀完成标志
-  /** 0807-11D-4C: 本刀唯一命中敌人数 */
-  private _slashUniqueHitIds: Set<string> = new Set();
+  /** 0807-11D-4C: 本刀直接命中敌人数 */
+  private _slashDirectHitIds: Set<string> = new Set();
   private _lastSlashUniqueHits = 0;
-  private _lastSlashMomentumDelta = 0;
+  private _lastSlashMomentumDelta = 0;  
+  /** 0807-11D-5B: 本轮重复拦截数 */
+  private _directHitDedupCount = 0;
   /** V0723014: Reactive 模式肉鸽修正器 */
   private reactiveBladeRunModifiers: BladeRunModifiers = { ...DEFAULT_BLADE_RUN_MODIFIERS };
   /** V0730001: 统一刀势上限（普通关用，默认 100，可成长） */
@@ -1992,9 +1994,10 @@ export class Game {
     // 0807-11D-4B: armed → bursting
     if (this._momentumState === 'armed') { this._momentumState = 'bursting'; this._burstRemaining = 5.0; }
     // 0807-11D-4C: 清空本刀命中计数
-    this._slashUniqueHitIds = new Set();
+    this._slashDirectHitIds = new Set();
     this._lastSlashUniqueHits = 0;
     this._lastSlashMomentumDelta = 0;
+    this._directHitDedupCount = 0;
     const lockedEnergy = pending ? pending.lockedEnergy : clamp(this.energy, 0, BALANCE.swordEnergy.max);
     // V0723014-Final.1 P0-1: Reactive 模式起刀时继承 pending.lockedMomentum（PointerDown 时锁定）。
     // 禁止重新调用 this.getReactiveBladeMomentum()，避免 pending 期间 max 变化导致快照不一致。
@@ -2203,6 +2206,8 @@ export class Game {
             const dot=abx*abx+aby*aby; if(dot<1)continue;
             const tt=clamp(-(eax*abx+eay*aby)/dot,0,1);
             if(Math.sqrt((a.x+abx*tt-enemy.x)**2+(a.y+aby*tt-enemy.y)**2)>rad)continue;
+            // 0807-11D-5B: 三刀流去重 — 主刀已伤的敌人不再吃三刀伤害
+            if (this.isLogicalLevel1() && this._slashDirectHitIds.has(enemy.id)) continue;
             this._tripleSlashHitEnemyIds.add(enemy.id);
             const r = resolveDamage({actionId:this.nextId("dmg"),parentActionId:t.id,sourceType:"TRIPLE_DERIVED_1",sourceConfig:DAMAGE_SOURCE_REGISTRY.MAIN_SLASH,attackerId:"player",targetId:enemy.id,targetCategory:"ENEMY",skillCoefficient:DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient,stats:t._damageSnapshot!,bladeBand:"mid",tags:["triple"],hitPos:{x:enemy.x,y:enemy.y},timestamp:this.elapsed,targetDirectorEntryState:enemy._directorEntryState},enemy.hp,enemy.maxHp,enemy.alive,!!enemy.eliteKind);
             if(r?.isAccepted&&r.resolvedDamage>0){this.damageEnemy(enemy,r.resolvedDamage,t,false,"triple");this.aggregateAndMaybeFlush(`${t.id}_${enemy.id}`,r.resolvedDamage,{x:enemy.x,y:enemy.y},'TRIPLE_DERIVED_1','ENEMY',100,t._damageSnapshot!.entryAttack,false,false);}
@@ -2312,7 +2317,7 @@ export class Game {
       // V0730015: 统一结算改用 directMainKills（不含连锁/爆炸/副刀）
       const hitCount = trail.directMainKills;
       // 0807-11D-4C: 基于唯一命中数统一结算
-      const uniqueHits = this._slashUniqueHitIds.size;
+      const uniqueHits = this._slashDirectHitIds.size;
       this._lastSlashUniqueHits = uniqueHits;
       const netDelta = uniqueHits === 0 ? -8 : uniqueHits <= 2 ? 4 : uniqueHits <= 5 ? 8 : 12;
       this._lastSlashMomentumDelta = netDelta;
@@ -4042,8 +4047,13 @@ export class Game {
 
     if (enemy.kind === "infantry") {
       if (!isEnemyCombatTargetable(enemy)) return; // 0807-11D-3G: 影化不可战斗
+      // 0807-11D-5B: 本刀去重 — 同一敌人只结算1次直接伤害
+      if (this.isLogicalLevel1() && this._slashDirectHitIds.has(enemy.id)) {
+        this._directHitDedupCount++;
+        return;
+      }
       // 0807-11D-4C: 本刀唯一命中统计
-      this._slashUniqueHitIds.add(enemy.id);
+      this._slashDirectHitIds.add(enemy.id);
       // 0807-11B-1: 统一伤害 — 真实HP结算
       const stats = trail._damageSnapshot ?? this.captureDamageSnapshot();
       const req: DamageRequest = {
