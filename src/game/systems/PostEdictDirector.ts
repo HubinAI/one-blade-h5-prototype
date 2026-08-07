@@ -1,9 +1,8 @@
 /**
- * 0807-11D-2 导演不变量收口与纵向通解修正
+ * 0807-11D-6G 注意力迁移与节奏梯度重构
  *
- * D=125, HP: trash=100(0.80D), tough=170(1.36D), wall=260(2.08D)
- * 总量 164: trash=84, tough=68, wall=12 (P1=36, P2=56, P3=72)
- * P1=64(5beats,all trash) P2=56(5beats,32+24) P3=72(6beats,16+44+12)
+ * P1=36(3beats, all trash) P2=40(5beats) P3=44(6beats rapidPulse)
+ * total=120
  */
 
 import { BATTLEFIELD_ZONES, BATTLE_SAFE_X } from '../config/balance';

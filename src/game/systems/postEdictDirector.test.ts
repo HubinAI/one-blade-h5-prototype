@@ -8,7 +8,7 @@ const tick = (d: PostEdictDirector, dt=0.016, aliveInZone=0, aliveTotal=0, appro
   d.tick(dt, aliveInZone, aliveTotal, approachingCount, queueLen, elapsedMs, beatS, beatA, beatC, beatAlive);
 
 describe('总量与档位', () => {
-  it('P1=36 P2=56 P3=72 total=164', () => {
+  it('P1=36 P2=40 P3=44 total=120', () => {
     expect(PHASES.P1.totalEnemies).toBe(36);
     expect(PHASES.P2.totalEnemies).toBe(40);
     expect(PHASES.P3.totalEnemies).toBe(44);

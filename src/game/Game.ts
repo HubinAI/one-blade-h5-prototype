@@ -4713,6 +4713,11 @@ export class Game {
             const dist = Math.hypot(dx, dy);
             (enemy as any)._shadowMoveDuration = Math.min(SHADOW_MOVE_DURATION_MAX,
               Math.max(SHADOW_MOVE_DURATION_MIN, dist / SHADOW_SPEED_REF));
+            // 0807-11D-6G: P2影子移动加速
+            if ((enemy as any)._dirPhase === 'P2') {
+              (enemy as any)._shadowMoveDuration =
+                Math.max(0.55, Math.min(0.70, dist / (SHADOW_SPEED_REF * 1.5)));
+            }
           }
           const moveDur = (enemy as any)._shadowMoveDuration || SHADOW_MOVE_DURATION;
           // 错峰延迟
