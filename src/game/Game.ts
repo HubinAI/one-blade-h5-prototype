@@ -8292,20 +8292,21 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     isKill: boolean,
     options?: { sourceType?: string; isDot?: boolean; isDerived?: boolean; sizeMultiplier?: number; priorityOverlay?: FloatPriority; duration?: number; }
   ): void {
-    // 0807-11E-1C: MAIN_SLASH 直接同步反馈(废弃80ms timer簇)
+    // 0807-11E-1C-1: MAIN_SLASH 直接addCombatFloat(D0~D6分层)
     if (options?.sourceType === 'MAIN_SLASH' && !options?.isDot && !options?.isDerived) {
       this._comboCount += 1; this._comboResetTimer = 0; this._comboHitFlash = 0.15; this._comboScale = 1.18;
       const isElite = targetType === 'ELITE' || targetType === 'BOSS';
-      // 精英: 每手势独立直接数字
-      if (isElite) {
-        this.addText(x, y - 14, `${Math.round(damage)}`, "#ffd35a", 21, 0.65);
-        return;
-      }
-      // 普通敌人: 前6个唯一目标
-      if (this._mainDirectFloatCount < 6) {
-        this._mainDirectFloatCount++;
-        this.addText(x, y - 14, `${Math.round(damage)}`, "#fff", 18, 0.55);
-      }
+      const ratioR = referenceAttack > 0 ? damage / referenceAttack : 0;
+      const tier = resolveDamageTier(ratioR);
+      const minSize = isElite ? 21 : 18;
+      const minDur = isElite ? 0.60 : 0.50;
+      const sz = Math.max(minSize, tier.fontSize);
+      const dur = Math.max(minDur, tier.duration);
+      const prio = isElite ? 'A' as const : tier.tier === 'D4' || tier.tier === 'D5' || tier.tier === 'D6' ? 'B' as const : 'B' as const;
+      // 普通上限6
+      if (!isElite && this._mainDirectFloatCount >= 6) return;
+      if (!isElite) this._mainDirectFloatCount++;
+      this.addCombatFloat({ x, y: y - 14, text: `${Math.round(damage)}`, color: tier.baseColor, size: sz, duration: dur, category: "damage", priority: prio });
       return;
     }
     const ratioR = referenceAttack > 0 ? damage / referenceAttack : 0;
