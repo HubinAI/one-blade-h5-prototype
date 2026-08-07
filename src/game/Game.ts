@@ -4106,6 +4106,7 @@ export class Game {
 
     if (enemy.kind === "powder") {
       enemy.ignited = true;
+      (enemy as any)._ignitedAt = (enemy as any)._ignitedAt ?? this.elapsed; // 0807-11D-6F-3
       trail.pendingExplosionIds.add(enemy.id);
       this.score += 4;
       this.addText(enemy.x, enemy.y - 18, "点燃", "#ffb15c", 14);
@@ -4351,27 +4352,29 @@ export class Game {
         AudioService.explosion();
 
         const radius = (ENEMY_BALANCE.powder.explosionRadius ?? 85) * stage.explosionRadiusMultiplier * this.getExplosionRadiusMultiplier();
-        // 0807-11D-6F-1: 三层爆炸视觉
+        // 0807-11D-6F-3: 三层强化爆炸
         const expX = enemy.x, expY = enemy.y;
-        // 1. 核心闪光 (0~0.08s)
-        this.particles.push(glowParticle({ x: expX, y: expY }, "#ffffdd", 0.08, 36));
-        this.particles.push(glowParticle({ x: expX, y: expY }, "#ffd67c", 0.10, 28));
-        // 2. 冲击波环 (0.04~0.22s, 扩张)
-        this._explosionShockwaves.push({ x: expX, y: expY, startTime: this.elapsed, maxRadius: radius * 1.0, color: "#ff6622" });
-        // 3. 放射状火星+碎片 (0.05~0.30s)
-        const burstCount = 22;
+        // 1. 核心: 白黄双环闪光 0.04~0.10s
+        this.particles.push(glowParticle({ x: expX, y: expY }, "#ffffff", 0.06, 44));
+        this.particles.push(glowParticle({ x: expX, y: expY }, "#ffdd88", 0.08, 34));
+        this.particles.push(glowParticle({ x: expX, y: expY }, "#ffaa44", 0.12, 24));
+        // 2. 冲击波: 双环 (内环强+外环薄)
+        this._explosionShockwaves.push({ x: expX, y: expY, startTime: this.elapsed, maxRadius: radius * 0.85, color: "#ff4400" });
+        this._explosionShockwaves.push({ x: expX, y: expY, startTime: this.elapsed + 0.02, maxRadius: radius * 1.05, color: "#ff8844" });
+        // 3. 放射火星+碎片+纸片
+        const burstCount = 30;
         for (let j = 0; j < burstCount; j++) {
-          const angle = (j / burstCount) * Math.PI * 2;
-          const speed = 80 + Math.random() * 160;
-          const life = 0.12 + Math.random() * 0.18;
-          this.particles.push(radialSparks({ x: expX, y: expY }, angle, speed, life, "#ff8c28"));
+          const angle = (j / burstCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
+          const speed = 100 + Math.random() * 200;
+          const life = 0.10 + Math.random() * 0.22;
+          this.particles.push(radialSparks({ x: expX, y: expY }, angle, speed, life, j % 3 === 0 ? "#ffcc44" : "#ff6622"));
         }
         // 纸片碎片
-        for (let j = 0; j < 10; j++) {
+        for (let j = 0; j < 14; j++) {
           const angle = Math.random() * Math.PI * 2;
-          const speed = 100 + Math.random() * 200;
-          const life = 0.15 + Math.random() * 0.15;
-          this.particles.push(radialSparks({ x: expX, y: expY }, angle, speed, life, "#ffbb44"));
+          const speed = 120 + Math.random() * 240;
+          const life = 0.12 + Math.random() * 0.18;
+          this.particles.push(radialSparks({ x: expX, y: expY }, angle, speed, life, "#ffbb55"));
         }
         this.screenShake = Math.max(this.screenShake, 0.65);
         this.flash = Math.max(this.flash, 0.55);
@@ -9807,30 +9810,39 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       }
 
       if (enemy.kind === "powder") {
-        // 0807-11D-6F-2: 火药兵"爆"字，橙黄/赭橙，点燃呼吸+爆发闪
+        // 0807-11D-6F-3: 递增预警 — 呼吸加速→颜色漂白→缩放增强
         const ignited = enemy.ignited;
-        const breath = ignited ? 0.6 + Math.sin(this.elapsed * 6) * 0.4 : 1;
-        const pFlash = ignited ? `rgba(255, 220, 100, ${breath * breath})` : "#f0a235";
-        ctx.fillStyle = pFlash;
-        ctx.font = `800 ${enemy.radius * 1.75}px "Microsoft YaHei", "SimHei", sans-serif`;
+        const ignitedAt = (enemy as any)._ignitedAt as number || 0;
+        const warnTime = ignited ? this.elapsed - ignitedAt : 0;
+        // 0~0.5s: 慢吸, 0.5~1.2s: 加速, 1.2s+: 急速频闪
+        const urgency = Math.min(warnTime / 1.2, 1);
+        const freq = 3 + urgency * 8; // 3Hz→11Hz
+        const breath = 0.5 + Math.sin(this.elapsed * freq) * 0.5;
+        const scale = ignited ? 1 + breath * 0.18 * (1 + urgency) : 1;
+        // 颜色: 赭橙→橙黄→白黄
+        const r = 240 - urgency * 15;
+        const g = 160 - urgency * 20 + breath * 40;
+        const b = 50 + urgency * 40 + breath * 80;
+        ctx.fillStyle = ignited ? `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},1)` : "#f0a235";
+        ctx.font = `800 ${enemy.radius * 1.75 * scale}px "Microsoft YaHei", "SimHei", sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        // 引爆前瞬间白黄闪
+        // 引爆前白黄闪 + 阴影辉光
         if (ignited) {
-          ctx.shadowColor = `rgba(255, 180, 40, ${0.3 + breath * 0.6})`;
-          ctx.shadowBlur = 8 + breath * 6;
+          ctx.shadowColor = `rgba(255, ${180 - urgency * 40}, 30, ${0.2 + breath * 0.7})`;
+          ctx.shadowBlur = 6 + urgency * 12 + breath * 8;
           ctx.shadowOffsetY = 2;
         }
         ctx.fillText("爆", 0, 0);
-        // 点燃状态火花
+        // 火花
         if (ignited) {
           ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-          const sparkCount = 4;
+          const sparkCount = 4 + Math.floor(urgency * 3);
           for (let i = 0; i < sparkCount; i++) {
-            const a = this.elapsed * 4 + i * 1.6;
+            const a = this.elapsed * (4 + urgency * 3) + i * 1.6;
             const sx = Math.cos(a) * enemy.radius * 0.9;
             const sy = Math.sin(a + 1) * enemy.radius * 0.7 - 2;
-            ctx.fillStyle = `rgba(255, 150, 40, ${0.4 + Math.sin(this.elapsed * 6 + i) * 0.4})`;
+            ctx.fillStyle = `rgba(255, ${150 - urgency * 40}, 30, ${0.3 + Math.sin(this.elapsed * 6 + i) * 0.5})`;
             ctx.beginPath();
             ctx.arc(sx, sy, 3.5, 0, Math.PI * 2);
             ctx.fill();
