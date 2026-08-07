@@ -101,3 +101,52 @@ describe('桥接保留档位', () => {
     for(let i=0;i<2000;i++){ms+=50;const reqs=tick(d,0.05,0,0,0,0,ms,0,0,0,0);for(const r of reqs){for(const item of r.items){if(r.consumedMicroBatchId){expect(item.hpTier).toBeDefined();expect(item.formationId).toBeTruthy();}}}}
   });
 });
+
+describe('0807-11D-6F-4 引信与爆炸', () => {
+  it('火药兵生成后有enemyKind=powder', () => {
+    const d = new PostEdictDirector(); d.start();
+    let ms = 0; let foundPowder = false;
+    for (let i = 0; i < 5000; i++) {
+      ms += 500;
+      const reqs = tick(d, 0.5, 0, 0, 0, 0, ms, 0, 0, 0, 0);
+      for (const r of reqs) {
+        for (const item of r.items) {
+          if (item.enemyKind === 'powder') { foundPowder = true; expect(item.hpTier).toBe('tough'); }
+        }
+      }
+      if (!d.active && d.allComplete) break;
+    }
+    expect(foundPowder).toBe(true);
+  });
+
+  it('火药兵总数=3', () => {
+    const d = new PostEdictDirector(); d.start();
+    let ms = 0; let powderCount = 0;
+    for (let i = 0; i < 5000; i++) {
+      ms += 500;
+      const reqs = tick(d, 0.5, 0, 0, 0, 0, ms, 0, 0, 0, 0);
+      for (const r of reqs) {
+        for (const item of r.items) {
+          if (item.enemyKind === 'powder') powderCount++;
+        }
+      }
+      if (!d.active && d.allComplete) break;
+    }
+    expect(powderCount).toBe(3);
+  });
+
+  it('火药兵spawnInPlace=true', () => {
+    const d = new PostEdictDirector(); d.start();
+    let ms = 0;
+    for (let i = 0; i < 5000; i++) {
+      ms += 500;
+      const reqs = tick(d, 0.5, 0, 0, 0, 0, ms, 0, 0, 0, 0);
+      for (const r of reqs) {
+        for (const item of r.items) {
+          if (item.enemyKind === 'powder') expect(item.spawnInPlace).toBe(true);
+        }
+      }
+      if (!d.active && d.allComplete) break;
+    }
+  });
+});

@@ -276,6 +276,13 @@ export type Enemy = {
   _condenseTotalTime?: number; // 0807-11D-6B: P3原地凝实时长
   _directorTargetX?: number;
   _directorTargetY?: number;
+  /** 0807-11D-6F-4: 引信状态 */
+  _fuseState?: 'idle' | 'arming' | 'detonating' | 'detonated';
+  _fuseTimer?: number;
+  _fusePhaseA?: number; _fusePhaseB?: number; _fusePhaseC?: number; // 三阶段视觉
+  _fuseDetonated?: boolean; // 单次爆炸锁定
+  _fuseTargetX?: number; _fuseTargetY?: number; // 击退目标
+  _fuseKnockbackSpeed?: number; // 击退速度
   _dirBeatId?: string;
   _dirHpTier?: string;
   _dirFormationId?: string;

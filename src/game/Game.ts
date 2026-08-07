@@ -1084,6 +1084,7 @@ export class Game {
     this.chestDone = false; this.chestDropped = false; this.chestDropX = 0; this.chestDropY = 0;
     this.finished = false; this.phase = "playing"; this.battlePhase = "main_waves";
     this.enemies = []; this.subSpawnQueue = []; this.particles = [];
+    this._explosionShockwaves = []; // 0807-11D-6F-4
     this.currentSlash = undefined; this.splitFlashes = [];
     this.screenShake = 0; this.flash = 0; this.hitStopTimer = 0; this.slowMoTimer = 0;
     this.pointerDown = false;
@@ -1319,6 +1320,7 @@ export class Game {
 
     this.updateActiveSlash(scaledDt);
     this.updateEnemies(scaledDt);
+    this._updateFuseEnemies(scaledDt); // 0807-11D-6F-4
     this.updatePickups(scaledDt);
     this.updateParticles(scaledDt);
     this.updateTexts(scaledDt);
@@ -4105,9 +4107,11 @@ export class Game {
     }
 
     if (enemy.kind === "powder") {
-      enemy.ignited = true;
-      (enemy as any)._ignitedAt = (enemy as any)._ignitedAt ?? this.elapsed; // 0807-11D-6F-3
-      trail.pendingExplosionIds.add(enemy.id);
+      // 0807-11D-6F-4: 启动引信替代立即加入爆炸队列
+      if (!enemy._fuseDetonated && enemy._fuseState !== 'arming') {
+        enemy._fuseState = 'arming'; enemy._fuseTimer = 0;
+        enemy.ignited = true; (enemy as any)._ignitedAt = this.elapsed;
+      }
       this.score += 4;
       this.addText(enemy.x, enemy.y - 18, "点燃", "#ffb15c", 14);
       this.showHint("powder-hit", "收刀引爆火药", enemy.x, Math.max(110, enemy.y - 38), 2);
@@ -6911,6 +6915,99 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       if (enemy.kind === "splitter") this.updateSplitterEnemy(enemy, dt);
       if (enemy.kind === "tractor") this.updateTractorEnemy(enemy, dt);
     }
+  }
+
+  /** 0807-11D-6F-4: 引信更新与引爆 */
+  private _updateFuseEnemies(dt: number) {
+    for (const enemy of this.enemies) {
+      if (enemy.kind !== 'powder' || !enemy.alive || enemy._fuseDetonated) continue;
+      if (enemy._fuseState === 'arming') {
+        enemy._fuseTimer = (enemy._fuseTimer || 0) + dt;
+        const t = enemy._fuseTimer;
+        // 三阶段视觉标记
+        enemy._fusePhaseA = Math.min(1, t / 0.40);
+        enemy._fusePhaseB = Math.min(1, Math.max(0, (t - 0.40) / 0.32));
+        enemy._fusePhaseC = Math.min(1, Math.max(0, (t - 0.72) / 0.18));
+        if (t >= 0.90) {
+          // 引爆
+          enemy._fuseState = 'detonating'; enemy._fuseDetonated = true;
+          this._detonatePowder(enemy);
+        }
+      }
+    }
+    // 处理击退动画
+    for (const enemy of this.enemies) {
+      if (!enemy._fuseTargetX) continue;
+      const dx = enemy._fuseTargetX - enemy.x;
+      const dy = enemy._fuseTargetY! - enemy.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 1) { enemy._fuseTargetX = undefined; continue; }
+      const speed = (enemy._fuseKnockbackSpeed || 300) * dt;
+      const step = Math.min(speed, dist);
+      enemy.x += (dx / dist) * step;
+      enemy.y += (dy / dist) * step;
+    }
+  }
+
+  /** 0807-11D-6F-4: 引爆火药兵 */
+  private _detonatePowder(enemy: Enemy) {
+    enemy._fuseState = 'detonated';
+    const radius = (ENEMY_BALANCE.powder.explosionRadius ?? 85);
+    const expX = enemy.x, expY = enemy.y;
+    // 爆炸视觉 (复用6F-3的核心+冲击波+放射)
+    this.particles.push(glowParticle({ x: expX, y: expY }, "#ffffff", 0.06, 44));
+    this.particles.push(glowParticle({ x: expX, y: expY }, "#ffdd88", 0.08, 34));
+    this.particles.push(glowParticle({ x: expX, y: expY }, "#ffaa44", 0.12, 24));
+    this._explosionShockwaves.push({ x: expX, y: expY, startTime: this.elapsed, maxRadius: radius * 0.85, color: "#ff4400" });
+    this._explosionShockwaves.push({ x: expX, y: expY, startTime: this.elapsed + 0.02, maxRadius: radius * 1.05, color: "#ff8844" });
+    for (let j = 0; j < 30; j++) {
+      const a = (j / 30) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
+      this.particles.push(radialSparks({ x: expX, y: expY }, a, 100 + Math.random() * 200, 0.10 + Math.random() * 0.22, j % 3 === 0 ? "#ffcc44" : "#ff6622"));
+    }
+    for (let j = 0; j < 14; j++) {
+      this.particles.push(radialSparks({ x: expX, y: expY }, Math.random() * Math.PI * 2, 120 + Math.random() * 240, 0.12 + Math.random() * 0.18, "#ffbb55"));
+    }
+    this.screenShake = Math.max(this.screenShake, 0.65);
+    this.flash = Math.max(this.flash, 0.55);
+    this.stats.explosions += 1;
+    AudioService.explosion();
+    // 敌人伤害+击退
+    for (const target of this.enemies) {
+      if (!target.alive || target.id === enemy.id) continue;
+      const d = distance(target, enemy);
+      if (d > radius) continue;
+      const damage = ENEMY_BALANCE.powder.explosionDamage ?? 1;
+      this.damageEnemy(target, damage, undefined as any, true, "powder");
+      // 击退
+      const angle = Math.atan2(target.y - expY, target.x - expX);
+      const knockDist = 70 + (1 - d / radius) * 40;
+      target._fuseTargetX = target.x + Math.cos(angle) * knockDist;
+      target._fuseTargetY = target.y + Math.sin(angle) * knockDist;
+      target._fuseKnockbackSpeed = 350;
+      this.particles.push(
+        ...sparkBurst({ x: target.x, y: target.y }, 3, "#ff8c28", 8),
+        glowParticle({ x: target.x, y: target.y }, "#ffaa44", 0.08, 6),
+      );
+    }
+    // 链式反应
+    for (const target of this.enemies) {
+      if (!target.alive || target.kind !== 'powder' || target.id === enemy.id) continue;
+      if (distance(target, enemy) > radius * 1.1) continue;
+      if (target._fuseDetonated || target._fuseState === 'arming') continue;
+      target._fuseState = 'arming'; target._fuseTimer = 0;
+      target.ignited = true; (target as any)._ignitedAt = this.elapsed;
+    }
+    // 玩家伤害
+    const px = this.pointerPos?.x ?? 0;
+    const py = this.pointerPos?.y ?? 0;
+    const pDist = Math.sqrt((px - expX) ** 2 + (py - expY) ** 2);
+    if (pDist <= radius) {
+      this.hp = Math.max(0, this.hp - 15);
+      this.flash = Math.max(this.flash, 0.8);
+      this.screenShake = Math.max(this.screenShake, 0.5);
+      this.addText(px, py - 20, "-15", "#ff4444", 18);
+    }
+    this.killEnemy(enemy, undefined as any, true, "powder");
   }
 
   /** P3：分裂兵逻辑 */
@@ -9810,45 +9907,49 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       }
 
       if (enemy.kind === "powder") {
-        // 0807-11D-6F-3: 递增预警 — 呼吸加速→颜色漂白→缩放增强
+        // 0807-11D-6F-4: 三阶段引信递增预警
         const ignited = enemy.ignited;
-        const ignitedAt = (enemy as any)._ignitedAt as number || 0;
-        const warnTime = ignited ? this.elapsed - ignitedAt : 0;
-        // 0~0.5s: 慢吸, 0.5~1.2s: 加速, 1.2s+: 急速频闪
-        const urgency = Math.min(warnTime / 1.2, 1);
-        const freq = 3 + urgency * 8; // 3Hz→11Hz
-        const breath = 0.5 + Math.sin(this.elapsed * freq) * 0.5;
-        const scale = ignited ? 1 + breath * 0.18 * (1 + urgency) : 1;
-        // 颜色: 赭橙→橙黄→白黄
-        const r = 240 - urgency * 15;
-        const g = 160 - urgency * 20 + breath * 40;
-        const b = 50 + urgency * 40 + breath * 80;
-        ctx.fillStyle = ignited ? `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},1)` : "#f0a235";
-        ctx.font = `800 ${enemy.radius * 1.75 * scale}px "Microsoft YaHei", "SimHei", sans-serif`;
+        const t = enemy._fuseTimer || 0;
+        const phaseA = enemy._fusePhaseA || 0; // 0~1
+        const phaseB = enemy._fusePhaseB || 0;
+        const phaseC = enemy._fusePhaseC || 0;
+        const inFuse = enemy._fuseState === 'arming';
+        if (inFuse) {
+          // 临界压缩: 最后0.08s缩小
+          const compress = t > 0.82 ? Math.min(1, (t - 0.82) / 0.08) : 0;
+          const freq = 2.5 + phaseB * 2.5 + phaseC * 5; // 2.5→5→10Hz
+          const breath = 0.5 + Math.sin(this.elapsed * freq * 6.28) * 0.5;
+          const scaleMax = 1.10 + phaseB * 0.12 + phaseC * 0.23; // 1.0→1.22→1.35
+          const scale = compress > 0
+            ? (1 + (scaleMax - 1) * breath) * (1 - compress * 0.18) // 压缩到0.82倍
+            : 1 + (scaleMax - 1) * breath;
+          const r = 240 - phaseC * 25;
+          const g = 160 - phaseC * 30 + breath * 50;
+          const b = 50 + phaseC * 60 + breath * 80;
+          ctx.fillStyle = `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},1)`;
+          ctx.font = `800 ${enemy.radius * 1.75 * scale}px "Microsoft YaHei", "SimHei", sans-serif`;
+          ctx.shadowColor = `rgba(255,${180-phaseC*50},30,${0.15+breath*0.8})`;
+          ctx.shadowBlur = 4 + phaseC * 18 + breath * 8;
+          ctx.shadowOffsetY = 2;
+        } else {
+          ctx.fillStyle = "#f0a235";
+          ctx.font = `800 ${enemy.radius * 1.75}px "Microsoft YaHei", "SimHei", sans-serif`;
+        }
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        // 引爆前白黄闪 + 阴影辉光
-        if (ignited) {
-          ctx.shadowColor = `rgba(255, ${180 - urgency * 40}, 30, ${0.2 + breath * 0.7})`;
-          ctx.shadowBlur = 6 + urgency * 12 + breath * 8;
-          ctx.shadowOffsetY = 2;
-        }
         ctx.fillText("爆", 0, 0);
         // 火花
-        if (ignited) {
+        if (inFuse) {
           ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-          const sparkCount = 4 + Math.floor(urgency * 3);
+          const sparkCount = 4 + Math.floor(phaseB * 3 + phaseC * 4);
           for (let i = 0; i < sparkCount; i++) {
-            const a = this.elapsed * (4 + urgency * 3) + i * 1.6;
+            const a = this.elapsed * (3 + phaseC * 6) + i * 1.6;
             const sx = Math.cos(a) * enemy.radius * 0.9;
             const sy = Math.sin(a + 1) * enemy.radius * 0.7 - 2;
-            ctx.fillStyle = `rgba(255, ${150 - urgency * 40}, 30, ${0.3 + Math.sin(this.elapsed * 6 + i) * 0.5})`;
-            ctx.beginPath();
-            ctx.arc(sx, sy, 3.5, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.fillStyle = `rgba(255,${150-phaseC*40},30,${0.3+Math.sin(this.elapsed*6+i)*0.5})`;
+            ctx.beginPath(); ctx.arc(sx, sy, 3.5, 0, Math.PI * 2); ctx.fill();
           }
-          ctx.shadowBlur = 6;
-          ctx.shadowOffsetY = 3;
+          ctx.shadowBlur = 4 + phaseC * 4; ctx.shadowOffsetY = 2;
         }
       }
 
