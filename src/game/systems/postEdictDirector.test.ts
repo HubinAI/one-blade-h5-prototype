@@ -8,15 +8,15 @@ const tick = (d: PostEdictDirector, dt=0.016, aliveInZone=0, aliveTotal=0, appro
   d.tick(dt, aliveInZone, aliveTotal, approachingCount, queueLen, elapsedMs, beatS, beatA, beatC, beatAlive);
 
 describe('总量与档位', () => {
-  it('P1=64 P2=56 P3=72 total=192', () => {
-    expect(PHASES.P1.totalEnemies).toBe(64);
+  it('P1=36 P2=56 P3=72 total=164', () => {
+    expect(PHASES.P1.totalEnemies).toBe(36);
     expect(PHASES.P2.totalEnemies).toBe(56);
     expect(PHASES.P3.totalEnemies).toBe(72);
-    expect(64+56+72).toBe(192);
+    expect(36+56+72).toBe(164);
   });
 
-  it('P1=5beat P2=5beat P3=6beat', () => {
-    expect(BEATS.filter(b=>b.phase==='P1').length).toBe(5);
+  it('P1=3beat P2=5beat P3=6beat', () => {
+    expect(BEATS.filter(b=>b.phase==='P1').length).toBe(3);
     expect(BEATS.filter(b=>b.phase==='P2').length).toBe(5);
     expect(BEATS.filter(b=>b.phase==='P3').length).toBe(6);
   });
@@ -27,13 +27,13 @@ describe('总量与档位', () => {
   it('压阵260 三刀', () => { expect(HP_TIERS.elite_wall.hp).toBe(260); expect(375>=260).toBe(true); });
 });
 
-describe('测试总量精确 192 (112+68+12)', () => {
+describe('测试总量精确 164 (84+68+12)', () => {
   it('精确生成所有敌人', () => {
     const d = new PostEdictDirector(); d.start();
     let trash=0, tough=0, wall=0, total=0, ms=0;
     for (let i=0; i<5000; i++) { ms+=500; const reqs=tick(d, 0.5, 0, 0, 0, 0, ms, 0, 0, 0, 0); for(const r of reqs) for(const item of r.items) { total++; if(item.hpTier==='trash') trash++; else if(item.hpTier==='tough') tough++; else wall++; } if(!d.active&&d.allComplete) break; }
-    expect(total).toBe(192);
-    expect(trash).toBe(112);
+    expect(total).toBe(164);
+    expect(trash).toBe(84);
     expect(tough).toBe(68);
     expect(wall).toBe(12);
   });

@@ -2,7 +2,7 @@
  * 0807-11D-2 导演不变量收口与纵向通解修正
  *
  * D=125, HP: trash=100(0.80D), tough=170(1.36D), wall=260(2.08D)
- * 总量 192: trash=112, tough=68, wall=12
+ * 总量 164: trash=84, tough=68, wall=12 (P1=36, P2=56, P3=72)
  * P1=64(5beats,all trash) P2=56(5beats,32+24) P3=72(6beats,16+44+12)
  */
 
@@ -390,7 +390,7 @@ interface DirectorBeat {
 // ═══════════════════ P1 P2 P3 节拍配置 ═══════════════════
 
 const BEATS: DirectorBeat[] = [
-  // ═══ P1: 5节拍 64全杂兵 ═══
+  // ═══ P1: 3节拍 36全杂兵（0807-11D-6A）═══
   {
     id: 'P1-1', phase: 'P1', notBeforeMs: 0,
     microBatches: [
@@ -399,31 +399,17 @@ const BEATS: DirectorBeat[] = [
     ],
   },
   {
-    id: 'P1-2', phase: 'P1', notBeforeMs: 1800,
+    id: 'P1-2', phase: 'P1', notBeforeMs: 1600,
     microBatches: [
-      { count: 7, tiers: [['trash',7]], formationId: 'back_wide',   xRange: X_WIDE,  row: 'back',  internalDelay: 0,    speedBonus: 0 },
-      { count: 6, tiers: [['trash',6]], formationId: 'back_wide',   xRange: X_WIDE,  row: 'back',  internalDelay: 0.32, speedBonus: 0 },
+      { count: 6, tiers: [['trash',6]], formationId: 'left_front',  xRange: X_LEFT,  row: 'mid',   internalDelay: 0,    speedBonus: 0 },
+      { count: 6, tiers: [['trash',6]], formationId: 'right_back',  xRange: X_RIGHT, row: 'mid',   internalDelay: 0.32, speedBonus: 0 },
     ],
   },
   {
-    id: 'P1-3', phase: 'P1', notBeforeMs: 3600,
+    id: 'P1-3', phase: 'P1', notBeforeMs: 3200,
     microBatches: [
-      { count: 6, tiers: [['trash',6]], formationId: 'left_high_diag',  xRange: X_LEFT,  row: 'front', internalDelay: 0,    speedBonus: 0 },
-      { count: 6, tiers: [['trash',6]], formationId: 'right_low_diag',  xRange: X_RIGHT, row: 'back',  internalDelay: 0.35, speedBonus: 0 },
-    ],
-  },
-  {
-    id: 'P1-4', phase: 'P1', notBeforeMs: 5400,
-    microBatches: [
-      { count: 6, tiers: [['trash',6]], formationId: 'right_high_diag', xRange: X_RIGHT, row: 'front', internalDelay: 0,    speedBonus: 0 },
-      { count: 7, tiers: [['trash',7]], formationId: 'left_low_diag',   xRange: X_LEFT,  row: 'back',  internalDelay: 0.32, speedBonus: 0 },
-    ],
-  },
-  {
-    id: 'P1-5', phase: 'P1', notBeforeMs: 7200,
-    microBatches: [
-      { count: 7, tiers: [['trash',7]], formationId: 'front_wide',     xRange: X_WIDE, row: 'front', internalDelay: 0,    speedBonus: 0 },
-      { count: 7, tiers: [['trash',7]], formationId: 'back_wide',      xRange: X_WIDE, row: 'back',  internalDelay: 0.28, speedBonus: 0 },
+      { count: 6, tiers: [['trash',6]], formationId: 'back_wide',   xRange: X_WIDE,  row: 'back',  internalDelay: 0,    speedBonus: 0 },
+      { count: 6, tiers: [['trash',6]], formationId: 'front_wide',  xRange: X_WIDE,  row: 'front', internalDelay: 0.30, speedBonus: 0 },
     ],
   },
 
@@ -522,7 +508,7 @@ interface PhaseConfig {
 }
 
 const PHASES: Record<DirectorPhase, PhaseConfig> = {
-  P1: { phase:'P1', totalEnemies:64, speedMul:1.00, targetOnScreen:[10,14], hardCap:16, approachCap:12 },
+  P1: { phase:'P1', totalEnemies:36, speedMul:1.00, targetOnScreen:[10,14], hardCap:16, approachCap:12 },
   P2: { phase:'P2', totalEnemies:56, speedMul:1.12, targetOnScreen:[14,18], hardCap:20, approachCap:14 },
   P3: { phase:'P3', totalEnemies:72, speedMul:1.25, targetOnScreen:[18,22], hardCap:24, approachCap:16 },
 };
