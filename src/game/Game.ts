@@ -226,7 +226,7 @@ export class Game {
     attackEndPos: Vec2;
   }[] = [];
   // 多波多次刷新队列：每个子刷新有时间戳，到时间就spawn
-  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; stageNode?: string; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number; isTailCatchup?: boolean; hpOverride?: number; dirPhase?: string; dirBeatId?: string; dirMbId?: string; dirHpTier?: string; dirFormationId?: string; entryTargetX?: number; entryEndYOverride?: number; shadowAnchorX?: number; shadowAnchorY?: number; shadowSkip?: boolean; spawnInPlace?: boolean }[] = [];
+  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; stageNode?: string; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number; isTailCatchup?: boolean; hpOverride?: number; dirPhase?: string; dirBeatId?: string; dirMbId?: string; dirHpTier?: string; dirFormationId?: string; entryTargetX?: number; entryEndYOverride?: number; shadowAnchorX?: number; shadowAnchorY?: number; shadowSkip?: boolean; spawnInPlace?: boolean; enemyKind?: string }[] = [];
 
   // 0807-11D-3: debug-only 手势伤害观测
   private _gestureObs?: { phase: string; toughHit: number; toughKill: number; wallHit: number; wallKill: number; hits: Record<string,number> };
@@ -6145,7 +6145,7 @@ export class Game {
       const item = req.items[i];
       this.subSpawnQueue.push({
         time: this.elapsed + (req.pulseDelayMs ?? 0) / 1000 + 0.02 + i * 0.01,
-        kind: 'infantry' as any,
+        kind: item.enemyKind ?? 'infantry',
         x: item.x,
         speedMultiplier: item.speedMul,
         yOffset: ENTRY_PROFILE_EDICT_BURST.spawnY - item.y,
@@ -6170,6 +6170,7 @@ export class Game {
         shadowAnchorY: item.anchorY,
         shadowSkip: item.skipShadow,
         spawnInPlace: item.spawnInPlace,
+        enemyKind: item.enemyKind,
       });
     }
   }

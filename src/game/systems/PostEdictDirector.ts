@@ -9,7 +9,8 @@
 import { BATTLEFIELD_ZONES, BATTLE_SAFE_X } from '../config/balance';
 import { randomRange } from '../../utils/math';
 
-const P3_ENTRY_END_Y = 520; // P3战斗区基准Y (替代ENTRY_PROFILE_EDICT_BURST.entryEndY)
+const P3_ENTRY_Y_MIN = BATTLEFIELD_ZONES.midfieldStartY + 35; // 385
+const P3_ENTRY_Y_MAX = BATTLEFIELD_ZONES.harvestEndY - 70;     // 630
 
 // ═══════════════════ 类型 ═══════════════════
 
@@ -32,6 +33,8 @@ export interface SpawnItem {
   placementMode?: 'clustered' | 'special';
   /** 0807-11D-6B: P3原地凝实 */
   spawnInPlace?: boolean;
+  /** 0807-11D-6D: 敌人类型 (默认infantry) */
+  enemyKind?: string;
 }
 
 export interface DirectorSpawnRequest {
@@ -386,6 +389,8 @@ interface MicroBatch {
   placementMode?: 'clustered' | 'special';
   /** 0807-11D-6C: 快速点刷 */
   rapidPulse?: true;
+  /** 0807-11D-6D: 分裂兵数量(从tough中替换) */
+  splitters?: number;
 }
 
 interface DirectorBeat {
@@ -478,7 +483,7 @@ const BEATS: DirectorBeat[] = [
     id: 'P3-3', phase: 'P3', notBeforeMs: 4800,
     microBatches: [
       { count: 6, tiers: [['trash',1],['tough',5]],           formationId: 'right_front',  xRange: X_RIGHT, row: 'front', internalDelay: 0,    speedBonus: 0 },
-      { count: 6, tiers: [['trash',1],['tough',4],['elite_wall',1]], formationId: 'left_back', xRange: X_LEFT, row: 'back', internalDelay: 0.30, speedBonus: 0, rapidPulse: true },
+      { count: 6, tiers: [['trash',1],['tough',4],['elite_wall',1]], formationId: 'left_back', xRange: X_LEFT, row: 'back', internalDelay: 0.30, speedBonus: 0, rapidPulse: true, splitters: 1 },
     ],
   },
   {
@@ -492,7 +497,7 @@ const BEATS: DirectorBeat[] = [
     id: 'P3-5', phase: 'P3', notBeforeMs: 9600,
     microBatches: [
       { count: 6, tiers: [['trash',1],['tough',3],['elite_wall',2]], formationId: 'right_slant_back', xRange: X_RIGHT, row: 'back',  internalDelay: 0,    speedBonus: 0 },
-      { count: 6, tiers: [['trash',0],['tough',4],['elite_wall',2]], formationId: 'scattered_walls',  xRange: X_WIDE,  row: 'mid',   internalDelay: 0.30, speedBonus: 0, rapidPulse: true },
+      { count: 6, tiers: [['trash',0],['tough',4],['elite_wall',2]], formationId: 'scattered_walls',  xRange: X_WIDE,  row: 'mid',   internalDelay: 0.30, speedBonus: 0, rapidPulse: true, splitters: 1 },
     ],
   },
   {
@@ -697,9 +702,15 @@ export class PostEdictDirector {
       const n = Math.min(1 + Math.floor(Math.random() * 3), remaining);
       pulses.push(n); remaining -= n;
     }
-    // 构建tier池
+    // 构建tier池, 分裂兵替换tough
     const tierPool: HpTier[] = [];
-    for (const [tier, n] of mb.tiers) for (let i = 0; i < n; i++) tierPool.push(tier);
+    let splitterPool = mb.splitters ?? 0;
+    for (const [tier, n] of mb.tiers) {
+      for (let i = 0; i < n; i++) {
+        if (tier === 'tough' && splitterPool > 0) { splitterPool--; tierPool.push('splitter' as any); }
+        else tierPool.push(tier);
+      }
+    }
     for (let i = tierPool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [tierPool[i], tierPool[j]] = [tierPool[j], tierPool[i]]; }
     let poolIdx = 0;
     let pulseDelayAccum = 0;
@@ -709,16 +720,17 @@ export class PostEdictDirector {
       for (let k = 0; k < pc; k++) {
         const tier = tierPool[poolIdx++ % tierPool.length];
         const x = mb.xRange[0] + Math.random() * (mb.xRange[1] - mb.xRange[0]);
-        const y = P3_ENTRY_END_Y + Math.random() * 60 - 30;
+        const y = P3_ENTRY_Y_MIN + Math.random() * (P3_ENTRY_Y_MAX - P3_ENTRY_Y_MIN);
+        const enemyKind = (tier as string) === 'splitter' ? 'splitter' : 'infantry';
         items.push({
           x: Math.round(x + (Math.random() - 0.5) * 6), y: y - 20,
           speedMul: phase.speedMul + mb.speedBonus,
-          hpTier: tier, hpOverride: HP_TIERS[tier].hp,
+          hpTier: (tier as string) === 'splitter' ? ('tough' as HpTier) : tier, hpOverride: HP_TIERS.tough.hp,
           formationId: mb.formationId,
           entryTargetX: Math.round(x), entryEndYOverride: Math.round(y),
           directorPhase: beat.phase, directorBeatId: mbId, directorMicroBatchId: `${mbId}_p${Math.round(pulseDelayAccum)}`,
           anchorId: mbId, anchorX: x, anchorY: y,
-          skipShadow: false, spawnInPlace: true,
+          skipShadow: false, spawnInPlace: true, enemyKind,
         });
       }
       this._phaseGenerated += items.length;
