@@ -5010,7 +5010,7 @@ export class Game {
           break;
         }
         case "ready": {
-          const validEnemies = this.enemies.filter(e => e.alive && e.y >= BATTLEFIELD_ZONES.midfieldStartY && e.y <= BALANCE.battlefield.bottomDefenseY - 30);
+          const validEnemies = this.enemies.filter(e => e.alive && e.y >= BATTLEFIELD_ZONES.midfieldStartY && e.y <= BALANCE.battlefield.bottomDefenseY - 30 && (e as any)._fuseState !== 'arming');
           // P4.1A.5: 最短Ready展示
           if (anim.phaseTimer < M.readyMinHold) {
             anim.phaseTimer += frameDt;
@@ -12215,6 +12215,13 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   /** 第六轮修正：副刀/系统伤害造成的敌人死亡处理（确保精英走宝箱流程） */
   private handleDirectEnemyKilledBySystem(enemy: Enemy, source: "sub_momentum" | "sub_weakpoint" | "chain" | "system") {
     if (!enemy.alive) return;
+    // 0807-11D-6F-5: 火药兵在引信中不可被子刀/链击靜默击杀
+    if (enemy.kind === 'powder' && enemy._fuseState === 'arming') return;
+    // 火药兵HP≤0触发引信
+    if (enemy.kind === 'powder' && !enemy._fuseDetonated && enemy.hp <= 0) {
+      this._startPowderFuse(enemy, source);
+      return;
+    }
     enemy.alive = false;
     this.score += enemy.score;
     this.stats.kills += 1;
