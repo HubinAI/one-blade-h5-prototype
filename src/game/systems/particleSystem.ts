@@ -76,6 +76,22 @@ export function glowParticle(origin: Vec2, color: string, size: number, speed = 
   };
 }
 
+/** 0807-11D-6F-1: 放射状火花 */
+export function radialSparks(origin: Vec2, angle: number, speed: number, life: number, color: string): Particle {
+  particleCounter += 1;
+  const spread = (Math.random() - 0.5) * 0.4;
+  return {
+    id: `radial_${particleCounter}`,
+    x: origin.x, y: origin.y,
+    vx: Math.cos(angle + spread) * speed,
+    vy: Math.sin(angle + spread) * speed,
+    life, maxLife: life,
+    size: 2 + Math.random() * 3,
+    color,
+    rotation: 0, kind: "spark" as ParticleKind, spin: 0,
+  };
+}
+
 /** 混合爆发：纸片 + 火花 + 光晕 + 冲击波环 */
 export function explosionBurst(origin: Vec2, tierPower: number, colors: string[], sparkColor = "#ffd67c"): Particle[] {
   const particles: Particle[] = [];

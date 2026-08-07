@@ -18,7 +18,7 @@ import { ELITE_CONFIG, ELITE_KINDS } from "./config/elites";
 import { REWARD_CONFIG } from "./config/rewards";
 import { getBladeTier, getTierConfig, calculateMomentumRefund, getSubBladeCDReduction, recoverEnergy } from "./systems/bladeEnergySystem";
 import { isSharpTurn, segmentHitCircle } from "./systems/collisionSystem";
-import { paperBurst, ringParticle, sparkBurst, glowParticle, explosionBurst, coreCollapseBurst } from "./systems/particleSystem";
+import { paperBurst, ringParticle, sparkBurst, glowParticle, explosionBurst, coreCollapseBurst, radialSparks } from "./systems/particleSystem";
 import { BossController } from "./systems/BossController";
 import { BossReactiveController, type ReactiveCollisionEvent } from "./systems/BossReactiveController";
 import { drawEnergyBar, drawHpBar, drawArmorIndicators } from "./systems/bossReactiveHUD";
@@ -241,6 +241,7 @@ export class Game {
   private nextWaveTimer: number = BALANCE.waves.firstWaveDelay;
   private screenShake = 0;
   private flash = 0;
+  private _explosionShockwaves: { x: number; y: number; startTime: number; maxRadius: number; color: string }[] = [];
   private slowMoTimer = 0;
   private warriorDrawTimer = 0;
   private warriorSheathTimer = 0;
@@ -1389,6 +1390,7 @@ export class Game {
     this.drawTripleSlashTrails(ctx);
     this._drawTutorialPrompt(ctx); // 0807-11A: 教学成功提示（独立渲染，不受P4.2限制）
     this.drawParticles(ctx);
+    this._drawExplosionShockwaves(ctx);
     this.drawDefenseAndWarrior(ctx);
     this.drawSubBladeVisual(ctx);
     this.drawEdictIconFly(ctx);
@@ -1641,6 +1643,7 @@ export class Game {
       this.drawSlash(ctx);
       this.drawTripleSlashTrails(ctx);
       this.drawParticles(ctx);
+      this._drawExplosionShockwaves(ctx);
       // 4. P4.4B-R3 P0-A: 玩家战斗层（玩家主体+主刀气场+副刀视觉+副刀槽）
       //    替代旧的"淡蓝虚线+蓝点"调试式可视化。
       //    副刀只显示不伤害（policy.enableSubBladeTargeting/Damage = false）。
@@ -4348,12 +4351,38 @@ export class Game {
         AudioService.explosion();
 
         const radius = (ENEMY_BALANCE.powder.explosionRadius ?? 85) * stage.explosionRadiusMultiplier * this.getExplosionRadiusMultiplier();
-        this.particles.push(...explosionBurst(enemy, tierPower, ["#ffb15c", "#d96c32", "#ffd67c"], "#ffd67c"));
+        // 0807-11D-6F-1: 三层爆炸视觉
+        const expX = enemy.x, expY = enemy.y;
+        // 1. 核心闪光 (0~0.08s)
+        this.particles.push(glowParticle({ x: expX, y: expY }, "#ffffdd", 0.08, 36));
+        this.particles.push(glowParticle({ x: expX, y: expY }, "#ffd67c", 0.10, 28));
+        // 2. 冲击波环 (0.04~0.22s, 扩张)
+        this._explosionShockwaves.push({ x: expX, y: expY, startTime: this.elapsed, maxRadius: radius * 1.0, color: "#ff6622" });
+        // 3. 放射状火星+碎片 (0.05~0.30s)
+        const burstCount = 22;
+        for (let j = 0; j < burstCount; j++) {
+          const angle = (j / burstCount) * Math.PI * 2;
+          const speed = 80 + Math.random() * 160;
+          const life = 0.12 + Math.random() * 0.18;
+          this.particles.push(radialSparks({ x: expX, y: expY }, angle, speed, life, "#ff8c28"));
+        }
+        // 纸片碎片
+        for (let j = 0; j < 10; j++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 100 + Math.random() * 200;
+          const life = 0.15 + Math.random() * 0.15;
+          this.particles.push(radialSparks({ x: expX, y: expY }, angle, speed, life, "#ffbb44"));
+        }
         this.screenShake = Math.max(this.screenShake, 0.65);
         this.flash = Math.max(this.flash, 0.55);
 
         for (const target of this.enemies) {
           if (!target.alive || distance(target, enemy) > radius) continue;
+          // 0807-11D-6F-1: 被波及敌人橙色小爆点
+          this.particles.push(
+            ...sparkBurst({ x: target.x, y: target.y }, 3, "#ff8c28", 8),
+            glowParticle({ x: target.x, y: target.y }, "#ffaa44", 0.08, 6),
+          );
           affectByBlast(target, ENEMY_BALANCE.powder.explosionDamage ?? 1, "chain");
         }
 
@@ -4878,6 +4907,8 @@ export class Game {
       particle.rotation += particle.spin * dt;
     }
     this.particles = this.particles.filter((particle) => particle.life > 0).slice(0, MAX_PARTICLES_ON_SCREEN);
+    // 0807-11D-6F-1: 清理过期冲击波
+    this._explosionShockwaves = this._explosionShockwaves.filter(s => this.elapsed - s.startTime < 0.28);
     for (const sf of this.splitFlashes) {
       sf.life -= dt;
     }
@@ -10532,6 +10563,30 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.beginPath();
     ctx.arc(pos.x, pos.y, Math.max(5, width * 0.72), 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  /** 0807-11D-6F-1: 爆炸冲击波绘制 */
+  private _drawExplosionShockwaves(ctx: CanvasRenderingContext2D) {
+    for (const s of this._explosionShockwaves) {
+      const elapsed = this.elapsed - s.startTime;
+      if (elapsed < 0) continue;
+      // 0~0.04s 核心，0.04~0.22s 扩张环
+      const ringStart = 0.04, ringEnd = 0.22;
+      if (elapsed >= ringStart && elapsed <= ringEnd) {
+        const prog = (elapsed - ringStart) / (ringEnd - ringStart);
+        const r = s.maxRadius * (0.15 + prog * 0.95);
+        const alpha = 1 - prog;
+        ctx.save();
+        ctx.strokeStyle = `rgba(255, 100, 30, ${alpha * 0.6})`;
+        ctx.lineWidth = 4 + (1 - prog) * 6;
+        ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, Math.PI * 2); ctx.stroke();
+        // 外层薄辉
+        ctx.strokeStyle = `rgba(255, 180, 60, ${alpha * 0.25})`;
+        ctx.lineWidth = 12 + (1 - prog) * 8;
+        ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, Math.PI * 2); ctx.stroke();
+        ctx.restore();
+      }
+    }
   }
 
   private drawParticles(ctx: CanvasRenderingContext2D) {
