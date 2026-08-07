@@ -170,7 +170,8 @@ export class Game {
   /** 0807-11D-4B: 满势爆发状态 */
   private _momentumState: 'charging' | 'armed' | 'bursting' = 'charging';
   private _burstRemaining = 0;  // 爆发倒计时(秒)
-  private _burstFadeoutTimer = 0; // 0807-11D-4B-7: 视觉退场计时
+  private _burstFadeoutTimer = 0; // 视觉退场计时
+  private _burstEnding = false; // Final: 末刀完成标志
   /** V0723014: Reactive 模式肉鸽修正器 */
   private reactiveBladeRunModifiers: BladeRunModifiers = { ...DEFAULT_BLADE_RUN_MODIFIERS };
   /** V0730001: 统一刀势上限（普通关用，默认 100，可成长） */
@@ -1244,14 +1245,25 @@ export class Game {
     if (this._momentumState === 'bursting') {
       this._burstRemaining -= scaledDt;
       if (this._burstRemaining <= 0) {
-        this._momentumState = 'charging';
-        this.energy = Math.round(BALANCE.swordEnergy.max * 0.35);
         this._burstRemaining = 0;
-        this._burstFadeoutTimer = 0.22; // 视觉退场
+        // 0807-11D-4B-Final: 末刀完整结算
+        if (this.currentSlash?.active) {
+          this._burstEnding = true; // 等待当前刀结束
+        } else {
+          this._finalizeBurst(); // 无活跃刀, 立即结束
+        }
       }
+    }
+    // 末刀结束后清理
+    if (this._burstEnding && this._momentumState === 'bursting') {
+      if (!this.currentSlash?.active) { this._finalizeBurst(); }
     } else if (this._momentumState === 'charging' && this.energy >= BALANCE.swordEnergy.max) {
       this._momentumState = 'armed';
       this.energy = BALANCE.swordEnergy.max;
+    }
+    // 末刀结束后清理
+    if (this._burstEnding && this._momentumState === 'bursting') {
+      if (!this.currentSlash?.active) { this._finalizeBurst(); }
     }
     // 视觉退场计时
     if (this._burstFadeoutTimer > 0) { this._burstFadeoutTimer = Math.max(0, this._burstFadeoutTimer - scaledDt); }
@@ -1965,9 +1977,18 @@ export class Game {
     this.reactiveBladeMax = preserved.max;
   }
 
+  /** 0807-11D-4B-Final: 清爆发并回到35% */
+  private _finalizeBurst(): void {
+    this._momentumState = 'charging';
+    this.energy = Math.round(BALANCE.swordEnergy.max * 0.35);
+    this._burstRemaining = 0;
+    this._burstEnding = false;
+    this._burstFadeoutTimer = 0.22;
+  }
+
   private startSlash(pos: Vec2, pending?: NonNullable<typeof this.pendingSlash>) {
     // 0807-11D-4B: armed → bursting
-    if (this._momentumState === 'armed') { this._momentumState = 'bursting'; this._burstRemaining = 5.0; }
+    if (this._momentumState === 'armed' && !this._burstEnding) { this._momentumState = 'bursting'; this._burstRemaining = 5.0; }
     const lockedEnergy = pending ? pending.lockedEnergy : clamp(this.energy, 0, BALANCE.swordEnergy.max);
     // V0723014-Final.1 P0-1: Reactive 模式起刀时继承 pending.lockedMomentum（PointerDown 时锁定）。
     // 禁止重新调用 this.getReactiveBladeMomentum()，避免 pending 期间 max 变化导致快照不一致。
