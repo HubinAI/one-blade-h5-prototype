@@ -2253,6 +2253,12 @@ export class Game {
   private endSlash(reason: string) {
     const trail = this.currentSlash;
     if (!trail?.active) return;
+    // 0807-11D-4D-1: 刀芒耗尽时刀尖收束反馈
+    if (reason === "刀芒耗尽" && trail.points.length > 0) {
+      const last = trail.points[trail.points.length - 1];
+      this.particles.push(...sparkBurst({ x: last.x, y: last.y }, 5, "#ffd35a", 12));
+      this.particles.push(glowParticle({ x: last.x, y: last.y }, "#fff4a0", 0.5, 18));
+    }
     trail.active = false;
 
     // chaseFlash: slash 级统一提交伤害
