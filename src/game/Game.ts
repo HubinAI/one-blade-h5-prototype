@@ -6977,7 +6977,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const d = distance(target, enemy);
       if (d > radius) continue;
       const damage = ENEMY_BALANCE.powder.explosionDamage ?? 1;
-      this.damageEnemy(target, damage, undefined as any, true, "powder");
+      this.damageEnemy(target, damage, { tier: "normal" } as any, true, "powder");
       // 击退
       const angle = Math.atan2(target.y - expY, target.x - expX);
       const knockDist = 70 + (1 - d / radius) * 40;
@@ -7007,7 +7007,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       this.screenShake = Math.max(this.screenShake, 0.5);
       this.addText(px, py - 20, "-15", "#ff4444", 18);
     }
-    this.killEnemy(enemy, undefined as any, true, "powder");
+    this.killEnemy(enemy, { tier: "normal", kills: 0, directMainKills: 0, chain: 0, energyBank: 0 } as any, true, "powder");
   }
 
   /** P3：分裂兵逻辑 */
