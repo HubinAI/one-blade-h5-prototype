@@ -391,6 +391,8 @@ interface MicroBatch {
   rapidPulse?: true;
   /** 0807-11D-6D: 分裂兵数量(从tough中替换) */
   splitters?: number;
+  /** 0807-11D-6F: 火药兵数量(从tough中替换) */
+  powders?: number;
 }
 
 interface DirectorBeat {
@@ -437,14 +439,14 @@ const BEATS: DirectorBeat[] = [
   {
     id: 'P2-2', phase: 'P2', notBeforeMs: 2400,
     microBatches: [
-      { count: 5, tiers: [['trash',4],['tough',1]], formationId: 'left_high_diag', xRange: X_LEFT,  row: 'front', internalDelay: 0,    speedBonus: 0 },
+      { count: 5, tiers: [['trash',4],['tough',1]], formationId: 'left_high_diag', xRange: X_LEFT,  row: 'front', internalDelay: 0,    speedBonus: 0, powders: 1 },
       { count: 4, tiers: [['trash',3],['tough',1]], formationId: 'right_low_diag', xRange: X_RIGHT, row: 'back',  internalDelay: 0.30, speedBonus: 0 },
     ],
   },
   {
     id: 'P2-3', phase: 'P2', notBeforeMs: 4800,
     microBatches: [
-      { count: 5, tiers: [['trash',3],['tough',2]], formationId: 'right_high_diag', xRange: X_RIGHT, row: 'front', internalDelay: 0,    speedBonus: 0 },
+      { count: 5, tiers: [['trash',3],['tough',2]], formationId: 'right_high_diag', xRange: X_RIGHT, row: 'front', internalDelay: 0,    speedBonus: 0, powders: 1 },
       { count: 4, tiers: [['trash',2],['tough',2]], formationId: 'left_low_diag',   xRange: X_LEFT,  row: 'back',  internalDelay: 0.32, speedBonus: 0 },
     ],
   },
@@ -459,7 +461,7 @@ const BEATS: DirectorBeat[] = [
   {
     id: 'P2-5', phase: 'P2', notBeforeMs: 9600,
     microBatches: [
-      { count: 6, tiers: [['trash',0],['tough',6]], formationId: 'front_wide',  xRange: X_WIDE, row: 'front', internalDelay: 0,    speedBonus: 0 },
+      { count: 6, tiers: [['trash',0],['tough',6]], formationId: 'front_wide',  xRange: X_WIDE, row: 'front', internalDelay: 0,    speedBonus: 0, powders: 1 },
       { count: 6, tiers: [['trash',0],['tough',6]], formationId: 'back_wide',   xRange: X_WIDE, row: 'back',  internalDelay: 0.30, speedBonus: 0 },
     ],
   },
@@ -771,13 +773,19 @@ export class PostEdictDirector {
     const anchor = ANCHORS[anchorId];
     const skipShadow = isP11;
     let idx = 0;
+    let powdersRemaining = mb.powders ?? 0;
 
     for (const [tier, cnt] of mb.tiers) {
       if (cnt <= 0) continue;
       for (let i = 0; i < cnt; i++) {
         const p = placements[idx];
+        // 0807-11D-6F: 火药兵替换tough
+        const isPowder = tier === 'tough' && powdersRemaining > 0;
+        if (isPowder) powdersRemaining--;
+        const enemyKind = isPowder ? 'powder' : 'infantry';
+        const itemSpawnInPlace = beat.phase === 'P3' || isPowder;
         items.push({
-          x: Math.round(p.x + (Math.random() - 0.5) * 6),  // 仅生成X微抖(非最终阵位X)
+          x: Math.round(p.x + (Math.random() - 0.5) * 6),
           y: -20 + (mb.row === 'back' ? 0 : mb.row === 'mid' ? -5 : -10),
           speedMul: phase.speedMul + mb.speedBonus,
           hpTier: tier, hpOverride: HP_TIERS[tier].hp,
@@ -789,7 +797,7 @@ export class PostEdictDirector {
           directorMicroBatchId: mbId,
           anchorId, anchorX: anchor.x, anchorY: anchor.y,
           skipShadow, placementMode: mode,
-          spawnInPlace: beat.phase === 'P3',
+          spawnInPlace: itemSpawnInPlace, enemyKind,
         });
         idx++;
       }
