@@ -360,6 +360,8 @@ export class Game {
   private _eliteGatherCenter = { x: 190, y: 370 };
   private _eliteGatherPhase: "idle" | "attract" | "merge" = "idle";
   private _eliteGatherTimer = 0;
+  private _elitePressureRound = 1; // 0808-11E-5: 三轮递增压力
+  private _eliteActivePf: { times: number[]; dur: number; gather: number; reform: number } = { times: [0.25,0.70,1.15], dur: 0.85, gather: 0.45, reform: 0.60 };
   // 0808-11E-4: 扩散-环-碎片-聚合循环
   private _eliteSeq: "human" | "splitting" | "ring_1" | "ring_2" | "ring_3" | "wait_resolve" | "gather" | "reform" | "idle" = "idle";
   private _eliteSeqTimer = 0;
@@ -2844,7 +2846,7 @@ export class Game {
     this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false;
     this._eliteCurrentWP = -1; this._eliteLastWPSide = ""; this._eliteDashStart = null; this._eliteDashTarget = null; this._eliteDashDuration = 0; this._eliteDashElapsed = 0;
     this._eliteForm = "human"; this._eliteFormTimer = 0; this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteFireTimeout = 0; this._eliteOpenHintShown = false;
-    this._eliteFragments = []; this._splitFragments = []; this._eliteGatherPhase = "idle"; this._eliteGatherTimer = 0; this._eliteLanded = false;
+    this._eliteFragments = []; this._splitFragments = []; this._eliteGatherPhase = "idle"; this._eliteGatherTimer = 0; this._eliteLanded = false; this._elitePressureRound = 1;
 
     if (this.debugEnabled) {
       console.log("[elite defeated]", {
@@ -8339,13 +8341,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ];
   }
 
-  private _spawnFireRingRaw(ringIndex: number, x: number, y: number) {
+  private _spawnFireRingRaw(ringIndex: number, x: number, y: number, dur: number) {
     this._eliteRingIssued++;
     const zones = [80, 190, 300];
     const tgt = zones[ringIndex] + (Math.random() - 0.5) * 30;
     const cx = x + (tgt - x) * 0.5 + (Math.random() - 0.5) * 50;
     const cy = Math.min(y, 260) - 50;
-    const dur = 0.85; // 0808-11E-4D: 固定0.85s直抵防线
     this._eliteFireRings.push({
       x, y, r: 24, speed: 0, alive: true, hasHit: false, hp: 1,
       targetX: tgt, targetY: BALANCE.battlefield.bottomDefenseY, _waveId: this._eliteWaveId,
@@ -12055,7 +12056,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false;
     this._eliteCurrentWP = -1; this._eliteLastWPSide = ""; this._eliteDashStart = null; this._eliteDashTarget = null; this._eliteDashDuration = 0; this._eliteDashElapsed = 0;
     this._eliteForm = "human"; this._eliteFormTimer = 0; this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteFireTimeout = 0; this._eliteOpenHintShown = false;
-    this._eliteFragments = []; this._splitFragments = []; this._eliteGatherPhase = "idle"; this._eliteGatherTimer = 0; this._eliteLanded = false;
+    this._eliteFragments = []; this._splitFragments = []; this._eliteGatherPhase = "idle"; this._eliteGatherTimer = 0; this._eliteLanded = false; this._elitePressureRound = 1;
     this._eliteCyclesDone = 0;
     this._eliteCycleTimer = 0;
     this._eliteCyclePhase = "idle";
@@ -12188,7 +12189,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         const frac = Math.min(1, (600 + dist * 0.3) * dt / dist);
         frag.x += dx * frac; frag.y += dy * frac;
       }
-      if (this._eliteGatherTimer >= 0.45 || this._eliteFragments.every(f => f.gathered)) {
+      if (this._eliteGatherTimer >= this._eliteActivePf.gather || this._eliteFragments.every(f => f.gathered)) {
         this._eliteGatherPhase = "idle"; goSeq("reform");
       }
     }
@@ -12212,13 +12213,21 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
           sf.y = elite.y + (sf.ty - elite.y) * Math.pow(Math.min(1, moveT), 2);
           sf.progress = this._eliteSeqTimer / 0.40;
         }
-        // 0808-11E-4D: 宽间隔(0.25/0.70/1.15)
-        const convertTimes = [0.25, 0.70, 1.15];
+        // 0808-11E-5: 三轮压力递增
+        const pr = Math.min(this._elitePressureRound, 3) - 1;
+        const profiles = [
+          { times: [0.25, 0.70, 1.15], dur: 0.85, gather: 0.45, reform: 0.60 },
+          { times: [0.20, 0.55, 0.90], dur: 0.72, gather: 0.30, reform: 0.40 },
+          { times: [0.15, 0.42, 0.68], dur: 0.62, gather: 0.22, reform: 0.30 },
+        ];
+        const pf = profiles[pr];
+        this._eliteActivePf = pf;
+        const convertTimes = pf.times;
         for (let i = 0; i < this._splitFragments.length; i++) {
           const sf = this._splitFragments[i];
           if (!sf.converted && this._eliteSeqTimer >= convertTimes[i]) {
             sf.converted = true;
-            this._spawnFireRingRaw(i, sf.x, sf.y);
+            this._spawnFireRingRaw(i, sf.x, sf.y, pf.dur);
           }
         }
         // 全部转换完成→wait(保证issued===3)
@@ -12262,7 +12271,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         // 0808-11E-4C-2: 仅在重组完成时清除碎片
         this._eliteFragments = [];
         this.screenShake = Math.max(this.screenShake, 0.25);
-        if (this._eliteSeqTimer >= 0.60) goSeq("human");
+        if (this._eliteSeqTimer >= this._eliteActivePf.reform) { this._elitePressureRound++; goSeq("human"); }
         break;
       }
     }

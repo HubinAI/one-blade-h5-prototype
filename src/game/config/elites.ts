@@ -30,7 +30,7 @@ export const ELITE_CONFIG: Record<EliteKind, EliteConfig> = {
   fireRing: {
     kind: "fireRing",
     name: "火环将",
-    maxHp: 1265, // 0807-11B-1: 临时HP，维持当前~12刀击杀（N=12, temp=round(11.5×110)=1265）
+    maxHp: 2000, // 0808-11E-5: 三轮压力递增
     speed: 28,
     radius: 42,
     defenseDamage: 2,
