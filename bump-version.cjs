@@ -11,6 +11,7 @@
  *   node bump-version.js --set V0708003  # 手动指定版本号
  *
  * 脚本会更新以下位置：
+ *   - src/version.ts         APP_VERSION + BUILD_VERSION
  *   - package.json           version 字段
  *   - index.html             title 标签
  *   - src/components/MainMenu.tsx   印章文字
@@ -31,6 +32,13 @@ const STATE_FILE = path.join(ROOT, ".version-state.json");
 
 // ─── 需要替换版本号的文件及其替换规则 ───
 const TARGETS = [
+  {
+    file: "src/version.ts",
+    replace: (content, ver, semver) =>
+      content
+        .replace(/APP_VERSION\s*=\s*"[^"]*"/, `APP_VERSION = "${ver}"`)
+        .replace(/BUILD_VERSION\s*=\s*"[^"]*"/, `BUILD_VERSION = "${semver}"`),
+  },
   {
     file: "package.json",
     // package.json 用语义化版本：V0708002 → "0708.002"
