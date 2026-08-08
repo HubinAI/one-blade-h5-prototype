@@ -8345,10 +8345,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const tgt = zones[ringIndex] + (Math.random() - 0.5) * 30;
     const cx = x + (tgt - x) * 0.5 + (Math.random() - 0.5) * 50;
     const cy = Math.min(y, 260) - 50;
-    const dist = Math.hypot(tgt - x, 520 - y) + 100;
-    const dur = dist / (200 + Math.random() * 30);
+    const dur = 0.88 + Math.random() * 0.08; // 0808-11E-4D: 统一飞行时间
     this._eliteFireRings.push({
-      x, y, r: 24, speed: dist / dur, alive: true, hasHit: false, hp: 1,
+      x, y, r: 24, speed: 0, alive: true, hasHit: false, hp: 1,
       targetX: tgt, targetY: 520, _waveId: this._eliteWaveId,
       pathStartX: x, pathStartY: y, controlX: cx, controlY: cy,
       pathElapsed: 0, pathDuration: dur,
@@ -12213,8 +12212,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
           sf.y = elite.y + (sf.ty - elite.y) * Math.pow(Math.min(1, moveT), 2);
           sf.progress = this._eliteSeqTimer / 0.40;
         }
-        // 顺序转换: 0.25s→0, 0.50s→1, 0.75s→2
-        const convertTimes = [0.25, 0.50, 0.75];
+        // 0808-11E-4D: 宽间隔(0.25/0.70/1.15)
+        const convertTimes = [0.25, 0.70, 1.15];
         for (let i = 0; i < this._splitFragments.length; i++) {
           const sf = this._splitFragments[i];
           if (!sf.converted && this._eliteSeqTimer >= convertTimes[i]) {
