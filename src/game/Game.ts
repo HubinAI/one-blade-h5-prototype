@@ -4696,6 +4696,8 @@ export class Game {
       if (!enemy.alive) continue;
       enemy.wobble += dt;
       enemy.flash = Math.max(0, enemy.flash - dt * 3);
+      // 0808-11E-2E: inkCut计时
+      if ((enemy as any)._inkCutTimer > 0) (enemy as any)._inkCutTimer -= dt;
       if (enemy.shieldBrokenFlash !== undefined) {
         enemy.shieldBrokenFlash = Math.max(0, enemy.shieldBrokenFlash - dt * 3);
       }
@@ -8187,31 +8189,37 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const morph = f === "morphing_to_flame" ? this._eliteFormTimer / 0.30 : 1;
       const r = elite.radius * (0.6 + (1 - morph) * 0.4);
       const flameH = r * 3.2;
-      // 0808-11E-2C-1: 局部坐标
-      ctx.fillStyle = `rgba(200,60,15,${0.4 * morph})`;
-      ctx.beginPath();
-      ctx.moveTo(-r * 0.7, r * 0.5); ctx.quadraticCurveTo(-r * 1.1, -r * 0.3, -r * 0.4, -flameH * 0.5);
-      ctx.quadraticCurveTo(-r * 0.6, -flameH * 0.8, r * 0.2, -flameH * 0.9);
-      ctx.quadraticCurveTo(0, -flameH * 1.0, r * 0.3, -flameH * 0.75);
-      ctx.quadraticCurveTo(r * 0.7, -r * 0.2, r * 0.6, r * 0.6);
-      ctx.quadraticCurveTo(r * 0.3, r * 0.8, -r * 0.4, r * 0.5);
-      ctx.fill();
-      ctx.fillStyle = `rgba(18,8,4,${0.85 * morph})`;
-      ctx.beginPath();
-      ctx.moveTo(-r * 0.5, r * 0.3); ctx.quadraticCurveTo(-r * 0.8, -r * 0.4, -r * 0.3, -flameH * 0.4);
-      ctx.quadraticCurveTo(-r * 0.4, -flameH * 0.6, r * 0.15, -flameH * 0.7);
-      ctx.quadraticCurveTo(r * 0.1, -flameH * 0.65, r * 0.2, -flameH * 0.5);
-      ctx.quadraticCurveTo(r * 0.5, -r * 0.15, r * 0.4, r * 0.4);
-      ctx.quadraticCurveTo(r * 0.2, r * 0.5, -r * 0.3, r * 0.3);
-      ctx.fill();
-      // 0808-11E-2C-2: 非圆形火舌(非靶心)
+      // 0808-11E-2E: 墨焰裂开
+      const ic = (elite as any)._inkCutTimer as number ?? 0;
+      const ia = (elite as any)._inkCutAngle as number ?? 0;
+      const splitX = ic > 0 ? Math.min(1, ic / 0.06) * 8 : 0;
+      const drawFlameBody = (ox: number) => {
+        ctx.fillStyle = `rgba(200,60,15,${0.4 * morph})`;
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.7 + ox, r * 0.5); ctx.quadraticCurveTo(-r * 1.1 + ox, -r * 0.3, -r * 0.4 + ox, -flameH * 0.5);
+        ctx.quadraticCurveTo(-r * 0.6 + ox, -flameH * 0.8, r * 0.2 + ox, -flameH * 0.9);
+        ctx.quadraticCurveTo(ox, -flameH * 1.0, r * 0.3 + ox, -flameH * 0.75);
+        ctx.quadraticCurveTo(r * 0.7 + ox, -r * 0.2, r * 0.6 + ox, r * 0.6);
+        ctx.quadraticCurveTo(r * 0.3 + ox, r * 0.8, -r * 0.4 + ox, r * 0.5);
+        ctx.fill();
+        ctx.fillStyle = `rgba(18,8,4,${0.85 * morph})`;
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.5 + ox, r * 0.3); ctx.quadraticCurveTo(-r * 0.8 + ox, -r * 0.4, -r * 0.3 + ox, -flameH * 0.4);
+        ctx.quadraticCurveTo(-r * 0.4 + ox, -flameH * 0.6, r * 0.15 + ox, -flameH * 0.7);
+        ctx.quadraticCurveTo(r * 0.1 + ox, -flameH * 0.65, r * 0.2 + ox, -flameH * 0.5);
+        ctx.quadraticCurveTo(r * 0.5 + ox, -r * 0.15, r * 0.4 + ox, r * 0.4);
+        ctx.quadraticCurveTo(r * 0.2 + ox, r * 0.5, -r * 0.3 + ox, r * 0.3);
+        ctx.fill();
+      };
+      if (splitX > 0) { drawFlameBody(-splitX); drawFlameBody(splitX); }
+      else drawFlameBody(0);
+      // 火舌
       ctx.fillStyle = `rgba(255,200,80,${0.7 * morph})`;
+      const cty = -r * 0.5;
       ctx.beginPath();
-      const cty = -r * 0.5 + Math.sin(this.elapsed * 2.5) * r * 0.12;
       ctx.moveTo(-r * 0.15, cty); ctx.quadraticCurveTo(r * 0.1, cty - r * 0.4, r * 0.05, cty - r * 0.6);
       ctx.quadraticCurveTo(r * 0.2, cty - r * 0.3, r * 0.15, cty); ctx.quadraticCurveTo(0, cty + r * 0.2, -r * 0.15, cty);
       ctx.fill();
-      // 第二火舌
       ctx.fillStyle = `rgba(255,140,20,${0.45 * morph})`;
       ctx.beginPath();
       ctx.moveTo(r * 0.05, cty + r * 0.05); ctx.quadraticCurveTo(r * 0.25, cty - r * 0.25, r * 0.15, cty - r * 0.4);
@@ -12108,7 +12116,16 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         const resolved = this._eliteRingResolved;
         const forceEnd = this._eliteFireTimeout >= 4.0 && this._eliteRingIssued >= 3;
         if ((this._eliteRingIssued >= 3 && resolved >= 3) || forceEnd) {
-          if (forceEnd && resolved < 3) console.warn(`[11E-2B] fire timeout issued=${this._eliteRingIssued} resolved=${resolved}`);
+          if (forceEnd && resolved < 3) {
+            console.warn(`[11E-2E] fire timeout settling ${this._eliteRingIssued - resolved} rings`);
+            for (const fr of this._eliteFireRings) {
+              if ((fr as any)._waveId !== this._eliteWaveId || !fr.alive) continue;
+              fr.hasHit = true; fr._touchedLine = true; fr.alive = false;
+              this._eliteRingResolved++;
+              this.hp = Math.max(0, this.hp - 20);
+              this.defenseLineHits = (this.defenseLineHits ?? 0) + 1;
+            }
+          }
           this._eliteFireRings = this._eliteFireRings.filter(fr => (fr as any)._waveId !== this._eliteWaveId);
           goSeq("reform");
         }
@@ -12153,7 +12170,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       } else {
         fr.y += fr.speed * dt;
       }
-        if (fr.y >= BALANCE.battlefield.bottomDefenseY) {
+        if (fr.y + fr.r >= BALANCE.battlefield.bottomDefenseY) {
         fr._touchedLine = true;
         if (!fr.hasHit) {
           fr.hasHit = true;
