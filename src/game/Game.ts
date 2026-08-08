@@ -354,7 +354,7 @@ export class Game {
   private _eliteRingFireTimer = 0; // 环间间隔计时
   private _eliteRingBroken = 0; // 已破环计数(0~3)
   // 0807-11E-2B: 串行状态机
-  private _eliteSeq: "human_move" | "human_open" | "morph" | "flame_dash_1" | "flame_fire_1" | "flame_dash_2" | "flame_fire_2" | "flame_dash_3" | "flame_fire_3" | "wait_rings" | "reform" | "stun" | "idle" = "idle";
+  private _eliteSeq: "human_move" | "human_open" | "morph" | "flame_dash_1" | "flame_fire_1" | "flame_dash_2" | "flame_fire_2" | "flame_dash_3" | "flame_fire_3" | "wait_rings" | "reform" | "success_stun" | "failure_escape" | "idle" = "idle";
   private _eliteSeqTimer = 0;
   private _eliteWaypoints = [{ x: 95, y: 300 }, { x: 190, y: 350 }, { x: 285, y: 300 }, { x: 120, y: 400 }, { x: 260, y: 400 }];
   private _eliteCurrentWP = -1;
@@ -12083,7 +12083,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       case "human_open": {
         this._eliteCyclePhase = "open"; this._eliteForm = "human";
         if (!this._eliteOpenHintShown) { this._eliteOpenHintShown = true; this.addCombatFloat({ x: elite.x, y: elite.y - 50, text: "趁现在攻击!", color: "#ffd35a", size: 20, duration: 1.0, category: "damage", priority: "A" }); }
-        if (this._eliteSeqTimer >= 0.65) goSeq("morph");
+        const limit = (this as any)._eliteFromFailure ? 0.40 : 0.65;
+        if (this._eliteSeqTimer >= limit) { (this as any)._eliteFromFailure = false; goSeq("morph"); }
         break;
       }
       case "morph": {
@@ -12147,19 +12148,37 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         if (this._eliteSeqTimer >= 0.25) {
           this._eliteForm = "human";
           if (this._eliteRingBroken >= 3) {
+            // 0808-11E-3: 全破 → SUCCESS
             this._eliteCyclePhase = "stun"; this._startDash(elite, this._eliteWaypoints[1], 0.36);
             this._eliteCyclesDone++;
+            this.screenShake = Math.max(this.screenShake, 0.4);
             this.addCombatFloat({ x: elite.x, y: elite.y - 36, text: "破环!", color: "#ff8c00", size: 23, duration: 0.9, category: "damage", priority: "A" });
-            goSeq("stun");
+            goSeq("success_stun");
           } else {
-            goSeq("human_move");
+            // 0808-11E-3: 漏环 → FAILURE
+            this._eliteForm = "inkflame"; this._eliteCyclePhase = "fire";
+            goSeq("failure_escape");
           }
         }
         break;
       }
-      case "stun": {
+      case "success_stun": {
         this._eliteCyclePhase = "stun"; this._eliteForm = "human";
-        if (this._eliteSeqTimer >= 0.8 && !this._eliteDashTarget) goSeq("human_move");
+        if (this._eliteSeqTimer >= 1.0 && !this._eliteDashTarget) goSeq("human_move");
+        break;
+      }
+      case "failure_escape": {
+        this._eliteCyclePhase = "fire"; this._eliteForm = "inkflame";
+        // 墨焰逃逸: 高速换点
+        if (!this._eliteDashTarget && this._eliteSeqTimer < 0.02) {
+          const avail = this._eliteWaypoints.filter((_, i) => i !== this._eliteCurrentWP);
+          this._startDash(elite, avail[Math.floor(Math.random() * avail.length)], 0.22);
+        }
+        if (this._eliteSeqTimer >= 0.30) {
+          this._eliteForm = "reforming"; this._eliteFormTimer = 0;
+          (this as any)._eliteFromFailure = true;
+          goSeq("human_move");
+        }
         break;
       }
     }
