@@ -4102,6 +4102,11 @@ export class Game {
   private handleEnemyHit(enemy: Enemy, trail: SlashTrail) {
     // V0730014: 教学组ready前不接受主刀伤害
     if (this._tutorialGroupEnemyIds.has(enemy.id) && !this._tutorialGroupReady) return;
+    // 0808-11E-4A: 非human阶段Boss身体不存在
+    if (enemy.eliteKind === "fireRing" && this._eliteBattleActive) {
+      const noBody = this._eliteSeq !== "human" && this._eliteSeq !== "reform" && this._eliteSeq !== "idle";
+      if (noBody) return;
+    }
     // 0808-11E-2D: 墨焰穿透(无命中语义)
     if (enemy.eliteKind === "fireRing" && (this._eliteForm === "inkflame" || this._eliteForm === "morphing_to_flame")) {
       (enemy as any)._inkCutTimer = 0.12; (enemy as any)._inkCutAngle = Math.atan2(
@@ -4881,7 +4886,10 @@ export class Game {
 
         // P4.3A: 动态flow倍率替代固定harvestSlow
         const flowMul = enemy.flow?.currentSpeedMultiplier ?? 1;
-        enemy.y += enemy.speed * entryMultiplier * rushMultiplier * statusSlow * fortressSlow * flowMul * dt;
+        // 0808-11E-4A: fireRing精英开战后不参与普通Y下落
+        if (!(enemy.kind === "elite" && enemy.eliteKind === "fireRing" && this._eliteBattleActive && this._eliteInvuln === false)) {
+          enemy.y += enemy.speed * entryMultiplier * rushMultiplier * statusSlow * fortressSlow * flowMul * dt;
+        }
         // V0731012: 凝霜减速 — 普通40%, 精英20%
         const fs = (enemy as any)._frostState as { slowLeft: number; frozenLeft: number } | undefined;
         if (fs && fs.slowLeft > 0) {
@@ -9994,7 +10002,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const wobbleX = Math.sin(enemy.wobble * 5) * 1.2;
       ctx.save();
       ctx.translate(enemy.x + wobbleX, enemy.y);
-      // 0808-11E-4: fireRing走正常human渲染
+      // 0808-11E-4A: fireRing在split/ring/gather阶段隐藏boss主体
+      if (enemy.eliteKind === "fireRing" && this._eliteBattleActive) {
+        const hideBoss = this._eliteSeq !== "human" && this._eliteSeq !== "reform";
+        if (hideBoss) { ctx.restore(); continue; }
+      }
       // P4.3A: 三层纵深缩放（Boss/精英不受影响）
       if (BATTLEFIELD_FLOW.enabled && enemy.flow && enemy.kind !== "boss" && enemy.kind !== "elite") {
         const dd = BATTLEFIELD_FLOW.drawDepth;
@@ -12030,23 +12042,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.fillStyle = "rgba(230,126,34,0.5)"; ctx.fill();
       ctx.strokeStyle = "#f39c12"; ctx.lineWidth = 2.5; ctx.stroke();
     }
-    if (this._eliteBattleActive && this._eliteCyclePhase === "telegraph") {
-      const elite = this.enemies.find(e => e.kind === "elite" && e.eliteKind === "fireRing" && e.alive);
-      if (elite) {
-        const alpha = 0.3 + 0.3 * Math.sin(this.elapsed * 6);
-        // 3团火焰预警
-        for (let i = 0; i < 3; i++) {
-          const angle = -0.25 + i * 0.25;
-          const rx = elite.x + Math.sin(angle) * 50;
-          const ry = elite.y + 15;
-          const r = 20 + this._eliteCycleTimer / 0.6 * 10;
-          ctx.beginPath(); ctx.arc(rx, ry, r, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(230,126,34,${alpha + 0.2})`; ctx.lineWidth = 3;
-          ctx.setLineDash([4, 3]); ctx.stroke(); ctx.setLineDash([]);
-          ctx.fillStyle = `rgba(255,140,30,${alpha * 0.3})`; ctx.fill();
-        }
-      }
-    }
+    // 0808-11E-4A: 删除旧telegraph三圆预警(splitting已承担)
   }
 
   /** V0801008: 火环精英入场+技能循环+守卫 */
@@ -12086,6 +12082,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         this._eliteForm = this._eliteForm === "morphing_to_flame" ? "inkflame" : "human";
         this._eliteFormTimer = 0;
       }
+    }
+
+    // 0808-11E-4A: 恢复中场锚点
+    if (this._eliteCyclePhase !== "idle") {
+      const targetY = 350 + Math.sin(this.elapsed * 0.7) * 6;
+      elite.y += (targetY - elite.y) * Math.min(1, 3 * dt);
     }
 
     // 0808-11E-4: 分裂→三环→碎片→聚合循环
