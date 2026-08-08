@@ -4286,13 +4286,11 @@ export class Game {
         eliteDmg = stage.damage * bladeDmg;
       }
       if (eliteDmg > 0) {
-        this.damageEnemy(enemy, eliteDmg, trail, false, "elite");
-        // 0807-11E-1D: 精英真实命中飘字(减伤后数值)
+        const blocked = !this.damageEnemy(enemy, eliteDmg, trail, false, "elite");
+        if (blocked) return; // 0807-11E-1G: 锁甲时不飘字
         const sn = trail._damageSnapshot ?? this.captureDamageSnapshot();
         const curAttack = getCurrentAttack(sn);
-        const floatDmg = (this._eliteCyclePhase === 'fire' && this._eliteFireRings.some(r => r.alive))
-          ? Math.max(1, Math.ceil(eliteDmg * 0.30)) : eliteDmg;
-        this.emitDamageFloat(floatDmg, curAttack, enemy.x, enemy.y - 28, 'ELITE', !enemy.alive, { sourceType: 'MAIN_SLASH' });
+        this.emitDamageFloat(eliteDmg, curAttack, enemy.x, enemy.y - 28, 'ELITE', !enemy.alive, { sourceType: 'MAIN_SLASH' });
       }
       // P2：精英受击反馈
       this.triggerEliteHitFeedback(enemy);
@@ -4494,13 +4492,18 @@ export class Game {
 
   private damageEnemy(enemy: Enemy, damage: number, trail: SlashTrail, chainKill: boolean, source: string) {
     if (!enemy.alive) return false;
-    // 0807-11E-1D: 火环将护体减伤
-    let effectiveDamage = damage;
-    if (enemy.eliteKind === "fireRing" && this._eliteCyclePhase === "fire") {
-      const aliveRings = this._eliteFireRings.filter(fr => fr.alive).length;
-      if (aliveRings > 0) effectiveDamage = Math.max(1, Math.ceil(damage * 0.30));
+    // 0807-11E-1G: telegraph/fire阶段Boss锁甲, 完全不扣HP
+    if (enemy.eliteKind === "fireRing" && this._eliteBattleActive) {
+      if (this._eliteCyclePhase === "telegraph" || this._eliteCyclePhase === "fire") {
+        enemy.flash = Math.max(enemy.flash, 0.18);
+        if (this.particles.length < 120) {
+          this.particles.push(...sparkBurst({ x: enemy.x, y: enemy.y - 12 }, 4, "#ff8c00"));
+        }
+        AudioService.defenseHit();
+        return false;
+      }
     }
-    enemy.hp -= effectiveDamage;
+    enemy.hp -= damage;
     enemy.flash = 0.25;
     if (enemy.hp <= 0) {
       // 0807-11D-6F-5: 火药兵进入引信而非直接死亡
