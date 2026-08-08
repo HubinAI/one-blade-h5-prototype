@@ -353,6 +353,7 @@ export class Game {
   private _eliteRingQueue: { x: number; y: number }[] = [];
   private _eliteRingFireTimer = 0; // 环间间隔计时
   private _eliteRingBroken = 0; // 已破环计数(0~3)
+  private _eliteDestabilize = 0; // 0808-11E-3B: 失稳程度(0~3)
   // 0807-11E-2B: 串行状态机
   private _eliteSeq: "human_move" | "human_open" | "morph" | "flame_dash_1" | "flame_fire_1" | "flame_dash_2" | "flame_fire_2" | "flame_dash_3" | "flame_fire_3" | "wait_rings" | "reform" | "success_stun" | "failure_reposition" | "idle" = "idle";
   private _eliteSeqTimer = 0;
@@ -3770,7 +3771,8 @@ export class Game {
           this._debugFireRingHits = (this._debugFireRingHits ?? 0) + 1;
           this._slashDirectHitIds.add(frKey);
           this._eliteRingBroken = Math.min(3, this._eliteRingBroken + 1);
-          this._eliteRingResolved++; // 0807-11E-2A
+          this._eliteDestabilize = Math.min(3, this._eliteDestabilize + 1);
+          this._eliteRingResolved++;
           this._threatVerifyLastHpBefore = fr.hp; fr.hp -= r.effectiveHpLoss;
           this._threatVerifyLastHpAfter = fr.hp;
           this._threatVerifyLastResult = fr.hp <= 0 ? 'DESTROYED' : 'DAMAGED';
@@ -8189,20 +8191,24 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const morph = f === "morphing_to_flame" ? this._eliteFormTimer / 0.30 : 1;
       const r = elite.radius * (0.6 + (1 - morph) * 0.4);
       const flameH = r * 3.2;
-      // 0808-11E-2E: 墨焰裂开
+      // 0808-11E-3B: 破环削弱亮度
+      const broken = this._eliteRingBroken;
+      const brightMul = 1 - broken * 0.25; // 0环=1, 3环=0.25
+      const wobble = broken >= 2 ? Math.sin(this.elapsed * 18) * broken * 2 : 0; // 不稳定抖动
       const ic = (elite as any)._inkCutTimer as number ?? 0;
       const ia = (elite as any)._inkCutAngle as number ?? 0;
       const splitX = ic > 0 ? Math.min(1, ic / 0.06) * 8 : 0;
       const drawFlameBody = (ox: number) => {
-        ctx.fillStyle = `rgba(200,60,15,${0.4 * morph})`;
+        const wx = ox + wobble;
+        ctx.fillStyle = `rgba(200,60,15,${0.4 * morph * brightMul})`;
         ctx.beginPath();
-        ctx.moveTo(-r * 0.7 + ox, r * 0.5); ctx.quadraticCurveTo(-r * 1.1 + ox, -r * 0.3, -r * 0.4 + ox, -flameH * 0.5);
+        ctx.moveTo(-r * 0.7 + wx, r * 0.5); ctx.quadraticCurveTo(-r * 1.1 + wx, -r * 0.3, -r * 0.4 + wx, -flameH * 0.5);
         ctx.quadraticCurveTo(-r * 0.6 + ox, -flameH * 0.8, r * 0.2 + ox, -flameH * 0.9);
         ctx.quadraticCurveTo(ox, -flameH * 1.0, r * 0.3 + ox, -flameH * 0.75);
         ctx.quadraticCurveTo(r * 0.7 + ox, -r * 0.2, r * 0.6 + ox, r * 0.6);
         ctx.quadraticCurveTo(r * 0.3 + ox, r * 0.8, -r * 0.4 + ox, r * 0.5);
         ctx.fill();
-        ctx.fillStyle = `rgba(18,8,4,${0.85 * morph})`;
+        ctx.fillStyle = `rgba(18,8,4,${0.85 * morph * brightMul})`;
         ctx.beginPath();
         ctx.moveTo(-r * 0.5 + ox, r * 0.3); ctx.quadraticCurveTo(-r * 0.8 + ox, -r * 0.4, -r * 0.3 + ox, -flameH * 0.4);
         ctx.quadraticCurveTo(-r * 0.4 + ox, -flameH * 0.6, r * 0.15 + ox, -flameH * 0.7);
@@ -11975,14 +11981,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 出场特效强化
     this.screenShake = Math.max(this.screenShake, 0.6);
     this.flash = Math.max(this.flash, 0.5);
-    // 全屏光柱粒子
-    for (let i = 0; i < 8; i++) {
-      this.particles.push(glowParticle(
-        { x: lane + (Math.random() - 0.5) * 60, y: BALANCE.battlefield.enemySpawnY + (Math.random() - 0.5) * 40 },
-        conf.color, 18 + Math.random() * 16, 40 + Math.random() * 20
-      ));
-    }
-    // 0807-11E-1F: 删除看不懂的大光圈, 用专属视觉替代
+    // 0808-11E-3B: 删除全屏光柱粒子(无明确语义) + 大光圈
     // V0801008: 激活火环战斗 + 入场保护
     this._eliteBattleActive = true;
     this._eliteInvuln = true;
@@ -12070,7 +12069,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       case "idle": { break; }
       case "human_move": {
         this._eliteCyclePhase = "open"; this._eliteForm = "human";
-        this._eliteRingBroken = 0; this._eliteRingIssued = 0; this._eliteRingResolved = 0;
+        this._eliteRingBroken = 0; this._eliteDestabilize = 0; this._eliteRingIssued = 0; this._eliteRingResolved = 0;
         if (!this._eliteDashTarget && this._eliteSeqTimer < 0.02) {
           const avail = this._eliteWaypoints.filter((_, i) => i !== this._eliteCurrentWP);
           const wp = avail[Math.floor(Math.random() * avail.length)];
@@ -12094,7 +12093,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         // 0808-11E-2C-2: 最后0.10s形态峰值
         const peak = this._eliteSeqTimer > 0.20 ? 1.15 : 1;
         if (peak > 1 && this._eliteFormTimer < peak) this._eliteFormTimer += peak * 0.02;
-        if (this._eliteSeqTimer >= 0.30) { this._eliteForm = "inkflame"; this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteRingBroken = 0; this._eliteFireTimeout = 0; this._eliteWaveId++; goSeq("flame_dash_1"); }
+        if (this._eliteSeqTimer >= 0.30) { this._eliteForm = "inkflame"; this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteRingBroken = 0; this._eliteDestabilize = 0; this._eliteFireTimeout = 0; this._eliteWaveId++; goSeq("flame_dash_1"); }
         break;
       }
       case "flame_dash_1": case "flame_dash_2": case "flame_dash_3": {
