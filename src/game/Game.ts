@@ -8181,8 +8181,18 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.quadraticCurveTo(r * 0.5, -r * 0.15, r * 0.4, r * 0.4);
       ctx.quadraticCurveTo(r * 0.2, r * 0.5, -r * 0.3, r * 0.3);
       ctx.fill();
-      ctx.fillStyle = `rgba(255,200,80,${0.75 * morph})`;
-      ctx.beginPath(); ctx.arc(-r * 0.05, -r * 0.6, r * 0.2, 0, Math.PI * 2); ctx.fill();
+      // 0808-11E-2C-2: 非圆形火舌(非靶心)
+      ctx.fillStyle = `rgba(255,200,80,${0.7 * morph})`;
+      ctx.beginPath();
+      const cty = -r * 0.5 + Math.sin(this.elapsed * 2.5) * r * 0.12;
+      ctx.moveTo(-r * 0.15, cty); ctx.quadraticCurveTo(r * 0.1, cty - r * 0.4, r * 0.05, cty - r * 0.6);
+      ctx.quadraticCurveTo(r * 0.2, cty - r * 0.3, r * 0.15, cty); ctx.quadraticCurveTo(0, cty + r * 0.2, -r * 0.15, cty);
+      ctx.fill();
+      // 第二火舌
+      ctx.fillStyle = `rgba(255,140,20,${0.45 * morph})`;
+      ctx.beginPath();
+      ctx.moveTo(r * 0.05, cty + r * 0.05); ctx.quadraticCurveTo(r * 0.25, cty - r * 0.25, r * 0.15, cty - r * 0.4);
+      ctx.quadraticCurveTo(r * 0.3, cty - r * 0.1, r * 0.2, cty + r * 0.05); ctx.fill();
       for (let i = 0; i < 4; i++) {
         const ty = -flameH * (0.5 + i * 0.12);
         const tx = (i - 1.5) * r * 0.4 + Math.sin(this.elapsed * 3 + i) * r * 0.2;
@@ -12035,7 +12045,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       }
       case "morph": {
         this._eliteCyclePhase = "telegraph";
+        // 0808-11E-2C-2: 清除攻击提示
+        this.texts = this.texts.filter((t: any) => t.text !== "趁现在攻击!");
         if (this._eliteForm !== "morphing_to_flame") { this._eliteForm = "morphing_to_flame"; this._eliteFormTimer = 0; }
+        // 0808-11E-2C-2: 最后0.10s形态峰值
+        const peak = this._eliteSeqTimer > 0.20 ? 1.15 : 1;
+        if (peak > 1 && this._eliteFormTimer < peak) this._eliteFormTimer += peak * 0.02;
         if (this._eliteSeqTimer >= 0.30) { this._eliteForm = "inkflame"; this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteRingBroken = 0; this._eliteFireTimeout = 0; this._eliteWaveId++; goSeq("flame_dash_1"); }
         break;
       }
