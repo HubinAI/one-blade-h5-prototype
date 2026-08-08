@@ -8253,6 +8253,19 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
   }
 
+  private _resolveFireRingTouchedLine(fr: any) {
+    const dmg = Math.max(1, Math.round(this.maxHp * 0.20));
+    this.hp = Math.max(0, this.hp - dmg);
+    this.screenShake = Math.max(this.screenShake, 0.3);
+    this.flash = Math.max(this.flash, 0.25);
+    AudioService.defenseHit();
+    this.defenseLineHits = (this.defenseLineHits ?? 0) + 1;
+    const hudDmg = Math.round(dmg / this.maxHp * 100);
+    this.addCombatFloat({ x: fr.x, y: fr.y, text: `-${hudDmg}`, color: "#ff5c3c", size: 21, duration: 0.7, category: "damage", priority: "A" });
+    this.particles.push(...sparkBurst({ x: fr.x, y: BALANCE.battlefield.bottomDefenseY }, 6, "#ff5c3c"));
+    this.particles.push(...sparkBurst({ x: fr.x, y: BALANCE.battlefield.bottomDefenseY }, 10, "#e67e22"));
+  }
+
   private _spawnFireRing(elite: any, targetX: number, waveId: number) {
     this._eliteRingIssued++;
     this._eliteFireRings.push({
@@ -12122,8 +12135,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
               if ((fr as any)._waveId !== this._eliteWaveId || !fr.alive) continue;
               fr.hasHit = true; fr._touchedLine = true; fr.alive = false;
               this._eliteRingResolved++;
-              this.hp = Math.max(0, this.hp - 20);
-              this.defenseLineHits = (this.defenseLineHits ?? 0) + 1;
+              this._resolveFireRingTouchedLine(fr);
             }
           }
           this._eliteFireRings = this._eliteFireRings.filter(fr => (fr as any)._waveId !== this._eliteWaveId);
@@ -12174,16 +12186,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         fr._touchedLine = true;
         if (!fr.hasHit) {
           fr.hasHit = true;
-          this._eliteRingResolved++; // 0807-11E-2A
-          // 0808-11E-2D: 统一玩家受伤(不受debug影响)
-          this.hp = Math.max(0, this.hp - 20);
-          this.screenShake = Math.max(this.screenShake, 0.3);
-          this.flash = Math.max(this.flash, 0.25);
-          AudioService.defenseHit();
-          this.defenseLineHits = (this.defenseLineHits ?? 0) + 1;
-          this.addCombatFloat({ x: fr.x, y: fr.y, text: "-20", color: "#ff5c3c", size: 21, duration: 0.7, category: "damage", priority: "A" });
-          this.particles.push(...sparkBurst({ x: fr.x, y: BALANCE.battlefield.bottomDefenseY }, 6, "#ff5c3c"));
-          this.particles.push(...sparkBurst({ x: fr.x, y: BALANCE.battlefield.bottomDefenseY }, 10, "#e67e22"));
+          this._eliteRingResolved++;
+          this._resolveFireRingTouchedLine(fr);
         }
         fr.alive = false; // 触线后立即销毁
       }
