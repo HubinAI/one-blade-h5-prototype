@@ -360,8 +360,15 @@ export class Game {
   private _eliteGatherCenter = { x: 190, y: 370 };
   private _eliteGatherPhase: "idle" | "attract" | "merge" = "idle";
   private _eliteGatherTimer = 0;
-  private _elitePressureRound = 1; // 0808-11E-5: 三轮递增压力
-  private _eliteActivePf: { times: number[]; dur: number; gather: number; reform: number } = { times: [0.25,0.70,1.15], dur: 0.85, gather: 0.45, reform: 0.60 };
+  private _elitePressureRound = 1;
+  private _eliteActivePf: { humanDur: number; times: number[]; dur: number; gather: number; reform: number; gc: { x: number; y: number }; tperm: number[] } = null!;
+
+  private _getFireRingPressureProfile(round: number) {
+    const r = Math.min(round, 3);
+    if (r === 1) return { humanDur: 0.65, times: [0.25, 0.62, 0.98], dur: 0.76, gather: 0.32, reform: 0.42, gc: { x: 190, y: 350 }, tperm: [80, 190, 300] };
+    if (r === 2) return { humanDur: 0.65, times: [0.16, 0.45, 0.72], dur: 0.60, gather: 0.20, reform: 0.28, gc: { x: 125, y: 345 }, tperm: [300, 80, 190] };
+    return { humanDur: 0.65, times: [0.10, 0.32, 0.54], dur: 0.48, gather: 0.14, reform: 0.20, gc: { x: this._elitePressureRound % 2 === 1 ? 255 : 125, y: 345 }, tperm: [190, 300, 80] };
+  }
   // 0808-11E-4: 扩散-环-碎片-聚合循环
   private _eliteSeq: "human" | "splitting" | "ring_1" | "ring_2" | "ring_3" | "wait_resolve" | "gather" | "reform" | "idle" = "idle";
   private _eliteSeqTimer = 0;
@@ -3795,6 +3802,8 @@ export class Game {
             const dmg = Math.max(1, Math.round(frElite.maxHp * 0.08));
             frElite.hp = Math.max(0, frElite.hp - dmg);
             frElite.flash = Math.max(frElite.flash, 0.3);
+            // 0808-11E-Final: -8%反馈
+            this.addCombatFloat({ x: fr.x, y: fr.y - 10, text: "-8%", color: "#ff8c00", size: 19, duration: 0.50, category: "damage", priority: "A" });
           }
           this._addFragment(fr.x, fr.y, "broken");
           this._threatVerifyLastHpBefore = fr.hp; fr.hp -= r.effectiveHpLoss;
@@ -8341,10 +8350,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ];
   }
 
-  private _spawnFireRingRaw(ringIndex: number, x: number, y: number, dur: number) {
+  private _spawnFireRingRaw(ringIndex: number, x: number, y: number, dur: number, tperm: number[]) {
     this._eliteRingIssued++;
-    const zones = [80, 190, 300];
-    const tgt = zones[ringIndex] + (Math.random() - 0.5) * 30;
+    const tgt = tperm[ringIndex] + (Math.random() - 0.5) * 25;
     const cx = x + (tgt - x) * 0.5 + (Math.random() - 0.5) * 50;
     const cy = Math.min(y, 260) - 50;
     this._eliteFireRings.push({
@@ -12199,13 +12207,16 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       case "human": {
         this._eliteCyclePhase = "open"; this._eliteForm = "human";
         if (!this._eliteOpenHintShown) { this._eliteOpenHintShown = true; this.addCombatFloat({ x: elite.x, y: elite.y - 50, text: "趁现在攻击!", color: "#ffd35a", size: 20, duration: 1.0, category: "damage", priority: "A" }); }
-        if (this._eliteSeqTimer >= 0.70) goSeq("splitting");
+        if (this._eliteSeqTimer >= this._eliteActivePf.humanDur) goSeq("splitting");
         break;
       }
       case "splitting": {
         this._eliteCyclePhase = "telegraph"; this._eliteForm = "human";
         // 0808-11E-4C-2: 仅第一帧初始化wave
-        if (this._eliteSeqTimer <= dt) this._beginFireRingSplitWave(elite);
+        if (this._eliteSeqTimer <= dt) {
+          this._eliteActivePf = this._getFireRingPressureProfile(this._elitePressureRound);
+          this._beginFireRingSplitWave(elite);
+        }
         // 身体碎片运动
         const moveT = Math.max(0, (this._eliteSeqTimer - 0.10) / 0.30);
         for (const sf of this._splitFragments) {
@@ -12213,21 +12224,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
           sf.y = elite.y + (sf.ty - elite.y) * Math.pow(Math.min(1, moveT), 2);
           sf.progress = this._eliteSeqTimer / 0.40;
         }
-        // 0808-11E-5: 三轮压力递增
-        const pr = Math.min(this._elitePressureRound, 3) - 1;
-        const profiles = [
-          { times: [0.25, 0.70, 1.15], dur: 0.85, gather: 0.45, reform: 0.60 },
-          { times: [0.20, 0.55, 0.90], dur: 0.72, gather: 0.30, reform: 0.40 },
-          { times: [0.15, 0.42, 0.68], dur: 0.62, gather: 0.22, reform: 0.30 },
-        ];
-        const pf = profiles[pr];
-        this._eliteActivePf = pf;
-        const convertTimes = pf.times;
+        const convertTimes = this._eliteActivePf.times;
         for (let i = 0; i < this._splitFragments.length; i++) {
           const sf = this._splitFragments[i];
           if (!sf.converted && this._eliteSeqTimer >= convertTimes[i]) {
             sf.converted = true;
-            this._spawnFireRingRaw(i, sf.x, sf.y, pf.dur);
+            this._spawnFireRingRaw(i, sf.x, sf.y, this._eliteActivePf.dur, this._eliteActivePf.tperm);
           }
         }
         // 全部转换完成→wait(保证issued===3)
@@ -12258,6 +12260,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         }
         if (this._eliteRingIssued >= 3 && this._eliteRingResolved >= 3) {
           this._eliteGatherPhase = "attract"; this._eliteGatherTimer = 0;
+          this._eliteGatherCenter = this._eliteActivePf.gc;
           goSeq("gather");
         }
         break;
@@ -12268,7 +12271,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       }
       case "reform": {
         this._eliteCyclePhase = "stun"; this._eliteForm = "human";
-        // 0808-11E-4C-2: 仅在重组完成时清除碎片
+        // 0808-11E-Final: Boss移到重组点
+        const gc = this._eliteActivePf.gc;
+        elite.x += (gc.x - elite.x) * 0.25; elite.y += (gc.y - elite.y) * 0.25;
         this._eliteFragments = [];
         this.screenShake = Math.max(this.screenShake, 0.25);
         if (this._eliteSeqTimer >= this._eliteActivePf.reform) { this._elitePressureRound++; goSeq("human"); }
