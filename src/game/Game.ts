@@ -338,7 +338,7 @@ export class Game {
   private elitePreviewShown = false;
   private eliteSpawnAnnounced = false;
   /** V0801008: 火环精英战斗状态 */
-  private _eliteFireRings: Array<{ x: number; y: number; r: number; speed: number; alive: boolean; hasHit: boolean; hp: number; _touchedLine?: boolean; targetX?: number; targetY?: number; _waveId?: number }> = [];
+  private _eliteFireRings: Array<{ x: number; y: number; r: number; speed: number; alive: boolean; hasHit: boolean; hp: number; _touchedLine?: boolean; targetX?: number; targetY?: number; _waveId?: number; _launched?: boolean }> = [];
   private _eliteBattleActive = false;
   private _eliteInvuln = false;
   private _eliteGuardSpawned = false;
@@ -354,6 +354,10 @@ export class Game {
   private _eliteRingFireTimer = 0; // 环间间隔计时
   // 0808-11E-4: Boss碎片系统
   private _eliteFragments: Array<{ x: number; y: number; vx: number; vy: number; size: number; alpha: number; bright: boolean; result: "broken" | "touched"; srcX: number; srcY: number; gathered: boolean }> = [];
+  // 0808-11E-4B: 真分裂preview
+  private _splitFragments: Array<{ x: number; y: number; tx: number; ty: number; progress: number }> = [];
+  private _ringLaunchDelays: number[] = [];
+  private _eliteLanded = false;
   private _eliteGatherCenter = { x: 190, y: 370 };
   private _eliteGatherPhase: "idle" | "attract" | "merge" = "idle";
   private _eliteGatherTimer = 0;
@@ -375,6 +379,13 @@ export class Game {
   private _eliteRingIssued = 0;
   private _eliteRingResolved = 0;
   private _eliteFireTimeout = 0;
+
+  // 0808-11E-4B: 统一Boss身体是否存在
+  private _isFireRingBodyPresent(): boolean {
+    if (!this._eliteBattleActive) return true;
+    const s = this._eliteSeq;
+    return s === "human" || s === "reform" || s === "idle";
+  }
   private _eliteCycleTimer = 0;
   /** V0730002: 第1关精英预告时间戳（用于清场衔接计时） */
   private _elitePreviewAt = 0;
@@ -1430,6 +1441,7 @@ export class Game {
     this._drawEliteFragments(ctx);
     if (this._numericalTestMode) this._drawNumericalTest(ctx); // 0807-11B-1
     this._drawFireRings(ctx); // V0801008
+    this._drawSplitFragments(ctx);
     this.drawTractorLinks(ctx);
     this._drawFrostEffects(ctx); // V0731012 — 在火环之上保证挂霜不被遮
     this._drawSwipeTutorial(ctx); // 0807-11A
@@ -2833,7 +2845,7 @@ export class Game {
     this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false;
     this._eliteCurrentWP = -1; this._eliteLastWPSide = ""; this._eliteDashStart = null; this._eliteDashTarget = null; this._eliteDashDuration = 0; this._eliteDashElapsed = 0;
     this._eliteForm = "human"; this._eliteFormTimer = 0; this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteFireTimeout = 0; this._eliteOpenHintShown = false;
-    this._eliteFragments = []; this._eliteGatherPhase = "idle"; this._eliteGatherTimer = 0;
+    this._eliteFragments = []; this._splitFragments = []; this._ringLaunchDelays = []; this._eliteGatherPhase = "idle"; this._eliteGatherTimer = 0; this._eliteLanded = false;
 
     if (this.debugEnabled) {
       console.log("[elite defeated]", {
@@ -4103,10 +4115,7 @@ export class Game {
     // V0730014: 教学组ready前不接受主刀伤害
     if (this._tutorialGroupEnemyIds.has(enemy.id) && !this._tutorialGroupReady) return;
     // 0808-11E-4A: 非human阶段Boss身体不存在
-    if (enemy.eliteKind === "fireRing" && this._eliteBattleActive) {
-      const noBody = this._eliteSeq !== "human" && this._eliteSeq !== "reform" && this._eliteSeq !== "idle";
-      if (noBody) return;
-    }
+    if (enemy.eliteKind === "fireRing" && this._eliteBattleActive && !this._isFireRingBodyPresent()) return;
     // 0808-11E-2D: 墨焰穿透(无命中语义)
     if (enemy.eliteKind === "fireRing" && (this._eliteForm === "inkflame" || this._eliteForm === "morphing_to_flame")) {
       (enemy as any)._inkCutTimer = 0.12; (enemy as any)._inkCutAngle = Math.atan2(
@@ -8317,6 +8326,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._eliteFragments = this._eliteFragments.filter(f => !f.gathered || f.alpha > 0.1);
   }
 
+  private _spawnFireRingRaw(x: number, y: number, targetX: number, waveId: number) {
+    this._eliteRingIssued++;
+    this._eliteFireRings.push({
+      x, y, r: 24, speed: 220 + Math.random() * 40, alive: true, hasHit: false, hp: 1,
+      targetX, targetY: BALANCE.battlefield.bottomDefenseY, _waveId: waveId,
+    });
+  }
+
   private _spawnFireRing(elite: any, targetX: number, waveId: number) {
     this._eliteRingIssued++;
     this._eliteFireRings.push({
@@ -10004,8 +10021,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.translate(enemy.x + wobbleX, enemy.y);
       // 0808-11E-4A: fireRing在split/ring/gather阶段隐藏boss主体
       if (enemy.eliteKind === "fireRing" && this._eliteBattleActive) {
-        const hideBoss = this._eliteSeq !== "human" && this._eliteSeq !== "reform";
-        if (hideBoss) { ctx.restore(); continue; }
+        if (!this._isFireRingBodyPresent()) { ctx.restore(); continue; }
       }
       // P4.3A: 三层纵深缩放（Boss/精英不受影响）
       if (BATTLEFIELD_FLOW.enabled && enemy.flow && enemy.kind !== "boss" && enemy.kind !== "elite") {
@@ -12026,12 +12042,22 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false;
     this._eliteCurrentWP = -1; this._eliteLastWPSide = ""; this._eliteDashStart = null; this._eliteDashTarget = null; this._eliteDashDuration = 0; this._eliteDashElapsed = 0;
     this._eliteForm = "human"; this._eliteFormTimer = 0; this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteFireTimeout = 0; this._eliteOpenHintShown = false;
-    this._eliteFragments = []; this._eliteGatherPhase = "idle"; this._eliteGatherTimer = 0;
+    this._eliteFragments = []; this._splitFragments = []; this._ringLaunchDelays = []; this._eliteGatherPhase = "idle"; this._eliteGatherTimer = 0; this._eliteLanded = false;
     this._eliteCyclesDone = 0;
     this._eliteCycleTimer = 0;
     this._eliteCyclePhase = "idle";
     this._eliteFireRings = [];
     logEvent("elite_spawn", { levelId: this.level.id, eliteKind: ek, time: this.elapsed });
+  }
+
+  private _drawSplitFragments(ctx: CanvasRenderingContext2D) {
+    for (const sf of this._splitFragments) {
+      const r = 20 * (0.3 + sf.progress * 0.7);
+      ctx.beginPath(); ctx.arc(sf.x, sf.y, r, 0, Math.PI * 2);
+      ctx.strokeStyle = "#e67e22"; ctx.lineWidth = 2.5;
+      ctx.setLineDash([2, 3]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = `rgba(200,100,20,${0.3 + sf.progress * 0.3})`; ctx.fill();
+    }
   }
 
   /** V0801008: 火环渲染 + telegraph 预警圈 */
@@ -12053,12 +12079,18 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
     // 0807-11E-1: 入场保护 — entryPhase完成才开战
     if (this._eliteInvuln) {
-      if (elite.entryPhase?.completed === true) {
+      // 0808-11E-4B: 强制落地350
+      if (!this._eliteLanded && elite.y >= 340) {
+        this._eliteLanded = true; elite.y = 350;
+        this.screenShake = Math.max(this.screenShake, 0.1);
+      }
+      if (elite.entryPhase?.completed === true && this._eliteLanded) {
         this._eliteInvuln = false;
         if (!this._eliteEntryBoostDone && this._momentumState === 'charging' && this.energy < 50) { this.energy = 50; this._eliteEntryBoostDone = true; }
         // 0808-11E-4: entry→分裂循环起点
         this._eliteSeq = "human"; this._eliteSeqTimer = 0;
-        this._eliteFragments = []; this._eliteGatherPhase = "idle"; this._eliteGatherTimer = 0;
+        this._eliteFragments = []; this._splitFragments = []; this._ringLaunchDelays = [];
+        this._eliteGatherPhase = "idle"; this._eliteGatherTimer = 0;
         this._eliteCyclePhase = "open"; this._eliteForm = "human";
         this.showBattleNotice({ text: "火环将·开战", priority: "A", category: "elite", style: "danger", duration: 0.7, dedupeKey: "elite:fireRing:battle", cooldown: 3, interrupt: false });
       }
@@ -12123,10 +12155,25 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         this._eliteCyclePhase = "telegraph"; this._eliteForm = "human";
         this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteFireTimeout = 0; this._eliteWaveId++;
         this._eliteFragments = [];
-        if (this._eliteSeqTimer >= 0.40) {
+        // 0808-11E-4B: 真分裂previsual(3块从身体裂出)
+        if (this._splitFragments.length === 0) {
+          const targets = [{ tx: 95, ty: 280 }, { tx: 190, ty: 260 }, { tx: 285, ty: 280 }];
+          for (const tg of targets) this._splitFragments.push({ x: elite.x, y: elite.y, tx: tg.tx, ty: tg.ty, progress: 0 });
+          this._ringLaunchDelays = [0.0, 0.30, 0.60];
+        }
+        const t = this._eliteSeqTimer / 0.45;
+        for (let i = 0; i < this._splitFragments.length; i++) {
+          const sf = this._splitFragments[i];
+          sf.x = elite.x + (sf.tx - elite.x) * Math.pow(t, 2);
+          sf.y = elite.y + (sf.ty - elite.y) * Math.pow(t, 2);
+          sf.progress = t;
+        }
+        if (this._eliteSeqTimer >= 0.45) {
           this._eliteCyclePhase = "fire";
-          const order = [95, 190, 285].sort(() => Math.random() - 0.5);
-          for (const tx of order) this._spawnFireRing(elite, tx, this._eliteWaveId);
+          for (const sf of this._splitFragments) {
+            this._spawnFireRingRaw(sf.x, sf.y, sf.tx, this._eliteWaveId);
+          }
+          this._splitFragments = [];
           goSeq("wait_resolve");
         }
         break;
@@ -12169,6 +12216,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 火环移动 & 防线碰撞(0807-11E-1D: X/Y分开目标)
     for (const fr of this._eliteFireRings) {
       if (!fr.alive) continue;
+      // 0808-11E-4B: 错峰启动(未launch时漂移)
+      const idx = this._eliteFireRings.indexOf(fr);
+      const delay = this._ringLaunchDelays[idx] || 0;
+      if (!fr._launched) {
+        if (this._eliteSeqTimer >= delay) fr._launched = true;
+        fr.y += Math.sin(this.elapsed * 2 + idx) * 0.3; // 轻微漂浮
+        continue;
+      }
       if (fr.targetX !== undefined && fr.targetY !== undefined) {
         const dx = fr.targetX - fr.x;
         const dy = fr.targetY - fr.y;
