@@ -350,16 +350,25 @@ export class Game {
   private _eliteAnchorY = 350; // 0807-11E-1E: Boss固定锚点
   private _eliteOpenHintShown = false; // 0807-11E-1F: 开场提示只一次
   private _eliteFireSubPhase: "queued" | "firing" | "done" = "queued"; // 0807-11E-1H: 环发射时序
-  private _eliteRingQueue: number[] = []; // 待发射环队列
+  private _eliteRingQueue: { x: number; y: number }[] = [];
   private _eliteRingFireTimer = 0; // 环间间隔计时
   private _eliteRingBroken = 0; // 已破环计数(0~3)
   // 0807-11E-2: 行动点AI
   private _eliteWaypoints = [{ x: 95, y: 300 }, { x: 190, y: 350 }, { x: 285, y: 300 }, { x: 120, y: 400 }, { x: 260, y: 400 }];
   private _eliteCurrentWP = -1;
   private _eliteLastWPSide: "" | "L" | "R" = "";
+  // 0807-11E-2A: 确定性dash
+  private _eliteDashStart: { x: number; y: number } | null = null;
   private _eliteDashTarget: { x: number; y: number } | null = null;
-  private _eliteDashPhase: "idle" | "moving" | "arrived" = "idle";
-  private _eliteDashTimer = 0;
+  private _eliteDashDuration = 0;
+  private _eliteDashElapsed = 0;
+  // 0807-11E-2A: 人形/墨焰
+  private _eliteForm: "human" | "morphing_to_flame" | "inkflame" | "reforming" = "human";
+  private _eliteFormTimer = 0;
+  // 0807-11E-2A: 火环计数防卡死
+  private _eliteRingIssued = 0;
+  private _eliteRingResolved = 0;
+  private _eliteFireTimeout = 0;
   private _eliteCycleTimer = 0;
   /** V0730002: 第1关精英预告时间戳（用于清场衔接计时） */
   private _elitePreviewAt = 0;
@@ -2815,7 +2824,8 @@ export class Game {
     this._eliteInvuln = false;
     this._eliteFireRings = [];
     this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false;
-    this._eliteCurrentWP = -1; this._eliteLastWPSide = ""; this._eliteDashTarget = null; this._eliteDashPhase = "idle"; this._eliteDashTimer = 0; this._eliteOpenHintShown = false;
+    this._eliteCurrentWP = -1; this._eliteLastWPSide = ""; this._eliteDashStart = null; this._eliteDashTarget = null; this._eliteDashDuration = 0; this._eliteDashElapsed = 0;
+    this._eliteForm = "human"; this._eliteFormTimer = 0; this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteFireTimeout = 0; this._eliteOpenHintShown = false;
 
     if (this.debugEnabled) {
       console.log("[elite defeated]", {
@@ -3757,7 +3767,8 @@ export class Game {
           this._slashDedupFireRings.add(frKey);
           this._debugFireRingHits = (this._debugFireRingHits ?? 0) + 1;
           this._slashDirectHitIds.add(frKey);
-          this._eliteRingBroken = Math.min(3, this._eliteRingBroken + 1); // 0807-11E-1H
+          this._eliteRingBroken = Math.min(3, this._eliteRingBroken + 1);
+          this._eliteRingResolved++; // 0807-11E-2A
           this._threatVerifyLastHpBefore = fr.hp; fr.hp -= r.effectiveHpLoss;
           this._threatVerifyLastHpAfter = fr.hp;
           this._threatVerifyLastResult = fr.hp <= 0 ? 'DESTROYED' : 'DAMAGED';
@@ -8145,61 +8156,57 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
   /** 0807-11E-1F: 火环将专属阶段视觉(含open传达+telegraph蓄势) */
   private _drawFireRingEliteVisual(ctx: CanvasRenderingContext2D, elite: Enemy) {
+    const f = this._eliteForm;
     const p = this._eliteCyclePhase;
-    if (p === "open") {
-      // 0807-11E-2: 双姿态
-      const f = 0.4 + Math.sin(this.elapsed * 10) * 0.3;
-      ctx.beginPath(); ctx.arc(elite.x, elite.y, elite.radius + 6, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(255,255,255,${0.6 * f})`; ctx.lineWidth = 3;
-      ctx.stroke();
-      ctx.beginPath(); ctx.arc(elite.x, elite.y, elite.radius + 12, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(255,200,100,${0.3 * f})`; ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 6]); ctx.stroke(); ctx.setLineDash([]);
-    } else if (p === "telegraph") {
-      // 蓄势: 从弱到强
-      const t = this._eliteCycleTimer / 0.6;
-      const f = t * t; // 加速升高
-      const pulse = 0.5 + Math.sin(this.elapsed * 8) * 0.5;
-      ctx.beginPath(); ctx.arc(elite.x, elite.y, elite.radius + 4 + f * 16, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(255,140,0,${0.3 + f * 0.5})`; ctx.lineWidth = 2 + f * 4;
-      ctx.setLineDash([3 + f * 4, 3]); ctx.stroke(); ctx.setLineDash([]);
-      ctx.beginPath(); ctx.arc(elite.x, elite.y, elite.radius + 2 + f * 10, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255,100,20,${0.1 + f * 0.15 * pulse})`; ctx.fill();
-    } else if (p === "fire") {
-      // 0807-11E-1H: 盾裂段数表达
-      const broken = this._eliteRingBroken;
-      const pulse = 0.6 + Math.sin(this.elapsed * 8) * 0.4;
-      ctx.beginPath(); ctx.arc(elite.x, elite.y, 38, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(255,140,0,${0.5 * pulse})`; ctx.lineWidth = 4; ctx.stroke();
-      if (broken >= 1) {
-        ctx.beginPath(); ctx.arc(elite.x, elite.y, 44, broken * 0.25, Math.PI * 2 - broken * 0.25);
-        ctx.strokeStyle = `rgba(230,126,34,${0.25})`; ctx.lineWidth = 2;
-        ctx.setLineDash([4 + broken * 2, 4 + broken * 3]); ctx.stroke(); ctx.setLineDash([]);
-        for (let i = 0; i < broken; i++) {
-          const ang = (i * 2 * Math.PI / 3) + this.elapsed * 0.5;
-          ctx.beginPath(); ctx.moveTo(elite.x + Math.cos(ang) * 30, elite.y + Math.sin(ang) * 30);
-          ctx.lineTo(elite.x + Math.cos(ang) * 48, elite.y + Math.sin(ang) * 48);
-          ctx.strokeStyle = `rgba(255,255,200,${0.6 * pulse})`; ctx.lineWidth = 2; ctx.stroke();
-        }
-      } else {
-        ctx.beginPath(); ctx.arc(elite.x, elite.y, 44, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(230,126,34,${0.25 * pulse})`; ctx.lineWidth = 2;
-        ctx.setLineDash([8, 4]); ctx.stroke(); ctx.setLineDash([]);
+    // 0807-11E-2A: 人形/墨焰
+    if (f === "inkflame" || f === "morphing_to_flame") {
+      const morph = f === "morphing_to_flame" ? this._eliteFormTimer / 0.18 : 1;
+      const r = elite.radius * (0.7 + (1 - morph) * 0.3);
+      ctx.fillStyle = `rgba(20,10,5,${0.9 * morph})`;
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const a = (i * Math.PI / 4) + this.elapsed * 2;
+        const rd = r * (0.6 + 0.4 * Math.sin(i * 1.5 + this.elapsed * 5));
+        const px = elite.x + Math.cos(a) * rd, py = elite.y + Math.sin(a) * rd * 1.3;
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
       }
-    } else if (p === "stun") {
-      ctx.beginPath(); ctx.arc(elite.x, elite.y, 42, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(255,255,255,${0.3 + Math.sin(this.elapsed*12)*0.3})`; ctx.lineWidth = 2;
-      ctx.setLineDash([3, 5]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = `rgba(255,90,20,${0.6 * morph})`;
+      ctx.beginPath(); ctx.arc(elite.x, elite.y, r * 0.3, 0, Math.PI * 2); ctx.fill();
+      for (let i = 0; i < 5; i++) {
+        const a = (i * Math.PI / 2.5) + this.elapsed * 1.5;
+        ctx.fillStyle = `rgba(255,140,20,${0.3 * morph * (0.5 + 0.5 * Math.sin(this.elapsed * 8 + i))})`;
+        ctx.beginPath(); ctx.arc(elite.x + Math.cos(a) * r * 0.8, elite.y + Math.sin(a) * r * 0.6, 4, 0, Math.PI * 2); ctx.fill();
+      }
+    } else {
+      const openPhase = p === "open" || p === "stun";
+      if (openPhase) {
+        const f2 = 0.5 + Math.sin(this.elapsed * 12) * 0.3;
+        ctx.beginPath(); ctx.arc(elite.x, elite.y, elite.radius - 4, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,255,240,${0.5 * f2})`; ctx.fill();
+        ctx.beginPath(); ctx.arc(elite.x, elite.y, elite.radius + 4, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255,220,140,0.7)"; ctx.lineWidth = 2; ctx.stroke();
+      } else {
+        ctx.beginPath(); ctx.arc(elite.x, elite.y, elite.radius + 10, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(200,100,20,0.85)"; ctx.lineWidth = 5; ctx.stroke();
+      }
     }
   }
 
   private _spawnFireRing(elite: any, targetX: number, waveId: number) {
-    const offsetX = (targetX - 190) * 0.15;
+    this._eliteRingIssued++;
     this._eliteFireRings.push({
-      x: elite.x + offsetX, y: elite.y + 15, r: 24,
+      x: elite.x + (targetX - 190) * 0.15, y: elite.y + 15, r: 24,
       speed: 220 + Math.random() * 40, alive: true, hasHit: false, hp: 1,
       targetX, targetY: BALANCE.battlefield.bottomDefenseY, _waveId: waveId,
     });
+  }
+
+  private _startDash(elite: any, target: { x: number; y: number }, duration: number) {
+    this._eliteDashStart = { x: elite.x, y: elite.y };
+    this._eliteDashTarget = target;
+    this._eliteDashDuration = duration;
+    this._eliteDashElapsed = 0;
   }
 
   /** 第四轮微调：军令爆发怪潮横向分布函数 */
@@ -11895,7 +11902,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._eliteBattleActive = true;
     this._eliteInvuln = true;
     this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false;
-    this._eliteCurrentWP = -1; this._eliteLastWPSide = ""; this._eliteDashTarget = null; this._eliteDashPhase = "idle"; this._eliteDashTimer = 0; this._eliteOpenHintShown = false;
+    this._eliteCurrentWP = -1; this._eliteLastWPSide = ""; this._eliteDashStart = null; this._eliteDashTarget = null; this._eliteDashDuration = 0; this._eliteDashElapsed = 0;
+    this._eliteForm = "human"; this._eliteFormTimer = 0; this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteFireTimeout = 0; this._eliteOpenHintShown = false;
     this._eliteCyclesDone = 0;
     this._eliteCycleTimer = 0;
     this._eliteCyclePhase = "idle";
@@ -11952,99 +11960,97 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       return;
     }
 
-    // 0807-11E-2: 行动点AI + 锁甲破绽双视觉
-    // 循环: pursuit(追→砍0.65s)→lock(0.15s)→3dash→stun(0.8s)
-    const curWaveRings = this._eliteFireRings.filter(fr => (fr as any)._waveId === this._eliteWaveId);
-    const aliveWaveRings = curWaveRings.filter(fr => fr.alive);
-    const allWaveDead = curWaveRings.length > 0 && aliveWaveRings.length === 0 && curWaveRings.length === 3;
-
-    // 全局Boss移动: dash逻辑
-    const dashMove = (target: { x: number; y: number }, speed: number) => {
-      const dx = target.x - elite.x, dy = target.y - elite.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist > 2) { const f = Math.min(1, speed * dt / dist); elite.x += dx * f; elite.y += dy * f; }
-    };
-
-    if (this._eliteDashTarget && this._eliteDashPhase === "moving") {
-      const spd = this._eliteCyclePhase === "fire" ? 1200 : 900;
-      dashMove(this._eliteDashTarget, spd);
-      this._eliteDashTimer += dt;
-      if (Math.hypot(this._eliteDashTarget.x - elite.x, this._eliteDashTarget.y - elite.y) < 8 || this._eliteDashTimer > 0.35) {
-        elite.x = this._eliteDashTarget.x; elite.y = this._eliteDashTarget.y;
-        this._eliteDashPhase = "arrived"; this._eliteDashTimer = 0;
+    // 0807-11E-2A: 确定性dash插值(easeInOutCubic)
+    if (this._eliteDashTarget) {
+      this._eliteDashElapsed += dt;
+      const t = Math.min(1, this._eliteDashElapsed / this._eliteDashDuration);
+      const v = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      elite.x = this._eliteDashStart!.x + (this._eliteDashTarget.x - this._eliteDashStart!.x) * v;
+      elite.y = this._eliteDashStart!.y + (this._eliteDashTarget.y - this._eliteDashStart!.y) * v;
+      if (t >= 1) { this._eliteDashTarget = null; this._eliteDashStart = null; }
+    }
+    // 形态过渡
+    if (this._eliteForm === "morphing_to_flame" || this._eliteForm === "reforming") {
+      this._eliteFormTimer += dt;
+      const maxT = this._eliteForm === "morphing_to_flame" ? 0.18 : 0.25;
+      if (this._eliteFormTimer >= maxT) {
+        this._eliteForm = this._eliteForm === "morphing_to_flame" ? "inkflame" : "human";
+        this._eliteFormTimer = 0;
       }
     }
+
+    // 0807-11E-2A: 火环计数+异常兜底
+    const aliveRings = this._eliteFireRings.filter(fr => fr.alive);
+    if (this._eliteCyclePhase === "fire") this._eliteFireTimeout += dt;
 
     this._eliteCycleTimer += dt;
     switch (this._eliteCyclePhase) {
       case "open": {
         if (!this._eliteOpenHintShown) { this._eliteOpenHintShown = true; this.addCombatFloat({ x: elite.x, y: elite.y - 50, text: "趁现在攻击!", color: "#ffd35a", size: 20, duration: 1.0, category: "damage", priority: "A" }); }
-        if (this._eliteDashPhase === "idle") {
-          // 选一个新行动点(不连续同点/侧)
-          const availWP = this._eliteWaypoints.filter((_, i) => i !== this._eliteCurrentWP);
-          const wpIdx = Math.floor(Math.random() * (availWP.length || 5));
-          this._eliteCurrentWP = this._eliteWaypoints.indexOf(availWP[wpIdx] || this._eliteWaypoints[1]);
-          this._eliteDashTarget = this._eliteWaypoints[this._eliteCurrentWP];
-          this._eliteDashPhase = "moving"; this._eliteDashTimer = 0;
-          this._eliteLastWPSide = this._eliteDashTarget.x < 175 ? "L" : "R";
+        if (!this._eliteDashTarget && this._eliteForm === "human") {
+          // 选新行动点
+          const avail = this._eliteWaypoints.filter((_, i) => i !== this._eliteCurrentWP);
+          const wp = avail[Math.floor(Math.random() * avail.length)];
+          this._eliteCurrentWP = this._eliteWaypoints.indexOf(wp);
+          this._startDash(elite, wp, 0.36);
           this._eliteRingBroken = 0;
         }
-        if (this._eliteCycleTimer >= 0.65) {
+        if (this._eliteCycleTimer >= 0.65 && !this._eliteDashTarget) {
+          // telegraph: morphing
+          this._eliteForm = "morphing_to_flame"; this._eliteFormTimer = 0;
           this._eliteCyclePhase = "telegraph"; this._eliteCycleTimer = 0;
-          this._eliteDashTarget = null; this._eliteDashPhase = "idle";
         }
         break;
       }
       case "telegraph": {
-        // 锁甲过渡 0.15s
         if (this._eliteCycleTimer >= 0.15) {
           this._eliteCyclePhase = "fire"; this._eliteCycleTimer = 0;
-          this._eliteWaveId++; this._eliteFireSubPhase = "firing"; this._eliteRingFireTimer = 0;
-          // 随机3个行动点(不放环于当前位置)
+          this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteRingBroken = 0; this._eliteFireTimeout = 0;
+          this._eliteWaveId++;
+          // 随机3个行动点(避开当前位置)
           const pts = this._eliteWaypoints.filter((_, i) => i !== this._eliteCurrentWP);
           const order = pts.sort(() => Math.random() - 0.5).slice(0, 3);
-          this._eliteRingQueue = order.map(p => p.x);
-          // 立即冲第一个点
-          this._eliteDashTarget = order[0]; this._eliteDashPhase = "moving"; this._eliteDashTimer = 0;
+          this._eliteRingQueue = order.map(p => ({ x: p.x, y: p.y }));
+          // dash到第一点
+          const p0 = this._eliteRingQueue[0];
+          this._startDash(elite, p0, 0.25);
         }
         break;
       }
       case "fire": {
-        // dash到达→放环→冲下一点
-        if (this._eliteDashPhase === "arrived" && this._eliteRingQueue.length > 0) {
-          const tx = this._eliteRingQueue[0];
-          this._spawnFireRing(elite, tx, this._eliteWaveId);
-          this._eliteRingQueue.shift();
-          // 下一个点
+        // dash到达→放环→下一dash
+        if (!this._eliteDashTarget && this._eliteRingQueue.length > 0) {
+          const p = this._eliteRingQueue.shift()!;
+          this._spawnFireRing(elite, p.x, this._eliteWaveId);
+          this._eliteRingIssued++;
           if (this._eliteRingQueue.length > 0) {
-            const nextX = this._eliteRingQueue[0];
-            this._eliteDashTarget = this._eliteWaypoints.find(w => w.x === nextX) || null;
-          } else {
-            this._eliteDashTarget = null;
+            this._startDash(elite, this._eliteRingQueue[0], 0.25);
           }
-          this._eliteDashPhase = "moving"; this._eliteDashTimer = 0;
         }
-        // 全部发射完, 等待破环
-        if (this._eliteRingQueue.length === 0 && allWaveDead) {
-          this._eliteFireSubPhase = "queued";
-          const allBroken = curWaveRings.every(fr => !(fr as any)._touchedLine);
-          if (allBroken) {
-            // stun: 回到中场
-            this._eliteDashTarget = this._eliteWaypoints[1]; this._eliteDashPhase = "moving";
+        // 结算: 等所有3环resolved
+        const resolvedCount = this._eliteRingResolved;
+        const forceEnd = this._eliteFireTimeout >= 4.0 && this._eliteRingIssued >= 3;
+        if ((this._eliteRingIssued >= 3 && resolvedCount >= 3) || forceEnd) {
+          if (forceEnd && resolvedCount < 3) console.warn(`[11E-2A] fire timeout: issued=${this._eliteRingIssued} resolved=${resolvedCount} alive=${aliveRings.length}`);
+          // 清理残余
+          this._eliteFireRings = this._eliteFireRings.filter(fr => (fr as any)._waveId !== this._eliteWaveId);
+          // reforming
+          this._eliteForm = "reforming"; this._eliteFormTimer = 0;
+          if (this._eliteRingBroken >= 3) {
+            this._startDash(elite, this._eliteWaypoints[1], 0.36);
             this._eliteCyclePhase = "stun"; this._eliteCycleTimer = 0; this._eliteCyclesDone++;
             this.particles.push(...sparkBurst(elite, 20, "#f39c12"), glowParticle(elite, "#ff8c00", 0.15, 22));
             this.screenShake = Math.max(this.screenShake, 0.3);
             this.addCombatFloat({ x: elite.x, y: elite.y - 36, text: "破环!", color: "#ff8c00", size: 23, duration: 0.9, category: "damage", priority: "A" });
           } else {
-            this._eliteCyclePhase = "open"; this._eliteCycleTimer = 0.3; this._eliteDashTarget = null; this._eliteDashPhase = "idle"; this._eliteRingBroken = 0;
+            this._eliteCyclePhase = "open"; this._eliteCycleTimer = 0.3;
           }
         }
         break;
       }
       case "stun": {
-        if (this._eliteCycleTimer >= 0.8) {
+        if (this._eliteCycleTimer >= 0.8 && !this._eliteDashTarget) {
           this._eliteCyclePhase = "open"; this._eliteCycleTimer = 0.3;
-          this._eliteDashTarget = null; this._eliteDashPhase = "idle"; this._eliteRingBroken = 0;
         }
         break;
       }
@@ -12077,11 +12083,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       } else {
         fr.y += fr.speed * dt;
       }
-      if (fr.y >= BALANCE.battlefield.bottomDefenseY) {
-        fr._touchedLine = true; // 0807-11E-1: 标记触线不计入破环
+        if (fr.y >= BALANCE.battlefield.bottomDefenseY) {
+        fr._touchedLine = true;
         if (!fr.hasHit) {
           fr.hasHit = true;
-          // 0807-11B-1: SAFE VERIFY — Debug火环验证时不扣玩家HP
+          this._eliteRingResolved++; // 0807-11E-2A
           if (!this.debugEnabled) {
             this.hp -= 20;
             this.screenShake = Math.max(this.screenShake, 0.3);
