@@ -349,6 +349,10 @@ export class Game {
   private _eliteWaveId = 0; // 0807-11E-1E: 波次隔离
   private _eliteAnchorY = 350; // 0807-11E-1E: Boss固定锚点
   private _eliteOpenHintShown = false; // 0807-11E-1F: 开场提示只一次
+  private _eliteFireSubPhase: "queued" | "firing" | "done" = "queued"; // 0807-11E-1H: 环发射时序
+  private _eliteRingQueue: number[] = []; // 待发射环队列
+  private _eliteRingFireTimer = 0; // 环间间隔计时
+  private _eliteRingBroken = 0; // 已破环计数(0~3)
   private _eliteCycleTimer = 0;
   /** V0730002: 第1关精英预告时间戳（用于清场衔接计时） */
   private _elitePreviewAt = 0;
@@ -3744,7 +3748,8 @@ export class Game {
         if (r && r.isAccepted && r.effectiveHpLoss > 0) {
           this._slashDedupFireRings.add(frKey);
           this._debugFireRingHits = (this._debugFireRingHits ?? 0) + 1;
-          this._slashDirectHitIds.add(frKey); // 0807-11E-1A: 火环计入手势目标
+          this._slashDirectHitIds.add(frKey);
+          this._eliteRingBroken = Math.min(3, this._eliteRingBroken + 1); // 0807-11E-1H
           this._threatVerifyLastHpBefore = fr.hp; fr.hp -= r.effectiveHpLoss;
           this._threatVerifyLastHpAfter = fr.hp;
           this._threatVerifyLastResult = fr.hp <= 0 ? 'DESTROYED' : 'DAMAGED';
@@ -4492,9 +4497,10 @@ export class Game {
 
   private damageEnemy(enemy: Enemy, damage: number, trail: SlashTrail, chainKill: boolean, source: string) {
     if (!enemy.alive) return false;
-    // 0807-11E-1G: telegraph/fire阶段Boss锁甲, 完全不扣HP
+    // 0807-11E-1H: telegraph前半仍可攻击, fire阶段锁甲
     if (enemy.eliteKind === "fireRing" && this._eliteBattleActive) {
-      if (this._eliteCyclePhase === "telegraph" || this._eliteCyclePhase === "fire") {
+      const locked = this._eliteCyclePhase === "fire" || (this._eliteCyclePhase === "telegraph" && this._eliteCycleTimer >= 0.45);
+      if (locked) {
         enemy.flash = Math.max(enemy.flash, 0.18);
         if (this.particles.length < 120) {
           this.particles.push(...sparkBurst({ x: enemy.x, y: enemy.y - 12 }, 4, "#ff8c00"));
@@ -8152,17 +8158,40 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       ctx.beginPath(); ctx.arc(elite.x, elite.y, elite.radius + 2 + f * 10, 0, Math.PI * 2);
       ctx.fillStyle = `rgba(255,100,20,${0.1 + f * 0.15 * pulse})`; ctx.fill();
     } else if (p === "fire") {
+      // 0807-11E-1H: 盾裂段数表达
+      const broken = this._eliteRingBroken;
       const pulse = 0.6 + Math.sin(this.elapsed * 8) * 0.4;
       ctx.beginPath(); ctx.arc(elite.x, elite.y, 38, 0, Math.PI * 2);
       ctx.strokeStyle = `rgba(255,140,0,${0.5 * pulse})`; ctx.lineWidth = 4; ctx.stroke();
-      ctx.beginPath(); ctx.arc(elite.x, elite.y, 44, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(230,126,34,${0.25 * pulse})`; ctx.lineWidth = 2;
-      ctx.setLineDash([8, 4]); ctx.stroke(); ctx.setLineDash([]);
+      if (broken >= 1) {
+        ctx.beginPath(); ctx.arc(elite.x, elite.y, 44, broken * 0.25, Math.PI * 2 - broken * 0.25);
+        ctx.strokeStyle = `rgba(230,126,34,${0.25})`; ctx.lineWidth = 2;
+        ctx.setLineDash([4 + broken * 2, 4 + broken * 3]); ctx.stroke(); ctx.setLineDash([]);
+        for (let i = 0; i < broken; i++) {
+          const ang = (i * 2 * Math.PI / 3) + this.elapsed * 0.5;
+          ctx.beginPath(); ctx.moveTo(elite.x + Math.cos(ang) * 30, elite.y + Math.sin(ang) * 30);
+          ctx.lineTo(elite.x + Math.cos(ang) * 48, elite.y + Math.sin(ang) * 48);
+          ctx.strokeStyle = `rgba(255,255,200,${0.6 * pulse})`; ctx.lineWidth = 2; ctx.stroke();
+        }
+      } else {
+        ctx.beginPath(); ctx.arc(elite.x, elite.y, 44, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(230,126,34,${0.25 * pulse})`; ctx.lineWidth = 2;
+        ctx.setLineDash([8, 4]); ctx.stroke(); ctx.setLineDash([]);
+      }
     } else if (p === "stun") {
       ctx.beginPath(); ctx.arc(elite.x, elite.y, 42, 0, Math.PI * 2);
       ctx.strokeStyle = `rgba(255,255,255,${0.3 + Math.sin(this.elapsed*12)*0.3})`; ctx.lineWidth = 2;
       ctx.setLineDash([3, 5]); ctx.stroke(); ctx.setLineDash([]);
     }
+  }
+
+  private _spawnFireRing(elite: any, targetX: number, waveId: number) {
+    const offsetX = (targetX - 190) * 0.15;
+    this._eliteFireRings.push({
+      x: elite.x + offsetX, y: elite.y + 15, r: 24,
+      speed: 160 + Math.random() * 30, alive: true, hasHit: false, hp: 1,
+      targetX, targetY: BALANCE.battlefield.bottomDefenseY, _waveId: waveId,
+    });
   }
 
   /** 第四轮微调：军令爆发怪潮横向分布函数 */
@@ -11914,52 +11943,58 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       return;
     }
 
-    // 0807-11E-1E: 循环: open→telegraph→fire(动态)→stun, 禁止波次叠加
+    // 0807-11E-1H: 循环: open→telegraph(可贪刀→锁甲→三拍连续发射)→stun
     const curWaveRings = this._eliteFireRings.filter(fr => (fr as any)._waveId === this._eliteWaveId);
     const aliveWaveRings = curWaveRings.filter(fr => fr.alive);
     const allWaveDead = curWaveRings.length > 0 && aliveWaveRings.length === 0 && curWaveRings.length === 3;
     this._eliteCycleTimer += dt;
     switch (this._eliteCyclePhase) {
       case "open": {
-        // 0807-11E-1F: 传达现在可以砍Boss
-        if (!this._eliteOpenHintShown) {
-          this._eliteOpenHintShown = true;
-          this.addCombatFloat({ x: elite.x, y: elite.y - 50, text: "趁现在攻击!", color: "#ffd35a", size: 20, duration: 1.0, category: "damage", priority: "A" });
-        }
+        if (!this._eliteOpenHintShown) { this._eliteOpenHintShown = true; this.addCombatFloat({ x: elite.x, y: elite.y - 50, text: "趁现在攻击!", color: "#ffd35a", size: 20, duration: 1.0, category: "damage", priority: "A" }); }
         if (this._eliteCycleTimer >= 0.8) {
           this._eliteCyclePhase = "telegraph"; this._eliteCycleTimer = 0;
+          this._eliteRingBroken = 0;
         }
         break;
       }
       case "telegraph": {
-        if (this._eliteCycleTimer >= 0.6) {
+        // 前0.45s Boss仍可受伤(玩家可贪刀), 后段锁甲
+        if (this._eliteCycleTimer >= 0.45 && this._eliteFireSubPhase === "queued") {
+          this._eliteFireSubPhase = "firing";
           this._eliteWaveId++;
           this._eliteCyclePhase = "fire"; this._eliteCycleTimer = 0;
-          // 三环分三路(左95/中190/右285)
-          const targets = [{ x: 95, y: BALANCE.battlefield.bottomDefenseY }, { x: 190, y: BALANCE.battlefield.bottomDefenseY }, { x: 285, y: BALANCE.battlefield.bottomDefenseY }];
-          for (let i = 0; i < 3; i++) {
-            const t = targets[i];
-            this._eliteFireRings.push({
-              x: elite.x + (i - 1) * 20, y: elite.y + 15, r: 24,
-              speed: 160 + Math.random() * 30, alive: true, hasHit: false, hp: 1,
-              targetX: t.x, targetY: t.y, _waveId: this._eliteWaveId,
-            });
-          }
+          this._eliteRingFireTimer = 0;
+          // 随机目标顺序
+          const order = [95, 190, 285].sort(() => Math.random() - 0.5);
+          this._eliteRingQueue = order;
+          // 立即发射第一环
+          this._spawnFireRing(elite, order[0], this._eliteWaveId);
+          this._eliteRingQueue.shift();
         }
         break;
       }
       case "fire": {
-        (elite as any)._eliteDamageReduction = 0.70;
-        if (allWaveDead) {
-          (elite as any)._eliteDamageReduction = 0;
-          const allBroken = curWaveRings.every(fr => !(fr as any)._touchedLine);
-          if (allBroken) {
-            this._eliteCyclePhase = "stun"; this._eliteCycleTimer = 0; this._eliteCyclesDone++;
-            this.particles.push(...sparkBurst(elite, 20, "#f39c12"), glowParticle(elite, "#ff8c00", 0.15, 22));
-            this.screenShake = Math.max(this.screenShake, 0.3);
-            this.addCombatFloat({ x: elite.x, y: elite.y - 36, text: "破环!", color: "#ff8c00", size: 23, duration: 0.9, category: "damage", priority: "A" });
-          } else {
-            this._eliteCyclePhase = "telegraph"; this._eliteCycleTimer = 0.4;
+        this._eliteRingFireTimer += dt;
+        // 按间隔发射剩余环
+        if (this._eliteFireSubPhase === "firing" && this._eliteRingQueue.length > 0 && this._eliteRingFireTimer >= 0.22) {
+          this._eliteRingFireTimer = 0;
+          const tx = this._eliteRingQueue.shift()!;
+          this._spawnFireRing(elite, tx, this._eliteWaveId);
+        }
+        if (this._eliteRingQueue.length === 0 && this._eliteFireSubPhase === "firing") {
+          // 更新破环计数(由ring hit更新_eliteRingBroken)
+          if (allWaveDead) {
+            this._eliteFireSubPhase = "queued";
+            const allBroken = curWaveRings.every(fr => !(fr as any)._touchedLine);
+            if (allBroken) {
+              this._eliteCyclePhase = "stun"; this._eliteCycleTimer = 0; this._eliteCyclesDone++;
+              this.particles.push(...sparkBurst(elite, 20, "#f39c12"), glowParticle(elite, "#ff8c00", 0.15, 22));
+              this.screenShake = Math.max(this.screenShake, 0.3);
+              this.addCombatFloat({ x: elite.x, y: elite.y - 36, text: "破环!", color: "#ff8c00", size: 23, duration: 0.9, category: "damage", priority: "A" });
+            } else {
+              this._eliteCyclePhase = "telegraph"; this._eliteCycleTimer = 0.4;
+              this._eliteRingBroken = 0;
+            }
           }
         }
         break;
@@ -11967,6 +12002,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       case "stun": {
         if (this._eliteCycleTimer >= 0.8) {
           this._eliteCyclePhase = "telegraph"; this._eliteCycleTimer = 0.3;
+          this._eliteRingBroken = 0;
         }
         break;
       }
