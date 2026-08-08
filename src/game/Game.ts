@@ -338,14 +338,16 @@ export class Game {
   private elitePreviewShown = false;
   private eliteSpawnAnnounced = false;
   /** V0801008: 火环精英战斗状态 */
-  private _eliteFireRings: Array<{ x: number; y: number; r: number; speed: number; alive: boolean; hasHit: boolean; hp: number; _touchedLine?: boolean; targetX?: number; targetY?: number }> = [];
+  private _eliteFireRings: Array<{ x: number; y: number; r: number; speed: number; alive: boolean; hasHit: boolean; hp: number; _touchedLine?: boolean; targetX?: number; targetY?: number; _waveId?: number }> = [];
   private _eliteBattleActive = false;
   private _eliteInvuln = false;
   private _eliteGuardSpawned = false;
   private _eliteEntryBoostDone = false; // 0807-11E-1B: 开场50一次性格挡
   private _eliteDeadLockRescueDone = false; // 0807-11E-1A/B: 低势救援触发标记
   private _eliteCyclesDone = 0;
-  private _eliteCyclePhase: "idle" | "telegraph" | "fire" | "stun" = "idle";
+  private _eliteCyclePhase: "idle" | "open" | "telegraph" | "fire" | "stun" = "idle";
+  private _eliteWaveId = 0; // 0807-11E-1E: 波次隔离
+  private _eliteAnchorY = 350; // 0807-11E-1E: Boss固定锚点
   private _eliteCycleTimer = 0;
   /** V0730002: 第1关精英预告时间戳（用于清场衔接计时） */
   private _elitePreviewAt = 0;
@@ -11878,79 +11880,76 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (this._eliteInvuln) {
       if (elite.entryPhase?.completed === true) {
         this._eliteInvuln = false;
-        // 0807-11E-1B: 开场最低50刀势(仅charging)
+        // 0807-11E-1B: 开场最低50刀势
         if (!this._eliteEntryBoostDone && this._momentumState === 'charging' && this.energy < 50) {
           this.energy = 50; this._eliteEntryBoostDone = true;
         }
-        this.showBattleNotice({ text: "火环将·开战", priority: "A", category: "elite", style: "danger", duration: 0.7, dedupeKey: "elite:fireRing:battle", cooldown: 3, interrupt: false });
+        // 0807-11E-1E: entry→open(0.8s正常输出窗口)
+        this._eliteCyclePhase = "open";
         this._eliteCycleTimer = 0;
-        this._eliteCyclePhase = "telegraph";
+        this.showBattleNotice({ text: "火环将·开战", priority: "A", category: "elite", style: "danger", duration: 0.7, dedupeKey: "elite:fireRing:battle", cooldown: 3, interrupt: false });
       }
       return;
     }
 
-    // 0807-11E-1: 循环: telegraph(0.6s) → fire(动态) → stun(0.8s)
-    const aliveRings = this._eliteFireRings.filter(fr => fr.alive);
+    // 0807-11E-1E: 循环: open→telegraph→fire(动态)→stun, 禁止波次叠加
+    const curWaveRings = this._eliteFireRings.filter(fr => (fr as any)._waveId === this._eliteWaveId);
+    const aliveWaveRings = curWaveRings.filter(fr => fr.alive);
+    const allWaveDead = curWaveRings.length > 0 && aliveWaveRings.length === 0 && curWaveRings.length === 3;
     this._eliteCycleTimer += dt;
     switch (this._eliteCyclePhase) {
+      case "open": {
+        // 开场正常输出窗口(无减伤, 不生成火环)
+        if (this._eliteCycleTimer >= 0.8) {
+          this._eliteCyclePhase = "telegraph"; this._eliteCycleTimer = 0;
+        }
+        break;
+      }
       case "telegraph": {
         if (this._eliteCycleTimer >= 0.6) {
-          this._eliteCyclePhase = "fire";
-          this._eliteCycleTimer = 0;
-          // 0807-11E-1D: 三环分三路(左/中/右)
-          const targets = [
-            { x: 95,  y: BALANCE.battlefield.bottomDefenseY },
-            { x: 190, y: BALANCE.battlefield.bottomDefenseY },
-            { x: 285, y: BALANCE.battlefield.bottomDefenseY },
-          ];
+          this._eliteWaveId++;
+          this._eliteCyclePhase = "fire"; this._eliteCycleTimer = 0;
+          // 三环分三路(左95/中190/右285)
+          const targets = [{ x: 95, y: BALANCE.battlefield.bottomDefenseY }, { x: 190, y: BALANCE.battlefield.bottomDefenseY }, { x: 285, y: BALANCE.battlefield.bottomDefenseY }];
           for (let i = 0; i < 3; i++) {
             const t = targets[i];
             this._eliteFireRings.push({
-              x: elite.x + (i - 1) * 20, y: elite.y + 15,
-              r: 24, speed: 160 + Math.random() * 30, alive: true, hasHit: false, hp: 1,
-              targetX: t.x, targetY: t.y,
+              x: elite.x + (i - 1) * 20, y: elite.y + 15, r: 24,
+              speed: 160 + Math.random() * 30, alive: true, hasHit: false, hp: 1,
+              targetX: t.x, targetY: t.y, _waveId: this._eliteWaveId,
             });
           }
         }
         break;
       }
       case "fire": {
-        // 火环存在时Boss减伤70%
         (elite as any)._eliteDamageReduction = 0.70;
-        if (aliveRings.length === 0) {
-          // 所有火环清除(broken or hit line)
-          const allBroken = this._eliteFireRings.every(fr => !fr.alive && !(fr as any)._touchedLine);
+        if (allWaveDead) {
           (elite as any)._eliteDamageReduction = 0;
+          const allBroken = curWaveRings.every(fr => !(fr as any)._touchedLine);
           if (allBroken) {
-            // 成功破环: stun 0.8s
-            this._eliteCyclePhase = "stun";
-            this._eliteCycleTimer = 0;
-            this._eliteCyclesDone++;
+            this._eliteCyclePhase = "stun"; this._eliteCycleTimer = 0; this._eliteCyclesDone++;
             this.particles.push(...sparkBurst(elite, 20, "#f39c12"), glowParticle(elite, "#ff8c00", 0.15, 22));
             this.screenShake = Math.max(this.screenShake, 0.3);
-            // 0807-11E-1D: 破环改用addCombatFloat
             this.addCombatFloat({ x: elite.x, y: elite.y - 36, text: "破环!", color: "#ff8c00", size: 23, duration: 0.9, category: "damage", priority: "A" });
           } else {
-            // 有环触线: 直接进入下一轮telegraph(无硬直奖励)
-            this._eliteCyclePhase = "telegraph";
-            this._eliteCycleTimer = 0.3; // 短缓冲
-            this._eliteFireRings.length = 0;
+            this._eliteCyclePhase = "telegraph"; this._eliteCycleTimer = 0.4;
           }
-        } else if (this._eliteCycleTimer >= 2.0) {
-          // 超时强制结束(环未处理完)
-          this._eliteCyclePhase = "telegraph";
-          this._eliteCycleTimer = 0.2;
-          (elite as any)._eliteDamageReduction = 0;
         }
         break;
       }
       case "stun": {
         if (this._eliteCycleTimer >= 0.8) {
-          this._eliteCyclePhase = "telegraph";
-          this._eliteCycleTimer = 0.3;
+          this._eliteCyclePhase = "telegraph"; this._eliteCycleTimer = 0.3;
         }
         break;
       }
+    }
+
+    // 0807-11E-1E: Boss固定锚点(开战后不再下压)
+    if (this._eliteCyclePhase !== "idle") {
+      const targetY = this._eliteAnchorY + Math.sin(this.elapsed * 0.8) * 8;
+      elite.y += (targetY - elite.y) * Math.min(1, 3 * dt);
     }
 
     // 火环移动 & 防线碰撞(0807-11E-1D: X/Y分开目标)
@@ -11987,6 +11986,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 清理死火环（延迟清理避免闪烁）
     this._eliteFireRings = this._eliteFireRings.filter(fr => fr.alive || fr.y < BALANCE.battlefield.bottomDefenseY + 40);
   }
+
   private initializeThunderGeneralBoss(): void {
     if (this.bossSpawned) return; // 防重复初始化
     this.bossSpawned = true;
