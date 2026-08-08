@@ -8254,14 +8254,13 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   }
 
   private _resolveFireRingTouchedLine(fr: any) {
-    const dmg = Math.max(1, Math.round(this.maxHp * 0.20));
+    const dmg = this.maxHp * 0.20; // 0808-11E-2E-2: float伤害, 不round
     this.hp = Math.max(0, this.hp - dmg);
     this.screenShake = Math.max(this.screenShake, 0.3);
     this.flash = Math.max(this.flash, 0.25);
     AudioService.defenseHit();
     this.defenseLineHits = (this.defenseLineHits ?? 0) + 1;
-    const hudDmg = Math.round(dmg / this.maxHp * 100);
-    this.addCombatFloat({ x: fr.x, y: fr.y, text: `-${hudDmg}`, color: "#ff5c3c", size: 21, duration: 0.7, category: "damage", priority: "A" });
+    this.addCombatFloat({ x: fr.x, y: fr.y, text: "-20", color: "#ff5c3c", size: 21, duration: 0.7, category: "damage", priority: "A" });
     this.particles.push(...sparkBurst({ x: fr.x, y: BALANCE.battlefield.bottomDefenseY }, 6, "#ff5c3c"));
     this.particles.push(...sparkBurst({ x: fr.x, y: BALANCE.battlefield.bottomDefenseY }, 10, "#e67e22"));
   }
