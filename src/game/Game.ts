@@ -353,6 +353,13 @@ export class Game {
   private _eliteRingQueue: number[] = []; // 待发射环队列
   private _eliteRingFireTimer = 0; // 环间间隔计时
   private _eliteRingBroken = 0; // 已破环计数(0~3)
+  // 0807-11E-2: 行动点AI
+  private _eliteWaypoints = [{ x: 95, y: 300 }, { x: 190, y: 350 }, { x: 285, y: 300 }, { x: 120, y: 400 }, { x: 260, y: 400 }];
+  private _eliteCurrentWP = -1;
+  private _eliteLastWPSide: "" | "L" | "R" = "";
+  private _eliteDashTarget: { x: number; y: number } | null = null;
+  private _eliteDashPhase: "idle" | "moving" | "arrived" = "idle";
+  private _eliteDashTimer = 0;
   private _eliteCycleTimer = 0;
   /** V0730002: 第1关精英预告时间戳（用于清场衔接计时） */
   private _elitePreviewAt = 0;
@@ -2807,7 +2814,8 @@ export class Game {
     this._eliteBattleActive = false;
     this._eliteInvuln = false;
     this._eliteFireRings = [];
-    this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false; this._eliteOpenHintShown = false;
+    this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false;
+    this._eliteCurrentWP = -1; this._eliteLastWPSide = ""; this._eliteDashTarget = null; this._eliteDashPhase = "idle"; this._eliteDashTimer = 0; this._eliteOpenHintShown = false;
 
     if (this.debugEnabled) {
       console.log("[elite defeated]", {
@@ -4497,9 +4505,9 @@ export class Game {
 
   private damageEnemy(enemy: Enemy, damage: number, trail: SlashTrail, chainKill: boolean, source: string) {
     if (!enemy.alive) return false;
-    // 0807-11E-1H: telegraph前半仍可攻击, fire阶段锁甲
+    // 0807-11E-2: telegraph/fire锁甲 (open/stun可攻击)
     if (enemy.eliteKind === "fireRing" && this._eliteBattleActive) {
-      const locked = this._eliteCyclePhase === "fire" || (this._eliteCyclePhase === "telegraph" && this._eliteCycleTimer >= 0.45);
+      const locked = this._eliteCyclePhase === "fire" || this._eliteCyclePhase === "telegraph";
       if (locked) {
         enemy.flash = Math.max(enemy.flash, 0.18);
         if (this.particles.length < 120) {
@@ -8139,7 +8147,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private _drawFireRingEliteVisual(ctx: CanvasRenderingContext2D, elite: Enemy) {
     const p = this._eliteCyclePhase;
     if (p === "open") {
-      // 破绽强调: 白闪亮边
+      // 0807-11E-2: 双姿态
       const f = 0.4 + Math.sin(this.elapsed * 10) * 0.3;
       ctx.beginPath(); ctx.arc(elite.x, elite.y, elite.radius + 6, 0, Math.PI * 2);
       ctx.strokeStyle = `rgba(255,255,255,${0.6 * f})`; ctx.lineWidth = 3;
@@ -8189,7 +8197,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const offsetX = (targetX - 190) * 0.15;
     this._eliteFireRings.push({
       x: elite.x + offsetX, y: elite.y + 15, r: 24,
-      speed: 160 + Math.random() * 30, alive: true, hasHit: false, hp: 1,
+      speed: 220 + Math.random() * 40, alive: true, hasHit: false, hp: 1,
       targetX, targetY: BALANCE.battlefield.bottomDefenseY, _waveId: waveId,
     });
   }
@@ -11886,7 +11894,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // V0801008: 激活火环战斗 + 入场保护
     this._eliteBattleActive = true;
     this._eliteInvuln = true;
-    this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false; this._eliteOpenHintShown = false;
+    this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false;
+    this._eliteCurrentWP = -1; this._eliteLastWPSide = ""; this._eliteDashTarget = null; this._eliteDashPhase = "idle"; this._eliteDashTimer = 0; this._eliteOpenHintShown = false;
     this._eliteCyclesDone = 0;
     this._eliteCycleTimer = 0;
     this._eliteCyclePhase = "idle";
@@ -11943,66 +11952,99 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       return;
     }
 
-    // 0807-11E-1H: 循环: open→telegraph(可贪刀→锁甲→三拍连续发射)→stun
+    // 0807-11E-2: 行动点AI + 锁甲破绽双视觉
+    // 循环: pursuit(追→砍0.65s)→lock(0.15s)→3dash→stun(0.8s)
     const curWaveRings = this._eliteFireRings.filter(fr => (fr as any)._waveId === this._eliteWaveId);
     const aliveWaveRings = curWaveRings.filter(fr => fr.alive);
     const allWaveDead = curWaveRings.length > 0 && aliveWaveRings.length === 0 && curWaveRings.length === 3;
+
+    // 全局Boss移动: dash逻辑
+    const dashMove = (target: { x: number; y: number }, speed: number) => {
+      const dx = target.x - elite.x, dy = target.y - elite.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist > 2) { const f = Math.min(1, speed * dt / dist); elite.x += dx * f; elite.y += dy * f; }
+    };
+
+    if (this._eliteDashTarget && this._eliteDashPhase === "moving") {
+      const spd = this._eliteCyclePhase === "fire" ? 1200 : 900;
+      dashMove(this._eliteDashTarget, spd);
+      this._eliteDashTimer += dt;
+      if (Math.hypot(this._eliteDashTarget.x - elite.x, this._eliteDashTarget.y - elite.y) < 8 || this._eliteDashTimer > 0.35) {
+        elite.x = this._eliteDashTarget.x; elite.y = this._eliteDashTarget.y;
+        this._eliteDashPhase = "arrived"; this._eliteDashTimer = 0;
+      }
+    }
+
     this._eliteCycleTimer += dt;
     switch (this._eliteCyclePhase) {
       case "open": {
         if (!this._eliteOpenHintShown) { this._eliteOpenHintShown = true; this.addCombatFloat({ x: elite.x, y: elite.y - 50, text: "趁现在攻击!", color: "#ffd35a", size: 20, duration: 1.0, category: "damage", priority: "A" }); }
-        if (this._eliteCycleTimer >= 0.8) {
-          this._eliteCyclePhase = "telegraph"; this._eliteCycleTimer = 0;
+        if (this._eliteDashPhase === "idle") {
+          // 选一个新行动点(不连续同点/侧)
+          const availWP = this._eliteWaypoints.filter((_, i) => i !== this._eliteCurrentWP);
+          const wpIdx = Math.floor(Math.random() * (availWP.length || 5));
+          this._eliteCurrentWP = this._eliteWaypoints.indexOf(availWP[wpIdx] || this._eliteWaypoints[1]);
+          this._eliteDashTarget = this._eliteWaypoints[this._eliteCurrentWP];
+          this._eliteDashPhase = "moving"; this._eliteDashTimer = 0;
+          this._eliteLastWPSide = this._eliteDashTarget.x < 175 ? "L" : "R";
           this._eliteRingBroken = 0;
+        }
+        if (this._eliteCycleTimer >= 0.65) {
+          this._eliteCyclePhase = "telegraph"; this._eliteCycleTimer = 0;
+          this._eliteDashTarget = null; this._eliteDashPhase = "idle";
         }
         break;
       }
       case "telegraph": {
-        // 前0.45s Boss仍可受伤(玩家可贪刀), 后段锁甲
-        if (this._eliteCycleTimer >= 0.45 && this._eliteFireSubPhase === "queued") {
-          this._eliteFireSubPhase = "firing";
-          this._eliteWaveId++;
+        // 锁甲过渡 0.15s
+        if (this._eliteCycleTimer >= 0.15) {
           this._eliteCyclePhase = "fire"; this._eliteCycleTimer = 0;
-          this._eliteRingFireTimer = 0;
-          // 随机目标顺序
-          const order = [95, 190, 285].sort(() => Math.random() - 0.5);
-          this._eliteRingQueue = order;
-          // 立即发射第一环
-          this._spawnFireRing(elite, order[0], this._eliteWaveId);
-          this._eliteRingQueue.shift();
+          this._eliteWaveId++; this._eliteFireSubPhase = "firing"; this._eliteRingFireTimer = 0;
+          // 随机3个行动点(不放环于当前位置)
+          const pts = this._eliteWaypoints.filter((_, i) => i !== this._eliteCurrentWP);
+          const order = pts.sort(() => Math.random() - 0.5).slice(0, 3);
+          this._eliteRingQueue = order.map(p => p.x);
+          // 立即冲第一个点
+          this._eliteDashTarget = order[0]; this._eliteDashPhase = "moving"; this._eliteDashTimer = 0;
         }
         break;
       }
       case "fire": {
-        this._eliteRingFireTimer += dt;
-        // 按间隔发射剩余环
-        if (this._eliteFireSubPhase === "firing" && this._eliteRingQueue.length > 0 && this._eliteRingFireTimer >= 0.22) {
-          this._eliteRingFireTimer = 0;
-          const tx = this._eliteRingQueue.shift()!;
+        // dash到达→放环→冲下一点
+        if (this._eliteDashPhase === "arrived" && this._eliteRingQueue.length > 0) {
+          const tx = this._eliteRingQueue[0];
           this._spawnFireRing(elite, tx, this._eliteWaveId);
+          this._eliteRingQueue.shift();
+          // 下一个点
+          if (this._eliteRingQueue.length > 0) {
+            const nextX = this._eliteRingQueue[0];
+            this._eliteDashTarget = this._eliteWaypoints.find(w => w.x === nextX) || null;
+          } else {
+            this._eliteDashTarget = null;
+          }
+          this._eliteDashPhase = "moving"; this._eliteDashTimer = 0;
         }
-        if (this._eliteRingQueue.length === 0 && this._eliteFireSubPhase === "firing") {
-          // 更新破环计数(由ring hit更新_eliteRingBroken)
-          if (allWaveDead) {
-            this._eliteFireSubPhase = "queued";
-            const allBroken = curWaveRings.every(fr => !(fr as any)._touchedLine);
-            if (allBroken) {
-              this._eliteCyclePhase = "stun"; this._eliteCycleTimer = 0; this._eliteCyclesDone++;
-              this.particles.push(...sparkBurst(elite, 20, "#f39c12"), glowParticle(elite, "#ff8c00", 0.15, 22));
-              this.screenShake = Math.max(this.screenShake, 0.3);
-              this.addCombatFloat({ x: elite.x, y: elite.y - 36, text: "破环!", color: "#ff8c00", size: 23, duration: 0.9, category: "damage", priority: "A" });
-            } else {
-              this._eliteCyclePhase = "telegraph"; this._eliteCycleTimer = 0.4;
-              this._eliteRingBroken = 0;
-            }
+        // 全部发射完, 等待破环
+        if (this._eliteRingQueue.length === 0 && allWaveDead) {
+          this._eliteFireSubPhase = "queued";
+          const allBroken = curWaveRings.every(fr => !(fr as any)._touchedLine);
+          if (allBroken) {
+            // stun: 回到中场
+            this._eliteDashTarget = this._eliteWaypoints[1]; this._eliteDashPhase = "moving";
+            this._eliteCyclePhase = "stun"; this._eliteCycleTimer = 0; this._eliteCyclesDone++;
+            this.particles.push(...sparkBurst(elite, 20, "#f39c12"), glowParticle(elite, "#ff8c00", 0.15, 22));
+            this.screenShake = Math.max(this.screenShake, 0.3);
+            this.addCombatFloat({ x: elite.x, y: elite.y - 36, text: "破环!", color: "#ff8c00", size: 23, duration: 0.9, category: "damage", priority: "A" });
+          } else {
+            this._eliteCyclePhase = "open"; this._eliteCycleTimer = 0.3; this._eliteDashTarget = null; this._eliteDashPhase = "idle"; this._eliteRingBroken = 0;
           }
         }
         break;
       }
       case "stun": {
         if (this._eliteCycleTimer >= 0.8) {
-          this._eliteCyclePhase = "telegraph"; this._eliteCycleTimer = 0.3;
-          this._eliteRingBroken = 0;
+          this._eliteCyclePhase = "open"; this._eliteCycleTimer = 0.3;
+          this._eliteDashTarget = null; this._eliteDashPhase = "idle"; this._eliteRingBroken = 0;
         }
         break;
       }
