@@ -23,7 +23,8 @@ test.describe("Boss状态机浏览器Smoke", () => {
 
     await page.goto("/");
     await page.waitForLoadState("networkidle");
-
+    // 0808-11E-2E-3: 等待React渲染出footer
+    await expect(page.locator(".version-footer")).toBeVisible({ timeout: 10000 });
     const versionText = await page.locator(".version-footer").textContent();
     expect(versionText).toContain(expectedVersion);
     expect(pageErrors).toEqual([]);
