@@ -12056,16 +12056,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       }
     }
 
-    // 0807-11E-1F: Boss中路游走(非木桩)
-    if (this._eliteCyclePhase !== "idle") {
-      const p = this._eliteCyclePhase;
-      const swayX = p === "telegraph" ? Math.sin(this.elapsed * 0.6) * 12 : Math.sin(this.elapsed * 1.5) * 22 + Math.sin(this.elapsed * 3.7) * 8;
-      const swayY = p === "telegraph" ? 0 : Math.sin(this.elapsed * 2.1) * 10;
-      const targetX = 190 + swayX;
-      const targetY = this._eliteAnchorY + swayY + Math.sin(this.elapsed * 0.8) * 6;
-      elite.x += (targetX - elite.x) * Math.min(1, 3 * dt);
-      elite.y += (targetY - elite.y) * Math.min(1, 3 * dt);
-    }
 
     // 火环移动 & 防线碰撞(0807-11E-1D: X/Y分开目标)
     for (const fr of this._eliteFireRings) {
