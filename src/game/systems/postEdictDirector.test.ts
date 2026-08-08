@@ -256,6 +256,11 @@ describe('0807-11D-6G-2 P3纵向band', () => {
   });
 
   it('P3下区每3 pulse最多1次', () => {
+    // 0808-11E-4C-2-1: stub random保证确定性
+    const orig = Math.random;
+    let s = 12345;
+    Math.random = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+    try {
     const d = new PostEdictDirector(); d.start(); let ms = 0;
     const bands: string[] = [];
     let lastMbId = '';
@@ -279,6 +284,7 @@ describe('0807-11D-6G-2 P3纵向band', () => {
       const bottomCount = bands.slice(i - 2, i + 1).filter(b => b === 'bottom').length;
       expect(bottomCount).toBeLessThanOrEqual(1);
     }
+    } finally { Math.random = orig; }
   });
 });
 
