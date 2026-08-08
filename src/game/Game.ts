@@ -338,7 +338,7 @@ export class Game {
   private elitePreviewShown = false;
   private eliteSpawnAnnounced = false;
   /** V0801008: 火环精英战斗状态 */
-  private _eliteFireRings: Array<{ x: number; y: number; r: number; speed: number; alive: boolean; hasHit: boolean; hp: number; _touchedLine?: boolean; targetX?: number; targetY?: number; _waveId?: number; _launched?: boolean }> = [];
+  private _eliteFireRings: Array<{ x: number; y: number; r: number; speed: number; alive: boolean; hasHit: boolean; hp: number; _touchedLine?: boolean; targetX?: number; targetY?: number; _waveId?: number; _launched?: boolean; _launchDelay?: number }> = [];
   private _eliteBattleActive = false;
   private _eliteInvuln = false;
   private _eliteGuardSpawned = false;
@@ -8326,11 +8326,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._eliteFragments = this._eliteFragments.filter(f => !f.gathered || f.alpha > 0.1);
   }
 
-  private _spawnFireRingRaw(x: number, y: number, targetX: number, waveId: number) {
+  private _spawnFireRingRaw(x: number, y: number, targetX: number, waveId: number, launchDelay: number) {
     this._eliteRingIssued++;
     this._eliteFireRings.push({
       x, y, r: 24, speed: 220 + Math.random() * 40, alive: true, hasHit: false, hp: 1,
       targetX, targetY: BALANCE.battlefield.bottomDefenseY, _waveId: waveId,
+      _launched: false, _launchDelay: launchDelay,
     });
   }
 
@@ -10586,6 +10587,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       if (enemy.y - enemy.radius < 90) continue;
       // 精英分段血条 + 名牌（绝对坐标）
       if (enemy.kind === "elite" && enemy.eliteKind) {
+        // 0808-11E-4B-1: bodyPresent同步
+        if (enemy.eliteKind === "fireRing" && !this._isFireRingBodyPresent()) continue;
         this.drawEliteHealthOverlay(ctx, enemy);
       }
       // Boss简短血条（屏幕空间）
@@ -12052,11 +12055,33 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
   private _drawSplitFragments(ctx: CanvasRenderingContext2D) {
     for (const sf of this._splitFragments) {
-      const r = 20 * (0.3 + sf.progress * 0.7);
-      ctx.beginPath(); ctx.arc(sf.x, sf.y, r, 0, Math.PI * 2);
-      ctx.strokeStyle = "#e67e22"; ctx.lineWidth = 2.5;
-      ctx.setLineDash([2, 3]); ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillStyle = `rgba(200,100,20,${0.3 + sf.progress * 0.3})`; ctx.fill();
+      // 0808-11E-4B-1: Boss身体碎片(六边形切割)
+      ctx.save(); ctx.globalAlpha = Math.max(0, 1 - sf.progress * 0.6);
+      const r = 30 * (1 - sf.progress * 0.3);
+      // 六边形
+      ctx.fillStyle = "#c0392b"; ctx.strokeStyle = "#7b241c"; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = (i * Math.PI / 3) - Math.PI / 2;
+        const px = sf.x + Math.cos(a) * r, py = sf.y + Math.sin(a) * r;
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      }
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      // 内部星纹(缩小版)
+      ctx.fillStyle = "rgba(255,160,30,0.5)";
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = (i * Math.PI / 3) - Math.PI / 2;
+        const px = sf.x + Math.cos(a) * r * 0.5, py = sf.y + Math.sin(a) * r * 0.5;
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      }
+      ctx.fill();
+      // 裂缝线
+      ctx.strokeStyle = `rgba(255,200,100,${0.5 * sf.progress})`; ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(sf.x - r * 0.3, sf.y); ctx.lineTo(sf.x + r * 0.3, sf.y);
+      ctx.stroke();
+      ctx.restore();
     }
   }
 
@@ -12157,9 +12182,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         this._eliteFragments = [];
         // 0808-11E-4B: 真分裂previsual(3块从身体裂出)
         if (this._splitFragments.length === 0) {
-          const targets = [{ tx: 95, ty: 280 }, { tx: 190, ty: 260 }, { tx: 285, ty: 280 }];
-          for (const tg of targets) this._splitFragments.push({ x: elite.x, y: elite.y, tx: tg.tx, ty: tg.ty, progress: 0 });
-          this._ringLaunchDelays = [0.0, 0.30, 0.60];
+          // 0808-11E-4B-1: 三角形落点(不排横线)
+          const bx = elite.x;
+          const targets = [
+            { tx: bx - 40, ty: 280 }, // 左上
+            { tx: bx + 50, ty: 340 }, // 右中
+            { tx: bx + 5,  ty: 400 }, // 下中
+          ];
+          for (const tg of targets) this._splitFragments.push({ x: bx, y: elite.y, tx: tg.tx, ty: tg.ty, progress: 0 });
         }
         const t = this._eliteSeqTimer / 0.45;
         for (let i = 0; i < this._splitFragments.length; i++) {
@@ -12170,8 +12200,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         }
         if (this._eliteSeqTimer >= 0.45) {
           this._eliteCyclePhase = "fire";
-          for (const sf of this._splitFragments) {
-            this._spawnFireRingRaw(sf.x, sf.y, sf.tx, this._eliteWaveId);
+          const delays = [0, 0.35, 0.70];
+          for (let i = 0; i < this._splitFragments.length; i++) {
+            const sf = this._splitFragments[i];
+            this._spawnFireRingRaw(sf.x, sf.y, sf.tx, this._eliteWaveId, delays[i]);
           }
           this._splitFragments = [];
           goSeq("wait_resolve");
@@ -12216,12 +12248,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 火环移动 & 防线碰撞(0807-11E-1D: X/Y分开目标)
     for (const fr of this._eliteFireRings) {
       if (!fr.alive) continue;
-      // 0808-11E-4B: 错峰启动(未launch时漂移)
-      const idx = this._eliteFireRings.indexOf(fr);
-      const delay = this._ringLaunchDelays[idx] || 0;
+      // 0808-11E-4B-1: 每环自有launchDelay
       if (!fr._launched) {
-        if (this._eliteSeqTimer >= delay) fr._launched = true;
-        fr.y += Math.sin(this.elapsed * 2 + idx) * 0.3; // 轻微漂浮
+        if (this._eliteSeqTimer >= (fr._launchDelay ?? 0)) fr._launched = true;
+        fr.y += Math.sin(this.elapsed * 2 + fr.x * 0.1) * 0.3;
         continue;
       }
       if (fr.targetX !== undefined && fr.targetY !== undefined) {
