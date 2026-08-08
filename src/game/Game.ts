@@ -348,6 +348,7 @@ export class Game {
   private _eliteCyclePhase: "idle" | "open" | "telegraph" | "fire" | "stun" = "idle";
   private _eliteWaveId = 0; // 0807-11E-1E: 波次隔离
   private _eliteAnchorY = 350; // 0807-11E-1E: Boss固定锚点
+  private _eliteOpenHintShown = false; // 0807-11E-1F: 开场提示只一次
   private _eliteCycleTimer = 0;
   /** V0730002: 第1关精英预告时间戳（用于清场衔接计时） */
   private _elitePreviewAt = 0;
@@ -2802,7 +2803,7 @@ export class Game {
     this._eliteBattleActive = false;
     this._eliteInvuln = false;
     this._eliteFireRings = [];
-    this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false;
+    this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false; this._eliteOpenHintShown = false;
 
     if (this.debugEnabled) {
       console.log("[elite defeated]", {
@@ -8125,17 +8126,36 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.restore();
   }
 
-  /** 0807-11E-1D: 火环将专属阶段视觉 */
+  /** 0807-11E-1F: 火环将专属阶段视觉(含open传达+telegraph蓄势) */
   private _drawFireRingEliteVisual(ctx: CanvasRenderingContext2D, elite: Enemy) {
-    if (this._eliteCyclePhase === "fire") {
+    const p = this._eliteCyclePhase;
+    if (p === "open") {
+      // 破绽强调: 白闪亮边
+      const f = 0.4 + Math.sin(this.elapsed * 10) * 0.3;
+      ctx.beginPath(); ctx.arc(elite.x, elite.y, elite.radius + 6, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,255,255,${0.6 * f})`; ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.beginPath(); ctx.arc(elite.x, elite.y, elite.radius + 12, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,200,100,${0.3 * f})`; ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 6]); ctx.stroke(); ctx.setLineDash([]);
+    } else if (p === "telegraph") {
+      // 蓄势: 从弱到强
+      const t = this._eliteCycleTimer / 0.6;
+      const f = t * t; // 加速升高
+      const pulse = 0.5 + Math.sin(this.elapsed * 8) * 0.5;
+      ctx.beginPath(); ctx.arc(elite.x, elite.y, elite.radius + 4 + f * 16, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,140,0,${0.3 + f * 0.5})`; ctx.lineWidth = 2 + f * 4;
+      ctx.setLineDash([3 + f * 4, 3]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(elite.x, elite.y, elite.radius + 2 + f * 10, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,100,20,${0.1 + f * 0.15 * pulse})`; ctx.fill();
+    } else if (p === "fire") {
       const pulse = 0.6 + Math.sin(this.elapsed * 8) * 0.4;
       ctx.beginPath(); ctx.arc(elite.x, elite.y, 38, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(255,140,0,${0.5 * pulse})`; ctx.lineWidth = 4;
-      ctx.stroke();
+      ctx.strokeStyle = `rgba(255,140,0,${0.5 * pulse})`; ctx.lineWidth = 4; ctx.stroke();
       ctx.beginPath(); ctx.arc(elite.x, elite.y, 44, 0, Math.PI * 2);
       ctx.strokeStyle = `rgba(230,126,34,${0.25 * pulse})`; ctx.lineWidth = 2;
       ctx.setLineDash([8, 4]); ctx.stroke(); ctx.setLineDash([]);
-    } else if (this._eliteCyclePhase === "stun") {
+    } else if (p === "stun") {
       ctx.beginPath(); ctx.arc(elite.x, elite.y, 42, 0, Math.PI * 2);
       ctx.strokeStyle = `rgba(255,255,255,${0.3 + Math.sin(this.elapsed*12)*0.3})`; ctx.lineWidth = 2;
       ctx.setLineDash([3, 5]); ctx.stroke(); ctx.setLineDash([]);
@@ -11830,12 +11850,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         conf.color, 18 + Math.random() * 16, 40 + Math.random() * 20
       ));
     }
-    // 向外扩散的光圈
-    this.particles.push(ringParticle({ x: lane, y: BALANCE.battlefield.enemySpawnY + 14 }, conf.color, 75));
+    // 0807-11E-1F: 删除看不懂的大光圈, 用专属视觉替代
     // V0801008: 激活火环战斗 + 入场保护
     this._eliteBattleActive = true;
     this._eliteInvuln = true;
-    this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false;
+    this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false; this._eliteOpenHintShown = false;
     this._eliteCyclesDone = 0;
     this._eliteCycleTimer = 0;
     this._eliteCyclePhase = "idle";
@@ -11899,7 +11918,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._eliteCycleTimer += dt;
     switch (this._eliteCyclePhase) {
       case "open": {
-        // 开场正常输出窗口(无减伤, 不生成火环)
+        // 0807-11E-1F: 传达现在可以砍Boss
+        if (!this._eliteOpenHintShown) {
+          this._eliteOpenHintShown = true;
+          this.addCombatFloat({ x: elite.x, y: elite.y - 50, text: "趁现在攻击!", color: "#ffd35a", size: 20, duration: 1.0, category: "damage", priority: "A" });
+        }
         if (this._eliteCycleTimer >= 0.8) {
           this._eliteCyclePhase = "telegraph"; this._eliteCycleTimer = 0;
         }
@@ -11946,9 +11969,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       }
     }
 
-    // 0807-11E-1E: Boss固定锚点(开战后不再下压)
+    // 0807-11E-1F: Boss中路游走(非木桩)
     if (this._eliteCyclePhase !== "idle") {
-      const targetY = this._eliteAnchorY + Math.sin(this.elapsed * 0.8) * 8;
+      const p = this._eliteCyclePhase;
+      const swayX = p === "telegraph" ? Math.sin(this.elapsed * 0.6) * 12 : Math.sin(this.elapsed * 1.5) * 22 + Math.sin(this.elapsed * 3.7) * 8;
+      const swayY = p === "telegraph" ? 0 : Math.sin(this.elapsed * 2.1) * 10;
+      const targetX = 190 + swayX;
+      const targetY = this._eliteAnchorY + swayY + Math.sin(this.elapsed * 0.8) * 6;
+      elite.x += (targetX - elite.x) * Math.min(1, 3 * dt);
       elite.y += (targetY - elite.y) * Math.min(1, 3 * dt);
     }
 
