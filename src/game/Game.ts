@@ -8345,10 +8345,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const tgt = zones[ringIndex] + (Math.random() - 0.5) * 30;
     const cx = x + (tgt - x) * 0.5 + (Math.random() - 0.5) * 50;
     const cy = Math.min(y, 260) - 50;
-    const dur = 0.88 + Math.random() * 0.08; // 0808-11E-4D: 统一飞行时间
+    const dur = 0.85; // 0808-11E-4D: 固定0.85s直抵防线
     this._eliteFireRings.push({
       x, y, r: 24, speed: 0, alive: true, hasHit: false, hp: 1,
-      targetX: tgt, targetY: 520, _waveId: this._eliteWaveId,
+      targetX: tgt, targetY: BALANCE.battlefield.bottomDefenseY, _waveId: this._eliteWaveId,
       pathStartX: x, pathStartY: y, controlX: cx, controlY: cy,
       pathElapsed: 0, pathDuration: dur,
     });
@@ -12238,7 +12238,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         const resolved = this._eliteRingResolved;
         const forceEnd = this._eliteFireTimeout >= 4.0 && this._eliteRingIssued >= 3;
         if (forceEnd && resolved < 3) {
-          console.warn(`[11E-4] timeout settling ${this._eliteRingIssued - resolved} rings`);
+          console.error(`[ELITE RING TIMEOUT] settling ${this._eliteRingIssued - resolved} rings — 正常不应触发`);
           for (const fr of this._eliteFireRings) {
             if ((fr as any)._waveId !== this._eliteWaveId || !fr.alive) continue;
             fr.hasHit = true; fr._touchedLine = true; fr.alive = false;
