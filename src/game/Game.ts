@@ -4089,6 +4089,14 @@ export class Game {
   private handleEnemyHit(enemy: Enemy, trail: SlashTrail) {
     // V0730014: 教学组ready前不接受主刀伤害
     if (this._tutorialGroupEnemyIds.has(enemy.id) && !this._tutorialGroupReady) return;
+    // 0808-11E-2D: 墨焰穿透(无命中语义)
+    if (enemy.eliteKind === "fireRing" && (this._eliteForm === "inkflame" || this._eliteForm === "morphing_to_flame")) {
+      (enemy as any)._inkCutTimer = 0.12; (enemy as any)._inkCutAngle = Math.atan2(
+        trail.points[trail.points.length - 1].y - trail.points[0].y,
+        trail.points[trail.points.length - 1].x - trail.points[0].x
+      );
+      return;
+    }
     // V0801008: 精英无敌期格挡
     if (this._eliteInvuln && enemy.eliteKind === "fireRing") {
       this.particles.push(...sparkBurst({ x: enemy.x, y: enemy.y }, 6, "#ffd35a"));
@@ -4167,8 +4175,23 @@ export class Game {
     }
 
     if (enemy.kind === "powder") {
-      // 0807-11E-2B: powder正常受伤至HP<=0才进arming
-      this.score += 4;
+      // 0808-11E-2D: 粉末接入统一MAIN_SLASH伤害链
+      const stats = trail._damageSnapshot ?? this.captureDamageSnapshot();
+      const req: DamageRequest = {
+        actionId: this.nextId("dmg"), parentActionId: trail.id, sourceType: "MAIN_SLASH",
+        sourceConfig: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH, attackerId: "player", targetId: enemy.id,
+        targetCategory: "ENEMY", skillCoefficient: DAMAGE_SOURCE_REGISTRY.MAIN_SLASH.skillCoefficient,
+        stats, bladeBand: stats.bladeDamageBonus >= 0.25 ? "high" : stats.bladeDamageBonus >= 0.10 ? "mid" : "low",
+        tags: ["main", "player"], hitPos: { x: enemy.x, y: enemy.y }, timestamp: this.elapsed,
+        targetDirectorEntryState: enemy._directorEntryState,
+      };
+      const result = resolveDamage(req, enemy.hp, enemy.maxHp, enemy.alive, false);
+      if (result && result.isAccepted && result.effectiveHpLoss > 0) {
+        this.damageEnemy(enemy, result.effectiveHpLoss, trail, false, "powder");
+        this._slashDirectHitIds.add(enemy.id);
+        const curAttack = getCurrentAttack(stats);
+        this.emitDamageFloat(result.resolvedDamage, curAttack, enemy.x, enemy.y - 14, 'NORMAL', result.isKill ?? false, { sourceType: 'MAIN_SLASH' });
+      }
       this.particles.push(...sparkBurst(enemy, 10, "#ffb15c"));
       AudioService.slashHit();
 
@@ -12135,11 +12158,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         if (!fr.hasHit) {
           fr.hasHit = true;
           this._eliteRingResolved++; // 0807-11E-2A
-          if (!this.debugEnabled) {
-            this.hp -= 20;
-            this.screenShake = Math.max(this.screenShake, 0.3);
-            this.flash = Math.max(this.flash, 0.25);
-          }
+          // 0808-11E-2D: 统一玩家受伤(不受debug影响)
+          this.hp = Math.max(0, this.hp - 20);
+          this.screenShake = Math.max(this.screenShake, 0.3);
+          this.flash = Math.max(this.flash, 0.25);
+          AudioService.defenseHit();
+          this.defenseLineHits = (this.defenseLineHits ?? 0) + 1;
+          this.addCombatFloat({ x: fr.x, y: fr.y, text: "-20", color: "#ff5c3c", size: 21, duration: 0.7, category: "damage", priority: "A" });
+          this.particles.push(...sparkBurst({ x: fr.x, y: BALANCE.battlefield.bottomDefenseY }, 6, "#ff5c3c"));
           this.particles.push(...sparkBurst({ x: fr.x, y: BALANCE.battlefield.bottomDefenseY }, 10, "#e67e22"));
         }
         fr.alive = false; // 触线后立即销毁
