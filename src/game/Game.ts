@@ -338,7 +338,7 @@ export class Game {
   private elitePreviewShown = false;
   private eliteSpawnAnnounced = false;
   /** V0801008: 火环精英战斗状态 */
-  private _eliteFireRings: Array<{ x: number; y: number; r: number; speed: number; alive: boolean; hasHit: boolean; hp: number; _touchedLine?: boolean; targetX?: number; targetY?: number; _waveId?: number; _launched?: boolean; _launchDelay?: number; midX?: number; midY?: number }> = [];
+  private _eliteFireRings: Array<{ x: number; y: number; r: number; speed: number; alive: boolean; hasHit: boolean; hp: number; _touchedLine?: boolean; targetX?: number; targetY?: number; _waveId?: number; controlX?: number; controlY?: number; pathStartX?: number; pathStartY?: number; pathElapsed?: number; pathDuration?: number }> = [];
   private _eliteBattleActive = false;
   private _eliteInvuln = false;
   private _eliteGuardSpawned = false;
@@ -355,8 +355,7 @@ export class Game {
   // 0808-11E-4: Boss碎片系统
   private _eliteFragments: Array<{ x: number; y: number; vx: number; vy: number; size: number; alpha: number; bright: boolean; result: "broken" | "touched"; srcX: number; srcY: number; gathered: boolean }> = [];
   // 0808-11E-4B: 真分裂preview
-  private _splitFragments: Array<{ x: number; y: number; tx: number; ty: number; progress: number }> = [];
-  private _ringLaunchDelays: number[] = [];
+  private _splitFragments: Array<{ x: number; y: number; tx: number; ty: number; progress: number; converted: boolean }> = [];
   private _eliteLanded = false;
   private _eliteGatherCenter = { x: 190, y: 370 };
   private _eliteGatherPhase: "idle" | "attract" | "merge" = "idle";
@@ -2845,7 +2844,7 @@ export class Game {
     this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false;
     this._eliteCurrentWP = -1; this._eliteLastWPSide = ""; this._eliteDashStart = null; this._eliteDashTarget = null; this._eliteDashDuration = 0; this._eliteDashElapsed = 0;
     this._eliteForm = "human"; this._eliteFormTimer = 0; this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteFireTimeout = 0; this._eliteOpenHintShown = false;
-    this._eliteFragments = []; this._splitFragments = []; this._ringLaunchDelays = []; this._eliteGatherPhase = "idle"; this._eliteGatherTimer = 0; this._eliteLanded = false;
+    this._eliteFragments = []; this._splitFragments = []; this._eliteGatherPhase = "idle"; this._eliteGatherTimer = 0; this._eliteLanded = false;
 
     if (this.debugEnabled) {
       console.log("[elite defeated]", {
@@ -8326,12 +8325,20 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._eliteFragments = this._eliteFragments.filter(f => !f.gathered || f.alpha > 0.1);
   }
 
-  private _spawnFireRingRaw(x: number, y: number, targetX: number, waveId: number, launchDelay: number, midX?: number, midY?: number) {
+  private _spawnFireRingRaw(x: number, y: number, targetX: number, waveId: number) {
     this._eliteRingIssued++;
+    // 0808-11E-4C-1: 分散防线目标+纯Bezier
+    const zones = [80, 190, 300]; // 左/中/右
+    const tgt = zones[this._eliteRingIssued % 3] + (Math.random() - 0.5) * 30;
+    const cx = x + (tgt - x) * 0.5 + (Math.random() - 0.5) * 60;
+    const cy = Math.min(y, 260) - 50;
+    const dist = Math.hypot(tgt - x, 520 - y) + 100;
+    const dur = dist / (200 + Math.random() * 30);
     this._eliteFireRings.push({
-      x, y, r: 24, speed: 220 + Math.random() * 40, alive: true, hasHit: false, hp: 1,
-      targetX, targetY: BALANCE.battlefield.bottomDefenseY, _waveId: waveId,
-      _launched: false, _launchDelay: launchDelay, midX, midY,
+      x, y, r: 24, speed: dist / dur, alive: true, hasHit: false, hp: 1,
+      targetX: tgt, targetY: 520, _waveId: waveId,
+      pathStartX: x, pathStartY: y, controlX: cx, controlY: cy,
+      pathElapsed: 0, pathDuration: dur,
     });
   }
 
@@ -12036,7 +12043,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._eliteGuardSpawned = false; this._eliteEntryBoostDone = false; this._eliteDeadLockRescueDone = false;
     this._eliteCurrentWP = -1; this._eliteLastWPSide = ""; this._eliteDashStart = null; this._eliteDashTarget = null; this._eliteDashDuration = 0; this._eliteDashElapsed = 0;
     this._eliteForm = "human"; this._eliteFormTimer = 0; this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteFireTimeout = 0; this._eliteOpenHintShown = false;
-    this._eliteFragments = []; this._splitFragments = []; this._ringLaunchDelays = []; this._eliteGatherPhase = "idle"; this._eliteGatherTimer = 0; this._eliteLanded = false;
+    this._eliteFragments = []; this._splitFragments = []; this._eliteGatherPhase = "idle"; this._eliteGatherTimer = 0; this._eliteLanded = false;
     this._eliteCyclesDone = 0;
     this._eliteCycleTimer = 0;
     this._eliteCyclePhase = "idle";
@@ -12120,7 +12127,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         if (!this._eliteEntryBoostDone && this._momentumState === 'charging' && this.energy < 50) { this.energy = 50; this._eliteEntryBoostDone = true; }
         // 0808-11E-4: entry→分裂循环起点
         this._eliteSeq = "human"; this._eliteSeqTimer = 0;
-        this._eliteFragments = []; this._splitFragments = []; this._ringLaunchDelays = [];
+        this._eliteFragments = []; this._splitFragments = [];
         this._eliteGatherPhase = "idle"; this._eliteGatherTimer = 0;
         this._eliteCyclePhase = "open"; this._eliteForm = "human";
         this.showBattleNotice({ text: "火环将·开战", priority: "A", category: "elite", style: "danger", duration: 0.7, dedupeKey: "elite:fireRing:battle", cooldown: 3, interrupt: false });
@@ -12186,32 +12193,34 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         this._eliteCyclePhase = "telegraph"; this._eliteForm = "human";
         this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteFireTimeout = 0; this._eliteWaveId++;
         this._eliteFragments = [];
-        // 0808-11E-4C: 真分裂(裂纹0.10s→分离→化环)
+        // 0808-11E-4C-1: 顺序转换(0.25/0.50/0.75)
         if (this._splitFragments.length === 0) {
           const bx = elite.x, by = elite.y;
           const targets = [
             { tx: bx - 50, ty: 270 }, { tx: bx + 55, ty: 350 }, { tx: bx + 5, ty: 410 },
           ];
-          for (const tg of targets) this._splitFragments.push({ x: bx, y: by, tx: tg.tx, ty: tg.ty, progress: 0 });
-          this._ringLaunchDelays = [0.10, 0.45, 0.80];
+          for (const tg of targets) this._splitFragments.push({ x: bx, y: by, tx: tg.tx, ty: tg.ty, progress: 0, converted: false });
         }
-        // 前0.10s只显示裂纹不移动
+        // 身体碎片运动
         const moveT = Math.max(0, (this._eliteSeqTimer - 0.10) / 0.30);
-        for (let i = 0; i < this._splitFragments.length; i++) {
-          const sf = this._splitFragments[i];
+        for (const sf of this._splitFragments) {
           sf.x = elite.x + (sf.tx - elite.x) * Math.pow(Math.min(1, moveT), 2);
           sf.y = elite.y + (sf.ty - elite.y) * Math.pow(Math.min(1, moveT), 2);
           sf.progress = this._eliteSeqTimer / 0.40;
         }
-        if (this._eliteSeqTimer >= 0.40) {
-          this._eliteCyclePhase = "fire";
-          for (let i = 0; i < this._splitFragments.length; i++) {
-            const sf = this._splitFragments[i];
-            const midX = sf.x + (i - 1) * 55;
-            const midY = Math.min(sf.y, 280) - 40;
-            this._spawnFireRingRaw(sf.x, sf.y, sf.tx, this._eliteWaveId, this._ringLaunchDelays[i], midX, midY);
+        // 顺序转换: 0.25s→环1, 0.50s→环2, 0.75s→环3
+        const convertTimes = [0.25, 0.50, 0.75];
+        for (let i = 0; i < this._splitFragments.length; i++) {
+          const sf = this._splitFragments[i];
+          if (!sf.converted && this._eliteSeqTimer >= convertTimes[i]) {
+            sf.converted = true;
+            this._spawnFireRingRaw(sf.x, sf.y, sf.tx, this._eliteWaveId);
           }
+        }
+        // 全部转换完成→wait
+        if (this._splitFragments.every(sf => sf.converted)) {
           this._splitFragments = [];
+          this._eliteCyclePhase = "fire";
           goSeq("wait_resolve");
         }
         break;
@@ -12254,35 +12263,18 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 火环移动 & 防线碰撞(0807-11E-1D: X/Y分开目标)
     for (const fr of this._eliteFireRings) {
       if (!fr.alive) continue;
-      // 0808-11E-4B-1: 每环自有launchDelay
-      if (!fr._launched) {
-        if (this._eliteSeqTimer >= (fr._launchDelay ?? 0)) fr._launched = true;
-        fr.y += Math.sin(this.elapsed * 2 + fr.x * 0.1) * 0.3;
-        continue;
+      // 0808-11E-4C-1: 纯Bezier(无launch状态)
+      if (fr.pathElapsed !== undefined && fr.pathDuration !== undefined) {
+        fr.pathElapsed += dt;
+        const t = Math.min(1, fr.pathElapsed / fr.pathDuration);
+        const p0x = fr.pathStartX!, p0y = fr.pathStartY!;
+        const p1x = fr.controlX!, p1y = fr.controlY!;
+        const p2x = fr.targetX!, p2y = fr.targetY!;
+        const mt = 1 - t;
+        fr.x = mt * mt * p0x + 2 * mt * t * p1x + t * t * p2x;
+        fr.y = mt * mt * p0y + 2 * mt * t * p1y + t * t * p2y;
       }
-      if (fr.targetX !== undefined && fr.targetY !== undefined) {
-        if (fr.midX !== undefined && fr.midY !== undefined) {
-          // 0808-11E-4C: Bezier曲线运动
-          let t = Math.min(1, 0.02 + (fr.y - fr.midY + 30) / (fr.targetY - fr.midY + 60));
-          if (t < 0) t = 0; if (t > 1) t = 1;
-          const p0x = fr.x, p0y = fr.y;
-          const p1x = fr.midX, p1y = fr.midY;
-          const p2x = fr.targetX, p2y = fr.targetY;
-          const bx = (1-t)*(1-t)*p0x + 2*(1-t)*t*p1x + t*t*p2x;
-          const by = (1-t)*(1-t)*p0y + 2*(1-t)*t*p1y + t*t*p2y;
-          fr.x += (bx - fr.x) * 0.15;
-          fr.y += (by - fr.y) * 0.15;
-          fr.y += fr.speed * dt * 0.7; // 保持下压
-        } else {
-          const dx = fr.targetX - fr.x;
-          const dy = fr.targetY - fr.y;
-          const dist = Math.hypot(dx, dy);
-          if (dist > 5) { const frac = Math.min(1, fr.speed * dt / dist); fr.x += dx * frac; fr.y += dy * frac; }
-        }
-      } else {
-        fr.y += fr.speed * dt;
-      }
-        if (fr.y + fr.r >= BALANCE.battlefield.bottomDefenseY) {
+      if (fr.y + fr.r >= BALANCE.battlefield.bottomDefenseY) {
         fr._touchedLine = true;
         if (!fr.hasHit) {
           fr.hasHit = true;
