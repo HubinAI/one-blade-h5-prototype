@@ -8325,18 +8325,31 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._eliteFragments = this._eliteFragments.filter(f => !f.gathered || f.alpha > 0.1);
   }
 
-  private _spawnFireRingRaw(x: number, y: number, targetX: number, waveId: number) {
+  private _beginFireRingSplitWave(elite: any) {
+    this._eliteWaveId++;
+    this._eliteRingIssued = 0;
+    this._eliteRingResolved = 0;
+    this._eliteFireTimeout = 0;
+    const bx = elite.x, by = elite.y;
+    // 0808-11E-4C-2: 仅在本轮wave开始时清理碎片(不清理已有fragments)
+    this._splitFragments = [
+      { x: bx, y: by, tx: bx - 50, ty: 270, progress: 0, converted: false },
+      { x: bx, y: by, tx: bx + 55, ty: 350, progress: 0, converted: false },
+      { x: bx, y: by, tx: bx + 5,  ty: 410, progress: 0, converted: false },
+    ];
+  }
+
+  private _spawnFireRingRaw(ringIndex: number, x: number, y: number) {
     this._eliteRingIssued++;
-    // 0808-11E-4C-1: 分散防线目标+纯Bezier
-    const zones = [80, 190, 300]; // 左/中/右
-    const tgt = zones[this._eliteRingIssued % 3] + (Math.random() - 0.5) * 30;
-    const cx = x + (tgt - x) * 0.5 + (Math.random() - 0.5) * 60;
+    const zones = [80, 190, 300];
+    const tgt = zones[ringIndex] + (Math.random() - 0.5) * 30;
+    const cx = x + (tgt - x) * 0.5 + (Math.random() - 0.5) * 50;
     const cy = Math.min(y, 260) - 50;
     const dist = Math.hypot(tgt - x, 520 - y) + 100;
     const dur = dist / (200 + Math.random() * 30);
     this._eliteFireRings.push({
       x, y, r: 24, speed: dist / dur, alive: true, hasHit: false, hp: 1,
-      targetX: tgt, targetY: 520, _waveId: waveId,
+      targetX: tgt, targetY: 520, _waveId: this._eliteWaveId,
       pathStartX: x, pathStartY: y, controlX: cx, controlY: cy,
       pathElapsed: 0, pathDuration: dur,
     });
@@ -12191,16 +12204,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       }
       case "splitting": {
         this._eliteCyclePhase = "telegraph"; this._eliteForm = "human";
-        this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteFireTimeout = 0; this._eliteWaveId++;
-        this._eliteFragments = [];
-        // 0808-11E-4C-1: 顺序转换(0.25/0.50/0.75)
-        if (this._splitFragments.length === 0) {
-          const bx = elite.x, by = elite.y;
-          const targets = [
-            { tx: bx - 50, ty: 270 }, { tx: bx + 55, ty: 350 }, { tx: bx + 5, ty: 410 },
-          ];
-          for (const tg of targets) this._splitFragments.push({ x: bx, y: by, tx: tg.tx, ty: tg.ty, progress: 0, converted: false });
-        }
+        // 0808-11E-4C-2: 仅第一帧初始化wave
+        if (this._eliteSeqTimer <= dt) this._beginFireRingSplitWave(elite);
         // 身体碎片运动
         const moveT = Math.max(0, (this._eliteSeqTimer - 0.10) / 0.30);
         for (const sf of this._splitFragments) {
@@ -12208,17 +12213,20 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
           sf.y = elite.y + (sf.ty - elite.y) * Math.pow(Math.min(1, moveT), 2);
           sf.progress = this._eliteSeqTimer / 0.40;
         }
-        // 顺序转换: 0.25s→环1, 0.50s→环2, 0.75s→环3
+        // 顺序转换: 0.25s→0, 0.50s→1, 0.75s→2
         const convertTimes = [0.25, 0.50, 0.75];
         for (let i = 0; i < this._splitFragments.length; i++) {
           const sf = this._splitFragments[i];
           if (!sf.converted && this._eliteSeqTimer >= convertTimes[i]) {
             sf.converted = true;
-            this._spawnFireRingRaw(sf.x, sf.y, sf.tx, this._eliteWaveId);
+            this._spawnFireRingRaw(i, sf.x, sf.y);
           }
         }
-        // 全部转换完成→wait
+        // 全部转换完成→wait(保证issued===3)
         if (this._splitFragments.every(sf => sf.converted)) {
+          if (this._eliteRingIssued !== 3) {
+            console.error(`[11E-4C-2] BUG: issued=${this._eliteRingIssued} expected 3`);
+          }
           this._splitFragments = [];
           this._eliteCyclePhase = "fire";
           goSeq("wait_resolve");
@@ -12252,6 +12260,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       }
       case "reform": {
         this._eliteCyclePhase = "stun"; this._eliteForm = "human";
+        // 0808-11E-4C-2: 仅在重组完成时清除碎片
         this._eliteFragments = [];
         this.screenShake = Math.max(this.screenShake, 0.25);
         if (this._eliteSeqTimer >= 0.60) goSeq("human");
