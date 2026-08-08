@@ -4512,10 +4512,15 @@ export class Game {
 
   private damageEnemy(enemy: Enemy, damage: number, trail: SlashTrail, chainKill: boolean, source: string) {
     if (!enemy.alive) return false;
-    // 0807-11E-2B: 锁甲(telegraph/fire阶段)
+    // 0808-11E-2C: 锁甲(telegraph/fire阶段)
     if (enemy.eliteKind === "fireRing" && this._eliteBattleActive) {
       const locked = this._eliteCyclePhase === "telegraph" || this._eliteCyclePhase === "fire";
       if (locked) {
+        // 墨焰态: 刀穿火散开(无格挡语义)
+        if (this._eliteForm === "inkflame" || this._eliteForm === "morphing_to_flame") {
+          enemy.flash = Math.max(enemy.flash, 0.12);
+          return false;
+        }
         enemy.flash = Math.max(enemy.flash, 0.18);
         if (this.particles.length < 120) {
           this.particles.push(...sparkBurst({ x: enemy.x, y: enemy.y - 12 }, 4, "#ff8c00"));
@@ -8156,23 +8161,48 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const p = this._eliteCyclePhase;
     // 0807-11E-2A: 人形/墨焰
     if (f === "inkflame" || f === "morphing_to_flame") {
-      const morph = f === "morphing_to_flame" ? this._eliteFormTimer / 0.18 : 1;
-      const r = elite.radius * (0.7 + (1 - morph) * 0.3);
-      ctx.fillStyle = `rgba(20,10,5,${0.9 * morph})`;
+      const morph = f === "morphing_to_flame" ? this._eliteFormTimer / 0.30 : 1;
+      const r = elite.radius * (0.6 + (1 - morph) * 0.4);
+      // 0808-11E-2C: 纵向不规则墨焰(非圆形)
+      const flameH = r * 3.2; // 纵向拉伸
+      // 外层: 赤橙焰边
+      ctx.fillStyle = `rgba(200,60,15,${0.4 * morph})`;
       ctx.beginPath();
-      for (let i = 0; i < 8; i++) {
-        const a = (i * Math.PI / 4) + this.elapsed * 2;
-        const rd = r * (0.6 + 0.4 * Math.sin(i * 1.5 + this.elapsed * 5));
-        const px = elite.x + Math.cos(a) * rd, py = elite.y + Math.sin(a) * rd * 1.3;
-        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      ctx.moveTo(elite.x - r * 0.7, elite.y + r * 0.5); // 左下
+      ctx.quadraticCurveTo(elite.x - r * 1.1, elite.y - r * 0.3, elite.x - r * 0.4, elite.y - flameH * 0.5);
+      ctx.quadraticCurveTo(elite.x - r * 0.6, elite.y - flameH * 0.8, elite.x + r * 0.2, elite.y - flameH * 0.9);
+      ctx.quadraticCurveTo(elite.x, elite.y - flameH * 1.0, elite.x + r * 0.3, elite.y - flameH * 0.75);
+      ctx.quadraticCurveTo(elite.x + r * 0.7, elite.y - r * 0.2, elite.x + r * 0.6, elite.y + r * 0.6);
+      ctx.quadraticCurveTo(elite.x + r * 0.3, elite.y + r * 0.8, elite.x - r * 0.4, elite.y + r * 0.5);
+      ctx.fill();
+      // 中层: 墨黑实体
+      ctx.fillStyle = `rgba(18,8,4,${0.85 * morph})`;
+      ctx.beginPath();
+      ctx.moveTo(elite.x - r * 0.5, elite.y + r * 0.3);
+      ctx.quadraticCurveTo(elite.x - r * 0.8, elite.y - r * 0.4, elite.x - r * 0.3, elite.y - flameH * 0.4);
+      ctx.quadraticCurveTo(elite.x - r * 0.4, elite.y - flameH * 0.6, elite.x + r * 0.15, elite.y - flameH * 0.7);
+      ctx.quadraticCurveTo(elite.x + r * 0.1, elite.y - flameH * 0.65, elite.x + r * 0.2, elite.y - flameH * 0.5);
+      ctx.quadraticCurveTo(elite.x + r * 0.5, elite.y - r * 0.15, elite.x + r * 0.4, elite.y + r * 0.4);
+      ctx.quadraticCurveTo(elite.x + r * 0.2, elite.y + r * 0.5, elite.x - r * 0.3, elite.y + r * 0.3);
+      ctx.fill();
+      // 核心: 亮白火芯
+      ctx.fillStyle = `rgba(255,200,80,${0.75 * morph})`;
+      ctx.beginPath(); ctx.arc(elite.x - r * 0.05, elite.y - r * 0.6, r * 0.2, 0, Math.PI * 2); ctx.fill();
+      // 火焰尖
+      for (let i = 0; i < 4; i++) {
+        const ty = elite.y - flameH * (0.5 + i * 0.12);
+        const tx = elite.x + (i - 1.5) * r * 0.4 + Math.sin(this.elapsed * 3 + i) * r * 0.2;
+        ctx.fillStyle = `rgba(255,140,20,${0.5 * morph * (0.6 + 0.4 * Math.sin(this.elapsed * 5 + i))})`;
+        ctx.beginPath(); ctx.moveTo(tx, ty);
+        ctx.lineTo(tx - r * 0.18, ty + r * 0.35); ctx.lineTo(tx + r * 0.18, ty + r * 0.35);
+        ctx.fill();
       }
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = `rgba(255,90,20,${0.6 * morph})`;
-      ctx.beginPath(); ctx.arc(elite.x, elite.y, r * 0.3, 0, Math.PI * 2); ctx.fill();
-      for (let i = 0; i < 5; i++) {
-        const a = (i * Math.PI / 2.5) + this.elapsed * 1.5;
-        ctx.fillStyle = `rgba(255,140,20,${0.3 * morph * (0.5 + 0.5 * Math.sin(this.elapsed * 8 + i))})`;
-        ctx.beginPath(); ctx.arc(elite.x + Math.cos(a) * r * 0.8, elite.y + Math.sin(a) * r * 0.6, 4, 0, Math.PI * 2); ctx.fill();
+      // 拖尾
+      for (let i = 0; i < 3; i++) {
+        const ty = elite.y + r * (0.4 + i * 0.15);
+        const tx = elite.x + Math.sin(this.elapsed * 2.5 + i) * r * 0.3;
+        ctx.fillStyle = `rgba(180,50,10,${0.25 * morph * (1 - i * 0.3)})`;
+        ctx.beginPath(); ctx.arc(tx, ty, r * 0.15, 0, Math.PI * 2); ctx.fill();
       }
     } else {
       const openPhase = p === "open" || p === "stun";
@@ -10185,6 +10215,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
       // ---- 精英怪渲染 ----
       if (enemy.kind === "elite" && enemy.eliteKind) {
+        // 0808-11E-2C: 墨焰态跳过人形UI(HP/名牌/主体/光环)
+        if (enemy.eliteKind === "fireRing" && (this._eliteForm === "inkflame" || this._eliteForm === "morphing_to_flame")) { ctx.restore(); continue; }
         // P2：护盾层（在效果光环之前绘制）
         this.drawEliteShieldLayer(ctx, enemy);
 
@@ -10439,6 +10471,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       if (enemy.y - enemy.radius < 90) continue;
       // 精英分段血条 + 名牌（绝对坐标）
       if (enemy.kind === "elite" && enemy.eliteKind) {
+        // 0808-11E-2C: 墨焰态隐藏HP名牌
+        if (enemy.eliteKind === "fireRing" && (this._eliteForm === "inkflame" || this._eliteForm === "morphing_to_flame")) { continue; }
         this.drawEliteHealthOverlay(ctx, enemy);
       }
       // Boss简短血条（屏幕空间）
@@ -11966,7 +12000,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 形态过渡
     if (this._eliteForm === "morphing_to_flame" || this._eliteForm === "reforming") {
       this._eliteFormTimer += dt;
-      const maxT = this._eliteForm === "morphing_to_flame" ? 0.18 : 0.25;
+      const maxT = this._eliteForm === "morphing_to_flame" ? 0.30 : 0.25;
       if (this._eliteFormTimer >= maxT) {
         this._eliteForm = this._eliteForm === "morphing_to_flame" ? "inkflame" : "human";
         this._eliteFormTimer = 0;
@@ -12000,8 +12034,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         break;
       }
       case "morph": {
-        this._eliteCyclePhase = "telegraph"; this._eliteForm = "morphing_to_flame"; this._eliteFormTimer = 0;
-        if (this._eliteSeqTimer >= 0.18) { this._eliteForm = "inkflame"; this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteRingBroken = 0; this._eliteFireTimeout = 0; this._eliteWaveId++; goSeq("flame_dash_1"); }
+        this._eliteCyclePhase = "telegraph";         this._eliteForm = "morphing_to_flame"; this._eliteFormTimer = 0;
+        if (this._eliteSeqTimer >= 0.30) { this._eliteForm = "inkflame"; this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteRingBroken = 0; this._eliteFireTimeout = 0; this._eliteWaveId++; goSeq("flame_dash_1"); }
         break;
       }
       case "flame_dash_1": case "flame_dash_2": case "flame_dash_3": {
