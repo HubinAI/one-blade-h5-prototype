@@ -338,7 +338,7 @@ export class Game {
   private elitePreviewShown = false;
   private eliteSpawnAnnounced = false;
   /** V0801008: 火环精英战斗状态 */
-  private _eliteFireRings: Array<{ x: number; y: number; r: number; speed: number; alive: boolean; hasHit: boolean; hp: number; _touchedLine?: boolean; targetX?: number; targetY?: number; _waveId?: number; _launched?: boolean; _launchDelay?: number }> = [];
+  private _eliteFireRings: Array<{ x: number; y: number; r: number; speed: number; alive: boolean; hasHit: boolean; hp: number; _touchedLine?: boolean; targetX?: number; targetY?: number; _waveId?: number; _launched?: boolean; _launchDelay?: number; midX?: number; midY?: number }> = [];
   private _eliteBattleActive = false;
   private _eliteInvuln = false;
   private _eliteGuardSpawned = false;
@@ -8326,12 +8326,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._eliteFragments = this._eliteFragments.filter(f => !f.gathered || f.alpha > 0.1);
   }
 
-  private _spawnFireRingRaw(x: number, y: number, targetX: number, waveId: number, launchDelay: number) {
+  private _spawnFireRingRaw(x: number, y: number, targetX: number, waveId: number, launchDelay: number, midX?: number, midY?: number) {
     this._eliteRingIssued++;
     this._eliteFireRings.push({
       x, y, r: 24, speed: 220 + Math.random() * 40, alive: true, hasHit: false, hp: 1,
       targetX, targetY: BALANCE.battlefield.bottomDefenseY, _waveId: waveId,
-      _launched: false, _launchDelay: launchDelay,
+      _launched: false, _launchDelay: launchDelay, midX, midY,
     });
   }
 
@@ -10355,16 +10355,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ctx.arc(0, 0, enemy.radius + 4 + ringT * 20, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
-        // V0801008: 无敌保护金色光罩
-        if (this._eliteInvuln && enemy.eliteKind === "fireRing") {
-          ctx.save(); ctx.translate(enemy.x, enemy.y);
-          const shieldPulse = 0.7 + 0.3 * Math.sin(this.elapsed * 5);
-          ctx.beginPath(); ctx.arc(0, 0, enemy.radius + 14, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255,200,50,${0.15 * shieldPulse})`; ctx.fill();
-          ctx.strokeStyle = `rgba(255,180,30,${0.6 * shieldPulse})`; ctx.lineWidth = 3;
-          ctx.setLineDash([8, 4]); ctx.stroke(); ctx.setLineDash([]);
-          ctx.restore();
-        }
+        // 0808-11E-4C: 删除invuln金色虚线护罩(落场本身已传达)
         ctx.fillStyle = enemy.flash > 0 ? "#fff1b8" : visDef.color;
         ctx.strokeStyle = visDef.accent;
         ctx.lineWidth = 3;
@@ -12054,33 +12045,48 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   }
 
   private _drawSplitFragments(ctx: CanvasRenderingContext2D) {
-    for (const sf of this._splitFragments) {
-      // 0808-11E-4B-1: Boss身体碎片(六边形切割)
-      ctx.save(); ctx.globalAlpha = Math.max(0, 1 - sf.progress * 0.6);
-      const r = 30 * (1 - sf.progress * 0.3);
-      // 六边形
-      ctx.fillStyle = "#c0392b"; ctx.strokeStyle = "#7b241c"; ctx.lineWidth = 2;
+    if (this._splitFragments.length === 0) return;
+    const elite = this.enemies.find(e => e.kind === "elite" && e.eliteKind === "fireRing" && e.alive);
+    if (!elite) return;
+    // 0808-11E-4C: clip三扇区绘制Boss身体碎片
+    const visDef = (window as any).ELITE_VISUAL_DEFS?.fireRing || { color: "#f0a235", accent: "#b86b16" };
+    const r = elite.radius;
+    for (let i = 0; i < this._splitFragments.length; i++) {
+      const sf = this._splitFragments[i];
+      ctx.save();
+      // 裁剪区域: 每个扇形120度(从不同角度)
       ctx.beginPath();
-      for (let i = 0; i < 6; i++) {
-        const a = (i * Math.PI / 3) - Math.PI / 2;
-        const px = sf.x + Math.cos(a) * r, py = sf.y + Math.sin(a) * r;
-        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      const startAngle = (i * Math.PI * 2 / 3) - Math.PI / 2 - 0.3;
+      ctx.moveTo(sf.x, sf.y);
+      ctx.arc(sf.x, sf.y, r * 1.4, startAngle, startAngle + Math.PI * 2 / 3 + 0.6);
+      ctx.closePath(); ctx.clip();
+      // 绘制六边形主体(每个碎片有独立位置偏移)
+      ctx.translate(sf.x, sf.y);
+      ctx.fillStyle = visDef.color; ctx.strokeStyle = visDef.accent; ctx.lineWidth = 3;
+      ctx.beginPath();
+      for (let j = 0; j < 6; j++) {
+        const a = (j * Math.PI / 3) - Math.PI / 2;
+        const px = Math.cos(a) * r, py = Math.sin(a) * r;
+        j === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
       }
       ctx.closePath(); ctx.fill(); ctx.stroke();
-      // 内部星纹(缩小版)
-      ctx.fillStyle = "rgba(255,160,30,0.5)";
+      // 星纹
+      ctx.strokeStyle = visDef.accent; ctx.lineWidth = 1.5;
       ctx.beginPath();
-      for (let i = 0; i < 6; i++) {
-        const a = (i * Math.PI / 3) - Math.PI / 2;
-        const px = sf.x + Math.cos(a) * r * 0.5, py = sf.y + Math.sin(a) * r * 0.5;
-        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      for (let j = 0; j < 6; j++) {
+        const a = (j * Math.PI / 3);
+        const px = Math.cos(a) * r * 0.5, py = Math.sin(a) * r * 0.5;
+        j === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
       }
-      ctx.fill();
-      // 裂缝线
-      ctx.strokeStyle = `rgba(255,200,100,${0.5 * sf.progress})`; ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(sf.x - r * 0.3, sf.y); ctx.lineTo(sf.x + r * 0.3, sf.y);
-      ctx.stroke();
+      ctx.closePath(); ctx.stroke();
+      // 裂缝高亮
+      if (sf.progress > 0.15) {
+        ctx.strokeStyle = `rgba(255,255,255,${Math.min(0.7, sf.progress * 4)})`; ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(startAngle + 0.3) * r * 0.7, Math.sin(startAngle + 0.3) * r * 0.7);
+        ctx.lineTo(sf.tx - sf.x + Math.cos(startAngle + 0.3) * 6, sf.ty - sf.y + Math.sin(startAngle + 0.3) * 6);
+        ctx.stroke();
+      }
       ctx.restore();
     }
   }
@@ -12180,30 +12186,30 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         this._eliteCyclePhase = "telegraph"; this._eliteForm = "human";
         this._eliteRingIssued = 0; this._eliteRingResolved = 0; this._eliteFireTimeout = 0; this._eliteWaveId++;
         this._eliteFragments = [];
-        // 0808-11E-4B: 真分裂previsual(3块从身体裂出)
+        // 0808-11E-4C: 真分裂(裂纹0.10s→分离→化环)
         if (this._splitFragments.length === 0) {
-          // 0808-11E-4B-1: 三角形落点(不排横线)
-          const bx = elite.x;
+          const bx = elite.x, by = elite.y;
           const targets = [
-            { tx: bx - 40, ty: 280 }, // 左上
-            { tx: bx + 50, ty: 340 }, // 右中
-            { tx: bx + 5,  ty: 400 }, // 下中
+            { tx: bx - 50, ty: 270 }, { tx: bx + 55, ty: 350 }, { tx: bx + 5, ty: 410 },
           ];
-          for (const tg of targets) this._splitFragments.push({ x: bx, y: elite.y, tx: tg.tx, ty: tg.ty, progress: 0 });
+          for (const tg of targets) this._splitFragments.push({ x: bx, y: by, tx: tg.tx, ty: tg.ty, progress: 0 });
+          this._ringLaunchDelays = [0.10, 0.45, 0.80];
         }
-        const t = this._eliteSeqTimer / 0.45;
+        // 前0.10s只显示裂纹不移动
+        const moveT = Math.max(0, (this._eliteSeqTimer - 0.10) / 0.30);
         for (let i = 0; i < this._splitFragments.length; i++) {
           const sf = this._splitFragments[i];
-          sf.x = elite.x + (sf.tx - elite.x) * Math.pow(t, 2);
-          sf.y = elite.y + (sf.ty - elite.y) * Math.pow(t, 2);
-          sf.progress = t;
+          sf.x = elite.x + (sf.tx - elite.x) * Math.pow(Math.min(1, moveT), 2);
+          sf.y = elite.y + (sf.ty - elite.y) * Math.pow(Math.min(1, moveT), 2);
+          sf.progress = this._eliteSeqTimer / 0.40;
         }
-        if (this._eliteSeqTimer >= 0.45) {
+        if (this._eliteSeqTimer >= 0.40) {
           this._eliteCyclePhase = "fire";
-          const delays = [0, 0.35, 0.70];
           for (let i = 0; i < this._splitFragments.length; i++) {
             const sf = this._splitFragments[i];
-            this._spawnFireRingRaw(sf.x, sf.y, sf.tx, this._eliteWaveId, delays[i]);
+            const midX = sf.x + (i - 1) * 55;
+            const midY = Math.min(sf.y, 280) - 40;
+            this._spawnFireRingRaw(sf.x, sf.y, sf.tx, this._eliteWaveId, this._ringLaunchDelays[i], midX, midY);
           }
           this._splitFragments = [];
           goSeq("wait_resolve");
@@ -12255,14 +12261,23 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         continue;
       }
       if (fr.targetX !== undefined && fr.targetY !== undefined) {
-        const dx = fr.targetX - fr.x;
-        const dy = fr.targetY - fr.y;
-        const dist = Math.hypot(dx, dy);
-        if (dist > 5) {
-          const moveDist = fr.speed * dt;
-          const frac = Math.min(1, moveDist / dist);
-          fr.x += dx * frac;
-          fr.y += dy * frac;
+        if (fr.midX !== undefined && fr.midY !== undefined) {
+          // 0808-11E-4C: Bezier曲线运动
+          let t = Math.min(1, 0.02 + (fr.y - fr.midY + 30) / (fr.targetY - fr.midY + 60));
+          if (t < 0) t = 0; if (t > 1) t = 1;
+          const p0x = fr.x, p0y = fr.y;
+          const p1x = fr.midX, p1y = fr.midY;
+          const p2x = fr.targetX, p2y = fr.targetY;
+          const bx = (1-t)*(1-t)*p0x + 2*(1-t)*t*p1x + t*t*p2x;
+          const by = (1-t)*(1-t)*p0y + 2*(1-t)*t*p1y + t*t*p2y;
+          fr.x += (bx - fr.x) * 0.15;
+          fr.y += (by - fr.y) * 0.15;
+          fr.y += fr.speed * dt * 0.7; // 保持下压
+        } else {
+          const dx = fr.targetX - fr.x;
+          const dy = fr.targetY - fr.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist > 5) { const frac = Math.min(1, fr.speed * dt / dist); fr.x += dx * frac; fr.y += dy * frac; }
         }
       } else {
         fr.y += fr.speed * dt;
