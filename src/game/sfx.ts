@@ -44,6 +44,30 @@ export function playEliteKill():void{const c=ensureCtx();if(!c||!sfxGain)return;
 
 export function playVictory():void{const c=ensureCtx();if(!c||!sfxGain)return;const m=sfxGain;if(thr("vy",1000))return;const t=c.currentTime;[196,262,330,392,523,659].forEach((f,i)=>{const o=c.createOscillator();o.type="sine";const g=c.createGain(),s=t+i*0.10;o.frequency.value=f;o.connect(g).connect(m);g.gain.setValueAtTime(0,s);g.gain.linearRampToValueAtTime(0.2,s+0.03);g.gain.linearRampToValueAtTime(0,s+0.30);o.start(s);o.stop(s+0.35)})}
 
+/* ══════════════════ 0809-11F-4F: 军令跑马灯SFX ══════════════════ */
+export function playRouletteTick(finalTick: boolean): void {
+  const c = ensureCtx(); if (!c || !sfxGain) return;
+  const t = c.currentTime; const m = sfxGain;
+  if (finalTick) {
+    // 最终定音: 低频+厚impact
+    const o = c.createOscillator(); o.type = "triangle"; o.frequency.value = 65;
+    const g = c.createGain(); o.connect(g).connect(m);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.18, t + 0.01);
+    g.gain.linearRampToValueAtTime(0, t + 0.18); o.start(t); o.stop(t + 0.22);
+    // 短thump
+    const o2 = c.createOscillator(); o2.type = "sine"; o2.frequency.value = 50;
+    const g2 = c.createGain(); o2.connect(g2).connect(m);
+    g2.gain.setValueAtTime(0, t); g2.gain.linearRampToValueAtTime(0.10, t + 0.005);
+    g2.gain.linearRampToValueAtTime(0, t + 0.12); o2.start(t); o2.stop(t + 0.15);
+  } else {
+    // 轻"登": triangle+sine
+    const o = c.createOscillator(); o.type = "triangle"; o.frequency.value = jit(180, 0.06);
+    const g = c.createGain(); o.connect(g).connect(m);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.08, t + 0.005);
+    g.gain.linearRampToValueAtTime(0, t + 0.06); o.start(t); o.stop(t + 0.08);
+  }
+}
+
 /* ══════════════════ BGM 系统 ══════════════════ */
 type BgmState = "silent" | "home" | "battle" | "elite" | "fading";
 let _bgmState: BgmState = "silent";

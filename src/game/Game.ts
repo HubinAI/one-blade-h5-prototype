@@ -29,7 +29,7 @@ import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, res
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
 import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, inertiaEase, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS, SHADOW_MOVE_DURATION, SHADOW_SPEED_REF, SHADOW_MOVE_DURATION_MIN, SHADOW_MOVE_DURATION_MAX, SHADOW_STAGGER_MS, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
-import { playSwing, playHit, playExplosion, playPlayerHurt, playEliteKill, playVictory, initSfx, setBgmBattle, setBgmElite, setBgmOff } from "./sfx";
+import { playSwing, playHit, playExplosion, playPlayerHurt, playEliteKill, playVictory, initSfx, setBgmBattle, setBgmElite, setBgmOff, playRouletteTick } from "./sfx";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
@@ -165,6 +165,13 @@ export class Game {
   private _chestRouletteSpeed = 0;
   private _chestRouletteIndex = 0;
   private _chestRouletteResult: EdictId | null = null;
+  // 0809-11F-4F: 跑马灯
+  private _rouletteHighlightPos = 0; // 0=left 1=center 2=right
+  private _rouletteTickAccum = 0;
+  private _rouletteTickIdx = 0;
+  private _rouletteLastPos = -1;
+  private _rouletteFinalPop = 0; // 0~1
+  private _rouletteTargetPos = 0;
   private _chestWarningAt = 0;
   private _chestOpenBlockUntilMs = 0;
   private _chestOpenAwaitPointerUp = false;
@@ -2960,6 +2967,14 @@ export class Game {
           this._chestRouletteTimer = 0;
           this._chestRouletteSpeed = 12;
           this._chestRouletteIndex = Math.floor(Math.random() * EDICT_POOL.length);
+          // 0809-11F-4F: 跑马灯初始化
+          this._rouletteHighlightPos = 0;
+          this._rouletteTickAccum = 0;
+          this._rouletteTickIdx = 0;
+          this._rouletteLastPos = -1;
+          this._rouletteFinalPop = 0;
+          const resIdx = EDICT_POOL.indexOf(this._chestRouletteResult!);
+          this._rouletteTargetPos = resIdx >= 0 ? resIdx : 1;
           this._chestRouletteResult = EDICT_POOL[Math.floor(Math.random() * EDICT_POOL.length)];
           this._chestOpenBlockUntilMs = performance.now() + 200; // 0809-11F-3A: 500→200
           this._chestOpenAwaitPointerUp = true;
@@ -2969,16 +2984,34 @@ export class Game {
       }
       case "roulette": {
         this._chestRouletteTimer += dt;
-        this.screenShake = Math.max(0, this.screenShake - dt * 40); // V0801003: 轻震~75ms衰减
-        const totalDuration = 0.60; // 0809-11F-3A: 1.8→0.60
-        const elapsed = this._chestRouletteTimer;
-        const progress = Math.min(elapsed / totalDuration, 1);
-        // 减速曲线：从快→慢
-        this._chestRouletteSpeed = 12 * Math.pow(1 - progress, 2.5) + 0.8;
-        const step = this._chestRouletteSpeed * dt;
-        this._chestRouletteIndex = (this._chestRouletteIndex + step) % EDICT_POOL.length;
-
-        if (progress >= 1) {
+        this.screenShake = Math.max(0, this.screenShake - dt * 40);
+        // 0809-11F-4F: 离散跑马灯间隔(ms): 前快后慢
+        const TICK_INTERVALS = [75, 85, 95, 115, 145, 180];
+        this._rouletteTickAccum += dt * 1000;
+        // 检查是否该跳下一格
+        const curInterval = TICK_INTERVALS[Math.min(this._rouletteTickIdx, TICK_INTERVALS.length - 1)];
+        if (this._rouletteTickAccum >= curInterval && this._rouletteTickIdx < TICK_INTERVALS.length + 1) {
+          this._rouletteTickAccum = 0;
+          this._rouletteTickIdx++;
+          if (this._rouletteTickIdx <= TICK_INTERVALS.length) {
+            // 跳转: 顺序循环
+            this._rouletteHighlightPos = (this._rouletteHighlightPos + 1) % 3;
+            playRouletteTick(false);
+          } else {
+            // 最终定格到目标
+            this._rouletteHighlightPos = this._rouletteTargetPos;
+            this._rouletteFinalPop = 1;
+            playRouletteTick(true);
+          }
+        }
+        // 最终定格动画: pop 0.18s
+        if (this._rouletteFinalPop > 0) {
+          this._rouletteFinalPop = Math.max(0, this._rouletteFinalPop - dt / 0.18);
+        }
+        // 更新rouletteIndex给rendering用
+        this._chestRouletteIndex = this._rouletteHighlightPos;
+        // roulette结束条件: 所有跳完成+pop完成
+        if (this._rouletteTickIdx > TICK_INTERVALS.length && this._rouletteFinalPop <= 0) {
           // 轮转结束，强制定位到结果
           this._chestRouletteIndex = EDICT_POOL.indexOf(this._chestRouletteResult!);
           this._chestOpeningPhase = "revealed";
@@ -9696,9 +9729,13 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         const dx = (i - 1) * 72;
         const x = cx + dx;
         const isSelected = isRevealed && eid === this._pendingEdictId;
-        const isActive = !isRevealed && Math.floor(this._chestRouletteIndex) % EDICT_POOL.length === i;
-        const dim = isRevealed && !isSelected ? 0.12 : 1;
-        const scale = isSelected ? 1.5 : 1;
+        const isActive = !isRevealed && i === this._rouletteHighlightPos;
+        // 0809-11F-4F: 最终定格后非选中项暗化
+        const dim = (this._rouletteFinalPop <= 0 && this._rouletteTickIdx > 6 && i !== this._rouletteTargetPos) ? 0.12 : (isRevealed && !isSelected ? 0.12 : 1);
+        // 0809-11F-4F: 选中项pop(1.0→1.08→1.0)
+        const popScale = (isRevealed && isSelected) ? 1 : 
+          (this._rouletteFinalPop > 0 && i === this._rouletteTargetPos) ? 1 + 0.08 * Math.sin(this._rouletteFinalPop * Math.PI) : 1;
+        const scale = (isRevealed && isSelected) ? 1.5 : popScale;
         const meta = EDICT_META[eid];
 
         ctx.save();
