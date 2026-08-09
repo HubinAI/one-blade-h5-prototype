@@ -358,6 +358,7 @@ export class Game {
   private _splitFragments: Array<{ x: number; y: number; tx: number; ty: number; progress: number; converted: boolean }> = [];
   private _eliteLanded = false;
   private _eliteGatherCenter = { x: 190, y: 370 };
+  private _eliteSplitOrigin = { x: 190, y: 350 }; // 0809-11E-5B: Boss分裂起点
   private _eliteGatherPhase: "idle" | "attract" | "merge" = "idle";
   private _eliteGatherTimer = 0;
   private _elitePressureRound = 1;
@@ -8377,12 +8378,34 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this._eliteRingIssued = 0;
     this._eliteRingResolved = 0;
     this._eliteFireTimeout = 0;
-    const bx = elite.x, by = elite.y;
-    // 0808-11E-4C-2: 仅在本轮wave开始时清理碎片(不清理已有fragments)
+    // 0809-11E-5B: 记录分裂起点
+    this._eliteSplitOrigin = { x: elite.x, y: elite.y };
+    const ox = elite.x, oy = elite.y;
+    // 0809-11E-5B: 6个候选散场点, 选3个离原点≥110且互距≥130
+    const candidates = [
+      { x: ox - 140, y: 240 }, { x: ox + 140, y: 240 },
+      { x: ox - 120, y: 320 }, { x: ox + 120, y: 320 },
+      { x: ox - 130, y: 400 }, { x: ox + 130, y: 400 },
+    ];
+    // 筛选满足距离约束的组合
+    const staging: { x: number; y: number }[] = [];
+    for (const c of candidates) {
+      const distFromOrigin = Math.hypot(c.x - ox, c.y - oy);
+      if (distFromOrigin < 100) continue;
+      let ok = true;
+      for (const s of staging) if (Math.hypot(c.x - s.x, c.y - s.y) < 120) { ok = false; break; }
+      if (ok) staging.push(c);
+      if (staging.length >= 3) break;
+    }
+    // fallback: 硬编码3个远点
+    if (staging.length < 3) {
+      staging.length = 0;
+      staging.push({ x: ox - 130, y: 230 }, { x: ox + 120, y: 330 }, { x: ox - 120, y: 420 });
+    }
     this._splitFragments = [
-      { x: bx, y: by, tx: bx - 50, ty: 270, progress: 0, converted: false },
-      { x: bx, y: by, tx: bx + 55, ty: 350, progress: 0, converted: false },
-      { x: bx, y: by, tx: bx + 5,  ty: 410, progress: 0, converted: false },
+      { x: ox, y: oy, tx: staging[0].x, ty: staging[0].y, progress: 0, converted: false },
+      { x: ox, y: oy, tx: staging[1].x, ty: staging[1].y, progress: 0, converted: false },
+      { x: ox, y: oy, tx: staging[2].x, ty: staging[2].y, progress: 0, converted: false },
     ];
   }
 
@@ -12261,12 +12284,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
           this._eliteActivePf = this._getFireRingPressureProfile(this._elitePressureRound);
           this._beginFireRingSplitWave(elite);
         }
-        // 身体碎片运动
-        const moveT = Math.max(0, (this._eliteSeqTimer - 0.10) / 0.30);
+        // 0809-11E-5B: 碎片0.10s快速散场
+        const moveT = Math.min(1, this._eliteSeqTimer / 0.10);
         for (const sf of this._splitFragments) {
-          sf.x = elite.x + (sf.tx - elite.x) * Math.pow(Math.min(1, moveT), 2);
-          sf.y = elite.y + (sf.ty - elite.y) * Math.pow(Math.min(1, moveT), 2);
-          sf.progress = this._eliteSeqTimer / 0.40;
+          sf.x = this._eliteSplitOrigin.x + (sf.tx - this._eliteSplitOrigin.x) * moveT;
+          sf.y = this._eliteSplitOrigin.y + (sf.ty - this._eliteSplitOrigin.y) * moveT;
+          sf.progress = Math.min(1, this._eliteSeqTimer / 0.40);
         }
         const convertTimes = this._eliteActivePf.times;
         for (let i = 0; i < this._splitFragments.length; i++) {
