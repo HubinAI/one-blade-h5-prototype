@@ -172,6 +172,7 @@ export class Game {
   private _rouletteLastPos = -1;
   private _rouletteFinalPop = 0; // 0~1
   private _rouletteTargetPos = 0;
+  private _rouletteHoldAccum = 0; // 0809-11F-4F-1: 定格保持
   private _chestWarningAt = 0;
   private _chestOpenBlockUntilMs = 0;
   private _chestOpenAwaitPointerUp = false;
@@ -2973,6 +2974,7 @@ export class Game {
           this._rouletteTickIdx = 0;
           this._rouletteLastPos = -1;
           this._rouletteFinalPop = 0;
+          this._rouletteHoldAccum = 0; // 0809-11F-4F-1
           const resIdx = EDICT_POOL.indexOf(this._chestRouletteResult!);
           this._rouletteTargetPos = resIdx >= 0 ? resIdx : 1;
           this._chestRouletteResult = EDICT_POOL[Math.floor(Math.random() * EDICT_POOL.length)];
@@ -2986,7 +2988,7 @@ export class Game {
         this._chestRouletteTimer += dt;
         this.screenShake = Math.max(0, this.screenShake - dt * 40);
         // 0809-11F-4F: 离散跑马灯间隔(ms): 前快后慢
-        const TICK_INTERVALS = [75, 85, 95, 115, 145, 180];
+        const TICK_INTERVALS = [95, 110, 125, 150, 180, 220]; // 0809-11F-4F-1: 放松节奏
         this._rouletteTickAccum += dt * 1000;
         // 检查是否该跳下一格
         const curInterval = TICK_INTERVALS[Math.min(this._rouletteTickIdx, TICK_INTERVALS.length - 1)];
@@ -3010,8 +3012,10 @@ export class Game {
         }
         // 更新rouletteIndex给rendering用
         this._chestRouletteIndex = this._rouletteHighlightPos;
-        // roulette结束条件: 所有跳完成+pop完成
-        if (this._rouletteTickIdx > TICK_INTERVALS.length && this._rouletteFinalPop <= 0) {
+        // roulette结束条件: 所有跳完成+pop完成+hold完成
+        const allDone = this._rouletteTickIdx > TICK_INTERVALS.length && this._rouletteFinalPop <= 0;
+        if (allDone) this._rouletteHoldAccum += dt;
+        if (this._rouletteHoldAccum >= 0.25) {
           // 轮转结束，强制定位到结果
           this._chestRouletteIndex = EDICT_POOL.indexOf(this._chestRouletteResult!);
           this._chestOpeningPhase = "revealed";
