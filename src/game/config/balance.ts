@@ -151,8 +151,8 @@ export const ENTRY_PROFILE_EDICT_BURST = {
 export const ENTRY_PROFILE_ELITE = {
   spawnY: -20,
   entryEndY: 430,
-  entryMultiplier: 2.35,
-  entryMaxDuration: 1.9
+  entryMultiplier: 3.8, // 0809-11F-3B: 2.35→3.8
+  entryMaxDuration: 0.85 // 0809-11F-3B: 1.9→0.85
 } as const;
 
 /** P2.5：怪物落点个体化扰动配置 */

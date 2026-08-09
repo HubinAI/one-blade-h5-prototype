@@ -12088,10 +12088,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const aliveEnemies = this.enemies.filter(e => e.alive).length;
     if (!handoff && (aliveEnemies > 0 || this.subSpawnQueue.length > 0)) return;
     if (this._eliteClearanceAt === 0) { this._eliteClearanceAt = this.elapsed; if (handoff) postEdictDirector.consumeHandoff(); return; }
-    if (this.elapsed - this._eliteClearanceAt < 0.6) {
+    if (this.elapsed - this._eliteClearanceAt < 0.35) { // 0809-11F-3B: 0.6→0.35
       if (!this.elitePreviewShown) {
         this.elitePreviewShown = true;
-        this.showBattleNotice({ text: "火环精英", priority: "A", category: "elite", style: "danger", duration: 0.8, dedupeKey: "elite:fireRing:preview", cooldown: 3, interrupt: true });
+        this.showBattleNotice({ text: "火环精英", priority: "A", category: "elite", style: "danger", duration: 0.5, dedupeKey: "elite:fireRing:preview", cooldown: 3, interrupt: true });
       }
       return;
     }
@@ -12110,7 +12110,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.discoveredEnemies.add("elite");
     // 出场播报（0.85秒）
     // P4.2A.3: 精英播报使用noticeTitle（不超过8字）
-    this.showBattleNotice({ text: conf.noticeTitle, priority: "A", category: "elite", style: "purple", duration: 0.85, dedupeKey: `elite:${ek}`, cooldown: 3, interrupt: false });
+    this.showBattleNotice({ text: conf.noticeTitle, priority: "A", category: "elite", style: "purple", duration: 0.5, dedupeKey: `elite:${ek}`, cooldown: 3, interrupt: false });
     // P3.2：标记已播报出场
     this.eliteSpawnAnnounced = true;
     // 出场特效强化
