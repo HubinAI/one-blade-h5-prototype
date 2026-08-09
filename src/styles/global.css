@@ -6289,12 +6289,16 @@ h1 {
 
 /* 2. 标题区 */
 .v3-title-section {
-  text-align: center;
+  text-align: center; /* 0809-11F-4D-1 */
+  width: 100%;
+  align-self: stretch;
   padding: 4px 0 4px;
 }
 
 .v3-title {
-  margin: 0;
+  margin: 0 auto;
+  width: 100%;
+  text-align: center;
   font-size: 32px;
   font-weight: 900;
   color: #fff3c0;
@@ -6303,6 +6307,8 @@ h1 {
 }
 
 .v3-tip {
+  width: 100%;
+  text-align: center;
   margin: 4px 0 0;
   font-size: 11px;
   color: rgba(246, 231, 189, 0.6);
