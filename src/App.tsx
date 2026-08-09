@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, useEffect } from "react";
 import { APP_VERSION } from "./version";
 import { GameCanvas } from "./game/GameCanvas";
+import { setBgmHome, setBgmOff } from "./game/sfx";
 import { LEVELS } from "./data/levels";
 import type { BattleResult, BossPhaseState, LevelConfig } from "./game/types";
 import { MainMenu } from "./components/MainMenu";
@@ -74,6 +75,12 @@ export default function App() {
   const [currentLevel, setCurrentLevel] = useState<LevelConfig>(LEVELS[0]);
   const [lastResult, setLastResult] = useState<BattleResult | null>(null);
   const appVersion = APP_VERSION;
+
+  // 0809-11F-4E: Home→BGM切换
+  useEffect(() => {
+    if (screen === "menu") setBgmHome();
+    else if (screen !== "battle") setBgmOff();
+  }, [screen]);
 
   /** P0: bossFlow 参数（双入口） */
   const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');

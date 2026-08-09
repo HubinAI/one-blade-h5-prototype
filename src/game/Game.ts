@@ -29,7 +29,7 @@ import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, res
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
 import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, inertiaEase, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS, SHADOW_MOVE_DURATION, SHADOW_SPEED_REF, SHADOW_MOVE_DURATION_MIN, SHADOW_MOVE_DURATION_MAX, SHADOW_STAGGER_MS, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
-import { playSwing, playHit, playExplosion, playPlayerHurt, playEliteKill, playVictory, initSfx } from "./sfx";
+import { playSwing, playHit, playExplosion, playPlayerHurt, playEliteKill, playVictory, initSfx, setBgmBattle, setBgmElite, setBgmOff } from "./sfx";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
@@ -149,6 +149,7 @@ export class Game {
   private finished = false;
   private _victoryDelayRemaining = 0; // 0809-11F-4C: 胜利后短暂收束
   private _victoryResult: boolean | null = null; // 0809-11F-4C: 延迟期间的胜负标记
+  private _lastBgmPhase = ""; // 0809-11F-4E: BGM阶段跟踪
 
   private hp: number;
   private maxHp: number;
@@ -1222,6 +1223,8 @@ export class Game {
 
   update(dt: number) {
     const frameDt = Math.min(dt, 0.04);
+    // 0809-11F-4E: BGM跟随phase
+    this._updateBgmForPhase();
     // 0809-11F-4C: 胜利/失败延迟收束
     if (this._victoryDelayRemaining > 0) {
       this._victoryDelayRemaining = Math.max(0, this._victoryDelayRemaining - frameDt);
@@ -7373,6 +7376,19 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     for (const enemy of aliveEnemies) {
       enemy.alive = false;
     }
+  }
+
+  /** 0809-11F-4E: BGM跟随游戏阶段 */
+  private _updateBgmForPhase(): void {
+    let want = "";
+    if (this._victoryDelayRemaining > 0 || this.phase === "won" || this.phase === "lost") want = "off";
+    else if (this.eliteSpawned && !this.eliteKilled) want = "elite";
+    else if (this.phase === "playing" && this.battlePhase !== "edict_modal") want = "battle";
+    if (want === this._lastBgmPhase) return;
+    this._lastBgmPhase = want;
+    if (want === "battle") setBgmBattle();
+    else if (want === "elite") setBgmElite();
+    else if (want === "off") setBgmOff();
   }
 
   /** 二次打磨：自动切换 battlePhase HUD 显示 */
