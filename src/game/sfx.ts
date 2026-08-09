@@ -157,6 +157,9 @@ function startBgmInternal(state: "home" | "battle" | "elite"): void {
   const bpm = state === "home" ? HOME_BPM : BATTLE_BPM;
   const interval = (60 / bpm) * 1000;
   _bgmTimer = window.setInterval(playBgmTick, interval);
+  // 0809-11F-4E-1: 启动时必须ramp到目标gain
+  const targetGain = state === "home" ? 0.16 : state === "battle" ? 0.20 : 0.24;
+  rampBgm(targetGain, 0.30);
   // Immediately play first note
   setTimeout(playBgmTick, 10);
 }
