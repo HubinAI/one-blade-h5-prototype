@@ -147,6 +147,8 @@ export class Game {
   private elapsed = 0;
   private idCounter = 0;
   private finished = false;
+  private _victoryDelayRemaining = 0; // 0809-11F-4C: 胜利后短暂收束
+  private _victoryResult: boolean | null = null; // 0809-11F-4C: 延迟期间的胜负标记
 
   private hp: number;
   private maxHp: number;
@@ -1220,6 +1222,14 @@ export class Game {
 
   update(dt: number) {
     const frameDt = Math.min(dt, 0.04);
+    // 0809-11F-4C: 胜利/失败延迟收束
+    if (this._victoryDelayRemaining > 0) {
+      this._victoryDelayRemaining = Math.max(0, this._victoryDelayRemaining - frameDt);
+      if (this._victoryDelayRemaining <= 0) {
+        if (this._victoryResult !== null) this.phase = this._victoryResult ? "won" : "lost";
+      }
+      return; // 略过战斗逻辑但允许渲染最后帧
+    }
     // V0731013: 正式接入 — 30/30时自动触发宝箱开奖
     if (!this._chestProgressPaused && this._chestRuntime.status === "ready" && this._chestOpeningPhase === "idle" && this.battlePhase !== "edict_modal" && this.phase !== "buffChoice" && !this.currentSlash?.active) {
         this._chestOpeningPhase = "warning";
@@ -7488,7 +7498,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private finish(win: boolean) {
     if (this.finished) return;
     this.finished = true;
-    this.phase = win ? "won" : "lost";
+    // 0809-11F-4C: 胜利延迟0.55s后再进结算
+    this._victoryDelayRemaining = 0.55;
+    this._victoryResult = win;
     if (win) playVictory(); // 0809-11F-4B: 胜利SFX
     // 首局结束后标记
     if (this.isFirstRun) {
