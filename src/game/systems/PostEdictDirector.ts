@@ -524,7 +524,7 @@ const PHASES: Record<DirectorPhase, PhaseConfig> = {
 
 // ═══════════════════ 常量 ═══════════════════
 
-const PHASE_GAP_SEC = 0.30;
+const PHASE_GAP_SEC = 0.15; // 0809-11F-3C: 0.30→0.15
 const FINAL_AFTERGLOW_SEC = 0.28;
 const BRIDGE_EARLY_SEC = 0.25;  // 桥接: 提前25~350ms释放
 const BRIDGE_EARLY_JITTER = 0.10;
@@ -646,7 +646,11 @@ export class PostEdictDirector {
     if (this._phaseGenerated >= phase.totalEnemies) {
       // 0809-11F-2: 总量达标时也触发P3→精英交接
       if (beat.phase === 'P3' && !this._p3HandoffReady) this._p3HandoffReady = true;
-      if (aliveTotal === 0 && subSpawnQueueLength === 0) {
+      const isP1orP2 = beat.phase === 'P1' || beat.phase === 'P2';
+      // 0809-11F-3C: P1/P2允许≤2残兵快速接力
+      const canAdvance = (aliveTotal === 0 && subSpawnQueueLength === 0)
+        || (isP1orP2 && aliveTotal <= 2 && subSpawnQueueLength === 0);
+      if (canAdvance) {
         this._phaseGapTimer += dt;
         if (this._phaseGapTimer >= PHASE_GAP_SEC) {
           this._advanceToNextPhase(); this._lastReason = `phase_${phase.phase}_cleared`;
