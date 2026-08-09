@@ -589,7 +589,7 @@ export class Game {
   /** P2.9：军令图标飞行 */
   private edictIconFlying = false;
   private edictIconFlyT = 0;
-  private edictIconFlyDuration = 0.28;
+  private edictIconFlyDuration = 0.18; // 0809-11F-3A: 0.28→0.18
   private edictIconFlyFrom = { x: DESIGN_WIDTH / 2, y: DESIGN_HEIGHT * 0.48 };
   private edictIconFlyTo = { x: 46, y: 78 };
   /** P2.9：左上角持续军令Icon */
@@ -2943,7 +2943,7 @@ export class Game {
           this._chestRouletteSpeed = 12;
           this._chestRouletteIndex = Math.floor(Math.random() * EDICT_POOL.length);
           this._chestRouletteResult = EDICT_POOL[Math.floor(Math.random() * EDICT_POOL.length)];
-          this._chestOpenBlockUntilMs = performance.now() + 500;
+          this._chestOpenBlockUntilMs = performance.now() + 200; // 0809-11F-3A: 500→200
           this._chestOpenAwaitPointerUp = true;
           this.screenShake = 3;
         }
@@ -2952,7 +2952,7 @@ export class Game {
       case "roulette": {
         this._chestRouletteTimer += dt;
         this.screenShake = Math.max(0, this.screenShake - dt * 40); // V0801003: 轻震~75ms衰减
-        const totalDuration = 1.8; // 总轮转时长
+        const totalDuration = 0.60; // 0809-11F-3A: 1.8→0.60
         const elapsed = this._chestRouletteTimer;
         const progress = Math.min(elapsed / totalDuration, 1);
         // 减速曲线：从快→慢
@@ -2972,18 +2972,18 @@ export class Game {
       case "revealed": {
         this._chestRouletteTimer += dt;
         this.screenShake = Math.max(0, this.screenShake - dt * 40);
-        if (this._chestRouletteTimer > 1.8 + 0.9) {
+        if (this._chestRouletteTimer > 0.60 + 0.10) { // 0809-11F-3A: 1.8+0.9→0.60+0.10
           this._chestOpeningPhase = "exiting";
           this._chestExitingProgress = 1;
-          this._chestStampTimer = 0.25; // 盖章反馈
+          this._chestStampTimer = 0.10; // 0809-11F-3A: 0.25→0.10
         }
         break;
       }
       case "exiting": {
         this.screenShake = 0; // V0801005: 禁止退出期震屏
         this._chestStampTimer -= dt;
-        this._chestExitingProgress = Math.max(0, this._chestExitingProgress - dt / 0.3);
-        if (this._chestExitingProgress <= 0 && this._chestStampTimer <= 0) {
+          this._chestExitingProgress = Math.max(0, this._chestExitingProgress - dt / 0.15); // 0809-11F-3A: 0.3→0.15
+          if (this._chestExitingProgress <= 0 && this._chestStampTimer <= 0) {
           this._chestOpeningPhase = "closed";
         }
         break;
