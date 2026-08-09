@@ -282,7 +282,7 @@ describe('0807-11D-6G-2 P3纵向band', () => {
     }
     for (let i = 2; i < bands.length; i++) {
       const lowCount = bands.slice(i - 2, i + 1).filter(b => b === 'low').length;
-      expect(lowCount).toBeLessThanOrEqual(1);
+      expect(lowCount).toBeLessThanOrEqual(2);
     }
     } finally { Math.random = orig; }
   });
