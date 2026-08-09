@@ -12148,6 +12148,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         if (!this._eliteEntryBoostDone && this._momentumState === 'charging' && this.energy < 50) { this.energy = 50; this._eliteEntryBoostDone = true; }
         // 0808-11E-4: entry→分裂循环起点
         this._eliteSeq = "human"; this._eliteSeqTimer = 0;
+        this._eliteActivePf = this._getFireRingPressureProfile(this._elitePressureRound); // 0808-11E-Final: 首轮初始化profile
         this._eliteFragments = []; this._splitFragments = [];
         this._eliteGatherPhase = "idle"; this._eliteGatherTimer = 0;
         this._eliteCyclePhase = "open"; this._eliteForm = "human";
