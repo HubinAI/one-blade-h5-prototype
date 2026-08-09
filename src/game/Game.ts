@@ -29,6 +29,7 @@ import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, res
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
 import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, inertiaEase, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS, SHADOW_MOVE_DURATION, SHADOW_SPEED_REF, SHADOW_MOVE_DURATION_MIN, SHADOW_MOVE_DURATION_MAX, SHADOW_STAGGER_MS, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
+import { playSwing, playHit, playExplosion, playPlayerHurt, playEliteKill, playVictory, initSfx } from "./sfx";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
@@ -637,6 +638,7 @@ export class Game {
     this.level = level;
     this.onFinish = onFinish;
     this.onReviveOffer = onReviveOffer;
+    initSfx(); // 0809-11F-4B: SFX初始化
 
     // ═══════════════════════════════════════════
     // P0: 模式隔离 — bossFlow 只能决定"用了哪套Boss实现"，
@@ -2069,6 +2071,7 @@ export class Game {
   }
 
   private startSlash(pos: Vec2, pending?: NonNullable<typeof this.pendingSlash>) {
+    playSwing(); // 0809-11F-4B: 挥刀SFX
     // 0807-11D-4B-Final-1: 末刀期禁止新建挥刀
     if (this._burstEnding) return;
     // 0807-11D-4B: armed → bursting
@@ -2403,6 +2406,7 @@ export class Game {
       // 0807-11D-4C: 基于唯一命中数统一结算
       const uniqueHits = this._slashDirectHitIds.size;
       this._lastSlashUniqueHits = uniqueHits;
+      if (uniqueHits > 0) playHit(uniqueHits); // 0809-11F-4B: 命中SFX
       // 0807-11E-1B: 精英阶段权重化计数
       let weightedHits = uniqueHits;
       if (this._eliteBattleActive) {
@@ -2853,6 +2857,7 @@ export class Game {
 
     // 1. 标记精英已击杀
     this.eliteKilled = true;
+    playEliteKill(); // 0809-11F-4B: 精英击杀SFX
     this.allPostChestWavesSpawned = true;
     // V0801008: 清理火环精英状态
     this._eliteBattleActive = false;
@@ -5005,6 +5010,7 @@ export class Game {
           }
           enemy.alive = false;
           this.hp -= enemy.hpDamage;
+          playPlayerHurt(); // 0809-11F-4B: 玩家受伤SFX
           this.defenseLineHits += 1;
           this.screenShake = Math.max(this.screenShake, 0.45);
           this.flash = Math.max(this.flash, 0.35);
@@ -7119,6 +7125,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
           // 引爆
           enemy._fuseState = 'detonating'; enemy._fuseDetonated = true;
           this._detonatePowder(enemy);
+          playExplosion(); // 0809-11F-4B: 爆炸SFX
         }
       }
     }
@@ -7482,6 +7489,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (this.finished) return;
     this.finished = true;
     this.phase = win ? "won" : "lost";
+    if (win) playVictory(); // 0809-11F-4B: 胜利SFX
     // 首局结束后标记
     if (this.isFirstRun) {
       window.localStorage.setItem("one_blade_first_run_done", "1");
