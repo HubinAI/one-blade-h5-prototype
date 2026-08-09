@@ -3807,10 +3807,11 @@ export class Game {
           const frElite = this.enemies.find(e => e.kind === "elite" && e.eliteKind === "fireRing" && e.alive);
           if (frElite) {
             const dmg = Math.max(1, Math.round(frElite.maxHp * 0.08));
+            const hpBefore = frElite.hp;
             frElite.hp = Math.max(0, frElite.hp - dmg);
             frElite.flash = Math.max(frElite.flash, 0.3);
-            // 0809-11E-5A: 记录环伤
-            this._eliteBudgetRing += dmg;
+            // 0809-11E-5A-1: 环伤用实际HP损失
+            this._eliteBudgetRing += (hpBefore - Math.max(0, frElite.hp));
             // 0808-11E-Final: -8%反馈
             this.addCombatFloat({ x: fr.x, y: fr.y - 10, text: "-8%", color: "#ff8c00", size: 19, duration: 0.50, category: "damage", priority: "A" });
           }
@@ -4598,15 +4599,17 @@ export class Game {
         return false;
       }
     }
+    const hpBefore = enemy.hp;
     enemy.hp -= damage;
-    // 0809-11E-5A: Budget跟踪(仅fireRing精英)
+    // 0809-11E-5A-1: 实际HP损失+elite源
     if (enemy.eliteKind === "fireRing" && this._eliteBattleActive) {
-      if (source === "paper" && this._eliteBudgetHumanActive) {
-        this._eliteBudgetHumanMain += damage;
+      const actualLoss = hpBefore - Math.max(0, enemy.hp);
+      if ((source === "paper" || source === "elite") && this._eliteBudgetHumanActive) {
+        this._eliteBudgetHumanMain += actualLoss;
       } else if (this._eliteBudgetHumanActive) {
-        this._eliteBudgetHumanOther += damage;
+        this._eliteBudgetHumanOther += actualLoss;
       } else {
-        this._eliteBudgetOther += damage;
+        this._eliteBudgetOther += actualLoss;
       }
     }
     enemy.flash = 0.25;
@@ -4629,7 +4632,8 @@ export class Game {
     // 0809-11E-5A: 死亡输出预算
     if (enemy.eliteKind === "fireRing" && this._eliteBattleActive) {
       const total = this._eliteBudgetHumanMain + this._eliteBudgetHumanOther + this._eliteBudgetRing + this._eliteBudgetOther;
-      console.log(`[ELITE ROUND BUDGET] DEATH R=${this._elitePressureRound} hpStart=${this._eliteBudgetHpStart} humanMain=${this._eliteBudgetHumanMain} humanOther=${this._eliteBudgetHumanOther} ring=${this._eliteBudgetRing} other=${this._eliteBudgetOther} total=${total} hpEnd=0`);
+      const unattributed = (this._eliteBudgetHpStart) - total;
+      console.log(`[ELITE ROUND BUDGET] DEATH R=${this._elitePressureRound} hpStart=${this._eliteBudgetHpStart} humanMain=${this._eliteBudgetHumanMain} humanOther=${this._eliteBudgetHumanOther} ring=${this._eliteBudgetRing} other=${this._eliteBudgetOther} unattributed=${unattributed} hpEnd=0`);
     }
     enemy.alive = false;
     trail.kills += 1;
@@ -5899,6 +5903,10 @@ export class Game {
       let damage = isL1Infantry ? Math.max(baseDamage, target.maxHp) : baseDamage;
       if (isL1Elite) damage = Math.min(damage, Math.ceil(target.maxHp * 0.02)); // ≤2%精英HP
       target.hp -= Math.max(1, Math.ceil(damage));
+      // 0809-11E-5A-1: 阵风伤害归因
+      if ((target as Enemy).eliteKind === "fireRing" && this._eliteBattleActive) {
+        this._eliteBudgetOther += Math.max(1, Math.ceil(damage));
+      }
       target.flash = 0.18;
       if (target.kind === "elite") {
         this.triggerEliteHitFeedback(target);
@@ -5963,6 +5971,10 @@ export class Game {
       damage = stats.damageMultiplier * 1.0;
     }
     target.hp -= Math.max(1, Math.ceil(damage));
+    // 0809-11E-5A-1: 弱点击破归因
+    if ((target as Enemy).eliteKind === "fireRing" && this._eliteBattleActive) {
+      this._eliteBudgetOther += Math.max(1, Math.ceil(damage));
+    }
     target.flash = 0.2;
     if (target.kind === "elite") {
       this.triggerEliteHitFeedback(target);
@@ -12313,7 +12325,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
           const eliteNow = this.enemies.find(e => e.kind === "elite" && e.eliteKind === "fireRing" && e.alive);
           const hpEnd = eliteNow ? eliteNow.hp : 0;
           const total = this._eliteBudgetHumanMain + this._eliteBudgetHumanOther + this._eliteBudgetRing + this._eliteBudgetOther;
-          console.log(`[ELITE ROUND BUDGET] R=${this._elitePressureRound} hpStart=${this._eliteBudgetHpStart} humanMain=${this._eliteBudgetHumanMain} humanOther=${this._eliteBudgetHumanOther} ring=${this._eliteBudgetRing} other=${this._eliteBudgetOther} total=${total} hpEnd=${hpEnd}`);
+          const unattributed = (this._eliteBudgetHpStart - hpEnd) - total;
+          console.log(`[ELITE ROUND BUDGET] R=${this._elitePressureRound} hpStart=${this._eliteBudgetHpStart} humanMain=${this._eliteBudgetHumanMain} humanOther=${this._eliteBudgetHumanOther} ring=${this._eliteBudgetRing} other=${this._eliteBudgetOther} unattributed=${unattributed} hpEnd=${hpEnd}`);
           this._elitePressureRound++; goSeq("human"); }
         break;
       }
