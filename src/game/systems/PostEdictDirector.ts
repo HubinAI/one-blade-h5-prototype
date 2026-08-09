@@ -414,14 +414,14 @@ const BEATS: DirectorBeat[] = [
     ],
   },
   {
-    id: 'P1-2', phase: 'P1', notBeforeMs: 1600,
+    id: 'P1-2', phase: 'P1', notBeforeMs: 1000,
     microBatches: [
       { count: 6, tiers: [['trash',6]], formationId: 'left_front',  xRange: X_LEFT,  row: 'mid',   internalDelay: 0,    speedBonus: 0 },
       { count: 6, tiers: [['trash',6]], formationId: 'right_back',  xRange: X_RIGHT, row: 'mid',   internalDelay: 0.32, speedBonus: 0 },
     ],
   },
   {
-    id: 'P1-3', phase: 'P1', notBeforeMs: 3200,
+    id: 'P1-3', phase: 'P1', notBeforeMs: 2000,
     microBatches: [
       { count: 6, tiers: [['trash',6]], formationId: 'back_wide',   xRange: X_WIDE,  row: 'back',  internalDelay: 0,    speedBonus: 0 },
       { count: 6, tiers: [['trash',6]], formationId: 'front_wide',  xRange: X_WIDE,  row: 'front', internalDelay: 0.30, speedBonus: 0 },
@@ -436,28 +436,28 @@ const BEATS: DirectorBeat[] = [
     ],
   },
   {
-    id: 'P2-2', phase: 'P2', notBeforeMs: 1800,
+    id: 'P2-2', phase: 'P2', notBeforeMs: 1000,
     microBatches: [
       { count: 4, tiers: [["trash",3],["tough",1]], formationId: 'right_high_diag', xRange: X_RIGHT, row: 'mid', internalDelay: 0, speedBonus: 0, powders: 1 },
       { count: 4, tiers: [["trash",4]],              formationId: 'left_low_diag',  xRange: X_LEFT,  row: 'mid', internalDelay: 0.28, speedBonus: 0 },
     ],
   },
   {
-    id: 'P2-3', phase: 'P2', notBeforeMs: 3600,
+    id: 'P2-3', phase: 'P2', notBeforeMs: 2000,
     microBatches: [
       { count: 4, tiers: [["trash",2],["tough",2]], formationId: 'left_expand',  xRange: X_LEFT,  row: 'front', internalDelay: 0, speedBonus: 0, powders: 1 },
       { count: 4, tiers: [["trash",3],["tough",1]], formationId: 'right_expand', xRange: X_RIGHT, row: 'back',  internalDelay: 0.28, speedBonus: 0 },
     ],
   },
   {
-    id: 'P2-4', phase: 'P2', notBeforeMs: 5400,
+    id: 'P2-4', phase: 'P2', notBeforeMs: 3000,
     microBatches: [
       { count: 5, tiers: [["trash",2],["tough",3]], formationId: 'front_wide', xRange: X_WIDE, row: 'front', internalDelay: 0, speedBonus: 0, powders: 1 },
       { count: 5, tiers: [["trash",3],["tough",2]], formationId: 'back_wide',  xRange: X_WIDE, row: 'back',  internalDelay: 0.26, speedBonus: 0 },
     ],
   },
   {
-    id: 'P2-5', phase: 'P2', notBeforeMs: 7200,
+    id: 'P2-5', phase: 'P2', notBeforeMs: 4000,
     microBatches: [
       { count: 6, tiers: [["trash",4],["tough",2]], formationId: 'center_expand', xRange: X_CENTER, row: 'mid', internalDelay: 0.22, speedBonus: 0.04 },
     ],
@@ -472,35 +472,35 @@ const BEATS: DirectorBeat[] = [
     ],
   },
   {
-    id: 'P3-2', phase: 'P3', notBeforeMs: 1500,
+    id: 'P3-2', phase: 'P3', notBeforeMs: 1000,
     microBatches: [
       { count: 4, tiers: [["trash",2],["tough",2]], formationId: 'left_expand',  xRange: X_LEFT,  row: 'back', internalDelay: 0.28, speedBonus: 0, rapidPulse: true },
       { count: 4, tiers: [["trash",1],["tough",3]], formationId: 'right_expand', xRange: X_RIGHT, row: 'mid',  internalDelay: 0,    speedBonus: 0, rapidPulse: true },
     ],
   },
   {
-    id: 'P3-3', phase: 'P3', notBeforeMs: 3000,
+    id: 'P3-3', phase: 'P3', notBeforeMs: 2000,
     microBatches: [
       { count: 4, tiers: [["trash",2],["tough",2]], formationId: 'back_wide',  xRange: X_WIDE, row: 'back',  internalDelay: 0,    speedBonus: 0, rapidPulse: true },
       { count: 4, tiers: [["trash",1],["tough",3]], formationId: 'left_expand', xRange: X_LEFT, row: 'mid',   internalDelay: 0.28, speedBonus: 0, rapidPulse: true },
     ],
   },
   {
-    id: 'P3-4', phase: 'P3', notBeforeMs: 4500,
+    id: 'P3-4', phase: 'P3', notBeforeMs: 3000,
     microBatches: [
       { count: 4, tiers: [["trash",1],["tough",3]], formationId: 'front_wide', xRange: X_WIDE, row: 'front', internalDelay: 0,    speedBonus: 0.06, rapidPulse: true },
       { count: 4, tiers: [["trash",2],["tough",2]], formationId: 'back_wide',  xRange: X_WIDE, row: 'back',  internalDelay: 0.26, speedBonus: 0,    rapidPulse: true },
     ],
   },
   {
-    id: 'P3-5', phase: 'P3', notBeforeMs: 6000,
+    id: 'P3-5', phase: 'P3', notBeforeMs: 4000,
     microBatches: [
       { count: 4, tiers: [["trash",1],["tough",3]], formationId: 'scattered_walls', xRange: X_WIDE, row: 'mid',   internalDelay: 0.30, speedBonus: 0, rapidPulse: true },
       { count: 4, tiers: [["trash",2],["tough",2]], formationId: 'front_tough',     xRange: X_WIDE, row: 'front', internalDelay: 0,    speedBonus: 0, rapidPulse: true },
     ],
   },
   {
-    id: 'P3-6', phase: 'P3', notBeforeMs: 7500,
+    id: 'P3-6', phase: 'P3', notBeforeMs: 5000,
     microBatches: [
       { count: 4, tiers: [["tough",4]], formationId: 'front_tough', xRange: X_WIDE, row: 'front', internalDelay: 0, speedBonus: 0.04, rapidPulse: true, splitters: 1 },
     ],
@@ -517,9 +517,9 @@ interface PhaseConfig {
 }
 
 const PHASES: Record<DirectorPhase, PhaseConfig> = {
-  P1: { phase:'P1', totalEnemies:36, speedMul:1.00, targetOnScreen:[10,14], hardCap:16, approachCap:12 },
-  P2: { phase:'P2', totalEnemies:40, speedMul:1.25, targetOnScreen:[12,16], hardCap:18, approachCap:12 },
-  P3: { phase:'P3', totalEnemies:44, speedMul:1.45, targetOnScreen:[14,18], hardCap:22, approachCap:14 },
+  P1: { phase:'P1', totalEnemies:24, speedMul:1.00, targetOnScreen:[10,14], hardCap:16, approachCap:12 },
+  P2: { phase:'P2', totalEnemies:30, speedMul:1.25, targetOnScreen:[12,16], hardCap:18, approachCap:12 },
+  P3: { phase:'P3', totalEnemies:36, speedMul:1.45, targetOnScreen:[14,18], hardCap:22, approachCap:14 },
 };
 
 // ═══════════════════ 常量 ═══════════════════
@@ -644,6 +644,8 @@ export class PostEdictDirector {
 
     // 阶段完成
     if (this._phaseGenerated >= phase.totalEnemies) {
+      // 0809-11F-2: 总量达标时也触发P3→精英交接
+      if (beat.phase === 'P3' && !this._p3HandoffReady) this._p3HandoffReady = true;
       if (aliveTotal === 0 && subSpawnQueueLength === 0) {
         this._phaseGapTimer += dt;
         if (this._phaseGapTimer >= PHASE_GAP_SEC) {
