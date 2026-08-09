@@ -518,8 +518,8 @@ interface PhaseConfig {
 
 const PHASES: Record<DirectorPhase, PhaseConfig> = {
   P1: { phase:'P1', totalEnemies:36, speedMul:1.00, targetOnScreen:[10,14], hardCap:16, approachCap:12 },
-  P2: { phase:'P2', totalEnemies:40, speedMul:1.40, targetOnScreen:[12,16], hardCap:18, approachCap:12 },
-  P3: { phase:'P3', totalEnemies:44, speedMul:1.75, targetOnScreen:[14,18], hardCap:22, approachCap:14 },
+  P2: { phase:'P2', totalEnemies:40, speedMul:1.25, targetOnScreen:[12,16], hardCap:18, approachCap:12 },
+  P3: { phase:'P3', totalEnemies:44, speedMul:1.45, targetOnScreen:[14,18], hardCap:22, approachCap:14 },
 };
 
 // ═══════════════════ 常量 ═══════════════════
@@ -553,8 +553,9 @@ export class PostEdictDirector {
   // 桥接
   private _bridgeMicroBatchId: string | null = null;  // 被桥接消费的微批次 ID
   // 0807-11D-6G-2: P3纵向band防重复
-  private _lastP3Band: 'top' | 'mid' | 'bottom' | null = null;
-  private _recentBottomCount = 0; // 最近pulse下区次数(用于3pulse限1)
+  private _lastP3Band: 'up' | 'mid' | 'low' | null = null;
+  private _lastXZone: 'left' | 'center' | 'right' | null = null;
+  private _lastYZoombo: string | null = null; // 0809-11F-1: 连续(Y+X)不重复
   // 0807-11D-6H: P3→精英无缝交接
   private _p3HandoffReady = false;
   private _p3HandoffTriggered = false;
@@ -572,7 +573,7 @@ export class PostEdictDirector {
     this._active = false; this._allComplete = false;
     this._beatIndex = 0; this._microBatchIndex = 0;
     this._phaseGenerated = 0; this._phaseBridgeCount = 0;
-    this._lastP3Band = null; this._recentBottomCount = 0; // 0807-11D-6G-2
+    this._lastP3Band = null; this._lastXZone = null; this._lastYZoombo = null;
     this._p3HandoffReady = false; this._p3HandoffTriggered = false; // 0807-11D-6H
     this._phaseElapsed = 0; this._phaseStartMs = 0; this._lastMbTime = 0;
     this._lastBurstAssistMs = 0; // 0807-11D-5A-Final
@@ -722,40 +723,52 @@ export class PostEdictDirector {
     for (let i = tierPool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [tierPool[i], tierPool[j]] = [tierPool[j], tierPool[i]]; }
     let poolIdx = 0;
     let pulseDelayAccum = 0;
-    // 0807-11D-6G-2: 纵向三区
-    const bands = [
-      { band: 'top' as const, weight: 45, yMin: 300, yRange: 90 },
-      { band: 'mid' as const, weight: 40, yMin: 400, yRange: 85 },
-      { band: 'bottom' as const, weight: 15, yMin: 500, yRange: 55 },
+    // 0809-11F-1: 三区配置(静态)
+    const allBands = [
+      { band: 'up' as const, weight: 30, yMin: 240, yRange: 100 },
+      { band: 'mid' as const, weight: 50, yMin: 350, yRange: 120 },
+      { band: 'low' as const, weight: 20, yMin: 480, yRange: 90 },
     ];
+    const xZones = [
+      { zone: 'left' as const, xMin: 28, xRange: 50 },
+      { zone: 'center' as const, xMin: 140, xRange: 70 },
+      { zone: 'right' as const, xMin: 270, xRange: 50 },
+    ];
+    const isP3 = beat.phase === 'P3';
     const results: DirectorSpawnRequest[] = [];
     for (const pc of pulses) {
-      // 0807-11D-6G-2: 每pulse独立选纵向band
-      let yPulse = 520; // fallback
-      const availBands = [...bands].filter(b => b.band !== this._lastP3Band);
-      let useBands = availBands.length > 0 ? availBands : [...bands];
-      // 0807-11D-6G-2: 下区3pulse限1 — 检查最近2pulse
-      const recentBottom = (this._lastP3Band === 'bottom' ? 1 : 0) + this._recentBottomCount;
-      if (recentBottom >= 1) useBands = useBands.filter(b => b.band !== 'bottom');
-      if (useBands.length === 0) useBands = [{ band: 'mid' as const, weight: 100, yMin: 400, yRange: 85 }];
+      // 0809-11F-1: 每pulse独立选Y band
+      let useBands = allBands.filter(b => isP3 || b.band !== 'low');
+      if (this._lastP3Band) useBands = useBands.filter(b => b.band !== this._lastP3Band);
+      if (useBands.length === 0) useBands = allBands.filter(b => isP3 || b.band !== 'low');
       const totalW = useBands.reduce((s, b) => s + b.weight, 0);
-      let r = Math.random() * totalW, picked = useBands[0];
-      for (const b of useBands) { r -= b.weight; if (r <= 0) { picked = b; break; } }
-      yPulse = picked.yMin + Math.random() * picked.yRange;
-      // 0807-11D-6G-2: 更新bottom历史(滑动窗口, 只记最近2pulse的bottom次数)
-      this._recentBottomCount = (this._lastP3Band === 'bottom' ? 1 : 0);
-      this._lastP3Band = picked.band;
+      let rw = Math.random() * totalW, pickedBand = useBands[0];
+      for (const b of useBands) { rw -= b.weight; if (rw <= 0) { pickedBand = b; break; } }
+      const yPulse = pickedBand.yMin + Math.random() * pickedBand.yRange;
+      this._lastP3Band = pickedBand.band;
+      // 0809-11F-1: X区, 不连续重复Y+X
+      let availX = xZones;
+      const yxKey = pickedBand.band + '-' + (this._lastXZone || '');
+      if (this._lastYZoombo) availX = availX.filter(x => (pickedBand.band + '-' + x.zone) !== this._lastYZoombo);
+      if (availX.length === 0) availX = xZones;
+      const pickedX = availX[Math.floor(Math.random() * availX.length)];
+      this._lastXZone = pickedX.zone;
+      this._lastYZoombo = pickedBand.band + '-' + pickedX.zone;
+      const xRange = [pickedX.xMin, pickedX.xMin + pickedX.xRange] as [number, number];
 
       const items: SpawnItem[] = [];
       const enemyKind0 = (tierPool[poolIdx] as string) === 'splitter' ? 'splitter' : 'infantry';
       for (let k = 0; k < pc; k++) {
         const tier = tierPool[poolIdx++ % tierPool.length];
         const enemyKind = (tier as string) === 'splitter' ? 'splitter' : 'infantry';
-        const x = mb.xRange[0] + Math.random() * (mb.xRange[1] - mb.xRange[0]);
-        const y = yPulse + (Math.random() - 0.5) * 6; // 微抖        const enemyKind = (tier as string) === 'splitter' ? 'splitter' : 'infantry';
+        const x = xRange[0] + Math.random() * (xRange[1] - xRange[0]);
+        const y = yPulse + (Math.random() - 0.5) * 6;
+        // 0809-11F-1: speed ±12%个别波动
+        const speedJitter = 1 + (Math.random() - 0.5) * 0.24;
+        const speedMul = (phase.speedMul + mb.speedBonus) * speedJitter;
         items.push({
           x: Math.round(x + (Math.random() - 0.5) * 6), y: y - 20,
-          speedMul: phase.speedMul + mb.speedBonus,
+          speedMul: speedMul,
           hpTier: (tier as string) === 'splitter' ? ('tough' as HpTier) : tier,
           hpOverride: (tier as string) === 'splitter' ? HP_TIERS.tough.hp : HP_TIERS[tier].hp,
           formationId: mb.formationId,
@@ -990,7 +1003,7 @@ export class PostEdictDirector {
     this._microBatchIndex = 0;
     this._phaseGenerated = 0;
     this._phaseBridgeCount = 0;
-    this._lastP3Band = null; this._recentBottomCount = 0; // 0807-11D-6G-2
+    this._lastP3Band = null; this._lastXZone = null; this._lastYZoombo = null;
     this._p3HandoffReady = false; this._p3HandoffTriggered = false; // 0807-11D-6H
     this._bridgeMicroBatchId = null;
     this._bridgeBeatIdx = -1;

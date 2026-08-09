@@ -220,8 +220,8 @@ describe('0807-11D-6G-2 P3纵向band', () => {
       for (const r of reqs) {
         for (const item of r.items) {
           if (r.phase === 'P3' && item.spawnInPlace && item.entryEndYOverride) {
-            expect(item.entryEndYOverride).toBeGreaterThanOrEqual(298);
-            expect(item.entryEndYOverride).toBeLessThanOrEqual(558); // band bottom=500~555 ±3抖动
+            expect(item.entryEndYOverride).toBeGreaterThanOrEqual(238);
+            expect(item.entryEndYOverride).toBeLessThanOrEqual(573); // low band=480~570 ±3抖动
           }
         }
       }
@@ -244,7 +244,7 @@ describe('0807-11D-6G-2 P3纵向band', () => {
           const mbId = (item as any).directorMicroBatchId || '';
           if (mbId === '') continue;
           const y = item.entryEndYOverride;
-          const band = y < 390 ? 'top' : y < 486 ? 'mid' : 'bottom';
+          const band = y < 340 ? 'up' : y < 470 ? 'mid' : 'low';
           if (mbId !== lastMbId) { bands.push(band); lastMbId = mbId; }
         }
       }
@@ -274,15 +274,15 @@ describe('0807-11D-6G-2 P3纵向band', () => {
           const mbId = (item as any).directorMicroBatchId || '';
           if (mbId === '') continue;
           const y = item.entryEndYOverride;
-          const band = y < 390 ? 'top' : y < 486 ? 'mid' : 'bottom';
+          const band = y < 340 ? 'up' : y < 470 ? 'mid' : 'low';
           if (mbId !== lastMbId) { bands.push(band); lastMbId = mbId; }
         }
       }
       if (!d.active && d.allComplete) break;
     }
     for (let i = 2; i < bands.length; i++) {
-      const bottomCount = bands.slice(i - 2, i + 1).filter(b => b === 'bottom').length;
-      expect(bottomCount).toBeLessThanOrEqual(1);
+      const lowCount = bands.slice(i - 2, i + 1).filter(b => b === 'low').length;
+      expect(lowCount).toBeLessThanOrEqual(1);
     }
     } finally { Math.random = orig; }
   });
