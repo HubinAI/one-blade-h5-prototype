@@ -6218,13 +6218,18 @@ h1 {
   display: flex;
   flex-direction: column;
   padding: 8px 0 12px;
-  gap: 10px;
+  gap: 8px;
   height: 100%;
   min-height: 100%;
   overflow: hidden;
   background:
     radial-gradient(ellipse at 50% 20%, rgba(255, 215, 100, 0.08), transparent 60%),
     radial-gradient(ellipse at 50% 90%, rgba(80, 40, 20, 0.3), transparent 50%);
+  /* 0809-11F-4D: 底部墨影承托 */
+  background:
+    radial-gradient(ellipse at 50% 20%, rgba(255, 215, 100, 0.08), transparent 60%),
+    radial-gradient(ellipse at 50% 90%, rgba(80, 40, 20, 0.3), transparent 50%),
+    linear-gradient(to bottom, transparent 65%, rgba(20, 10, 4, 0.35) 85%, rgba(12, 6, 2, 0.5) 100%);
 }
 
 /* 1. 货币栏 */
@@ -6394,8 +6399,8 @@ h1 {
 /* 4. 挂机砍树动画区 */
 .v3-idle-tree-area {
   position: relative;
-  margin: 4px 18px;
-  height: 180px;
+  margin: 2px 18px 0;
+  height: 200px; /* 0809-11F-4D: 180→200 */
   flex-shrink: 0;
   background: linear-gradient(180deg, rgba(20, 30, 20, 0.4), rgba(40, 20, 10, 0.4));
   border: 1px solid rgba(120, 80, 50, 0.4);
@@ -6777,9 +6782,10 @@ h1 {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 8px 16px 4px;
+  padding: 6px 16px 4px; /* 0809-11F-4D: 8→6pt */
   flex-shrink: 0;
   gap: 4px;
+  margin-top: 8px; /* 0809-11F-4D: 下沉到约58%位置 */
 }
 
 .v3-start-btn {
@@ -6883,9 +6889,10 @@ h1 {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 28px 4px;
+  padding: 6px 28px 4px; /* 0809-11F-4D: 8→6pt */
   gap: 12px;
   flex-shrink: 0;
+  margin-top: 10px; /* 0809-11F-4D: 下沉到约72%位置 */
 }
 
 .v3-side-btn {
