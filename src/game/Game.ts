@@ -362,6 +362,13 @@ export class Game {
   private _eliteGatherTimer = 0;
   private _elitePressureRound = 1;
   private _eliteActivePf: { humanDur: number; times: number[]; dur: number; gather: number; reform: number; gc: { x: number; y: number }; tperm: number[] } = null!;
+  // 0809-11E-5A: Damage Budget审计
+  private _eliteBudgetHpStart = 0;
+  private _eliteBudgetHumanMain = 0;
+  private _eliteBudgetHumanOther = 0;
+  private _eliteBudgetRing = 0;
+  private _eliteBudgetOther = 0;
+  private _eliteBudgetHumanActive = false;
 
   private _getFireRingPressureProfile(round: number) {
     const r = Math.min(round, 3);
@@ -3802,6 +3809,8 @@ export class Game {
             const dmg = Math.max(1, Math.round(frElite.maxHp * 0.08));
             frElite.hp = Math.max(0, frElite.hp - dmg);
             frElite.flash = Math.max(frElite.flash, 0.3);
+            // 0809-11E-5A: 记录环伤
+            this._eliteBudgetRing += dmg;
             // 0808-11E-Final: -8%反馈
             this.addCombatFloat({ x: fr.x, y: fr.y - 10, text: "-8%", color: "#ff8c00", size: 19, duration: 0.50, category: "damage", priority: "A" });
           }
@@ -4590,6 +4599,16 @@ export class Game {
       }
     }
     enemy.hp -= damage;
+    // 0809-11E-5A: Budget跟踪(仅fireRing精英)
+    if (enemy.eliteKind === "fireRing" && this._eliteBattleActive) {
+      if (source === "paper" && this._eliteBudgetHumanActive) {
+        this._eliteBudgetHumanMain += damage;
+      } else if (this._eliteBudgetHumanActive) {
+        this._eliteBudgetHumanOther += damage;
+      } else {
+        this._eliteBudgetOther += damage;
+      }
+    }
     enemy.flash = 0.25;
     if (enemy.hp <= 0) {
       // 0807-11D-6F-5: 火药兵进入引信而非直接死亡
@@ -4607,6 +4626,11 @@ export class Game {
   private killEnemy(enemy: Enemy, trail: SlashTrail, chainKill: boolean, source: string) {
     if (!enemy.alive) return false;
 
+    // 0809-11E-5A: 死亡输出预算
+    if (enemy.eliteKind === "fireRing" && this._eliteBattleActive) {
+      const total = this._eliteBudgetHumanMain + this._eliteBudgetHumanOther + this._eliteBudgetRing + this._eliteBudgetOther;
+      console.log(`[ELITE ROUND BUDGET] DEATH R=${this._elitePressureRound} hpStart=${this._eliteBudgetHpStart} humanMain=${this._eliteBudgetHumanMain} humanOther=${this._eliteBudgetHumanOther} ring=${this._eliteBudgetRing} other=${this._eliteBudgetOther} total=${total} hpEnd=0`);
+    }
     enemy.alive = false;
     trail.kills += 1;
     if (!chainKill) trail.directMainKills += 1;
@@ -12207,8 +12231,15 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       case "idle": { break; }
       case "human": {
         this._eliteCyclePhase = "open"; this._eliteForm = "human";
+        // 0809-11E-5A: 回合开始记HP
+        if (this._eliteSeqTimer <= dt) {
+          this._eliteBudgetHpStart = elite.hp;
+          this._eliteBudgetHumanMain = 0; this._eliteBudgetHumanOther = 0;
+          this._eliteBudgetRing = 0; this._eliteBudgetOther = 0;
+          this._eliteBudgetHumanActive = true;
+        }
         if (!this._eliteOpenHintShown) { this._eliteOpenHintShown = true; this.addCombatFloat({ x: elite.x, y: elite.y - 50, text: "趁现在攻击!", color: "#ffd35a", size: 20, duration: 1.0, category: "damage", priority: "A" }); }
-        if (this._eliteSeqTimer >= this._eliteActivePf.humanDur) goSeq("splitting");
+        if (this._eliteSeqTimer >= this._eliteActivePf.humanDur) { this._eliteBudgetHumanActive = false; goSeq("splitting"); }
         break;
       }
       case "splitting": {
@@ -12277,7 +12308,13 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         elite.x += (gc.x - elite.x) * 0.25; elite.y += (gc.y - elite.y) * 0.25;
         this._eliteFragments = [];
         this.screenShake = Math.max(this.screenShake, 0.25);
-        if (this._eliteSeqTimer >= this._eliteActivePf.reform) { this._elitePressureRound++; goSeq("human"); }
+        if (this._eliteSeqTimer >= this._eliteActivePf.reform) {
+          // 0809-11E-5A: 输出回合预算
+          const eliteNow = this.enemies.find(e => e.kind === "elite" && e.eliteKind === "fireRing" && e.alive);
+          const hpEnd = eliteNow ? eliteNow.hp : 0;
+          const total = this._eliteBudgetHumanMain + this._eliteBudgetHumanOther + this._eliteBudgetRing + this._eliteBudgetOther;
+          console.log(`[ELITE ROUND BUDGET] R=${this._elitePressureRound} hpStart=${this._eliteBudgetHpStart} humanMain=${this._eliteBudgetHumanMain} humanOther=${this._eliteBudgetHumanOther} ring=${this._eliteBudgetRing} other=${this._eliteBudgetOther} total=${total} hpEnd=${hpEnd}`);
+          this._elitePressureRound++; goSeq("human"); }
         break;
       }
     }
