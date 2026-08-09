@@ -373,9 +373,9 @@ export class Game {
 
   private _getFireRingPressureProfile(round: number) {
     const r = Math.min(round, 3);
-    if (r === 1) return { humanDur: 0.65, times: [0.25, 0.62, 0.98], dur: 0.76, gather: 0.32, reform: 0.42, gc: { x: 190, y: 350 }, tperm: [80, 190, 300] };
-    if (r === 2) return { humanDur: 0.65, times: [0.16, 0.45, 0.72], dur: 0.60, gather: 0.20, reform: 0.28, gc: { x: 125, y: 345 }, tperm: [300, 80, 190] };
-    return { humanDur: 0.65, times: [0.10, 0.32, 0.54], dur: 0.48, gather: 0.14, reform: 0.20, gc: { x: this._elitePressureRound % 2 === 1 ? 255 : 125, y: 345 }, tperm: [190, 300, 80] };
+    if (r === 1) return { humanDur: 0.65, times: [0.25, 0.62, 0.98], dur: 0.95, gather: 0.32, reform: 0.42, gc: { x: 190, y: 350 }, tperm: [80, 190, 300] };
+    if (r === 2) return { humanDur: 0.65, times: [0.16, 0.45, 0.72], dur: 0.80, gather: 0.20, reform: 0.28, gc: { x: 125, y: 345 }, tperm: [300, 80, 190] };
+    return { humanDur: 0.65, times: [0.10, 0.32, 0.54], dur: 0.68, gather: 0.14, reform: 0.20, gc: { x: this._elitePressureRound % 2 === 1 ? 255 : 125, y: 345 }, tperm: [190, 300, 80] };
   }
   // 0808-11E-4: 扩散-环-碎片-聚合循环
   private _eliteSeq: "human" | "splitting" | "ring_1" | "ring_2" | "ring_3" | "wait_resolve" | "gather" | "reform" | "idle" = "idle";
