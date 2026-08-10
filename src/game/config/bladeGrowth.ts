@@ -185,6 +185,19 @@ export const FORGE_CONFIG: ForgeConfig[] = [
     failureExpCount: 1,
     tutorialFirstGuaranteedSuccess: true,
   },
+  // ══ 质量对齐测试用（0814-03.4R）══
+  {
+    sourceQuality: "green", targetQuality: "blue",
+    materialCount: 2, baseSuccessRate: 0.70, failureRateAdd: 0.15,
+    maxSuccessRate: 1.00, failureExpQuality: "blue", failureExpCount: 1,
+    tutorialFirstGuaranteedSuccess: false,
+  },
+  {
+    sourceQuality: "blue", targetQuality: "purple",
+    materialCount: 2, baseSuccessRate: 0.60, failureRateAdd: 0.12,
+    maxSuccessRate: 0.95, failureExpQuality: "purple", failureExpCount: 1,
+    tutorialFirstGuaranteedSuccess: false,
+  },
 ];
 
 // ---- 关卡首通奖励配置 ----

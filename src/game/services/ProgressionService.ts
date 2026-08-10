@@ -238,7 +238,9 @@ function normalizeProgress(raw: Partial<PlayerProgress> | null): PlayerProgress 
       ...(raw?.upgrades ?? {})
     },
     codex: Array.from(new Set(raw?.codex ?? fallback.codex)),
-    daily: normalizeDaily(raw?.daily)
+    daily: normalizeDaily(raw?.daily),
+    expOrbs: raw?.expOrbs ?? fallback.expOrbs ?? {},
+    synFailCount: raw?.synFailCount ?? fallback.synFailCount ?? {},
   };
   repairBreakthroughProgress(progress);
   return progress;
@@ -1445,6 +1447,30 @@ export function addGreenExpOrb(count: number): void {
   const progress = readProgress();
   progress.expOrbs["green"] = (progress.expOrbs["green"] ?? 0) + count;
   writeProgress(progress);
+}
+
+/** 0814-03.4R: 通用同品质批量炼器（任意quality→下一quality） */
+export function forgeQualityBlades(quality: BladeQualityId): { pairs: number; successes: number; fails: number; targetQuality: BladeQualityId | null } {
+  const progress = readProgress();
+  const cfg = getForgeConfig(quality, quality);
+  if (!cfg) return { pairs: 0, successes: 0, fails: 0, targetQuality: null };
+  const equipped = new Set([progress.equippedMainBladeId, ...progress.equippedSubBladeIds].filter(Boolean));
+  const forgeable = progress.blades.filter(b => b.quality === quality && !equipped.has(b.id));
+  const pairs = Math.floor(forgeable.length / 2);
+  if (pairs < 1) return { pairs: 0, successes: 0, fails: 0, targetQuality: null };
+  let ok = 0, ng = 0;
+  for (let i = 0; i < pairs; i++) {
+    const consumed = progress.blades.filter(b => b.quality === quality && !equipped.has(b.id)).slice(0, 2);
+    progress.blades = progress.blades.filter(b => !consumed.find(c => c.id === b.id));
+    if (consumed.length < 2) break;
+    const fc = progress.synFailCount[quality] ?? 0;
+    const rate = Math.min(cfg.baseSuccessRate + fc * cfg.failureRateAdd, cfg.maxSuccessRate);
+    const success = (fc === 0 && cfg.tutorialFirstGuaranteedSuccess) ? true : Math.random() < rate;
+    if (success) { ok++; progress.blades.push(createBladeInstance(cfg.targetQuality, 1)); progress.synFailCount[quality] = 0; }
+    else { ng++; progress.expOrbs[cfg.failureExpQuality] = (progress.expOrbs[cfg.failureExpQuality] ?? 0) + cfg.failureExpCount; progress.synFailCount[quality] = fc + 1; }
+  }
+  writeProgress(progress);
+  return { pairs, successes: ok, fails: ng, targetQuality: cfg.targetQuality };
 }
 
 /** 0814-03.4: 经验球合成 — floor(N/2)组二合，逐组用ForgeConfig计算 */
