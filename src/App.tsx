@@ -11,6 +11,7 @@ import { AdOverlay } from "./components/AdOverlay";
 import { PauseOverlay } from "./components/PauseOverlay";
 import { Codex } from "./components/Codex";
 import ArmoryScreen from "./components/ArmoryScreen";
+import IdlePopup from "./components/IdlePopup";
 import { isArmoryUnlocked } from "./game/services/ProgressionService";
 import { ChallengeScreen } from "./components/ChallengeScreen";
 import { TeamScreen } from "./components/TeamScreen";
@@ -369,6 +370,10 @@ export default function App() {
 
       {screen === "bag" && (
         <ArmoryScreen onBack={() => { refreshHome(); setScreen("menu"); }} debug={true} />
+      )}
+
+      {screen === "idle" && (
+        <IdlePopup onClose={() => setScreen("menu")} debug={true} />
       )}
 
       {screen === "debug" && (
