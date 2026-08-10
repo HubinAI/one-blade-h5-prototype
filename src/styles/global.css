@@ -7599,6 +7599,10 @@ h1 {
 .as-debug button { margin:2px 4px;padding:4px 10px;font-size:12px;border:1px solid rgba(255,211,90,0.25);border-radius:6px;background:rgba(22,18,12,0.8);color:#ccc;cursor:pointer; }
 
 .as-toast { position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(20,14,8,0.92);color:#ffd35a;padding:10px 20px;border-radius:10px;border:1px solid rgba(255,211,90,0.3);font-weight:700;font-size:15px;z-index:200;text-align:center;max-width:80vw;pointer-events:none; }
+/* scroll arrows */
+.as-scroll-btns { position:fixed;right:12px;bottom:60px;display:flex;flex-direction:column;gap:6px;z-index:50; }
+.as-scroll-btn { width:36px;height:36px;border-radius:50%;background:rgba(20,14,8,0.9);border:1px solid rgba(255,211,90,0.3);color:#ffd35a;font-size:16px;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0.85; }
+.as-scroll-btn:hover { opacity:1;border-color:#ffd35a; }
 .as-modal-line { font-size:15px;color:#f6e7bd;margin:4px 0; }
 /* batch select glow */
 .as-item.batch-selected { border-color:#ffd35a!important; animation:as-glow 0.8s ease-in-out infinite alternate; }

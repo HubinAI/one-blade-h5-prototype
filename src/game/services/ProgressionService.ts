@@ -1447,6 +1447,41 @@ export function addGreenExpOrb(count: number): void {
   writeProgress(progress);
 }
 
+/** 0814-03.4: 经验球合成 — floor(N/2)组二合，逐组用ForgeConfig计算 */
+export function mergeExpOrbs(quality: BladeQualityId): { pairs: number; successes: number; fails: number; targetQuality: BladeQualityId | null } {
+  const progress = readProgress();
+  const total = progress.expOrbs[quality] ?? 0;
+  const pairs = Math.floor(total / 2);
+  if (pairs < 1) return { pairs: 0, successes: 0, fails: 0, targetQuality: null };
+
+  const cfg = getForgeConfig(quality, quality);
+  if (!cfg) return { pairs: 0, successes: 0, fails: 0, targetQuality: null };
+
+  const qOrder: BladeQualityId[] = ["rainbow","pink","gold","red","orange","purple","blue","green","white"];
+  const idx = qOrder.indexOf(quality as BladeQualityId);
+  const targetQuality = idx > 0 ? qOrder[idx - 1] : null;
+
+  let good = 0, bad = 0;
+  for (let i = 0; i < pairs; i++) {
+    const failCount = progress.synFailCount[quality] ?? 0;
+    const rate = Math.min(cfg.baseSuccessRate + failCount * cfg.failureRateAdd, cfg.maxSuccessRate);
+    const success = failCount === 0 && cfg.tutorialFirstGuaranteedSuccess ? true : Math.random() < rate;
+
+    progress.expOrbs[quality] = (progress.expOrbs[quality] ?? 0) - 2;
+    if (success) {
+      good++;
+      if (targetQuality) progress.expOrbs[targetQuality] = (progress.expOrbs[targetQuality] ?? 0) + 1;
+      progress.synFailCount[quality] = 0;
+    } else {
+      bad++;
+      progress.expOrbs[quality] = (progress.expOrbs[quality] ?? 0) + 1; // keep 1 on fail
+      progress.synFailCount[quality] = (progress.synFailCount[quality] ?? 0) + 1;
+    }
+  }
+  writeProgress(progress);
+  return { pairs, successes: good, fails: bad, targetQuality };
+}
+
 /** 0814-03: 重置炼器概率 */
 export function resetForgeFailCount(): void {
   const progress = readProgress();
