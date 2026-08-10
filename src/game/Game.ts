@@ -3508,6 +3508,8 @@ export class Game {
   /** debug强制启用SUB_1（第一关验证用） */
   get debugForceSub1Enabled(): boolean { return this._debugForceSub1Enabled; }
   setDebugSub1ForceEnable(): void { if (this.debugEnabled) this._debugForceSub1Enabled = !this._debugForceSub1Enabled; }
+  /** 0814-03.1: debug重开第1关 */
+  restartLevel1(): void { if (this.debugEnabled) window.location.search = "?debug=1"; }
   private _debugForceSub1Enabled = false;
 
   /** 重置105HP测试目标 */

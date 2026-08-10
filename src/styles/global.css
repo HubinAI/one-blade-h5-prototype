@@ -7474,3 +7474,71 @@ h1 {
   box-shadow: 0 0 6px rgba(239, 68, 68, 0.5);
   line-height: 1;
 }
+/* ═══════════════════════════════════════════════════ */
+/* 0814-03.1 刀袋 / 炼器 v2 可用性优化                */
+/* ═══════════════════════════════════════════════════ */
+
+.bbs-root { display:flex;flex-direction:column;min-height:100vh;background:#0e0b08;color:#f6e7bd;font-family:"Microsoft YaHei",sans-serif;padding-bottom:40px; }
+.bbs-topbar { display:flex;align-items:center;gap:12px;padding:16px 16px 10px;border-bottom:1px solid rgba(255,211,90,0.15); }
+.bbs-topbar h2 { margin:0;font-size:20px;color:#ffd35a; }
+.bbs-back { background:none;border:1px solid rgba(255,211,90,0.3);color:#ffd35a;font-size:18px;padding:4px 12px;border-radius:6px;cursor:pointer; }
+.bbs-res-bar { display:flex;gap:14px;margin-left:auto;flex-wrap:wrap; }
+.bbs-res { font-size:14px;color:#ccc; }
+
+.bbs-tabs { display:flex;gap:0;padding:0 16px;border-bottom:2px solid rgba(255,211,90,0.12); }
+.bbs-tab { padding:10px 20px;font-size:15px;color:#777;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:.15s;user-select:none; }
+.bbs-tab.active { color:#ffd35a;border-bottom-color:#ffd35a;font-weight:700; }
+
+.bbs-section { padding:14px 16px; }
+.bbs-section h3 { margin:0 0 10px;font-size:16px;color:#ffd35a; }
+.bbs-section h4 { margin:0 0 8px;font-size:14px;color:#f6e7bd; }
+
+.bbs-card { background:rgba(22,18,12,0.92);border:1px solid rgba(255,211,90,0.15);border-radius:10px;padding:12px 14px;margin-bottom:10px; }
+.bbs-card-top { display:flex;align-items:center;gap:8px;margin-bottom:6px; }
+.bbs-slot-tag { background:rgba(255,211,90,0.15);color:#ffd35a;font-size:11px;padding:1px 8px;border-radius:4px; }
+.bbs-tag-main { color:#5bc0ff;font-size:12px; }
+.bbs-tag-sub { color:#5bc0ff;font-size:12px; }
+.bbs-quality { font-size:13px;font-weight:700; }
+.bbs-name { font-size:15px;font-weight:700;color:#f6e7bd; }
+.bbs-card-mid { display:flex;gap:14px;margin-bottom:8px;align-items:center; }
+.bbs-level { color:#5bc0ff;font-weight:700;font-size:16px; }
+.bbs-atk { color:#fff;font-size:14px; }
+.bbs-max { color:#ffd35a;font-size:12px;font-weight:700; }
+
+.bbs-card-actions { display:flex;gap:8px;flex-wrap:wrap; }
+.bbs-btn { border:1px solid rgba(255,211,90,0.3);border-radius:8px;padding:8px 16px;font-size:14px;font-weight:700;cursor:pointer;background:rgba(22,18,12,0.9);color:#f6e7bd;transition:.15s;white-space:nowrap; }
+.bbs-btn:hover { border-color:#ffd35a; }
+.bbs-btn:disabled { opacity:0.35;cursor:default;border-color:rgba(255,255,255,0.1); }
+.bbs-btn-primary { background:rgba(91,192,255,0.15);border-color:#5bc0ff;color:#8ad4ff; }
+.bbs-btn-primary:hover { background:rgba(91,192,255,0.25); }
+.bbs-btn-secondary { background:rgba(22,18,12,0.9);border-color:rgba(255,211,90,0.25);color:#ccc; }
+.bbs-btn-cta { background:rgba(255,211,90,0.2);border-color:#ffd35a;color:#ffd35a;font-size:16px;padding:12px 24px;width:100%;text-align:center; }
+.bbs-btn-cta:hover { background:rgba(255,211,90,0.3); }
+.bbs-btn-cta:disabled { background:rgba(255,211,90,0.05);border-color:rgba(255,211,90,0.1); }
+.bbs-btn-danger { background:rgba(255,80,60,0.2);border-color:#ff503c;color:#ff7b6e; }
+
+.bbs-empty { text-align:center;color:#666;padding:20px; }
+.bbs-locked { display:flex;align-items:center;gap:10px;color:#555; }
+.bbs-lock-icon { font-size:22px; }
+
+.forge-recipe-box { background:rgba(18,14,8,0.8);border-radius:10px;padding:14px;margin-bottom:14px; }
+.forge-flow { display:flex;align-items:center;gap:10px;font-size:15px;margin-bottom:10px;flex-wrap:wrap; }
+.forge-mat { color:#ccc; }
+.forge-arrow { color:#ffd35a;font-size:20px;font-weight:700; }
+.forge-result-item { color:#5bc0ff;font-weight:700; }
+.forge-info { font-size:13px;color:#999; }
+.forge-rate-line { margin-bottom:4px; }
+.forge-rate-value { color:#ffd35a;font-weight:700;font-size:16px; }
+.forge-rate-cap { color:#f6a623;font-size:11px; }
+.forge-fail-line { color:#888; }
+
+.forge-result-banner { padding:14px;border-radius:8px;font-size:15px;font-weight:700;text-align:center;margin:0 16px 10px; }
+.forge-result-banner.success { background:rgba(91,192,255,0.15);border:1px solid #5bc0ff;color:#8ad4ff; }
+.forge-result-banner.fail { background:rgba(255,180,60,0.12);border:1px solid #f6a623;color:#f6a623; }
+
+.forge-debug-area { opacity:0.85;margin-top:6px; }
+.forge-debug-grid { display:flex;flex-wrap:wrap;gap:8px; }
+.forge-debug-grid .bbs-btn { font-size:13px;padding:6px 12px; }
+
+.bbs-toast { position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(20,14,8,0.92);color:#ffd35a;padding:12px 22px;border-radius:10px;border:1px solid rgba(255,211,90,0.3);font-weight:700;font-size:16px;z-index:999;opacity:0;pointer-events:none;transition:opacity .3s;text-align:center;max-width:80vw; }
+.bbs-toast.show { opacity:1; }
