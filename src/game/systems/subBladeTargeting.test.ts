@@ -77,11 +77,8 @@ describe("副刀锁敌 — fireRing精英回归测试", () => {
     (game as any)._eliteBattleActive = true;
     (game as any)._eliteInvuln = false;
 
-    // 副刀伤害 (6% × 500 = 30) > 剩余 HP(5)
-    const blade = { quality: "green", name: "青锋刀", level: 1, affix: null };
-    const stats = { damageMultiplier: 1.0 };
-
-    (game as any).applySubBladeDamage(elite, blade, stats);
+    // 副刀伤害 = 青锋Lv1攻击(100) × SUB_1系数(0.28) = 28 > 剩余HP(5)
+    (game as any).applySubBladeDamage(elite, 28);
 
     expect(elite.hp).toBeLessThanOrEqual(0);
     expect(elite.alive).toBe(false);

@@ -34,6 +34,7 @@ import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
 import { BLADE_BASE_STATS, QUALITY_ORDER } from "./config/synthesis";
+import { BLADE_QUALITY_CONFIG, BLADE_LEVEL_CONFIG, SLOT_CONFIG, getBladeQualityConfig, getBladeLevelConfig, computeBladeAttack, type BladeQualityId } from "./config/bladeGrowth";
 import type { Blade } from "./services/BladeService";
 import type { Quality } from "./config/synthesis";
 import { BossChaseController } from "./systems/BossChaseController";
@@ -435,7 +436,24 @@ export class Game {
   private _swipeTutorialPhase: 'idle' | 'waiting_stable' | 'active' | 'success' = 'idle';
 
   // 0807-11B-1: 统一伤害系统
-  private _playerStats: PlayerRunStats = createDefaultPlayerStats(100);
+  private _playerStats: PlayerRunStats = createDefaultPlayerStats(computeBladeAttack("green", 1)); // 0814-01C: 青锋Lv1=100
+  // 0814-01C: bladeGrowth装备状态
+  private _mainBladeQuality: BladeQualityId = "green";
+  private _mainBladeLevel = 1;
+  private _sub1BladeQuality: BladeQualityId = "green";
+  private _sub1BladeLevel = 1;
+  /** debug：临时覆盖等级（0=不覆盖） */
+  private _debugMainLevelOverride = 0;
+  private _debugSub1LevelOverride = 0;
+  /** bladeGrowth攻击基准 */
+  private getMainBladeBaseAttack(): number {
+    const lv = this._debugMainLevelOverride > 0 ? this._debugMainLevelOverride : this._mainBladeLevel;
+    return computeBladeAttack(this._mainBladeQuality, lv);
+  }
+  private getSub1BladeBaseAttack(): number {
+    const lv = this._debugSub1LevelOverride > 0 ? this._debugSub1LevelOverride : this._sub1BladeLevel;
+    return computeBladeAttack(this._sub1BladeQuality, lv);
+  }
   private _bladeDamageSnapshot: number = 0;
   private _lastDamageResult: DamageResult | null = null;
   /** Debug数值测试模式 */
@@ -1036,20 +1054,15 @@ export class Game {
     // V0731005: 初始化进度宝箱（Boss模式跳过）
     this._initProgressChest();
 
-    // 初始化副刀（先确保有默认绿刀+2把绿副刀）
-    saveDefaultWhiteBlade();
-    const equipped = getEquippedBlades();
-    this.mainBladeQuality = equipped.main?.quality ?? null;
-    this.subBlades = equipped.subs.filter(b => b && b.quality);
-    // P4.1A.11: 先初始化cooldowns，再初始化timers（避免NaN）
-    this.subBladeCooldowns = this.subBlades.map((b) => {
-      const stats = BLADE_BASE_STATS[b.quality];
-      return stats ? stats.subSlashInterval : 5;
-    });
-    const firstReadyDelay = [4, 6];
-    this.subBladeTimers = this.subBlades.map((_, i) =>
-      this.subBladeCooldowns[i] - firstReadyDelay[i]
-    );
+    // 0814-01C: bladeGrowth副刀初始化
+    // SUB_1 = 青锋Lv1, CD从GREEN.subCooldown读取
+    // SUB_2 = 未开放 (不参与战斗)
+    const greenCfg = getBladeQualityConfig("green")!;
+    const slot1Cfg = SLOT_CONFIG.SUB_1;
+    this.subBlades = [{ quality: "green", name: greenCfg.bladeName, level: 1, affix: null, id: "sub1_default", exp: 0, locked: false }];
+    this.subBladeCooldowns = [greenCfg.subCooldown];
+    const firstReadyDelay = [4];
+    this.subBladeTimers = [greenCfg.subCooldown - firstReadyDelay[0]];
     this.subBladeAnim = this.subBlades.map((_, i) => {
       const home = this.getSubBladeFloatingPos(i);
       return {
@@ -2477,7 +2490,7 @@ export class Game {
       }
       // P4.1A.8: 删除双份"副刀共鸣"文字，只保留槽位脉冲
       if (trail.kills >= 5) {
-        for (let i = 0; i < 2; i++) {
+        for (let i = 0; i < this.subBlades.length; i++) {
           this.subReadyPing.push({ slot: i, life: 0.3, maxLife: 0.3 });
         }
       }
@@ -2713,9 +2726,9 @@ export class Game {
     return calcFinalHp(1, et, this._currentStageNode);
   }
 
+  /** 0814-01C: 主刀攻击力来自 bladeGrowth 配置 */
   private getMainBladeDamageMultiplier(): number {
-    const q = this.mainBladeQuality;
-    return q ? (BLADE_BASE_STATS[q]?.damageMultiplier ?? 1) : 1;
+    return this.getMainBladeBaseAttack();
   }
 
   private getPassiveRegenMultiplier() {
@@ -3476,6 +3489,10 @@ export class Game {
     if (band === "mid")  this.energy = Math.round(max * 0.55);
     if (band === "high") this.energy = Math.round(max * 0.85);
   }
+  
+  // 0814-01C: debug等级切换
+  setDebugMainLevel(level: number): void { if (this.debugEnabled) { this._debugMainLevelOverride = level; this._playerStats = createDefaultPlayerStats(this.getMainBladeBaseAttack()); } }
+  setDebugSub1Level(level: number): void { if (this.debugEnabled) this._debugSub1LevelOverride = level; }
 
   /** 重置105HP测试目标 */
   resetNumericalTestTarget(): void {
@@ -5190,7 +5207,7 @@ export class Game {
   }
 
   private updateSubBladesIdleOnly(dt: number): void {
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < this.subBlades.length; i++) {
       const anim = this.subBladeAnim[i];
       if (!anim) continue;
       const cd = this.subBladeCooldowns[i];
@@ -5217,6 +5234,7 @@ export class Game {
   }
 
   /** 0814-01C-0: 副刀自动攻击 — 统一单目标锁敌 */
+  /** 0814-01C: 副刀自动攻击 — 统一单目标锁敌（SUB_2不参与） */
   private updateSubBlades(dt: number) {
     // P4.4B-R3 P0-A: Boss 模式（reactive + legacy）副刀只更新待机动画
     // （cooldown→ready 呼吸），不锁敌、不攻击。视觉保留，伤害冻结。
@@ -5240,7 +5258,7 @@ export class Game {
     for (const p of this.subReadyPing) p.life -= dt;
     this.subReadyPing = this.subReadyPing.filter(p => p.life > 0);
 
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < this.subBlades.length; i++) {
       const blade = this.subBlades[i];
       if (!blade) continue;
       const anim = this.subBladeAnim[i];
@@ -5332,29 +5350,26 @@ export class Game {
           const attackProgress = clamp(anim.phaseTimer / anim.phaseDuration, 0, 1);
           if (attackProgress >= 0.45 && !anim.hitApplied) {
             anim.hitApplied = true;
-            const stats = BLADE_BASE_STATS[blade.quality];
-            if (stats) {
-              let hitTarget: Enemy | null = anim.targetId ? (this.enemies.find(e => e.id === anim.targetId && e.alive) ?? null) : null;
-              if (!hitTarget) {
-                // 重锁：统一距离防线最近有效目标
-                const fallbackTargets = this.getValidSubBladeTargets();
-                hitTarget = fallbackTargets.length > 0 ? fallbackTargets[0] : null;
-                if (hitTarget) {
-                  this.syncWeakpointBladeToTarget(anim as any, hitTarget);
-                } else {
-                  this.subBladeTimers[i] = this.subBladeCooldowns[i] * 0.75;
-                  anim.phase = "returning";
-                  anim.phaseTimer = 0;
-                  anim.phaseDuration = M.returning;
-                  anim.startPos = { ...anim.endPos };
-                  anim.endPos = { ...home };
-                  break;
-                }
-              }
+            const subBaseAtk = this.getSub1BladeBaseAttack() * SLOT_CONFIG.SUB_1.damageCoeff; // 0814-01C: bladeGrowth×slot
+            let hitTarget: Enemy | null = anim.targetId ? (this.enemies.find(e => e.id === anim.targetId && e.alive) ?? null) : null;
+            if (!hitTarget) {
+              const fallbackTargets = this.getValidSubBladeTargets();
+              hitTarget = fallbackTargets.length > 0 ? fallbackTargets[0] : null;
               if (hitTarget) {
-                this.applySubBladeDamage(hitTarget, blade, stats);
-                if (this.isLogicalLevel1()) this.triggerHitStop(0.07, 0.07);
+                this.syncWeakpointBladeToTarget(anim as any, hitTarget);
+              } else {
+                this.subBladeTimers[i] = this.subBladeCooldowns[i] * 0.75;
+                anim.phase = "returning";
+                anim.phaseTimer = 0;
+                anim.phaseDuration = M.returning;
+                anim.startPos = { ...anim.endPos };
+                anim.endPos = { ...home };
+                break;
               }
+            }
+            if (hitTarget) {
+              this.applySubBladeDamage(hitTarget, subBaseAtk);
+              if (this.isLogicalLevel1()) this.triggerHitStop(0.07, 0.07);
             }
           }
           if (anim.phaseTimer >= anim.phaseDuration) {
@@ -5863,8 +5878,8 @@ export class Game {
     }
   }
 
-  /** 0814-01C-0: 统一副刀单目标伤害 */
-  private applySubBladeDamage(target: Enemy, blade: Blade, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]) {
+  /** 0814-01C: 统一副刀单目标伤害 — bladeGrowth配置 × slot系数 */
+  private applySubBladeDamage(target: Enemy, baseDamage: number) {
     if (!target.alive) return;
     const isLevel1 = this.isLogicalLevel1();
     let damage: number;
@@ -5872,10 +5887,10 @@ export class Game {
       if (target.kind === "elite") {
         damage = Math.ceil(target.maxHp * 0.06);
       } else {
-        damage = Math.max(stats.damageMultiplier * 1.0, target.maxHp);
+        damage = Math.max(baseDamage, target.maxHp);
       }
     } else {
-      damage = stats.damageMultiplier * 1.0;
+      damage = baseDamage;
     }
     target.hp -= Math.max(1, Math.ceil(damage));
     if ((target as Enemy).eliteKind === "fireRing" && this._eliteBattleActive) {
@@ -11131,12 +11146,24 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 右下角临时效果图标（鼓/魂/油）— 含圆形倒计时
     this.drawPickupBuffs(ctx);
 
-    // 0814-01C-0: 副刀槽位统一视觉（蓝调，不再区分左蓝/右紫）
+    // 0814-01C: SUB_1装备槽 + SUB_2锁定槽
     const leftSlot = this.getSubBladeSlotLayout(0);
     const rightSlot = this.getSubBladeSlotLayout(1);
     const slotColor = 0x5bc0ff;
     this.drawSubBladeSlot(ctx, 0, leftSlot.boxX, leftSlot.boxY, leftSlot.iconR, slotColor);
-    this.drawSubBladeSlot(ctx, 1, rightSlot.boxX, rightSlot.boxY, rightSlot.iconR, slotColor);
+    // SUB_2 锁定显示
+    ctx.save();
+    const rx = rightSlot.boxX, ry = rightSlot.boxY, rR = rightSlot.iconR;
+    ctx.fillStyle = "rgba(18, 16, 14, 0.92)";
+    ctx.beginPath(); ctx.arc(rx + rR, ry + rR, rR + 1, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(rx + rR, ry + rR, rR, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = "rgba(136, 136, 136, 0.4)";
+    ctx.font = '700 16px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("🔒", rx + rR, ry + rR);
+    ctx.restore();
 
     // 刀势三段能量条 —— 屏幕底部居中（窄条），普通关与 Boss 关共用
     // V0730001: 统一使用 low/mid/high 档位，40%/70% 分界
@@ -11794,6 +11821,30 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.drawDebugZoneLine(ctx, z.midfieldStartY, "midfieldStartY=360", "#5bc0ff");
     this.drawDebugZoneLine(ctx, z.harvestStartY, "harvestStartY=560", "#9b6dff");
     this.drawDebugZoneLine(ctx, z.defenseLineY, "defenseLineY=720", "#ff3535");
+
+    // 0814-01C: bladeGrowth 装备信息
+    const mainLv = this._debugMainLevelOverride > 0 ? this._debugMainLevelOverride : this._mainBladeLevel;
+    const mainAtk = this.getMainBladeBaseAttack();
+    const mainQcfg = getBladeQualityConfig(this._mainBladeQuality);
+    const mainLcfg = getBladeLevelConfig(mainLv);
+    const sub1Lv = this._debugSub1LevelOverride > 0 ? this._debugSub1LevelOverride : this._sub1BladeLevel;
+    const sub1Atk = this.getSub1BladeBaseAttack();
+    const sub1DmgAtk = Math.round(sub1Atk * SLOT_CONFIG.SUB_1.damageCoeff);
+    const sub1CD = (this.subBladeCooldowns[0] || 5).toFixed(1);
+    const blInfo = [
+      `MAIN: ${mainQcfg?.bladeName} Lv${mainLv} | atk=${Math.round(mainAtk)} (base=${mainQcfg?.baseAttack ?? '?'}×${mainLcfg.attackMultiplier.toFixed(3)})`,
+      `SUB1: ${this.subBlades[0]?.name ?? '-'} Lv${sub1Lv} | bladeAtk=${Math.round(sub1Atk)} | dmgAtk=${sub1DmgAtk} (coeff=${SLOT_CONFIG.SUB_1.damageCoeff}) | CD=${sub1CD}s`,
+      `SUB2: 未开放`,
+    ];
+    ctx.save();
+    ctx.font = '11px "Consolas", monospace';
+    ctx.textAlign = 'left';
+    const biy = 508;
+    for (let i = 0; i < blInfo.length; i++) {
+      ctx.fillStyle = i === 2 ? 'rgba(136,136,136,0.6)' : '#ffd35a';
+      ctx.fillText(blInfo[i], 8, biy + i * 15);
+    }
+    ctx.restore();
   }
 
   private drawDebugZoneLine(ctx: CanvasRenderingContext2D, y: number, label: string, color: string) {
@@ -12191,7 +12242,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.pointerDown = false;
     this.pendingSlash = null;
     this.currentSlash = undefined;
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < this.subBlades.length; i++) {
       if (this.subBladeAnim[i]) this.subBladeAnim[i].phase = "idle";
     }
     this.wavesSpawned = 0;
@@ -12924,7 +12975,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     for (const e of this.enemies) { e.alive = false; }
     this.enemies = [];
     this.pointerDown = false; this.pendingSlash = null; this.currentSlash = undefined;
-    for (let i = 0; i < 2; i++) { if (this.subBladeAnim[i]) this.subBladeAnim[i].phase = "idle"; }
+    for (let i = 0; i < this.subBlades.length; i++) { if (this.subBladeAnim[i]) this.subBladeAnim[i].phase = "idle"; }
     this.wavesSpawned = 0; this.subSpawnQueue = [];
   }
   private updateChaseFlashMode(scaledDt: number): void {

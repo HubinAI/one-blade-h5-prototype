@@ -143,6 +143,12 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
         gameRef.current?.setDebugBladeBand("high");
       } else if (event.key.toLowerCase() === "r") {
         gameRef.current?.resetNumericalTestTarget();
+      } else if (event.key === "7") {
+        gameRef.current?.setDebugMainLevel(1);
+      } else if (event.key === "8") {
+        gameRef.current?.setDebugMainLevel(10);
+      } else if (event.key === "9") {
+        gameRef.current?.setDebugMainLevel(40);
       }
     };
 
