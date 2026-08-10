@@ -78,6 +78,10 @@ export type PlayerProgress = {
   pendingBreakthroughId: string | null;
   /** 0814-04A: 已领取首通奖励的关卡ID集合 */
   clearedFloorRewards: number[];
+  /** 0814-04B-2: 上次领取挂机奖励的时间戳 */
+  lastIdleCollectAt: number;
+  /** 0814-04B-2: 当前累计挂机秒数 (≤ capHours*3600) */
+  idleAccumulatedSeconds: number;
 };
 
 export type BattleRewardInput = {
@@ -211,6 +215,8 @@ function createDefaultProgress(): PlayerProgress {
     expOrbs: {},
     clearedBreakthroughs: [],
     clearedFloorRewards: [],
+    lastIdleCollectAt: Date.now(),
+    idleAccumulatedSeconds: 0,
     pendingBreakthroughId: null,
   };
 }
@@ -1881,5 +1887,67 @@ export function debugClearAllUnlocks(): void {
   const progress = readProgress();
   progress.clearedFloorRewards = [];
   progress.highestFloor = 1;
+  writeProgress(progress);
+}
+
+// ═════════════════════════════════════════════════════════════════
+// 0814-04B-2 挂机刀产出正式系统
+// ═════════════════════════════════════════════════════════════════
+
+const IDLE_BASE_PER_HOUR = 2; // 首测: 2白刀/小时
+const IDLE_CAP_HOURS = 24;
+
+/** 更新挂机累计（调用时机：Home/IdlePopup读取前） */
+export function tickIdleAccumulation(): void {
+  const progress = readProgress();
+  if (progress.highestFloor < 2) return; // 第2关前不累计
+  const now = Date.now();
+  const elapsedSec = Math.max(0, (now - progress.lastIdleCollectAt) / 1000);
+  if (elapsedSec < 60) return; // 不足1分钟不累计
+  progress.idleAccumulatedSeconds = Math.min(
+    IDLE_CAP_HOURS * 3600,
+    progress.idleAccumulatedSeconds + elapsedSec
+  );
+  progress.lastIdleCollectAt = now;
+  writeProgress(progress);
+}
+
+/** 获取当前挂机信息 */
+export function getIdleInfo(): { accumulatedSeconds: number; bladeCount: number; timeStr: string; pct: number } {
+  tickIdleAccumulation();
+  const p = readProgress();
+  const sec = p.idleAccumulatedSeconds;
+  const count = Math.floor((sec / 3600) * IDLE_BASE_PER_HOUR);
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+  const timeStr = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  const pct = Math.min(100, Math.round((sec / (IDLE_CAP_HOURS * 3600)) * 100));
+  return { accumulatedSeconds: sec, bladeCount: count, timeStr, pct };
+}
+
+/** 领取挂机奖励 */
+export function claimIdleRewards(): number {
+  tickIdleAccumulation();
+  const progress = readProgress();
+  const count = Math.floor((progress.idleAccumulatedSeconds / 3600) * IDLE_BASE_PER_HOUR);
+  if (count <= 0) return 0;
+  for (let i = 0; i < count; i++) {
+    progress.blades.push(createBladeInstance("white", 1));
+  }
+  progress.idleAccumulatedSeconds = 0;
+  writeProgress(progress);
+  return count;
+}
+
+/** Debug: 模拟挂机N小时 */
+export function debugIdleAddHours(hours: number): void {
+  const progress = readProgress();
+  progress.idleAccumulatedSeconds = Math.min(IDLE_CAP_HOURS * 3600, progress.idleAccumulatedSeconds + hours * 3600);
+  writeProgress(progress);
+}
+
+/** Debug: 清零挂机 */
+export function debugIdleClear(): void {
+  const progress = readProgress();
+  progress.idleAccumulatedSeconds = 0;
   writeProgress(progress);
 }
