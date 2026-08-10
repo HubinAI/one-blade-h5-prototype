@@ -3970,7 +3970,7 @@ export class Game {
         if (remaining > 0) {
           const refund = 15;
           this.energy = clamp(this.energy + refund, 0, BALANCE.swordEnergy.max);
-          this.addText(enemy.x, enemy.y - 36, `破点斩 +${refund}%`, "#ff6a33", 20, 1.5);
+          this.addText(enemy.x, enemy.y - 36, `刀势 +${refund}%`, "#ff6a33", 20, 1.5);
           this.weakpointMarks.delete(enemy.id);
           this.flash = Math.max(this.flash, 0.5);
           this.screenShake = Math.max(this.screenShake, 0.3);
@@ -5178,7 +5178,6 @@ export class Game {
       .filter(e => {
         if (!e.alive) return false;
         if (e.kind === "boss") return false;
-        if ((e as any).eliteKind === "fireRing") return false; // 火环精英由主刀处理
         if (e.kind === "core") return false; // 命核
         if ((e as any)._fuseState === 'arming') return false; // 引爆中火药兵
         if (e.y < BATTLEFIELD_ZONES.midfieldStartY) return false; // 未入战区
@@ -5892,10 +5891,11 @@ export class Game {
       this.handleDirectEnemyKilledBySystem(target, "sub_weakpoint");
       this.stats.subBladeKills++;
       this.particles.push(...paperBurst(target, 5, ["#5bc0ff", "#f6e7bd"]));
-      if (isLevel1) this.addText(target.x, target.y - 28, "副刀击杀", "#5bc0ff", 16, 1.0);
     }
     this.particles.push(ringParticle({ x: target.x, y: target.y }, "#5bc0ff", 20));
     AudioService.slashHit();
+    // 0814-01C-0.1: 统一伤害飘字
+    this.addText(target.x, target.y - 18, `-${Math.max(1, Math.ceil(damage))}`, "#ff7b6e", 16, 0.8);
     if (isLevel1) this.triggerHitStop(0.07, 0.07);
     if (blade.affix) this.applySubAffixEffect(blade.affix, target, killed, 'momentum_sweep');
   }
@@ -5912,14 +5912,14 @@ export class Game {
             if (!e.alive || distance(e, target) > radius) continue;
             e.slowedTimer = 1.5;
           }
-          this.addText(target.x, target.y - 34, "冰霜横扫", "#9FE1CB", 12, 0.4);
+          this.addText(target.x, target.y - 34, "冰霜", "#9FE1CB", 12, 0.4);
         } else {
           // 破点槽：锁定目标冻结 1 秒，周围小范围减速
           for (const e of this.enemies) {
             if (!e.alive || distance(e, target) > 35) continue;
             e.slowedTimer = 1.0;
           }
-          this.addText(target.x, target.y - 34, "冰霜锁定", "#9FE1CB", 12, 0.4);
+          this.addText(target.x, target.y - 34, "冰霜", "#9FE1CB", 12, 0.4);
         }
         this.particles.push(ringParticle(target, "#9FE1CB", 24));
         break;
@@ -5930,17 +5930,17 @@ export class Game {
             if (!e.alive || distance(e, target) > radius) continue;
             e.ignited = true;
           }
-          this.addText(target.x, target.y - 34, "烈火横扫", "#F0997B", 12, 0.4);
+          this.addText(target.x, target.y - 34, "烈火", "#F0997B", 12, 0.4);
         } else {
-          // 破点槽：点燃高血量目标
+          // 单目标点燃
           const highHp = this.enemies.filter(e => e.alive).sort((a, b) => b.hp - a.hp)[0];
           if (highHp && distance(highHp, target) < 40) highHp.ignited = true;
-          this.addText(target.x, target.y - 34, "烈火追击", "#F0997B", 12, 0.4);
+          this.addText(target.x, target.y - 34, "烈火", "#F0997B", 12, 0.4);
         }
         this.particles.push(...sparkBurst(target, 8, "#F0997B"));
         break;
       case "thunder":
-        this.addText(target.x, target.y - 34, st === 'momentum_sweep' ? "雷暴横扫" : "雷暴锁定", "#AFA9EC", 12, 0.4);
+        this.addText(target.x, target.y - 34, "雷暴", "#AFA9EC", 12, 0.4);
         if (Math.random() < 0.3) {
           // 30% 概率触发链雷
           const chain = this.enemies.filter(e => e.alive && distance(e, target) < 70).slice(0, st === 'momentum_sweep' ? 3 : 2);
@@ -5959,14 +5959,14 @@ export class Game {
             if (!e.alive || e.kind !== "shield" || distance(e, target) > radius) continue;
             e.hp -= 1; e.flash = 0.2;
           }
-          this.addText(target.x, target.y - 34, "破甲横扫", "#85B7EB", 12, 0.4);
+          this.addText(target.x, target.y - 34, "破甲", "#85B7EB", 12, 0.4);
         } else {
           // 破点槽：对精英/盾兵防御 -50%
           for (const e of this.enemies) {
             if (!e.alive || !["elite", "shield", "core", "boss"].includes(e.kind) || distance(e, target) > 40) continue;
             e.hp -= 2; e.flash = 0.3;
           }
-          this.addText(target.x, target.y - 34, "破甲点杀", "#85B7EB", 12, 0.4);
+          this.addText(target.x, target.y - 34, "破甲", "#85B7EB", 12, 0.4);
         }
         break;
       case "vampire":
@@ -5974,13 +5974,13 @@ export class Game {
           // 蓄势槽：横扫击杀每个敌人额外 +1% 刀势
           if (killed) {
             this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 1);
-            this.addText(target.x, target.y - 34, "蓄势回春+1", "#a8e6cf", 12, 0.4);
+            this.addText(target.x, target.y - 34, "回春+1", "#a8e6cf", 12, 0.4);
           }
         } else {
           // 破点槽：击杀高价值目标额外 +8% 刀势
           if (killed) {
             this.energy = Math.min(BALANCE.swordEnergy.max, this.energy + 8);
-            this.addText(target.x, target.y - 34, "破点回春+8", "#a8e6cf", 12, 0.4);
+            this.addText(target.x, target.y - 34, "回春+8", "#a8e6cf", 12, 0.4);
           }
         }
         break;
@@ -11586,36 +11586,28 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         }
       }
 
-      // 0814-01C-0: 中心统一显示"刀"，不再区分"斩/破"
-      ctx.fillStyle = colorStr;
-      ctx.font = '900 22px "Microsoft YaHei", "SimHei", sans-serif';
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("刀", x + iconR, y + iconR + 2);
+      // 0814-01C-0.1: CD倒计时整数显示在圆槽中央
+      if (!ready) {
+        // 冷却中：中央显示整数倒计时
+        ctx.fillStyle = colorStr;
+        ctx.font = '900 18px "Microsoft YaHei", "SimHei", sans-serif';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(`${cdSec}`, x + iconR, y + iconR + 1);
+      }
+      // Ready时中央不显示文字，仅通过外圈高亮表现
     }
     ctx.restore();
 
-    // 槽位标签
+    // 槽位底部标签（仅空槽显示"副刀"） — 0814-01C-0.1
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     ctx.fillStyle = colorStr;
     ctx.font = '700 11px "Microsoft YaHei", sans-serif';
-    let label = genericLabel;
-    if (blade && ready) {
-      label = "可";
-    } else if (blade) {
-      label = `${cdSec}秒`;
-      // CD 将好时标签闪烁 + 发光
-      if (ratio >= 0.85) {
-        const flashPulse = Math.sin(this.elapsed * 12 + slotIndex * 3) * 0.5 + 0.5;
-        ctx.fillStyle = colorStr;
-        ctx.shadowColor = colorStr;
-        ctx.shadowBlur = 8 + flashPulse * 12;
-        ctx.font = '900 12px "Microsoft YaHei", sans-serif';
-      }
+    if (!blade) {
+      ctx.fillText(genericLabel, x + iconR, y + iconR * 2 + 6);
     }
-    ctx.fillText(label, x + iconR, y + iconR * 2 + 6);
     ctx.restore();
   }
 
