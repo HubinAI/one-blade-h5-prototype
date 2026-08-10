@@ -32,7 +32,7 @@ import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetab
 import { playSwing, playHit, playExplosion, playPlayerHurt, playEliteKill, playVictory, initSfx, setBgmBattle, setBgmElite, setBgmOff, playRouletteTick } from "./sfx";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
-import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, initBladeGrowthDefaults, getEquippedBladeInfo, equipBladeToSlot } from "./services/ProgressionService";
+import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, initBladeGrowthDefaults, getEquippedBladeInfo, equipBladeToSlot, claimFloorFirstReward, isSub1Unlocked } from "./services/ProgressionService";
 import { BLADE_BASE_STATS, QUALITY_ORDER } from "./config/synthesis";
 import { BLADE_QUALITY_CONFIG, BLADE_LEVEL_CONFIG, SLOT_CONFIG, getBladeQualityConfig, getBladeLevelConfig, computeBladeAttack, type BladeQualityId } from "./config/bladeGrowth";
 import type { Blade } from "./services/BladeService";
@@ -1062,8 +1062,8 @@ export class Game {
     this._mainBladeLevel = equips.main?.level ?? 1;
     this._playerStats = createDefaultPlayerStats(computeBladeAttack(this._mainBladeQuality, this._mainBladeLevel));
     
-    // SUB_1 from equipped blade instance
-    if (equips.sub1 && equips.sub1.quality) {
+    // 0814-04A: SUB_1根据第3关解锁状态
+    if (equips.sub1 && equips.sub1.quality && isSub1Unlocked()) {
       this._sub1BladeQuality = equips.sub1.quality as BladeQualityId;
       this._sub1BladeLevel = equips.sub1.level;
       const greenCfg = getBladeQualityConfig("green")!;

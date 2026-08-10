@@ -417,6 +417,7 @@ export type RunRewards = {
   adChestOpened: boolean;
   dailyBonusApplied?: boolean;
   highYieldBonusApplied?: boolean;
+  firstClearRewards?: string[] | null;
 };
 
 export type RunProgress = {

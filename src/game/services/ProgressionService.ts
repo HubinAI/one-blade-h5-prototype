@@ -76,6 +76,8 @@ export type PlayerProgress = {
   clearedBreakthroughs: string[];
   /** P3.10：显式待突破ID */
   pendingBreakthroughId: string | null;
+  /** 0814-04A: 已领取首通奖励的关卡ID集合 */
+  clearedFloorRewards: number[];
 };
 
 export type BattleRewardInput = {
@@ -208,6 +210,7 @@ function createDefaultProgress(): PlayerProgress {
     synFailCount: {},
     expOrbs: {},
     clearedBreakthroughs: [],
+    clearedFloorRewards: [],
     pendingBreakthroughId: null,
   };
 }
@@ -558,6 +561,13 @@ export function applyBattleRewards(input: BattleRewardInput): Pick<BattleResult,
   const newBlade = generateBlade(rewardQuality);
   progress.blades.push(newBlade);
 
+  // 0814-04A: 首通奖励
+  let firstClearRewards: string[] | null = null;
+  if (input.win && input.levelId >= 1 && input.levelId <= 5) {
+    const r = claimFloorFirstReward(input.levelId);
+    if (r) firstClearRewards = r.items;
+  }
+
   progress.currentRunMode = "normal";
   writeProgress(progress);
 
@@ -570,7 +580,8 @@ export function applyBattleRewards(input: BattleRewardInput): Pick<BattleResult,
     chestOpened,
     adChestOpened: false,
     dailyBonusApplied,
-    highYieldBonusApplied
+    highYieldBonusApplied,
+    firstClearRewards,
   };
 
   return {
@@ -1302,7 +1313,7 @@ function addExpOrbToProgress(progress: PlayerProgress, quality: Quality, count: 
 // ═════════════════════════════════════════════════════════════════
 // 0814-03 bladeGrowth 炼器 + 经验 + 装备系统
 // ═════════════════════════════════════════════════════════════════
-import { getForgeConfig, getBladeLevelConfig, getBladeQualityConfig, BLADE_QUALITY_CONFIG, BLADE_LEVEL_CONFIG, FORGE_CONFIG } from "../config/bladeGrowth";
+import { getForgeConfig, getBladeLevelConfig, getBladeQualityConfig, getFloorRewardConfig, BLADE_QUALITY_CONFIG, BLADE_LEVEL_CONFIG, FORGE_CONFIG } from "../config/bladeGrowth";
 import type { BladeQualityId } from "../config/bladeGrowth";
 
 let _bladeIdCounter = Date.now();
@@ -1331,10 +1342,15 @@ export function initBladeGrowthDefaults(): void {
     if (g) { progress.equippedMainBladeId = g.id; changed = true; }
   }
 
-  // 确保 SUB_1 已装备
-  if (progress.equippedSubBladeIds.length === 0 || !progress.blades.find(b => b.id === progress.equippedSubBladeIds[0])) {
+  // 0814-04A: SUB_1 仅第3关后解锁
+  if (progress.highestFloor >= 3) {
+    if (progress.equippedSubBladeIds.length === 0 || !progress.blades.find(b => b.id === progress.equippedSubBladeIds[0])) {
     const g = progress.blades.find(b => b.quality === "green" && b.id !== progress.equippedMainBladeId);
     if (g) { progress.equippedSubBladeIds = [g.id]; changed = true; }
+  }
+  } else {
+    // 未解锁：清空 SUB_1 装备
+    if (progress.equippedSubBladeIds.length > 0) { progress.equippedSubBladeIds = []; changed = true; }
   }
 
   if (changed) writeProgress(progress);
@@ -1811,4 +1827,59 @@ export function getBossLevelConfig(rankId: RankId): LevelConfig {
       initialBladeTier: "满势"
     }
   };
+}
+
+// ═════════════════════════════════════════════════════════════════
+// 0814-04A 首通奖励 + 功能解锁
+// ═════════════════════════════════════════════════════════════════
+
+/** 检查某关首通奖励是否已领取 */
+export function hasClearedFloorReward(floorId: number): boolean {
+  return readProgress().clearedFloorRewards.includes(floorId);
+}
+
+/** 检查挂机是否已解锁 (第2关首通) */
+export function isIdleUnlocked(): boolean { return readProgress().highestFloor >= 2; }
+
+/** 检查装备/炼器是否已解锁 (第3关首通) */
+export function isArmoryUnlocked(): boolean { return readProgress().highestFloor >= 3; }
+
+/** 检查SUB_1是否正式开放 (第3关首通) */
+export function isSub1Unlocked(): boolean { return readProgress().highestFloor >= 3; }
+
+/** 领取某关首通奖励 */
+export function claimFloorFirstReward(floorId: number): { items: string[]; bladeCount: number } | null {
+  const cfg = getFloorRewardConfig(floorId);
+  if (!cfg) return null;
+  const progress = readProgress();
+  if (progress.clearedFloorRewards.includes(floorId)) return null;
+  let bladeCount = 0;
+  const items: string[] = [];
+  for (const reward of cfg.firstClearReward) {
+    if (reward.quality === "white") {
+      for (let i = 0; i < reward.count; i++) {
+        progress.blades.push(createBladeInstance("white", 1));
+        bladeCount++;
+      }
+      items.push(`白色刀胚 ×${reward.count}`);
+    }
+  }
+  progress.clearedFloorRewards.push(floorId);
+  writeProgress(progress);
+  return { items, bladeCount };
+}
+
+/** Debug: 清除某关首通记录 */
+export function debugClearFloorReward(floorId: number): void {
+  const progress = readProgress();
+  progress.clearedFloorRewards = progress.clearedFloorRewards.filter(f => f !== floorId);
+  writeProgress(progress);
+}
+
+/** Debug: 清除所有解锁状态 */
+export function debugClearAllUnlocks(): void {
+  const progress = readProgress();
+  progress.clearedFloorRewards = [];
+  progress.highestFloor = 1;
+  writeProgress(progress);
 }
