@@ -7542,3 +7542,60 @@ h1 {
 
 .bbs-toast { position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(20,14,8,0.92);color:#ffd35a;padding:12px 22px;border-radius:10px;border:1px solid rgba(255,211,90,0.3);font-weight:700;font-size:16px;z-index:999;opacity:0;pointer-events:none;transition:opacity .3s;text-align:center;max-width:80vw; }
 .bbs-toast.show { opacity:1; }
+/* ═══════════════════════════════════════════════════ */
+/* 0814-03.1 ArmoryScreen — 拖拽装备界面              */
+/* ═══════════════════════════════════════════════════ */
+.as-root { display:flex;flex-direction:column;min-height:100vh;background:#0e0b08;color:#f6e7bd;font-family:"Microsoft YaHei",sans-serif;padding-bottom:30px; }
+.as-header { display:flex;align-items:center;gap:12px;padding:14px 16px 8px; }
+.as-header h2 { margin:0;font-size:20px;color:#ffd35a; }
+.as-back { background:none;border:1px solid rgba(255,211,90,0.3);color:#ffd35a;font-size:18px;padding:4px 12px;border-radius:6px;cursor:pointer; }
+
+/* equipment zone */
+.as-equip-zone { display:flex;justify-content:center;gap:12px;padding:16px; }
+.as-slot { width:90px;height:120px;border:2px solid #444;border-radius:10px;background:rgba(22,18,12,0.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;position:relative;transition:border-color .15s,box-shadow .15s; }
+.as-slot.main { width:100px;height:130px; }
+.as-slot.hover-valid { border-color:#5bc0ff!important;box-shadow:0 0 14px rgba(91,192,255,0.4); }
+.as-slot.hover-invalid { border-color:#555!important; }
+.as-slot.locked { opacity:0.4; }
+.as-slot-q { font-size:11px;font-weight:700; }
+.as-slot-name { font-size:13px;font-weight:700; }
+.as-slot-lv { color:#5bc0ff;font-weight:700;font-size:14px; }
+.as-slot-atk { color:#ccc;font-size:12px; }
+.as-slot-empty { color:#555;font-size:13px; }
+.as-slot-hint { position:absolute;bottom:-22px;background:rgba(0,0,0,0.85);color:#ffd35a;font-size:11px;padding:2px 8px;border-radius:4px;white-space:nowrap; }
+.as-slot-hint.invalid { color:#f05050; }
+.as-lock { font-size:24px;margin-bottom:2px; }
+
+/* backpack */
+.as-backpack { flex:1;padding:0 16px; }
+.as-backpack h3 { margin:0 0 8px;font-size:15px;color:#ffd35a; }
+.as-grid { display:grid;grid-template-columns:repeat(4,1fr);gap:8px; }
+.as-item { border:2px solid rgba(255,255,255,0.1);border-radius:10px;background:rgba(18,14,8,0.9);padding:8px 6px;display:flex;flex-direction:column;align-items:center;gap:2px;position:relative;cursor:grab;transition:.12s;min-height:70px; }
+.as-item.dragging { opacity:0.4; }
+.as-item.hover-valid { border-color:#5bc0ff!important;box-shadow:0 0 10px rgba(91,192,255,0.35); }
+.as-item.hover-invalid { border-color:rgba(255,80,60,0.4); }
+.as-item-icon { width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:18px; }
+.as-exp-ball { width:28px;height:28px;border-radius:50%!important; }
+.as-blade-sq { border:2px solid;background:rgba(22,18,12,0.8); }
+.as-item-label { font-size:11px;color:#ccc;text-align:center; }
+.as-item-lv { font-size:10px;color:#5bc0ff; }
+.as-item-count { position:absolute;right:2px;bottom:2px;font-size:12px;color:#ffd35a;font-weight:700;background:rgba(0,0,0,0.7);padding:0 4px;border-radius:3px; }
+.as-drag-hint { position:absolute;top:-20px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.9);color:#ffd35a;font-size:11px;padding:2px 8px;border-radius:4px;white-space:nowrap;z-index:10; }
+.as-empty { grid-column:1/-1;text-align:center;color:#555;padding:30px; }
+
+/* modal */
+.as-modal-overlay { position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:100;display:flex;align-items:center;justify-content:center; }
+.as-modal { background:#1a140e;border:2px solid #ffd35a;border-radius:16px;padding:24px 32px;text-align:center;min-width:200px; }
+.as-modal-title { font-size:20px;color:#ffd35a;font-weight:700;margin-bottom:14px; }
+.as-modal-blade { border:2px solid;border-radius:12px;padding:14px 20px;margin-bottom:16px; }
+.as-modal-q { font-size:15px;font-weight:700;margin-bottom:4px; }
+.as-modal-name { font-size:18px;font-weight:700;color:#f6e7bd;margin-bottom:6px; }
+.as-modal-icon { font-size:36px; }
+.as-modal-close { background:rgba(255,211,90,0.2);border:1px solid #ffd35a;color:#ffd35a;padding:8px 24px;border-radius:8px;font-size:16px;font-weight:700;cursor:pointer; }
+
+/* debug */
+.as-debug { margin:10px 16px;padding:12px;background:rgba(255,255,255,0.04);border-radius:8px;opacity:0.85; }
+.as-debug h4 { margin:0 0 6px;color:#f6a623;font-size:13px; }
+.as-debug button { margin:2px 4px;padding:4px 10px;font-size:12px;border:1px solid rgba(255,211,90,0.25);border-radius:6px;background:rgba(22,18,12,0.8);color:#ccc;cursor:pointer; }
+
+.as-toast { position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(20,14,8,0.92);color:#ffd35a;padding:10px 20px;border-radius:10px;border:1px solid rgba(255,211,90,0.3);font-weight:700;font-size:15px;z-index:200;text-align:center;max-width:80vw;pointer-events:none; }
