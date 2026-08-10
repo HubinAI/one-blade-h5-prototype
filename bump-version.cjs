@@ -234,24 +234,12 @@ function main() {
     }
   }
 
+  // 0814: .version-state.json 已进入 git 跟踪，不再自动加 gitignore
   if (changedFiles.length > 0) {
     console.log(`\n✨ 已更新 ${changedFiles.length} 个文件，版本号: ${newVer}`);
     console.log(`\n💡 下一步: git add ${changedFiles.join(" ")} .version-state.json && git commit -m "${newVer}"`);
   } else {
     console.log(`\n⚠️ 没有找到可替换的版本标记。检查文件内容是否包含旧版本号。`);
-  }
-
-  // 确保 .version-state.json 在 .gitignore 中
-  const gitignorePath = path.join(ROOT, ".gitignore");
-  if (fs.existsSync(gitignorePath)) {
-    const gi = fs.readFileSync(gitignorePath, "utf8");
-    if (!gi.includes(".version-state.json")) {
-      fs.writeFileSync(gitignorePath, gi + "\n.version-state.json\n", "utf8");
-      console.log(`\n📝 已将 .version-state.json 加入 .gitignore`);
-    }
-  } else {
-    fs.writeFileSync(gitignorePath, ".version-state.json\n", "utf8");
-    console.log(`\n📝 已创建 .gitignore，包含 .version-state.json`);
   }
 }
 

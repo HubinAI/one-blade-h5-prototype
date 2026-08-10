@@ -13,8 +13,6 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 
-.version-state.json
-
 # 自动化测试
 *.mjs
 e2e-screenshots/
