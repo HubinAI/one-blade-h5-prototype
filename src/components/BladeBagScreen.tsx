@@ -201,7 +201,7 @@ export function BladeBagScreen({ onBack, onOpenCodex }: BladeBagScreenProps) {
                   <button className="bag-team-remove" onClick={() => handleUnequipSub(0)}>卸</button>
                 </>
               ) : (
-                <span className="bag-team-empty">蓄势副刀槽</span>
+                <span className="bag-team-empty">副刀槽 1</span>
               )}
             </div>
             <div
@@ -222,7 +222,7 @@ export function BladeBagScreen({ onBack, onOpenCodex }: BladeBagScreenProps) {
                   <button className="bag-team-remove" onClick={() => handleUnequipSub(1)}>卸</button>
                 </>
               ) : (
-                <span className="bag-team-empty">破点副刀槽</span>
+                <span className="bag-team-empty">副刀槽 2</span>
               )}
             </div>
           </div>

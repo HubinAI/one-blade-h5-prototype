@@ -5170,6 +5170,26 @@ export class Game {
    * 不锁敌、不攻击、不飞出。视觉由 drawSubBladeVisual 根据 phase 绘制（idle/cooldown/ready 横向悬浮）。
    * 来源：审计文档 §4 共识 B "保留待机、呼吸和 Ready 反馈；冻结自动锁敌和自动伤害"。
    */
+  /** 0814-01C-0: 统一副刀有效目标筛选 + 锁敌排序
+   *  优先级：距离防线最近（Y最大）的有效敌人
+   *  排除：死亡/离场/无敌/Boss/火环/弹幕/命核/引爆中火药兵/已离场实体 */
+  private getValidSubBladeTargets(alsoExcludeTargetId: string | null = null): Enemy[] {
+    return this.enemies
+      .filter(e => {
+        if (!e.alive) return false;
+        if (e.kind === "boss") return false;
+        if ((e as any).eliteKind === "fireRing") return false; // 火环精英由主刀处理
+        if (e.kind === "core") return false; // 命核
+        if ((e as any)._fuseState === 'arming') return false; // 引爆中火药兵
+        if (e.y < BATTLEFIELD_ZONES.midfieldStartY) return false; // 未入战区
+        if (e.y > BALANCE.battlefield.bottomDefenseY - 30) return false; // 已近防线
+        if (this._eliteInvuln && (e as any).eliteKind === "fireRing") return false; // 精英无敌帧
+        if (alsoExcludeTargetId && e.id === alsoExcludeTargetId) return false;
+        return true;
+      })
+      .sort((a, b) => b.y - a.y); // 距防线最近优先（Y最大）
+  }
+
   private updateSubBladesIdleOnly(dt: number): void {
     for (let i = 0; i < 2; i++) {
       const anim = this.subBladeAnim[i];
@@ -5197,7 +5217,7 @@ export class Game {
     }
   }
 
-  /** 副刀自动攻击 - 蓄势横扫(槽0) + 破点追击(槽1) */
+  /** 0814-01C-0: 副刀自动攻击 — 统一单目标锁敌 */
   private updateSubBlades(dt: number) {
     // P4.4B-R3 P0-A: Boss 模式（reactive + legacy）副刀只更新待机动画
     // （cooldown→ready 呼吸），不锁敌、不攻击。视觉保留，伤害冻结。
@@ -5244,80 +5264,33 @@ export class Game {
           break;
         }
         case "ready": {
-          const validEnemies = this.enemies.filter(e => e.alive && e.y >= BATTLEFIELD_ZONES.midfieldStartY && e.y <= BALANCE.battlefield.bottomDefenseY - 30 && (e as any)._fuseState !== 'arming');
           // P4.1A.5: 最短Ready展示
           if (anim.phaseTimer < M.readyMinHold) {
             anim.phaseTimer += frameDt;
             break;
           }
           // V0730009: L1副刀延迟攻击 — 等2次有效主刀/高刀势/10s解锁
-          // 紧急(≤40px)只允许"破"临时点杀，不永久解锁
           if (this.isLogicalLevel1() && !this._l1SubBladeUnlocked) {
             if (this._checkL1SubBladeUnlock()) {
               this._l1SubBladeUnlocked = true;
-            } else if (i === 1 && this._checkL1SubBladeEmergencyUnlock()) {
-              // 允许"破"临时托底（不永久解锁，下次ready阶段重新判断）
+            } else if (this._checkL1SubBladeEmergencyUnlock()) {
+              // 紧急托底（不永久解锁）
             } else {
-              anim.phaseTimer += frameDt; // 保持Ready展示
+              anim.phaseTimer += frameDt;
               break;
             }
           }
-          // V0730020: L1斩刀局部≥4人才发动
-          const isL1 = this.isLogicalLevel1();
-          const slashDensityReq = isL1 ? 4 : 3;
-          if (i === 0 && validEnemies.length >= slashDensityReq) {
-            let bestGroup: typeof validEnemies = [];
-            for (const seed of validEnemies) {
-              const group = validEnemies.filter(e => Math.abs(e.y - seed.y) <= 40);
-              if (group.length > bestGroup.length) bestGroup = group;
-            }
-            if (bestGroup.length < slashDensityReq) { anim.phaseTimer += frameDt; break; }
-            const avgX = bestGroup.reduce((s, e) => s + e.x, 0) / bestGroup.length;
-            const avgY = bestGroup.reduce((s, e) => s + e.y, 0) / bestGroup.length;
-            const centerX = clamp(avgX, 100, DESIGN_WIDTH - 100);
-            const centerY = clampSubBladeAttackY(avgY - 50);
-            // P4.1A.11: 计算横扫入口/出口，让outbound飞向入口，attacking穿越到出口
-            const entryPos = { x: clamp(centerX - 90, 32, DESIGN_WIDTH - 32), y: clampSubBladeAttackY(centerY + 6) };
-            const exitPos = { x: clamp(centerX + 90, 32, DESIGN_WIDTH - 32), y: clampSubBladeAttackY(centerY - 6) };
+          // 0814-01C-0: 统一锁敌 — 距离防线最近优先，SUB_2避免重复
+          const excludeId = (i === 1 && this.subBladeAnim[0]?.targetId) ? this.subBladeAnim[0].targetId : null;
+          const targets = this.getValidSubBladeTargets(excludeId);
+          const target = targets.length > 0 ? targets[0] : null;
+          if (target) {
+            anim.targetId = target.id;
             anim.startPos = { ...home };
-            anim.endPos = { ...entryPos };
-            // P4.1A.13: attackStartPos/attackEndPos 用于attacking阶段真实横扫
-            anim.attackStartPos = { ...entryPos };
-            anim.attackEndPos = { ...exitPos };
+            anim.endPos = { x: target.x, y: target.y - 30 };
             anim.phase = "arming";
             anim.phaseTimer = 0;
             anim.phaseDuration = M.arming;
-          } else if (i === 1) {
-            // P4.1A.8: 高价值优先，全部限制在有效战区
-            const highValPriorityOrder = ["splitter", "elite", "core", "powder", "shield"];
-            let highVal = null;
-            for (const kind of highValPriorityOrder) {
-              if (kind === "splitter") highVal = validEnemies.find(e => e.kind === "splitter" && e.splitState === "warning");
-              else highVal = validEnemies.find(e => e.kind === kind);
-              if (highVal) break;
-            }
-            if (highVal) {
-              anim.targetId = highVal.id;
-              anim.startPos = { ...home };
-              anim.endPos = { x: highVal.x, y: highVal.y - 30 };
-              anim.phase = "arming";
-              anim.phaseTimer = 0;
-              anim.phaseDuration = M.arming;
-            } else {
-              const nearest = validEnemies.sort((a, b) => b.y - a.y)[0];
-              const isUrgent = nearest && (nearest.y >= BALANCE.battlefield.bottomDefenseY - 120 || validEnemies.length >= 4);
-              anim.phaseTimer += frameDt;
-              if (isUrgent || anim.phaseTimer >= M.highValueWait) {
-                if (nearest) {
-                  anim.targetId = nearest.id;
-                  anim.startPos = { ...home };
-                  anim.endPos = { x: nearest.x, y: nearest.y - 30 };
-                  anim.phase = "arming";
-                  anim.phaseTimer = 0;
-                  anim.phaseDuration = M.arming;
-                }
-              }
-            }
           }
           break;
         }
@@ -5329,95 +5302,59 @@ export class Game {
             anim.phaseDuration = M.outbound;
             anim.startPos = { ...home };
             const sl = this.getSubBladeSlotLayout(i);
-            this.particles.push(ringParticle({ x: sl.centerX, y: sl.centerY }, i === 0 ? "#5bc0ff" : "#b58cff", 20));
+            this.particles.push(ringParticle({ x: sl.centerX, y: sl.centerY }, "#5bc0ff", 20));
           }
           break;
         }
         case "outbound": {
           anim.phaseTimer += frameDt;
           if (anim.phaseTimer >= anim.phaseDuration) {
-            // P4.1A.5: outbound → attacking（不再直接returning）
             this.subBladeTimers[i] = 0;
-            const stats = BLADE_BASE_STATS[blade.quality];
-            if (stats) {
-              // P4.1A.12: 伤害由attacking阶段直接结算，不再调用空trigger函数
-            }
             anim.phase = "attacking";
             anim.phaseTimer = 0;
             anim.phaseDuration = M.attacking;
-            // P4.1A.14: 左右副刀初始化currentPos
-            if (i === 0) {
-              anim.currentPos = { ...anim.attackStartPos };
-              anim.rotation = Math.atan2(anim.attackEndPos.y - anim.attackStartPos.y, anim.attackEndPos.x - anim.attackStartPos.x) + Math.PI / 2;
-              anim.startPos = { ...anim.attackEndPos };
-            } else {
-              // P4.1A.15: 右刀进入attacking时初始化rotation
-              const dx = anim.endPos.x - anim.startPos.x;
-              const dy = anim.endPos.y - anim.startPos.y;
-              anim.rotation = Math.atan2(dy, dx) + Math.PI / 2;
-              anim.currentPos = { ...anim.endPos };
-              anim.startPos = { ...anim.endPos };
-            }
+            // 0814-01C-0: 统一初始化单目标追踪
+            const dx = anim.endPos.x - anim.startPos.x;
+            const dy = anim.endPos.y - anim.startPos.y;
+            anim.rotation = Math.atan2(dy, dx) + Math.PI / 2;
+            anim.currentPos = { ...anim.endPos };
+            anim.startPos = { ...anim.endPos };
           }
           break;
         }
         case "attacking": {
           anim.phaseTimer += frameDt;
-          // P4.1A.11: attacking阶段飞刀实体沿真实路径运动
+          // 0814-01C-0: 统一单目标追踪，不再区分横扫/点杀
           const aT = clamp(anim.phaseTimer / anim.phaseDuration, 0, 1);
-          if (i === 0) {
-            // P4.1A.13: 左刀从attackStartPos到attackEndPos横扫
-            const sweepStart = anim.attackStartPos ?? { x: anim.endPos.x - 90, y: anim.endPos.y };
-            const sweepEnd = anim.attackEndPos ?? { x: anim.endPos.x + 90, y: anim.endPos.y };
-            const easeT = aT < 0.5 ? 2 * aT * aT : 1 - Math.pow(-2 * aT + 2, 2) / 2;
-            anim.currentPos = { x: sweepStart.x + (sweepEnd.x - sweepStart.x) * easeT, y: sweepStart.y + (sweepEnd.y - sweepStart.y) * easeT };
-          } else if (i === 1 && anim.targetId) {
-            // P4.1A.15: 右刀攻击阶段持续追踪存活目标（使用统一同步函数）
+          if (anim.targetId) {
             const target = this.enemies.find(e => e.id === anim.targetId && e.alive);
             if (target) this.syncWeakpointBladeToTarget(anim, target);
           }
-          // P4.1A.15: 左右刀使用命中进度（左52%，右45%）代替固定0.06s
           const attackProgress = clamp(anim.phaseTimer / anim.phaseDuration, 0, 1);
-          const hitProgress = i === 0 ? 0.52 : 0.45;
-          if (attackProgress >= hitProgress && !anim.hitApplied) {
+          if (attackProgress >= 0.45 && !anim.hitApplied) {
             anim.hitApplied = true;
             const stats = BLADE_BASE_STATS[blade.quality];
             if (stats) {
-              if (i === 0) {
-                // P4.1A.14: 左刀伤害使用attackStartPos→attackEndPos（禁止endPos±90）
-                const dmgX1 = anim.attackStartPos?.x ?? anim.endPos.x - 90;
-                const dmgY1 = anim.attackStartPos?.y ?? anim.endPos.y + 6;
-                const dmgX2 = anim.attackEndPos?.x ?? anim.endPos.x + 90;
-                const dmgY2 = anim.attackEndPos?.y ?? anim.endPos.y - 6;
-                this.applyMomentumSweepDamage({ x1: dmgX1, y1: dmgY1, x2: dmgX2, y2: dmgY2, color: "#5bc0ff", bladeIdx: 0 }, blade, stats);
-              } else {
-                // P4.1A.11: 右刀严格单目标伤害
-                let rightTarget: Enemy | null = anim.targetId ? (this.enemies.find(e => e.id === anim.targetId && e.alive) ?? null) : null;
-                if (!rightTarget) {
-                  // 重锁：使用endPos附近90px搜索
-                  const searchPos = { x: anim.endPos.x, y: anim.endPos.y + 30 };
-                  const candidates = this.enemies.filter(e => e.alive && e.y >= BATTLEFIELD_ZONES.midfieldStartY && e.y <= BALANCE.battlefield.bottomDefenseY - 30);
-                  const orders = ["splitter", "elite", "core", "powder", "shield"];
-                  for (const kind of orders) { rightTarget = candidates.find(e => e.kind === kind && Math.abs(e.x - searchPos.x) <= 90 && Math.abs(e.y - searchPos.y) <= 90) ?? null; if (rightTarget) break; }
-                  if (!rightTarget) rightTarget = candidates.sort((a, b) => b.y - a.y).find(e => Math.abs(e.x - searchPos.x) <= 90 && Math.abs(e.y - searchPos.y) <= 90) ?? null;
-                  if (rightTarget) {
-                    // P4.1A.15: 重锁同步targetId/currentPos/endPos/rotation
-                    this.syncWeakpointBladeToTarget(anim as any, rightTarget);
-                  } else {
-                    // 无目标：回收+返还75%CD
-                    this.subBladeTimers[i] = this.subBladeCooldowns[i] * 0.75;
-                    anim.phase = "returning";
-                    anim.phaseTimer = 0;
-                    anim.phaseDuration = M.returning;
-                    anim.startPos = { ...anim.endPos };
-                    anim.endPos = { ...home };
-                    break; // 跳过伤害
-                  }
+              let hitTarget: Enemy | null = anim.targetId ? (this.enemies.find(e => e.id === anim.targetId && e.alive) ?? null) : null;
+              if (!hitTarget) {
+                // 重锁：统一距离防线最近有效目标
+                const fallbackTargets = this.getValidSubBladeTargets();
+                hitTarget = fallbackTargets.length > 0 ? fallbackTargets[0] : null;
+                if (hitTarget) {
+                  this.syncWeakpointBladeToTarget(anim as any, hitTarget);
+                } else {
+                  this.subBladeTimers[i] = this.subBladeCooldowns[i] * 0.75;
+                  anim.phase = "returning";
+                  anim.phaseTimer = 0;
+                  anim.phaseDuration = M.returning;
+                  anim.startPos = { ...anim.endPos };
+                  anim.endPos = { ...home };
+                  break;
                 }
-                if (rightTarget) {
-                  this.applyWeakpointDamageByTarget(rightTarget, blade, stats);
-                  if (this.isLogicalLevel1()) this.triggerHitStop(0.07, 0.07); // V0730020
-                }
+              }
+              if (hitTarget) {
+                this.applySubBladeDamage(hitTarget, blade, stats);
+                if (this.isLogicalLevel1()) this.triggerHitStop(0.07, 0.07);
               }
             }
           }
@@ -5425,12 +5362,7 @@ export class Game {
             anim.phase = "returning";
             anim.phaseTimer = 0;
             anim.phaseDuration = M.returning;
-            // P4.1A.14: 左刀从attackEndPos收回，右刀从currentPos收回
-            if (i === 0) {
-              anim.startPos = { ...(anim.attackEndPos ?? { x: anim.endPos.x + 180, y: anim.endPos.y }) };
-            } else {
-              anim.startPos = { ...(anim.currentPos ?? anim.endPos) };
-            }
+            anim.startPos = { ...(anim.currentPos ?? anim.endPos) };
             anim.endPos = { ...home };
             anim.hitApplied = false;
           }
@@ -5475,8 +5407,6 @@ export class Game {
     }
   }
 
-  /** 蓄势横扫 —— 横向扫过敌群最密集区域 */
-  /** P4.1A.8：左副刀横扫（不再生成假subSlash，由attacking阶段直接结算） */
   /** P2.8：hit stop 普通触发（有冷却，force=true 可无视冷却） */
   /** P4.3A: 战场三层流动压力控制器 */
   private getPressureLayer(enemyY: number): BattlefieldPressureLayer {
@@ -5934,101 +5864,21 @@ export class Game {
     }
   }
 
-  /** 蓄势横扫伤害结算 */
-  private applyMomentumSweepDamage(
-    s: { x1: number; y1: number; x2: number; y2: number; color: string; bladeIdx: number },
-    blade: Blade, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]
-  ) {
-    const hits: Enemy[] = [];
-    // P3.11：副刀只攻击中下段区域（中场起始~防线上方）
-    for (const enemy of this.enemies) {
-      if (!enemy.alive) continue;
-      if (enemy.kind === "boss") continue; // P4.4A.2: 副刀不攻击Boss
-      if (enemy.y < BATTLEFIELD_ZONES.midfieldStartY) continue;
-      const dist = distanceToSegment(enemy, { x: s.x1, y: s.y1 }, { x: s.x2, y: s.y2 });
-      if (dist < enemy.radius + 32) hits.push(enemy);
-    }
-    const baseDamage = stats.damageMultiplier * 0.8; // 蓄势副刀伤害略低
-    const isLevel1 = this.isLogicalLevel1();
-    let killCount = 0;
-    for (const target of hits) {
-      // V0730007: L1保证击杀infantry（不秒精英），最多斩5名
-      const l1KillCap = isLevel1 && killCount >= 3;
-      if (l1KillCap) break;
-      const isL1Infantry = isLevel1 && target.kind === "infantry";
-      const isL1Elite = isLevel1 && target.kind === "elite";
-      let damage = isL1Infantry ? Math.max(baseDamage, target.maxHp) : baseDamage;
-      if (isL1Elite) damage = Math.min(damage, Math.ceil(target.maxHp * 0.02)); // ≤2%精英HP
-      target.hp -= Math.max(1, Math.ceil(damage));
-      // 0809-11E-5A-1: 阵风伤害归因
-      if ((target as Enemy).eliteKind === "fireRing" && this._eliteBattleActive) {
-        this._eliteBudgetOther += Math.max(1, Math.ceil(damage));
-      }
-      target.flash = 0.18;
-      if (target.kind === "elite") {
-        this.triggerEliteHitFeedback(target);
-        this.checkEliteLowHpFeedback(target);
-      }
-      const killed = target.hp <= 0;
-      if (killed) {
-        this.handleDirectEnemyKilledBySystem(target, "sub_momentum");
-        killCount++;
-        this.stats.subBladeKills++;
-        this.particles.push(...paperBurst(target, 5, ["#5bc0ff", "#f6e7bd"]));
-      }
-      this.particles.push(ringParticle({ x: target.x, y: target.y }, s.color, 18));
-      if (blade.affix) this.applySubAffixEffect(blade.affix, target, killed, 'momentum_sweep');
-    }
-    // V0730008: 横扫音效和HitStop只播一次（非每目标）
-    if (hits.length > 0) {
-      AudioService.slashHit();
-      if (isLevel1) this.triggerHitStop(0.05, 0.05); // V0730020: 斩单次0.05s
-    }
-
-    // 蓄势返还刀势
-    if (killCount > 0) {
-      if (isLevel1) {
-        // V0730006: L1副刀回势上限3，不再有击杀3+额外奖励
-        const refund = Math.min(killCount, 3);
-        this.energy = gainBladeMomentum(this.energy, this.bladeMomentumMax, refund);
-        this.addText(s.x1 + (s.x2 - s.x1) / 2, s.y1 + (s.y2 - s.y1) / 2 - 16, `副刀横扫 ×${killCount}`, "#5bc0ff", 16, 1.0);
-      } else {
-        const refund = killCount * 1; // 每击杀1个 +1%
-        if (killCount >= 3) {
-          const extraRefund = 5; // 击杀3+ 额外 +5%
-          this.addText(s.x1 + (s.x2 - s.x1) / 2, s.y1 + (s.y2 - s.y1) / 2 - 16, `蓄势连斩 +${refund + extraRefund}%`, "#5bc0ff", 16, 1.0);
-          this.energy = clamp(this.energy + refund + extraRefund, 0, BALANCE.swordEnergy.max);
-          // P4.1A.10: 击杀5+ 只推进下一轮CD，不永久修改subBladeCooldowns
-          if (killCount >= 5 && s.bladeIdx < this.subBladeTimers.length) {
-            const cd = this.subBladeCooldowns[s.bladeIdx];
-            this.subBladeTimers[s.bladeIdx] = Math.max(this.subBladeTimers[s.bladeIdx], cd * 0.2);
-          }
-        } else {
-          this.addText(s.x1 + (s.x2 - s.x1) / 2, s.y1 + (s.y2 - s.y1) / 2 - 16, `蓄势 +${refund}%`, "#5bc0ff", 14, 0.8);
-          this.energy = clamp(this.energy + refund, 0, BALANCE.swordEnergy.max);
-        }
-      }
-    }
-  }
-
-  /** 破点追击伤害结算 */
-  /** P4.1A.13: 右刀严格单目标伤害 */
-  private applyWeakpointDamageByTarget(target: Enemy, blade: Blade, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]) {
+  /** 0814-01C-0: 统一副刀单目标伤害 */
+  private applySubBladeDamage(target: Enemy, blade: Blade, stats: typeof BLADE_BASE_STATS[keyof typeof BLADE_BASE_STATS]) {
     if (!target.alive) return;
     const isLevel1 = this.isLogicalLevel1();
-    // V0730006: L1保证击杀infantry；精英打8-10%maxHP
     let damage: number;
     if (isLevel1) {
       if (target.kind === "elite") {
-        damage = Math.ceil(target.maxHp * 0.06); // 6%精英HP
+        damage = Math.ceil(target.maxHp * 0.06);
       } else {
-        damage = Math.max(stats.damageMultiplier * 1.0, target.maxHp); // 保证击杀
+        damage = Math.max(stats.damageMultiplier * 1.0, target.maxHp);
       }
     } else {
       damage = stats.damageMultiplier * 1.0;
     }
     target.hp -= Math.max(1, Math.ceil(damage));
-    // 0809-11E-5A-1: 弱点击破归因
     if ((target as Enemy).eliteKind === "fireRing" && this._eliteBattleActive) {
       this._eliteBudgetOther += Math.max(1, Math.ceil(damage));
     }
@@ -6036,37 +5886,18 @@ export class Game {
     if (target.kind === "elite") {
       this.triggerEliteHitFeedback(target);
       this.checkEliteLowHpFeedback(target);
-      this.addText(target.x, target.y - 36, "-6%", "#ff6a33", 18, 1.0); // V0731004
     }
     const killed = target.hp <= 0;
     if (killed) {
       this.handleDirectEnemyKilledBySystem(target, "sub_weakpoint");
       this.stats.subBladeKills++;
-      this.particles.push(...paperBurst(target, 6, ["#ff6a33", "#ffd35a"]));
-      // V0730006: L1击杀反馈
-      if (isLevel1) {
-        this.addText(target.x, target.y - 28, "破点斩杀", "#ff6a33", 17, 1.2);
-      }
+      this.particles.push(...paperBurst(target, 5, ["#5bc0ff", "#f6e7bd"]));
+      if (isLevel1) this.addText(target.x, target.y - 28, "副刀击杀", "#5bc0ff", 16, 1.0);
     }
-    this.particles.push(ringParticle({ x: target.x, y: target.y }, "#b58cff", 22));
-    // V0730007: 副刀命中反馈（独立音效+短HitStop）
+    this.particles.push(ringParticle({ x: target.x, y: target.y }, "#5bc0ff", 20));
     AudioService.slashHit();
-    if (isLevel1) this.triggerHitStop(0.07, 0.14);
-    if (blade.affix) this.applySubAffixEffect(blade.affix, target, killed, 'weakpoint_chase');
-    const highValue: EnemyKind[] = ["core", "powder", "elite", "shield"];
-    if (highValue.includes(target.kind) && !killed) {
-      this.weakpointMarks.set(target.id, 2.0);
-      this.addText(target.x, target.y - 20, "+ 破绽", "#ff6a33", 16, 1.2);
-    }
-    // V0730006: L1回势上限2，删除+5%刀势
-    if (killed) {
-      if (isLevel1) {
-        this.energy = gainBladeMomentum(this.energy, this.bladeMomentumMax, Math.min(2, highValue.includes(target.kind) ? 2 : 1));
-      } else if (highValue.includes(target.kind)) {
-        this.energy = clamp(this.energy + 5, 0, BALANCE.swordEnergy.max);
-        this.addText(target.x, target.y - 36, "+5%刀势", "#ffd35a", 14, 0.8);
-      }
-    }
+    if (isLevel1) this.triggerHitStop(0.07, 0.07);
+    if (blade.affix) this.applySubAffixEffect(blade.affix, target, killed, 'momentum_sweep');
   }
 
   /** 副刀词缀效果（按槽位转译） */
@@ -10952,8 +10783,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const anim = this.subBladeAnim[i];
       const home = this.getSubBladeFloatingPos(i);
       const isLeft = i === 0;
-      const baseColor = isLeft ? "#5bc0ff" : "#b58cff";
-      const readyColor = isLeft ? "#8ad4ff" : "#d4a8ff";
+      // 0814-01C-0: 统一副刀颜色
+      const baseColor = "#5bc0ff";
+      const readyColor = "#8ad4ff";
 
       // 确定当前绘制位置
       let drawPos: Vec2;
@@ -10975,8 +10807,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         const sy = Math.sin(this.elapsed * (isRdy ? 2.6 : 3.0) + i * 0.7) * (isRdy ? 1.4 : 2.0);
         drawPos = { x: home.x + sx, y: home.y + sy };
         rot = baseRot + Math.sin(this.elapsed * 2.0 + i) * (isRdy ? 0.015 : 0.035);
-        bladeAlpha = isRdy ? 0.92 : (isLeft ? 0.55 : 0.58);
-        bladeScale = isRdy ? (isLeft ? 1.05 : 1.06) : 1;
+        bladeAlpha = isRdy ? 0.92 : 0.55;
+        bladeScale = isRdy ? 1.05 : 1;
       } else if (anim.phase === "arming") {
         const t = clamp(anim.phaseTimer / anim.phaseDuration, 0, 1);
         // P4.1A.4: 从横向→目标方向旋转，上提6px→后撤→放大
@@ -10990,7 +10822,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         const rotProgress = clamp((t - 0.2) / 0.55, 0, 1);
         rot = baseHoriz + (targetAngle - baseHoriz) * Math.min(1, rotProgress);
         if (t < 0.25) bladeScale = 0.96;
-        else bladeScale = 0.96 + (t - 0.25) / 0.75 * (isLeft ? 0.14 : 0.18);
+        else bladeScale = 0.96 + (t - 0.25) / 0.75 * 0.16;
         bladeAlpha = 0.85 + t * 0.15;
       } else if (anim.phase === "attacking") {
         // P4.1A.13: 用currentPos绘制，不再从startPos插值
@@ -11047,7 +10879,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const connWidth = anim.phase === "arming" ? 1.5 : 1;
       const connShadow = anim.phase === "idle" ? (this.subBladeTimers[i] >= this.subBladeCooldowns[i] ? 4 : 1) : (anim.phase === "arming" ? 8 : 0);
       ctx.save();
-      ctx.strokeStyle = `rgba(${isLeft ? "91,192,255" : "181,140,255"},${connAlpha2})`;
+      ctx.strokeStyle = `rgba(91,192,255,${connAlpha2})`;
       ctx.lineWidth = connWidth;
       ctx.setLineDash([3, 4]);
       ctx.shadowColor = baseColor;
@@ -11081,7 +10913,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
       // 刀尖高光
       ctx.shadowBlur = 0;
-      ctx.fillStyle = isLeft ? "#B8F4FF" : "#FFB45C";
+      ctx.fillStyle = "#B8F4FF";
       ctx.beginPath();
       ctx.moveTo(0, -bladeH);
       ctx.lineTo(-bladeW * 0.4, 2 - tipLen);
@@ -11103,7 +10935,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       if (this.subBladeTimers[i] >= this.subBladeCooldowns[i] && anim.phase === "idle") {
         const tipPulse = 0.3 + Math.sin(this.elapsed * (isLeft ? 7.85 : 8.15)) * 0.3;
         ctx.shadowBlur = 0;
-        ctx.fillStyle = isLeft ? "#B8F4FF" : "#FFB45C";
+        ctx.fillStyle = "#B8F4FF";
         ctx.beginPath();
         ctx.arc(0, -bladeH - 2, 2.5 + tipPulse * 0.5, 0, Math.PI * 2);
         ctx.fill();
@@ -11404,11 +11236,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 右下角临时效果图标（鼓/魂/油）— 含圆形倒计时
     this.drawPickupBuffs(ctx);
 
-    // P4.1A.3：副刀槽位使用统一布局（左紫/右紫+橙金强调）
+    // 0814-01C-0: 副刀槽位统一视觉（蓝调，不再区分左蓝/右紫）
     const leftSlot = this.getSubBladeSlotLayout(0);
     const rightSlot = this.getSubBladeSlotLayout(1);
-    this.drawSubBladeSlot(ctx, 0, leftSlot.boxX, leftSlot.boxY, leftSlot.iconR, 0x5bc0ff);
-    this.drawSubBladeSlot(ctx, 1, rightSlot.boxX, rightSlot.boxY, rightSlot.iconR, 0xb58cff);
+    const slotColor = 0x5bc0ff;
+    this.drawSubBladeSlot(ctx, 0, leftSlot.boxX, leftSlot.boxY, leftSlot.iconR, slotColor);
+    this.drawSubBladeSlot(ctx, 1, rightSlot.boxX, rightSlot.boxY, rightSlot.iconR, slotColor);
 
     // 刀势三段能量条 —— 屏幕底部居中（窄条），普通关与 Boss 关共用
     // V0730001: 统一使用 low/mid/high 档位，40%/70% 分界
@@ -11662,8 +11495,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private drawSubBladeSlot(ctx: CanvasRenderingContext2D, slotIndex: number, x: number, y: number, iconR: number, color: number) {
     const blade = this.subBlades[slotIndex] ?? null;
     const colorStr = "#" + color.toString(16).padStart(6, "0");
-    const slotType = slotIndex === 0 ? "蓄势" : "破点";
-    const slotTypeIcon = slotIndex === 0 ? "斩" : "破";
+    // 0814-01C-0: 统一副刀标签 — 不再区分"蓄势/破点"
+    const genericLabel = "副刀";
     const timer = this.subBladeTimers[slotIndex] ?? 0;
     const cd = this.subBladeCooldowns[slotIndex] ?? 5;
     const ratio = blade ? Math.min(1, timer / cd) : 0;
@@ -11753,28 +11586,22 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         }
       }
 
-      // 中心大字（"斩"/"破"）- 22px 是主元素
+      // 0814-01C-0: 中心统一显示"刀"，不再区分"斩/破"
       ctx.fillStyle = colorStr;
       ctx.font = '900 22px "Microsoft YaHei", "SimHei", sans-serif';
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(slotTypeIcon, x + iconR, y + iconR + 2);
-      // 破槽位叠加 + 号（与破绽标记准星中心+号建立视觉关联）
-      if (slotIndex === 1) {
-        ctx.fillStyle = "#ff6a33";
-        ctx.font = '900 13px "Microsoft YaHei", sans-serif';
-        ctx.fillText("+", x + iconR + 13, y + iconR - 11);
-      }
+      ctx.fillText("刀", x + iconR, y + iconR + 2);
     }
     ctx.restore();
 
-    // 槽位标签：CD态显示"X秒"，Ready态显示"可"，空状态显示"蓄势"/"破点"
+    // 槽位标签
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     ctx.fillStyle = colorStr;
     ctx.font = '700 11px "Microsoft YaHei", sans-serif';
-    let label = slotType;
+    let label = genericLabel;
     if (blade && ready) {
       label = "可";
     } else if (blade) {
