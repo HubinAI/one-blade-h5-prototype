@@ -149,6 +149,12 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
         gameRef.current?.setDebugMainLevel(10);
       } else if (event.key === "9") {
         gameRef.current?.setDebugMainLevel(40);
+      } else if (event.key === "8" && event.ctrlKey) {
+        gameRef.current?.setDebugSub1Level(10);
+      } else if (event.key === "9" && event.ctrlKey) {
+        gameRef.current?.setDebugSub1Level(40);
+      } else if (event.key.toLowerCase() === "j") {
+        gameRef.current?.setDebugSub1ForceEnable();
       }
     };
 

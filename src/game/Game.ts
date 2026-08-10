@@ -2453,7 +2453,9 @@ export class Game {
       }
       const netDelta = weightedHits === 0 ? -8 : weightedHits <= 2 ? 4 : weightedHits <= 5 ? 8 : 12;
       this._lastSlashMomentumDelta = netDelta;
-      const newEnergy = clamp(this.energy + netDelta, 0, BALANCE.swordEnergy.max);
+      // 0814-01C: 主刀刀势效率
+      const effDelta = Math.round(netDelta * (getBladeQualityConfig(this._mainBladeQuality)?.mainMomentumEfficiency ?? 1.0));
+      const newEnergy = clamp(this.energy + effDelta, 0, BALANCE.swordEnergy.max);
       this.energy = (this._momentumState === 'bursting') ? this.energy : newEnergy;
       if (this.debugEnabled) {
         console.log(`[4C] L1 slash done: uniqueHits=${uniqueHits} netDelta=${netDelta} energy=${this.energy}`);
@@ -2465,7 +2467,9 @@ export class Game {
         coreCollapses: trail.coreCollapseCount
       });
       if (refund > 0) {
-        this.energy = clamp(this.energy + refund, 0, BALANCE.swordEnergy.max);
+        // 0814-01C: 主刀刀势效率
+        const effRefund = Math.round(refund * (getBladeQualityConfig(this._mainBladeQuality)?.mainMomentumEfficiency ?? 1.0));
+        this.energy = clamp(this.energy + effRefund, 0, BALANCE.swordEnergy.max);
         // 返还 >= 15 时显示返还量
         if (refund >= 15) {
           this.addText(DESIGN_WIDTH / 2, 810, `+${refund}% 刀势`, "#5bc0ff", 12, 0.7);
@@ -3493,6 +3497,10 @@ export class Game {
   // 0814-01C: debug等级切换
   setDebugMainLevel(level: number): void { if (this.debugEnabled) { this._debugMainLevelOverride = level; this._playerStats = createDefaultPlayerStats(this.getMainBladeBaseAttack()); } }
   setDebugSub1Level(level: number): void { if (this.debugEnabled) this._debugSub1LevelOverride = level; }
+  /** debug强制启用SUB_1（第一关验证用） */
+  get debugForceSub1Enabled(): boolean { return this._debugForceSub1Enabled; }
+  setDebugSub1ForceEnable(): void { if (this.debugEnabled) this._debugForceSub1Enabled = !this._debugForceSub1Enabled; }
+  private _debugForceSub1Enabled = false;
 
   /** 重置105HP测试目标 */
   resetNumericalTestTarget(): void {
@@ -11823,6 +11831,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.drawDebugZoneLine(ctx, z.defenseLineY, "defenseLineY=720", "#ff3535");
 
     // 0814-01C: bladeGrowth 装备信息
+    const sub1Enabled = true; // SUB_1 当前正式启用
     const mainLv = this._debugMainLevelOverride > 0 ? this._debugMainLevelOverride : this._mainBladeLevel;
     const mainAtk = this.getMainBladeBaseAttack();
     const mainQcfg = getBladeQualityConfig(this._mainBladeQuality);
@@ -11831,10 +11840,11 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const sub1Atk = this.getSub1BladeBaseAttack();
     const sub1DmgAtk = Math.round(sub1Atk * SLOT_CONFIG.SUB_1.damageCoeff);
     const sub1CD = (this.subBladeCooldowns[0] || 5).toFixed(1);
+    const momEff = mainQcfg?.mainMomentumEfficiency ?? 1.0;
     const blInfo = [
-      `MAIN: ${mainQcfg?.bladeName} Lv${mainLv} | atk=${Math.round(mainAtk)} (base=${mainQcfg?.baseAttack ?? '?'}×${mainLcfg.attackMultiplier.toFixed(3)})`,
-      `SUB1: ${this.subBlades[0]?.name ?? '-'} Lv${sub1Lv} | bladeAtk=${Math.round(sub1Atk)} | dmgAtk=${sub1DmgAtk} (coeff=${SLOT_CONFIG.SUB_1.damageCoeff}) | CD=${sub1CD}s`,
-      `SUB2: 未开放`,
+      `MAIN: ${mainQcfg?.bladeName} Lv${mainLv} | atk=${Math.round(mainAtk)} (base=${mainQcfg?.baseAttack ?? '?'}×${mainLcfg.attackMultiplier.toFixed(3)}) | mom×${momEff}`,
+      `SUB1: ${this.subBlades[0]?.name ?? '-'} Lv${sub1Lv} | blAtk=${Math.round(sub1Atk)} | dmg=${sub1DmgAtk} (×${SLOT_CONFIG.SUB_1.damageCoeff}) | CD=${sub1CD}s | ${sub1Enabled ? '启用' : '禁用'}`,
+      `SUB2: 锁定未开放`,
     ];
     ctx.save();
     ctx.font = '11px "Consolas", monospace';
