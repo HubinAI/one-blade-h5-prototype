@@ -10,11 +10,11 @@ import { ResultScreen } from "./components/ResultScreen";
 import { AdOverlay } from "./components/AdOverlay";
 import { PauseOverlay } from "./components/PauseOverlay";
 import { Codex } from "./components/Codex";
-import { ForgeScreen } from "./components/ForgeScreen";
+import ForgeScreen from "./components/ForgeScreen";
 import { ChallengeScreen } from "./components/ChallengeScreen";
 import { TeamScreen } from "./components/TeamScreen";
 import { RankingScreen } from "./components/RankingScreen";
-import { BladeBagScreen } from "./components/BladeBagScreen";
+import BladeBagScreen from "./components/BladeBagScreen";
 import { DebugScreen } from "./components/DebugScreen";
 import type { ReviveOffer } from "./game/Game";
 import { AdService } from "./game/services/AdService";
@@ -364,13 +364,13 @@ export default function App() {
       {showCodex && <Codex onClose={() => setShowCodex(false)} />}
 
       {screen === "forge" && (
-        <ForgeScreen onBack={() => { refreshHome(); setScreen("menu"); }} />
+        <ForgeScreen onBack={() => { refreshHome(); setScreen("menu"); }} debug={true} />
       )}
 
       {screen === "bag" && (
         <BladeBagScreen
           onBack={() => { refreshHome(); setScreen("menu"); }}
-          onOpenCodex={() => setShowCodex(true)}
+          onOpenForge={() => setScreen("forge")}
         />
       )}
 

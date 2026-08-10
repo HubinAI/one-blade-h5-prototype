@@ -1,186 +1,87 @@
-import { useState } from "react";
-import type { Blade } from "../game/services/BladeService";
-import { getBladeInventory, forgeBlades, removeBlade } from "../game/services/ProgressionService";
-import { QUALITY_META, getRandomAffixForQuality, QUALITY_ORDER, SYNTHESIS_RULES, getExpCostForLevel } from "../game/config/synthesis";
-import { randomBladeName, createBlade } from "../game/services/BladeService";
-import type { Quality } from "../game/config/synthesis";
+import { useState, useEffect } from "react";
+import {
+  getBladeInventory, getExpOrbInventory,
+  getWhiteGreenForgeRate, forgeWhiteToGreen, resetForgeFailCount,
+  addWhiteBladeMaterial, addGreenExpOrb,
+} from "../game/services/ProgressionService";
+import { getForgeConfig, getBladeQualityConfig } from "../game/config/bladeGrowth";
 
-type ForgeScreenProps = {
-  onBack: () => void;
-};
+function showToast(text: string) {
+  const el = document.getElementById("forge-toast");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), 2000);
+}
 
-export function ForgeScreen({ onBack }: ForgeScreenProps) {
-  const [inventory, setInventory] = useState<Blade[]>(getBladeInventory());
-  const [slot1, setSlot1] = useState<Blade | null>(null);
-  const [slot2, setSlot2] = useState<Blade | null>(null);
-  const [result, setResult] = useState<{ success: boolean; name?: string; quality?: Quality; affix?: string; exp: number } | null>(null);
-  const [animating, setAnimating] = useState(false);
+export default function ForgeScreen({ onBack, debug }: { onBack: () => void; debug?: boolean }) {
+  const [result, setResult] = useState<string | null>(null);
+  const [forceSuccess, setForceSuccess] = useState(false);
+  const [forceFail, setForceFail] = useState(false);
+  const [_, setTick] = useState(0);
+  const tick = () => setTick(t => t + 1);
 
-  function selectBlade(blade: Blade) {
-    if (blade.locked) return;
-    if (!slot1) setSlot1(blade);
-    else if (!slot2 && blade.id !== slot1.id) setSlot2(blade);
-  }
+  const inventory = getBladeInventory();
+  const whiteCount = inventory.filter(b => b.quality === "white").length;
+  const expOrbs = getExpOrbInventory();
+  const greenExp = expOrbs.find(e => e.quality === "green")?.count ?? 0;
+  const rate = getWhiteGreenForgeRate();
+  const cfg = getForgeConfig("white", "green");
+  const greenCfg = getBladeQualityConfig("green");
 
-  function clearSlot(slot: 1 | 2) {
-    if (slot === 1) setSlot1(null);
-    else setSlot2(null);
-    setResult(null);
-  }
-
-  function doForge() {
-    if (!slot1 || !slot2 || slot1.id === slot2.id) return;
-    if (slot1.quality !== slot2.quality) return;
-
-    setAnimating(true);
-    setResult(null);
-
-    // 短延迟制造动画感
-    setTimeout(() => {
-      const res = forgeBlades(slot1.id, slot2.id);
-      if (res) {
-        setResult({
-          success: res.success,
-          name: res.resultBlade?.name,
-          quality: res.resultBlade?.quality,
-          affix: res.resultBlade?.affix ?? undefined,
-          exp: res.expReward,
-        });
-        if (res.success && res.resultBlade) {
-          // 自动给新刀随机词缀
-          const affix = getRandomAffixForQuality(res.resultBlade.quality);
-          if (affix) res.resultBlade.affix = affix;
-        }
-      }
-      setInventory(getBladeInventory());
-      setSlot1(null);
-      setSlot2(null);
-      setAnimating(false);
-    }, 400);
-  }
-
-  const sameQuality = slot1 && slot2 && slot1.quality === slot2.quality;
-  const canForge = slot1 && slot2 && sameQuality && !animating;
+  const doForge = () => {
+    if (whiteCount < 2) { setResult("白刀胚不足，需要2把"); return; }
+    const r = forgeWhiteToGreen(forceSuccess || undefined, forceFail || undefined);
+    if (r.success) {
+      setResult(`炼器成功！获得 ${r.blade?.name ?? "青锋刀"}`);
+    } else {
+      setResult(`炼器失败，获得 ${r.expOrbs ?? 1} 颗${greenCfg?.qualityName ?? "绿"}经验球。成功率提升至${Math.round(r.newRate * 100)}%`);
+    }
+    setForceSuccess(false);
+    setForceFail(false);
+    tick();
+  };
 
   return (
-    <section className="screen forge-screen">
+    <div className="forge-screen">
       <div className="forge-header">
         <button className="forge-back" onClick={onBack}>← 返回</button>
-        <h1>炼器炉</h1>
+        <h2>{greenCfg?.bladeName ?? "青锋刀"}炼器</h2>
       </div>
 
-      {/* 合成槽 */}
-      <div className="forge-slots">
-        <div className="forge-slot" onClick={() => clearSlot(1)}>
-          {slot1 ? (
-            <div className="forge-blade-card" style={{ borderColor: QUALITY_META[slot1.quality]?.color }}>
-              <span className="forge-blade-quality" style={{ color: QUALITY_META[slot1.quality]?.color }}>
-                {QUALITY_META[slot1.quality]?.label}
-              </span>
-              <span className="forge-blade-name">{slot1.name}</span>
-              <span className="forge-blade-lv">Lv.{slot1.level}</span>
-            </div>
-          ) : (
-            <span className="forge-slot-empty">选择材料</span>
-          )}
+      <div className="forge-recipe">
+        <div className="forge-mats">
+          <span>凡铁刀胚 ×2</span>
+          <span className="forge-arrow">→</span>
+          <span>{greenCfg?.bladeName ?? "青锋刀"} ×1</span>
         </div>
-        <span className="forge-plus">+</span>
-        <div className="forge-slot" onClick={() => clearSlot(2)}>
-          {slot2 ? (
-            <div className="forge-blade-card" style={{ borderColor: QUALITY_META[slot2.quality]?.color }}>
-              <span className="forge-blade-quality" style={{ color: QUALITY_META[slot2.quality]?.color }}>
-                {QUALITY_META[slot2.quality]?.label}
-              </span>
-              <span className="forge-blade-name">{slot2.name}</span>
-              <span className="forge-blade-lv">Lv.{slot2.level}</span>
-            </div>
-          ) : (
-            <span className="forge-slot-empty">选择材料</span>
-          )}
-        </div>
+        <div className="forge-rate">成功率：{Math.round(rate * 100)}%{rate >= 1 ? " (已达上限)" : ""}</div>
+        <div className="forge-fail-reward">失败获得：{greenCfg?.qualityName ?? "绿"}经验球 ×{cfg?.failureExpCount ?? 1}</div>
       </div>
 
-      {/* 概率 + 合成按钮 */}
-      {sameQuality && (
-        <div className="forge-info">
-          {slot1.quality !== "white" && slot1.quality !== "green" && (
-            <p className="forge-chance">
-              成功率：{Math.min(100, (SYNTHESIS_RULES[slot1.quality]?.baseChance ?? 0))}%
-              （每次失败提升{SYNTHESIS_RULES[slot1.quality]?.increment ?? 0}%）
-            </p>
-          )}
-          <p className="forge-hint">
-            {slot1.quality === "white" || slot1.quality === "green"
-              ? "100%必成"
-              : `保底${SYNTHESIS_RULES[slot1.quality]?.maxAttempts ?? 7}次`}
-          </p>
+      <div className="forge-resources">
+        <span>白刀胚：{whiteCount}</span>
+        <span>绿经验：{greenExp}</span>
+      </div>
+
+      <button className="forge-btn" onClick={doForge} disabled={whiteCount < 2}>炼器（消耗2白刀胚）</button>
+
+      {result && <div className="forge-result">{result}</div>}
+
+      {debug && (
+        <div className="forge-debug">
+          <h4>Debug工具</h4>
+          <button onClick={() => { addWhiteBladeMaterial(2); tick(); showToast("+2白刀"); }}>+2白刀</button>
+          <button onClick={() => { addWhiteBladeMaterial(10); tick(); showToast("+10白刀"); }}>+10白刀</button>
+          <button onClick={() => { addGreenExpOrb(1); tick(); showToast("+1绿经验"); }}>+1绿经验</button>
+          <button onClick={() => { addGreenExpOrb(10); tick(); showToast("+10绿经验"); }}>+10绿经验</button>
+          <button onClick={() => { setForceSuccess(!forceSuccess); showToast(forceSuccess ? "取消强制成功" : "下次炼器强制成功"); }}>{forceSuccess ? "⏹取消强制成功" : "⭐强制成功"}</button>
+          <button onClick={() => { setForceFail(!forceFail); showToast(forceFail ? "取消强制失败" : "下次炼器强制失败"); }}>{forceFail ? "⏹取消强制失败" : "💀强制失败"}</button>
+          <button onClick={() => { resetForgeFailCount(); tick(); showToast("已重置概率"); }}>重置概率</button>
         </div>
       )}
 
-      <button
-        className={`forge-button ${canForge ? "" : "disabled"}`}
-        onClick={doForge}
-        disabled={!canForge}
-      >
-        {animating ? "炼器中..." : "开始炼器"}
-      </button>
-
-      {/* 合成结果 */}
-      {result && (
-        <div className={`forge-result ${result.success ? "success" : "fail"}`}>
-          {result.success ? (
-            <>
-              <p className="forge-result-title">✨ 炼器成功！</p>
-              <p className="forge-result-name" style={{ color: result.quality ? QUALITY_META[result.quality]?.color : "#fff" }}>
-                {result.name}
-              </p>
-              <p className="forge-result-quality">
-                {result.quality ? QUALITY_META[result.quality]?.label : ""}
-                {result.affix ? ` · ${result.affix}` : ""}
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="forge-result-title">💥 炼器失败</p>
-              <p className="forge-result-exp">获得 +{result.exp} 点{slot1?.quality ? QUALITY_META[slot1.quality]?.label : ""}经验</p>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* 刀库列表 */}
-      <div className="forge-inventory">
-        <h2>刀库 ({inventory.length}把)</h2>
-        <div className="forge-inventory-grid">
-          {inventory.map((blade) => {
-            const meta = QUALITY_META[blade.quality];
-            const selected = slot1?.id === blade.id || slot2?.id === blade.id;
-            return (
-              <div
-                key={blade.id}
-                className={`forge-inv-card ${selected ? "selected" : ""} ${blade.locked ? "locked" : ""}`}
-                style={{ borderColor: meta?.color }}
-                onClick={() => selectBlade(blade)}
-              >
-                <span className="forge-inv-quality" style={{ color: meta?.color }}>
-                  {meta?.label}
-                </span>
-                <span className="forge-inv-name">{blade.name}</span>
-                <span className="forge-inv-lv">Lv.{blade.level}</span>
-                {blade.affix && <span className="forge-inv-affix">{blade.affix}</span>}
-                {blade.locked && <span className="forge-inv-locked">🔒</span>}
-                {/* 等级进度条 */}
-                {blade.level < 40 && (
-                  <div className="forge-lv-progress">
-                    <div className="forge-lv-bar" style={{ width: `${(blade.exp / getExpCostForLevel(blade.level)) * 100}%` }} />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          {inventory.length === 0 && <p className="forge-empty">刀库为空，去主线获取刀吧</p>}
-        </div>
-      </div>
-    </section>
+      <div id="forge-toast" className="bag-toast"/>
+    </div>
   );
 }

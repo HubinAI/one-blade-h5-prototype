@@ -32,7 +32,7 @@ import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetab
 import { playSwing, playHit, playExplosion, playPlayerHurt, playEliteKill, playVictory, initSfx, setBgmBattle, setBgmElite, setBgmOff, playRouletteTick } from "./sfx";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
-import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, getEquippedBlades, saveDefaultWhiteBlade } from "./services/ProgressionService";
+import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, initBladeGrowthDefaults, getEquippedBladeInfo, equipBladeToSlot } from "./services/ProgressionService";
 import { BLADE_BASE_STATS, QUALITY_ORDER } from "./config/synthesis";
 import { BLADE_QUALITY_CONFIG, BLADE_LEVEL_CONFIG, SLOT_CONFIG, getBladeQualityConfig, getBladeLevelConfig, computeBladeAttack, type BladeQualityId } from "./config/bladeGrowth";
 import type { Blade } from "./services/BladeService";
@@ -440,6 +440,7 @@ export class Game {
   // 0814-01C: bladeGrowth装备状态
   private _mainBladeQuality: BladeQualityId = "green";
   private _mainBladeLevel = 1;
+  /** 0814-03: SUB_1攻击读取装备实例 */
   private _sub1BladeQuality: BladeQualityId = "green";
   private _sub1BladeLevel = 1;
   /** debug：临时覆盖等级（0=不覆盖） */
@@ -1054,16 +1055,23 @@ export class Game {
     // V0731005: 初始化进度宝箱（Boss模式跳过）
     this._initProgressChest();
 
-    // 0814-01C: bladeGrowth副刀初始化
-    // SUB_1 = 青锋Lv1, CD从GREEN.subCooldown读取
-    // SUB_2 = 未开放 (不参与战斗)
-    const greenCfg = getBladeQualityConfig("green")!;
-    const slot1Cfg = SLOT_CONFIG.SUB_1;
-    this.subBlades = [{ quality: "green", name: greenCfg.bladeName, level: 1, affix: null, id: "sub1_default", exp: 0, locked: false }];
-    this.subBladeCooldowns = [greenCfg.subCooldown];
-    const firstReadyDelay = [4];
-    this.subBladeTimers = [greenCfg.subCooldown - firstReadyDelay[0]];
-    this.subBladeAnim = this.subBlades.map((_, i) => {
+    // 0814-03: bladeGrowth装备实例初始化
+    initBladeGrowthDefaults();
+    const equips = getEquippedBladeInfo();
+    this._mainBladeQuality = (equips.main?.quality ?? "green") as BladeQualityId;
+    this._mainBladeLevel = equips.main?.level ?? 1;
+    this._playerStats = createDefaultPlayerStats(computeBladeAttack(this._mainBladeQuality, this._mainBladeLevel));
+    
+    // SUB_1 from equipped blade instance
+    if (equips.sub1 && equips.sub1.quality) {
+      this._sub1BladeQuality = equips.sub1.quality as BladeQualityId;
+      this._sub1BladeLevel = equips.sub1.level;
+      const greenCfg = getBladeQualityConfig("green")!;
+      this.subBlades = [{ quality: equips.sub1.quality, name: equips.sub1.name, level: equips.sub1.level, affix: null, id: equips.sub1.id, exp: 0, locked: false }];
+      this.subBladeCooldowns = [greenCfg.subCooldown];
+      const firstReadyDelay = [4];
+      this.subBladeTimers = [greenCfg.subCooldown - firstReadyDelay[0]];
+      this.subBladeAnim = this.subBlades.map((_, i) => {
       const home = this.getSubBladeFloatingPos(i);
       return {
       slot: i,
@@ -1077,11 +1085,11 @@ export class Game {
       rotation: 0,
       visualScale: 1,
       hitApplied: false,
-      // P4.1A.13: 左刀横扫路径
       currentPos: { ...home },
       attackStartPos: { ...home },
       attackEndPos: { ...home }
     }});
+    }
     this.subBladeReadyAfterAction = this.subBlades.map(() => false);
     this.weakpointMarks = new Map();
     this._breakReadyNotified = false;

@@ -70,6 +70,8 @@ export type PlayerProgress = {
   equippedSubBladeIds: string[];
   /** 各品质合成失败计数 */
   synFailCount: Record<string, number>;
+  /** 0814-03: 经验球库存 key=品质 value=数量 */
+  expOrbs: Record<string, number>;
   /** 已完成的突破ID列表 */
   clearedBreakthroughs: string[];
   /** P3.10：显式待突破ID */
@@ -204,6 +206,7 @@ function createDefaultProgress(): PlayerProgress {
     equippedMainBladeId: null,
     equippedSubBladeIds: [],
     synFailCount: {},
+    expOrbs: {},
     clearedBreakthroughs: [],
     pendingBreakthroughId: null,
   };
@@ -1294,50 +1297,205 @@ function addExpOrbToProgress(progress: PlayerProgress, quality: Quality, count: 
   (progress as any).expOrbs = orbs;
 }
 
-/** 第一次进入武器背包时确保有默认白刀 + 主刀已装备 + 2把默认副刀 */
-export function saveDefaultWhiteBlade(): void {
+// ═════════════════════════════════════════════════════════════════
+// 0814-03 bladeGrowth 炼器 + 经验 + 装备系统
+// ═════════════════════════════════════════════════════════════════
+import { getForgeConfig, getBladeLevelConfig, getBladeQualityConfig, BLADE_QUALITY_CONFIG, BLADE_LEVEL_CONFIG, FORGE_CONFIG } from "../config/bladeGrowth";
+import type { BladeQualityId } from "../config/bladeGrowth";
+
+let _bladeIdCounter = Date.now();
+
+/** 0814-03: 初始化默认装备 — MAIN青锋Lv1 + SUB_1青锋Lv1 */
+export function initBladeGrowthDefaults(): void {
   const progress = readProgress();
-  // 第一次进入时确保有默认绿刀+主刀已装备+2把默认副刀
   let changed = false;
-  if (!progress.blades.some(b => b.quality === "green")) {
-    const main = generateBlade("green");
-    main.name = "常锋";
-    progress.blades.push(main);
-    if (!progress.equippedMainBladeId) progress.equippedMainBladeId = main.id;
-    // 两把默认副刀（绿色）
-    if (progress.equippedSubBladeIds.length < 2) {
-      const sub1 = createBlade("木短刀", "green");
-      const sub2 = createBlade("铁短刀", "green");
-      progress.blades.push(sub1, sub2);
-      progress.equippedSubBladeIds = [sub1.id, sub2.id];
-    }
-    changed = true;
-  } else if (!progress.equippedMainBladeId) {
-    // 有绿刀但没装备，装备第一把
-    const firstGreen = progress.blades.find(b => b.quality === "green");
-    if (firstGreen) progress.equippedMainBladeId = firstGreen.id;
-    changed = true;
-  }
-  // 确保至少有2把副刀装备（防止旧存档只装备1把）
-  const validSubs = progress.equippedSubBladeIds.filter(id =>
-    progress.blades.some(b => b.id === id)
-  );
-  if (validSubs.length < 2) {
-    const need = 2 - validSubs.length;
-    const namePool = ["木短刀", "铁短刀", "玄铁匕", "短匕"];
+
+  // 确保有至少2把青锋刀（MAIN + SUB_1各一把独立实例）
+  const greenBlades = progress.blades.filter(b => b.quality === "green");
+  if (greenBlades.length < 2) {
+    const need = 2 - greenBlades.length;
     for (let i = 0; i < need; i++) {
-      const sub = generateBlade("green");
-      sub.name = namePool[validSubs.length + i] ?? "副刀";
-      progress.blades.push(sub);
-      validSubs.push(sub.id);
+      const b = createBladeInstance("green", 1);
+      progress.blades.push(b);
+      if (i === 0 && !progress.equippedMainBladeId) progress.equippedMainBladeId = b.id;
+      if (i === 1 && progress.equippedSubBladeIds.length === 0) progress.equippedSubBladeIds = [b.id];
     }
-    progress.equippedSubBladeIds = validSubs;
     changed = true;
   }
+
+  // 确保 MAIN 已装备
+  if (!progress.equippedMainBladeId || !progress.blades.find(b => b.id === progress.equippedMainBladeId)) {
+    const g = progress.blades.find(b => b.quality === "green" && b.id !== progress.equippedSubBladeIds[0]);
+    if (g) { progress.equippedMainBladeId = g.id; changed = true; }
+  }
+
+  // 确保 SUB_1 已装备
+  if (progress.equippedSubBladeIds.length === 0 || !progress.blades.find(b => b.id === progress.equippedSubBladeIds[0])) {
+    const g = progress.blades.find(b => b.quality === "green" && b.id !== progress.equippedMainBladeId);
+    if (g) { progress.equippedSubBladeIds = [g.id]; changed = true; }
+  }
+
   if (changed) writeProgress(progress);
 }
 
-// ═════════════════════════════════════════════════════════════════
+/** 0814-03: 创建独立装备实例 */
+function createBladeInstance(quality: BladeQualityId, level: number): Blade {
+  const cfg = getBladeQualityConfig(quality);
+  _bladeIdCounter++;
+  return {
+    id: `b_${_bladeIdCounter}`,
+    name: cfg?.bladeName ?? "刀",
+    quality: quality as any,
+    level,
+    exp: 0,
+    affix: null,
+    locked: false,
+  };
+}
+
+/** 0814-03: 白→绿炼器，基于ForgeConfig */
+export function forgeWhiteToGreen(forceSuccess?: boolean, forceFail?: boolean): { success: boolean; blade?: Blade; expOrbs?: number; newRate: number } {
+  const progress = readProgress();
+  const cfg = getForgeConfig("white", "green");
+  if (!cfg) return { success: false, newRate: 0 };
+
+  const whiteCount = progress.blades.filter(b => b.quality === "white").length;
+  if (whiteCount < cfg.materialCount) return { success: false, newRate: 0 };
+
+  // 计算成功率
+  const failCount = progress.synFailCount["white"] ?? 0;
+  let rate = cfg.baseSuccessRate + failCount * cfg.failureRateAdd;
+  rate = Math.min(rate, cfg.maxSuccessRate);
+
+  let success: boolean;
+  if (forceSuccess) success = true;
+  else if (forceFail) success = false;
+  else if (failCount === 0 && cfg.tutorialFirstGuaranteedSuccess) success = true;
+  else success = Math.random() < rate;
+
+  // 消耗2把白刀
+  const consumed = progress.blades.filter(b => b.quality === "white").slice(0, cfg.materialCount);
+  progress.blades = progress.blades.filter(b => !consumed.find(c => c.id === b.id));
+
+  if (success) {
+    const blade = createBladeInstance(cfg.targetQuality, 1);
+    progress.blades.push(blade);
+    progress.synFailCount["white"] = 0;
+    writeProgress(progress);
+    return { success: true, blade, newRate: cfg.baseSuccessRate };
+  } else {
+    const expCount = cfg.failureExpCount;
+    addExpOrbToProgress(progress, cfg.failureExpQuality as Quality, expCount);
+    progress.synFailCount["white"] = (progress.synFailCount["white"] ?? 0) + 1;
+    const newRate2 = cfg.baseSuccessRate + (progress.synFailCount["white"] ?? 0) * cfg.failureRateAdd;
+    writeProgress(progress);
+    return { success: false, expOrbs: expCount, newRate: Math.min(newRate2, cfg.maxSuccessRate) };
+  }
+}
+
+/** 0814-03: 用经验球升级指定刀 */
+export function upgradeBladeExp(bladeId: string): { ok: boolean; newLevel?: number; cost?: number; reason?: string } {
+  const progress = readProgress();
+  const blade = progress.blades.find(b => b.id === bladeId);
+  if (!blade) return { ok: false, reason: "刀不存在" };
+  if (blade.level >= 40) return { ok: false, reason: "已满级" };
+
+  const lvlCfg = getBladeLevelConfig(blade.level);
+  if (!lvlCfg) return { ok: false, reason: "等级配置缺失" };
+
+  const cost = lvlCfg.expCostToNextLevel;
+  const orbs = (progress.expOrbs?.[blade.quality] ?? 0);
+  if (orbs < cost) return { ok: false, reason: `经验不足，需要${cost}颗，当前${orbs}颗` };
+
+  progress.expOrbs[blade.quality] = orbs - cost;
+  blade.level += 1;
+  writeProgress(progress);
+  return { ok: true, newLevel: blade.level, cost };
+}
+
+/** 0814-03: 重置指定刀，100%返还历史投入经验 */
+export function resetBladeExp(bladeId: string): { ok: boolean; refunded: number; reason?: string } {
+  const progress = readProgress();
+  const blade = progress.blades.find(b => b.id === bladeId);
+  if (!blade) return { ok: false, refunded: 0, reason: "刀不存在" };
+  if (blade.level <= 1) return { ok: false, refunded: 0, reason: "已是Lv1" };
+
+  let totalExp = 0;
+  for (let lv = 1; lv < blade.level; lv++) {
+    const cfg = getBladeLevelConfig(lv);
+    if (cfg) totalExp += cfg.expCostToNextLevel;
+  }
+
+  blade.level = 1;
+  blade.exp = 0;
+  progress.expOrbs[blade.quality] = (progress.expOrbs[blade.quality] ?? 0) + totalExp;
+  writeProgress(progress);
+  return { ok: true, refunded: totalExp };
+}
+
+/** 0814-03: 添加白刀材料 */
+export function addWhiteBladeMaterial(count: number): void {
+  const progress = readProgress();
+  for (let i = 0; i < count; i++) progress.blades.push(createBladeInstance("white", 1));
+  writeProgress(progress);
+}
+
+/** 0814-03: 添加绿经验球 */
+export function addGreenExpOrb(count: number): void {
+  const progress = readProgress();
+  progress.expOrbs["green"] = (progress.expOrbs["green"] ?? 0) + count;
+  writeProgress(progress);
+}
+
+/** 0814-03: 重置炼器概率 */
+export function resetForgeFailCount(): void {
+  const progress = readProgress();
+  progress.synFailCount["white"] = 0;
+  writeProgress(progress);
+}
+
+/** 0814-03: 获取当前白→绿成功率 */
+export function getWhiteGreenForgeRate(): number {
+  const progress = readProgress();
+  const cfg = getForgeConfig("white", "green");
+  if (!cfg) return 0;
+  const failCount = progress.synFailCount["white"] ?? 0;
+  return Math.min(cfg.baseSuccessRate + failCount * cfg.failureRateAdd, cfg.maxSuccessRate);
+}
+
+/** 0814-03: 获取未装备的绿刀 */
+export function getUnequippedGreenBlades(): Blade[] {
+  const progress = readProgress();
+  const equipped = new Set([progress.equippedMainBladeId, ...progress.equippedSubBladeIds].filter(Boolean));
+  return progress.blades.filter(b => b.quality === "green" && !equipped.has(b.id));
+}
+
+/** 0814-03: 获取装备信息 */
+export function getEquippedBladeInfo(): { main: Blade | null; sub1: Blade | null } {
+  const progress = readProgress();
+  return {
+    main: progress.blades.find(b => b.id === progress.equippedMainBladeId) ?? null,
+    sub1: progress.blades.find(b => b.id === progress.equippedSubBladeIds[0]) ?? null,
+  };
+}
+
+/** 0814-03: 装备刀到指定槽位，被替换的刀回库 */
+export function equipBladeToSlot(bladeId: string, slot: "MAIN" | "SUB_1"): boolean {
+  const progress = readProgress();
+  const blade = progress.blades.find(b => b.id === bladeId);
+  if (!blade || blade.quality === "white") return false;
+  // 不能同时占两个槽
+  if (slot === "MAIN" && blade.id === progress.equippedSubBladeIds[0]) return false;
+  if (slot === "SUB_1" && blade.id === progress.equippedMainBladeId) return false;
+
+  if (slot === "MAIN") {
+    progress.equippedMainBladeId = bladeId;
+  } else {
+    progress.equippedSubBladeIds = [bladeId];
+  }
+  writeProgress(progress);
+  return true;
+}// ═════════════════════════════════════════════════════════════════
 // 今日Buff 系统
 // ═════════════════════════════════════════════════════════════════
 const STORE_KEY_TODAY = "one_blade_today_buffs";

@@ -22,7 +22,7 @@ const TIPS_POOL: MenuTip[] = [
   { text: "BOSS战前先练满刀势，胜算更高", minFloor: 5, pendingGateOnly: true },
   { text: "图鉴会记录你击杀过的所有敌人" },
   { text: "Boss图鉴满后可开启对应的成就奖励", minFloor: 5, pendingGateOnly: true },
-  { text: "精品以上的刀可以相互合成升级" },
+  { text: "两把同品质刀，可炼成更高品质" },
   { text: "挂机奖励每分钟自动累积1份" }
 ];
 

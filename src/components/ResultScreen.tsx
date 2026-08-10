@@ -16,7 +16,7 @@ function getFailReason(result: BattleResult): string {
   if (result.kills === 0) return "没有及时挥刀";
   if (result.maxSingleBlade <= 3) return "单刀击杀过少，积蓄刀势再挥刀";
   if (result.explosiveCount === 0) return "没有利用火药兵连锁爆炸";
-  return "双拳难敌四手，试试提升装备";
+  return "炼刀变强，再战此关";
 }
 
 // 0809-11F-4C: 输入锁时长
