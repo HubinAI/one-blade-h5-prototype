@@ -13,6 +13,7 @@ type MainMenuProps = {
   onRestoreStamina: () => void;
   onRanking: () => void;
   onBag: () => void;
+  onIdle?: () => void;
   onDebug: () => void;
   appVersion: string;
   pendingGate?: { breakthroughName: string; unlockText: string; breakthroughId: string } | null;
@@ -27,6 +28,7 @@ export function MainMenu({
   onRestoreStamina,
   onRanking,
   onBag,
+  onIdle,
   onDebug,
   appVersion,
   pendingGate,
@@ -125,7 +127,8 @@ export function MainMenu({
         {!pendingGate && (
           <button className="v3-idle-reward-btn"
             onClick={() => {
-              showToast("挂机系统升级中，敬请期待");
+              if (onIdle) onIdle();
+              else showToast("挂机系统升级中，敬请期待");
             }}>
             <span className="v3-idle-reward-icon">🛍</span>
             <span className="v3-idle-reward-label">挂机</span>

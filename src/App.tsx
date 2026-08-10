@@ -12,7 +12,7 @@ import { PauseOverlay } from "./components/PauseOverlay";
 import { Codex } from "./components/Codex";
 import ArmoryScreen from "./components/ArmoryScreen";
 import IdlePopup from "./components/IdlePopup";
-import { isArmoryUnlocked } from "./game/services/ProgressionService";
+import { isArmoryUnlocked, isIdleUnlocked } from "./game/services/ProgressionService";
 import { ChallengeScreen } from "./components/ChallengeScreen";
 import { TeamScreen } from "./components/TeamScreen";
 import { RankingScreen } from "./components/RankingScreen";
@@ -355,6 +355,7 @@ export default function App() {
           onRestoreStamina={handleRestoreStamina}
           onRanking={() => setScreen("ranking")}
           onBag={() => { if (isArmoryUnlocked()) setScreen("bag"); else setScreen("menu"); }}
+          onIdle={() => { if (isIdleUnlocked()) setScreen("idle"); }}
           onDebug={() => setScreen("debug")}
           appVersion={appVersion}
           pendingGate={pendingGate ? { breakthroughName: pendingGate.breakthroughName, unlockText: pendingGate.unlockText, breakthroughId: pendingGate.breakthroughId } : null}

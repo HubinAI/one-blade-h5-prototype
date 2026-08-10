@@ -1951,3 +1951,19 @@ export function debugIdleClear(): void {
   progress.idleAccumulatedSeconds = 0;
   writeProgress(progress);
 }
+
+/** 0814-04C: 一键重置为新号状态 (debug) */
+export function debugResetToNewPlayer(): void {
+  const fresh = createDefaultProgress();
+  fresh.blades = [createBladeInstance("green", 1)];
+  fresh.equippedMainBladeId = fresh.blades[0].id;
+  fresh.equippedSubBladeIds = [];
+  fresh.clearedFloorRewards = [];
+  fresh.clearedBreakthroughs = [];
+  fresh.expOrbs = {};
+  fresh.synFailCount = {};
+  fresh.idleAccumulatedSeconds = 0;
+  fresh.lastIdleCollectAt = Date.now();
+  fresh.pendingBreakthroughId = null;
+  writeProgress(fresh);
+}

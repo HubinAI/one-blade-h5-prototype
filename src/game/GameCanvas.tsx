@@ -157,6 +157,8 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
         gameRef.current?.setDebugSub1ForceEnable();
       } else if (event.key === "0") {
         gameRef.current?.restartLevel1();
+      } else if (event.key === "`") {
+        import("../game/services/ProgressionService").then(m => { m.debugResetToNewPlayer(); window.location.reload(); });
       }
     };
 
