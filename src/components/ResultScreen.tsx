@@ -9,8 +9,6 @@ type ResultScreenProps = {
   onNext: () => void;
   onLevels: () => void;
   onHome: () => void;
-  onDoubleReward: () => void;
-  onAdChest: () => void;
   restartCurrentLevel: () => void;
 };
 
@@ -27,7 +25,6 @@ const INPUT_LOCK_MS = 1500;
 export function ResultScreen({
   result,
   onHome,
-  onDoubleReward,
   onRetry,
   restartCurrentLevel,
 }: ResultScreenProps) {
@@ -58,15 +55,6 @@ export function ResultScreen({
       incrementDailyAdCount("revive_extra_slash");
       setExtraSlashUsed(true);
       restartCurrentLevel();
-    }
-  };
-
-  const handleDoubleCoins = async () => {
-    setAdState("playing");
-    const ok = await showRewardedAdMock("double_coins");
-    setAdState("idle");
-    if (ok) {
-      onDoubleReward();
     }
   };
 
@@ -156,12 +144,8 @@ export function ResultScreen({
           </div>
         </div>
 
-        {/* 奖励 */}
+        {/* 奖励 — 0814-01A: 金币奖励已屏蔽 */}
         <div className="result-rewards-section" style={{ display: "flex", gap: 16 }}>
-          <div className="result-reward" style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <span className="result-reward-icon">🪙</span>
-            <span className="result-reward-amount" style={{ fontWeight: 600 }}>+{result.rewards.coins}</span>
-          </div>
           <div className="result-reward" style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <span className="result-reward-icon">⚔</span>
             <span className="result-reward-amount" style={{ fontWeight: 600 }}>+{result.rewards.battlePass}</span>
@@ -178,20 +162,9 @@ export function ResultScreen({
           </div>
         )}
 
-        {/* 按钮区 */}
+        {/* 按钮区 — 0814-01A: 金币翻倍按钮已屏蔽 */}
         <div className="result-actions-section" style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%", maxWidth: 260, marginTop: 4 }}>
-          {result.win ? (
-            result.canDoubleReward && !result.rewards.doubled && (
-              <button
-                className="result-btn ad-btn single-btn"
-                onClick={inputLocked ? undefined : handleDoubleCoins}
-                disabled={adState === "playing" || inputLocked}
-                style={{ ...btnStyle, padding: "12px 0", fontSize: 15, borderRadius: 10 }}
-              >
-                📺 看广告 ×2
-              </button>
-            )
-          ) : (
+          {!result.win && (
             <>
               {!extraSlashUsed && (
                 <button

@@ -8,26 +8,19 @@ import { MainMenu } from "./components/MainMenu";
 import { LevelSelect } from "./components/LevelSelect";
 import { ResultScreen } from "./components/ResultScreen";
 import { AdOverlay } from "./components/AdOverlay";
-import { UpgradeScreen } from "./components/UpgradeScreen";
 import { PauseOverlay } from "./components/PauseOverlay";
 import { Codex } from "./components/Codex";
 import { ForgeScreen } from "./components/ForgeScreen";
 import { ChallengeScreen } from "./components/ChallengeScreen";
 import { TeamScreen } from "./components/TeamScreen";
 import { RankingScreen } from "./components/RankingScreen";
-import { MerchantScreen } from "./components/MerchantScreen";
-import { IdleScreen } from "./components/IdleScreen";
 import { BladeBagScreen } from "./components/BladeBagScreen";
 import { DebugScreen } from "./components/DebugScreen";
 import type { ReviveOffer } from "./game/Game";
 import { AdService } from "./game/services/AdService";
 import {
   beginRun,
-  buyUpgrade,
   canShowInterstitial,
-  claimAdChest,
-  claimDoubleReward,
-  claimOfflineReward,
   earnShareStamina,
   getHomeSnapshot,
   isFreeBurstAvailable,
@@ -50,7 +43,6 @@ import {
   type RunMode
 } from "./game/services/ProgressionService";
 import { logEvent } from "./game/services/Analytics";
-import type { UpgradeId } from "./game/config/rewards";
 import { REWARD_CONFIG } from "./game/config/rewards";
 import { createFloorLevelConfig, MAIN_STAGE_GATES, getCurrentGate, RANK_ORDER } from "./game/config/synthesis";
 
@@ -104,8 +96,6 @@ export default function App() {
   const handleBossPhaseChange = (phase: BossPhaseState | null) => setBossPhase(phase);
   const [showCodex, setShowCodex] = useState(false);
   const [paused, setPaused] = useState(false);
-  const [showMerchant, setShowMerchant] = useState(false);
-  const [pendingMerchant, setPendingMerchant] = useState(false);
   const [breakthroughResult, setBreakthroughResult] = useState<{ name: string; id: string; unlockText: string } | null>(null);
   const pendingGate = getPendingGate();
 
@@ -224,10 +214,6 @@ export default function App() {
           }
         }
         setScreen("result");
-        // 主线通关后标记，待返回首页时弹商店
-        if (result.win && result.levelId >= 10000) {
-          setPendingMerchant(true);
-        }
       }, 180);
     },
     [refreshHome, home.highestFloor, currentMode]
@@ -281,22 +267,6 @@ export default function App() {
       startLevel(nextLevel);
     }
   }, [lastResult, maybeShowInterstitial, nextLevel, startLevel]);
-
-  const handleDoubleReward = useCallback(async () => {
-    if (!lastResult) return;
-    const success = await AdService.showRewardedAd("double_reward");
-    if (!success) return;
-    setLastResult(claimDoubleReward(lastResult));
-    refreshHome();
-  }, [lastResult, refreshHome]);
-
-  const handleAdChest = useCallback(async () => {
-    if (!lastResult) return;
-    const success = await AdService.showRewardedAd("bonus_chest");
-    if (!success) return;
-    setLastResult(claimAdChest(lastResult));
-    refreshHome();
-  }, [lastResult, refreshHome]);
 
   const handleRevive = useCallback(async () => {
     if (!reviveOffer) return;
@@ -355,23 +325,6 @@ export default function App() {
     startLevel(bossLevel, "challenge");
   }, [startLevel]);
 
-  const handleBuyUpgrade = useCallback(
-    (id: UpgradeId) => {
-      const result = buyUpgrade(id);
-      setHome(result.progress);
-    },
-    []
-  );
-
-  const handleClaimOffline = useCallback(() => {
-    setHome(claimOfflineReward(false));
-  }, []);
-
-  const handleClaimOfflineDouble = useCallback(async () => {
-    const success = await AdService.showRewardedAd("double_reward");
-    if (success) setHome(claimOfflineReward(true));
-  }, []);
-
   const restartBattle = useCallback(() => {
     setPaused(false);
     setRunIndex(beginRun(currentLevel.id, "normal"));
@@ -383,15 +336,7 @@ export default function App() {
   const goToMenu = useCallback(() => {
     refreshHome();
     setScreen("menu");
-    // 回到首页时，如果有待触发的神秘商人，则弹窗
-    setTimeout(() => {
-      setShowMerchant(prev => {
-        if (pendingMerchant && !prev) return true;
-        return prev;
-      });
-      setPendingMerchant(false);
-    }, 200);
-  }, [refreshHome, pendingMerchant]);
+  }, [refreshHome]);
 
   const quitBattle = useCallback(() => {
     setPaused(false);
@@ -409,7 +354,6 @@ export default function App() {
           onRestoreStamina={handleRestoreStamina}
           onRanking={() => setScreen("ranking")}
           onBag={() => setScreen("bag")}
-          onIdle={() => setScreen("idle")}
           onDebug={() => setScreen("debug")}
           appVersion={appVersion}
           pendingGate={pendingGate ? { breakthroughName: pendingGate.breakthroughName, unlockText: pendingGate.unlockText, breakthroughId: pendingGate.breakthroughId } : null}
@@ -419,31 +363,8 @@ export default function App() {
 
       {showCodex && <Codex onClose={() => setShowCodex(false)} />}
 
-      {showMerchant && (
-        <MerchantScreen
-          onClose={() => setShowMerchant(false)}
-          coins={home.coins}
-          onCoinChange={refreshHome}
-        />
-      )}
-
-      {screen === "upgrades" && (
-        <UpgradeScreen
-          home={home}
-          onBack={() => {
-            refreshHome();
-            setScreen("menu");
-          }}
-          onBuy={handleBuyUpgrade}
-        />
-      )}
-
       {screen === "forge" && (
         <ForgeScreen onBack={() => { refreshHome(); setScreen("menu"); }} />
-      )}
-
-      {screen === "idle" && (
-        <IdleScreen onBack={() => { refreshHome(); setScreen("menu"); }} />
       )}
 
       {screen === "bag" && (
@@ -535,8 +456,6 @@ export default function App() {
           onNext={handleNext}
           onLevels={goToMenu}
           onHome={goToMenu}
-          onDoubleReward={handleDoubleReward}
-          onAdChest={handleAdChest}
           restartCurrentLevel={restartBattle}
         />
       )}

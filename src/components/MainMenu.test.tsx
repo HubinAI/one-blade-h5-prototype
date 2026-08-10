@@ -36,7 +36,6 @@ describe("MainMenu - 首页突破入口", () => {
         onRestoreStamina={() => {}}
         onRanking={() => {}}
         onBag={() => {}}
-        onIdle={() => {}}
         onDebug={() => {}}
         appVersion="test"
         pendingGate={{
@@ -65,7 +64,6 @@ describe("MainMenu - 首页突破入口", () => {
         onRestoreStamina={() => {}}
         onRanking={() => {}}
         onBag={() => {}}
-        onIdle={() => {}}
         onDebug={() => {}}
         appVersion="test"
         pendingGate={null}

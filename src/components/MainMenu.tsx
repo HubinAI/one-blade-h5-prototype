@@ -13,7 +13,6 @@ type MainMenuProps = {
   onRestoreStamina: () => void;
   onRanking: () => void;
   onBag: () => void;
-  onIdle: () => void;
   onDebug: () => void;
   appVersion: string;
   pendingGate?: { breakthroughName: string; unlockText: string; breakthroughId: string } | null;
@@ -28,7 +27,6 @@ export function MainMenu({
   onRestoreStamina,
   onRanking,
   onBag,
-  onIdle,
   onDebug,
   appVersion,
   pendingGate,
@@ -41,19 +39,9 @@ export function MainMenu({
   // 关卡信息
   const stageName = getStageNameByFloor(Math.max(1, home.highestFloor));
 
-  // 挂机奖励计数（每分钟加1，最多60个=1小时）
-  // 自动累积挂机收益到 idleCoins/blades（每分钟一次，无须玩家点击）
-  const [, forceUpdate] = useState({});
+  // 0814-01A: 静默挂机收益累积（每分钟一次），玩家层无金币输出
   useEffect(() => {
-    // 立即跑一次 + 每分钟跑
-    const tick = () => {
-      const result = claimAutoIdle();
-      if (result.added > 0) {
-        // 飘字显示已自动收入
-        showToast(`+${result.added} 挂机收益`);
-      }
-      forceUpdate({});
-    };
+    const tick = () => { claimAutoIdle(); };
     tick();
     const timer = setInterval(tick, 60_000);
     return () => clearInterval(timer);
@@ -66,9 +54,6 @@ export function MainMenu({
   function showToast(text: string) {
     setToast(text);
     setTimeout(() => setToast((t) => (t === text ? null : t)), 2200);
-  }
-  function handleCoinPlus() {
-    showToast("挂机收益获得");
   }
   function handleStaminaPlus() {
     setStaminaModal(true);
@@ -94,13 +79,8 @@ export function MainMenu({
 
   return (
     <section className="screen menu-screen v3-home-screen">
-      {/* 1. 货币栏(顶部) */}
+      {/* 1. 货币栏(顶部) — 0814-01A: 金币已屏蔽 */}
       <div className="v3-currency-bar">
-        <div className="v3-currency-pill" onClick={handleCoinPlus}>
-          <span className="v3-currency-icon coin-icon" />
-          <span className="v3-currency-num">{home.coins}</span>
-          <span className="v3-currency-plus">+</span>
-        </div>
         <div className="v3-currency-pill stamina" onClick={handleStaminaPlus}>
           <span className="v3-currency-icon bun-icon" />
           <span className="v3-currency-num">{home.stamina}/{home.staminaMax}</span>
@@ -145,17 +125,10 @@ export function MainMenu({
         {!pendingGate && (
           <button className="v3-idle-reward-btn"
             onClick={() => {
-              if (unlockedLevel < 2) {
-                showToast("通关第2关后解锁挂机收益");
-                return;
-              }
-              onIdle();
+              showToast("挂机系统升级中，敬请期待");
             }}>
             <span className="v3-idle-reward-icon">🛍</span>
             <span className="v3-idle-reward-label">挂机</span>
-            {home.offlineCoins > 0 && (
-              <span className="v3-idle-reward-badge">{home.offlineCoins}</span>
-            )}
           </button>
         )}
       </div>
