@@ -47,25 +47,25 @@ export const BLADE_QUALITY_CONFIG: Record<BladeQualityId, BladeQualityConfig | n
   // ══ 本轮正式配置 ══
   white: {
     qualityId: "white",
-    qualityName: "凡品",
+    qualityName: "白色",
     bladeName: "凡铁刀胚",
     equipable: false,
-    baseAttack: 70,           // 不可装备，占位值
+    baseAttack: 70,
     mainMomentumEfficiency: 1.0,
-    subCooldown: 99,          // 不可装备，占位值
+    subCooldown: 99,
     appearanceId: "",
   },
   green: {
     qualityId: "green",
-    qualityName: "精炼",
+    qualityName: "绿色",
     bladeName: "青锋刀",
     equipable: true,
-    baseAttack: 100,          // 绿Lv1 = 100
+    baseAttack: 100,
     mainMomentumEfficiency: 1.0,
-    subCooldown: 5.0,         // 绿副刀CD 5.0s
+    subCooldown: 5.0,
     appearanceId: "",
   },
-  // ══ 后续品质预留占位 ══
+  // 后续品质已预留 qualityName+bladeName，正式配置留 null，接入时填写完整
   blue: null,
   purple: null,
   orange: null,
