@@ -34,7 +34,7 @@ export default function ItemDetailModal({ item, onClose, onRefresh }: Props) {
         {isBlade && (
           <div className="idm-props">
             <div className="idm-prop-row"><span>主刀攻击</span><span>{atk}</span></div>
-            <div className="idm-prop-row"><span>刀势效率</span><span>{(getBladeQualityConfig(quality)?.mainMomentumEfficiency ?? 1) * 100}%</span></div>
+            <div className="idm-prop-row"><span>刀势效率</span><span>{Math.round((getBladeQualityConfig(quality)?.mainMomentumEfficiency ?? 1) * 100)}%</span></div>
             <div className="idm-prop-row"><span>副刀伤害</span><span>{subDmg}</span></div>
             <div className="idm-prop-row"><span>副刀冷却</span><span>{getBladeQualityConfig(quality)?.subCooldown ?? 0}s</span></div>
           </div>

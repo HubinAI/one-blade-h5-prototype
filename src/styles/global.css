@@ -7655,9 +7655,8 @@ h1 {
 .arm-modal-title { font-size:22px;font-weight:800;color:#ffd35a;margin-bottom:12px;flex-shrink:0; }
 /* reward grid: internal scroll only, hidden scrollbar */
 .arm-reward-grid { display:flex;flex-wrap:wrap;gap:6px;justify-content:center;flex:1 1 auto;overflow-y:auto;max-height:60vh;padding:2px 0;
-  scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.15) transparent; }
-.arm-reward-grid::-webkit-scrollbar { width:4px; }
-.arm-reward-grid::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.12);border-radius:2px; }
+  scrollbar-width:none;-ms-overflow-style:none; }
+.arm-reward-grid::-webkit-scrollbar { display:none;width:0;height:0; }
 .arm-rw-card { width:48px;height:48px;border:2px solid;border-radius:10px;display:flex;align-items:center;justify-content:center; }
 .arm-rw-card.pop-bling { animation:arm-bling 0.4s ease-out; }
 .arm-rw-blade { font-size:24px;line-height:1; }
