@@ -127,10 +127,10 @@ export function MainMenu({
         {!pendingGate && (
           <button className="v3-idle-reward-btn"
             onClick={() => {
-              if (onIdle) onIdle();
-              else showToast("挂机系统升级中，敬请期待");
+              if (unlockedLevel >= 2) { if (onIdle) onIdle(); }
+              else showToast("通关第2关后解锁挂机");
             }}>
-            <span className="v3-idle-reward-icon">🛍</span>
+            <span className="v3-idle-reward-icon">{unlockedLevel >= 2 ? "🛍" : "🔒"}</span>
             <span className="v3-idle-reward-label">挂机</span>
           </button>
         )}
@@ -162,8 +162,8 @@ export function MainMenu({
           <div className="v3-side-icon">🏯</div>
           <div className="v3-side-label">排行榜</div>
         </button>
-        <button className="v3-side-btn" onClick={onBag}>
-          <div className="v3-side-icon forge-icon">⚒</div>
+        <button className="v3-side-btn" onClick={() => { if (unlockedLevel >= 3) onBag(); else showToast("通关第3关后解锁炼器合成"); }}>
+          <div className="v3-side-icon forge-icon">{unlockedLevel >= 3 ? "⚒" : "🔒"}</div>
           <div className="v3-side-label">炼器合成</div>
         </button>
       </div>
