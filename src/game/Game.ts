@@ -708,7 +708,7 @@ export class Game {
       this.bladeMomentumMax = BLADE_MOMENTUM_CONFIG.baseMax;
     } else {
       // V0730001: 统一刀势 — 普通第1关初始 40%（40/100）
-      const isLevel1 = this.isLogicalLevel1() && this.runContext.mode !== "freeBurst";
+      const isNormalLine = this.isNormalMainline() && this.runContext.mode !== "freeBurst";
       if (this.runContext.mode === "freeBurst") {
         this.energy = BALANCE.swordEnergy.max;
       } else if (isNormalLine) {
@@ -5943,7 +5943,7 @@ export class Game {
     AudioService.slashHit();
     // 0814-01C-0.1: 统一伤害飘字
     this.addText(target.x, target.y - 18, `-${Math.max(1, Math.ceil(damage))}`, "#ff7b6e", 16, 0.8);
-    if (isLevel1) this.triggerHitStop(0.07, 0.07);
+    if (isNormalLine) this.triggerHitStop(0.07, 0.07);
     // 0814-01C-0.2: 旧副刀affix系统已删除
   }
 
@@ -6021,7 +6021,7 @@ export class Game {
     if (!this._act1Triggered && this.elapsed >= 15) {
       this._act1Triggered = true;
       const isNormalLine = this.isNormalMainline();
-      if (!isLevel1) {
+      if (!isNormalLine) {
         this.triggerMomentumBurst();
       }
     }
@@ -6332,7 +6332,7 @@ export class Game {
     // ── 决定是否触发事件波（20%概率，同局不重复，第1波不触发）──
     // V0730002: 第1关关闭随机事件潮
     const isNormalLine = this.isNormalMainline();
-    const triggerEvent = !isLevel1 && this.wavesSpawned > 1 && Math.random() < 0.2;
+    const triggerEvent = this.getLogicalFloor() >= 2 && this.wavesSpawned > 1 && Math.random() < 0.2;
     // 事件波按关卡解锁
     // P3.9：使用逻辑层数，避免动态主线 level.id=10000+floor 误触发
     const e = this.getLogicalFloor();
