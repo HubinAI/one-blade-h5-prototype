@@ -28,6 +28,7 @@ import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles"
 import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, resolveDamage, resolveThreatDamage, type PlayerRunStats, type DamageRequest, type DamageResult, type DamageSourceType } from "./systems/damageSystem";
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
+import { getEnemyFinalHp } from "./config/mainlineNumeric";
 import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, inertiaEase, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS, SHADOW_MOVE_DURATION, SHADOW_SPEED_REF, SHADOW_MOVE_DURATION_MIN, SHADOW_MOVE_DURATION_MAX, SHADOW_STAGGER_MS, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
 import { playSwing, playHit, playExplosion, playPlayerHurt, playEliteKill, playVictory, initSfx, setBgmBattle, setBgmElite, setBgmOff, playRouletteTick } from "./sfx";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
@@ -2732,10 +2733,14 @@ export class Game {
   /** 0807-11B-3: 统一HP计算入口 */
   private getEnemyBaseHp(kind: EnemyKind, oldHp: number): number {
     if (this.gameMode !== "normal") return oldHp;
-    if (!this.isLogicalLevel1()) return oldHp;
-    const et = (kind === 'infantry' || kind === 'shield' || kind === 'powder' || kind === 'core') ? 'infantry' as const : null;
+    const kindMap: Record<string, string | undefined> = {
+      infantry:"infantry", shield:"shield", powder:"powder", core:"core",
+      splitter:"splitter", tractor:"tractor"
+    };
+    const et = kindMap[kind];
     if (!et) return oldHp;
-    return calcFinalHp(this.level.id, et, this._currentStageNode);
+    const floor = this.getLogicalFloor();
+    return getEnemyFinalHp(floor, et, getNodeConfig(this._currentStageNode).hpMultiplier);
   }
 
   /** 0814-01C: 主刀攻击力来自 bladeGrowth 配置 */
