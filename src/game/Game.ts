@@ -388,7 +388,7 @@ export class Game {
   /** V0811064: 氛围将护盾纯派生 — 统计实时可攻击护卫 */
   private getAuraGuardState(auraEnemy: Enemy): number {
     const others = this.enemies.filter(e =>
-      e.alive && e !== auraEnemy && e.kind !== "elite" && e.kind !== "boss" && e.kind !== "fireRing"
+      e.alive && e !== auraEnemy && e.kind !== "elite" && e.kind !== "boss"
       && isEnemyCombatTargetable(e)
     );
     return Math.min(6, others.length);
