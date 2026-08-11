@@ -1,69 +1,65 @@
 /**
- * V0811039: 主线1~180关数值公式化配置
- * 公式参数集中管理，不逐关手写
+ * V0811043: 主线数值配置 + GrowthCurve 二次曲线
+ * 唯一源：主线BaseHP / 品质攻击锚点 / 速度 / 密度
  */
 export interface MainlineNumericConfig {
-  baseHpStart: number;
-  hpGrowth: number;
-  baseAttackStart: number;
-  attackGrowth: number;
-  speedMulBase: number;
-  speedMulPerFloor: number;
-  speedMulMax: number;
-  densityMulBase: number;
-  densityMulPerFloor: number;
-  densityMulMax: number;
+  growthA: number; growthB: number; growthC: number;
+  baseAttackStart: number; attackGrowth: number;
+  speedMulBase: number; speedMulPerFloor: number; speedMulMax: number;
+  densityMulBase: number; densityMulPerFloor: number; densityMulMax: number;
 }
 
 export const MAINLINE_NUMERIC_CONFIG: MainlineNumericConfig = {
-  baseHpStart: 100,
-  hpGrowth: 1.015,
-  baseAttackStart: 10,
-  attackGrowth: 1.008,
-  speedMulBase: 0.98,
-  speedMulPerFloor: 0.0021,
-  speedMulMax: 1.35,
-  densityMulBase: 1.00,
-  densityMulPerFloor: 0.0025,
-  densityMulMax: 1.45,
+  growthA: 0.4, growthB: 4, growthC: 10,
+  baseAttackStart: 10, attackGrowth: 1.008,
+  speedMulBase: 0.98, speedMulPerFloor: 0.0021, speedMulMax: 1.35,
+  densityMulBase: 1.00, densityMulPerFloor: 0.0025, densityMulMax: 1.45,
 };
 
-// ── 乘数表 ──
-export const ENEMY_TYPE_HP_MULTIPLIER: Record<string, number> = {
-  infantry: 0.75,
-  powder:   0.80,
-  tractor:  0.85,
-  splitter: 0.90,
-  core:     0.95,
-  shield:   1.20,
-};
+const Cfg = MAINLINE_NUMERIC_CONFIG;
 
-// ── 公式函数 ──
-const C = MAINLINE_NUMERIC_CONFIG;
-
-export function getBaseHp(floor: number): number {
-  return Math.round(C.baseHpStart * Math.pow(C.hpGrowth, floor - 1));
+/** GrowthCurve = round(a*n² + b*n + c), n = floor-1 */
+export function growthCurve(floor: number): number {
+  const n = floor - 1;
+  return Math.round(Cfg.growthA * n * n + Cfg.growthB * n + Cfg.growthC);
 }
 
+/** 品质攻击锚点 — 品质对应基准关卡 */
+export const QUALITY_ATTACK_ANCHOR_FLOOR: Record<string, number> = {
+  green: 5, blue: 15, purple: 30, orange: 50, red: 75,
+  gold: 105, pink: 140, rainbow: 180,
+};
+
+export function getQualityBaseAttack(quality: string): number {
+  return growthCurve(QUALITY_ATTACK_ANCHOR_FLOOR[quality] ?? 1);
+}
+
+// 乘数表
+export const ENEMY_TYPE_HP_MULTIPLIER: Record<string, number> = {
+  infantry: 0.75, powder: 0.80, tractor: 0.85, splitter: 0.90,
+  core: 0.95, shield: 1.20,
+};
+
+// 公式
+export function getBaseHp(floor: number): number { return growthCurve(floor); }
+
 export function getBaseAttack(floor: number): number {
-  return Math.round(C.baseAttackStart * Math.pow(C.attackGrowth, floor - 1));
+  return Math.round(Cfg.baseAttackStart * Math.pow(Cfg.attackGrowth, floor - 1));
 }
 
 export function getSpeedMultiplier(floor: number): number {
-  return Math.min(C.speedMulMax, C.speedMulBase + (floor - 1) * C.speedMulPerFloor);
+  return Math.min(Cfg.speedMulMax, Cfg.speedMulBase + (floor - 1) * Cfg.speedMulPerFloor);
 }
 
 export function getDensityMultiplier(floor: number): number {
-  return Math.min(C.densityMulMax, C.densityMulBase + (floor - 1) * C.densityMulPerFloor);
+  return Math.min(Cfg.densityMulMax, Cfg.densityMulBase + (floor - 1) * Cfg.densityMulPerFloor);
 }
 
 export function getEnemyFinalHp(floor: number, enemyType: string, nodeHpMul: number): number {
-  const base = getBaseHp(floor);
-  const typeMul = ENEMY_TYPE_HP_MULTIPLIER[enemyType] ?? 1.0;
-  return Math.round(base * typeMul * nodeHpMul);
+  return Math.round(growthCurve(floor) * (ENEMY_TYPE_HP_MULTIPLIER[enemyType] ?? 1.0) * nodeHpMul);
 }
 
-// ── 境界区间 ──
+// 境界区间
 export const REALM_ZONES = [
   { name: "未入境", start: 1, end: 5 },
   { name: "练气",   start: 6, end: 15 },

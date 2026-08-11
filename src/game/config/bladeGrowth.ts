@@ -233,11 +233,11 @@ export function getBladeLevelConfig(level: number): BladeLevelConfig {
 }
 
 /** 计算指定品质+等级的最终攻击 */
+import { getQualityBaseAttack } from "./mainlineNumeric";
+
 export function computeBladeAttack(qualityId: BladeQualityId, level: number): number {
-  const q = getBladeQualityConfig(qualityId);
-  if (!q) throw new Error(`[bladeGrowth] Quality not configured: ${qualityId}`);
   const l = getBladeLevelConfig(level);
-  return q.baseAttack * l.attackMultiplier;
+  return getQualityBaseAttack(qualityId) * l.attackMultiplier;
 }
 
 /** 根据槽位ID获取槽位配置 */
