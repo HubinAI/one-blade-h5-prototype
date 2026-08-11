@@ -28,7 +28,7 @@ import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles"
 import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, resolveDamage, resolveThreatDamage, type PlayerRunStats, type DamageRequest, type DamageResult, type DamageSourceType } from "./systems/damageSystem";
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
-import { getEnemyFinalHp } from "./config/mainlineNumeric";
+import { getEnemyFinalHp, mainlineGrowthCurve, phaseEnemyCount, phaseSpeedMul, genericEliteHp, postEdictTotal } from "./config/mainlineNumeric";
 import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, inertiaEase, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS, SHADOW_MOVE_DURATION, SHADOW_SPEED_REF, SHADOW_MOVE_DURATION_MIN, SHADOW_MOVE_DURATION_MAX, SHADOW_STAGGER_MS, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
 import { playSwing, playHit, playExplosion, playPlayerHurt, playEliteKill, playVictory, initSfx, setBgmBattle, setBgmElite, setBgmOff, playRouletteTick } from "./sfx";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
@@ -467,6 +467,7 @@ export class Game {
   /** 0807-11B-2: 聚合缓冲区 */
   private _aggBuffer: Map<string, { damage: number; segments: number; hpLoss: number; pos: Vec2; lastTime: number; sourceType: string; targetType: string; killed: boolean; }> = new Map();
   private _aggTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  private _edictTriggerKills = 30;
   private _aggDebugTarget: { x: number; y: number; radius: number; hp: number; maxHp: number; alive: boolean; id: string; flash: number } | null = null;
   private _aggDebugTriple: { actionId: string; segments: number; damage: number } | null = null;
   private _lastSpawnedInfantryHp = 0;
@@ -8001,28 +8002,33 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.startEdictBurstOnce();
   }
 
-  /** P3.5：军令爆发只入队一次，状态统一由 postChestSequenceState 管理 */
+  /** V0811048: 军令预算驱动阈值 + Director floor profile */
   private startEdictBurstOnce() {
-    // 0807-11D: 防止导演双重重置
     if (postEdictDirector.active) return;
+    const floor = this.getLogicalFloor();
+    const hBase = mainlineGrowthCurve(floor);
+    const hMul = hBase / 100;
+    const p1C = phaseEnemyCount(floor, "P1");
+    const p2C = phaseEnemyCount(floor, "P2");
+    const p3C = phaseEnemyCount(floor, "P3");
+    const p1S = phaseSpeedMul(floor, "P1");
+    const p2S = phaseSpeedMul(floor, "P2");
+    const p3S = phaseSpeedMul(floor, "P3");
+    postEdictDirector.configureForFloor({ floor, p1Count:p1C, p2Count:p2C, p3Count:p3C, p1Speed:p1S, p2Speed:p2S, p3Speed:p3S, hpMultiplier:hMul });
+    // budget-based threshold
+    const budget = p1C + p2C + p3C;
+    this._edictTriggerKills = Math.round(budget * 0.55);
+    // legacy postChestWaves for compatibility
     const postWaves = this.getEffectivePostChestWaves();
-    if (postWaves.length <= 0) {
-      this.allPostChestWavesSpawned = true;
-      this.edictBurstRoundIndex = 0;
-      this.edictBurstRoundTotal = 0;
-      return;
-    }
-    // 避免重复入队，但初始化参数和状态必须执行
-    if (!this.edictPostWavesQueued) {
-      this.edictPostWavesQueued = true;
-    }
     this.battlePhase = "edict_burst";
     this.postChestStartAt = this.elapsed;
     this.postChestWaveIndex = 0;
     this.allPostChestWavesSpawned = false;
     this.edictBurstRoundIndex = 1;
-    this.edictBurstRoundTotal = postWaves.length;
-    // 0807-11D: 同时启动导演系统（chest_closed / chest_paused_skip 路径也会触发）
+    this.edictBurstRoundTotal = postWaves.length || 1;
+    if (!this.edictPostWavesQueued) {
+      this.edictPostWavesQueued = true;
+    }
     postEdictDirector.start();
     postEdictDirector.setPhaseStartMs(this.elapsed * 1000);
     this._directorPhaseStartMs = this.elapsed * 1000;

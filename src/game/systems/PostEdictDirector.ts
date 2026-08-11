@@ -228,11 +228,25 @@ export const SHADOW_STAGGER_MS = [0, 40, 80];
 
 // ═══════════════════ HP 配置 ═══════════════════
 
+/** 基础HP档位 (floor=1), 用于缩放 */
+const BASE_HP = { trash: 100, tough: 170, elite_wall: 260 };
+
 export const HP_TIERS: Record<HpTier, { hp: number; hpMul: number; scale: number; ringWidth: number }> = {
-  trash:      { hp: 100, hpMul: 1.33, scale: 1.00, ringWidth: 1.0 },
-  tough:      { hp: 170, hpMul: 2.27, scale: 1.06, ringWidth: 1.4 },
-  elite_wall: { hp: 260, hpMul: 3.47, scale: 1.11, ringWidth: 2.0 },
+  trash:      { hp: BASE_HP.trash, hpMul: 1.33, scale: 1.00, ringWidth: 1.0 },
+  tough:      { hp: BASE_HP.tough, hpMul: 2.27, scale: 1.06, ringWidth: 1.4 },
+  elite_wall: { hp: BASE_HP.elite_wall, hpMul: 3.47, scale: 1.11, ringWidth: 2.0 },
 };
+
+/** V0811048: 按楼层比例缩放HP_TIERS */
+export function scaleHpTiers(floorMultiplier: number): Record<HpTier, { hp: number; hpMul: number; scale: number; ringWidth: number }> {
+  return {
+    trash:      { ...HP_TIERS.trash,      hp: Math.round(BASE_HP.trash      * floorMultiplier) },
+    tough:      { ...HP_TIERS.tough,      hp: Math.round(BASE_HP.tough      * floorMultiplier) },
+    elite_wall: { ...HP_TIERS.elite_wall, hp: Math.round(BASE_HP.elite_wall * floorMultiplier) },
+  };
+}
+
+export function getBaseHpTiers(): typeof BASE_HP { return BASE_HP; }
 export const STANDARD_SLASH_DAMAGE = 125;
 
 /** 由 HP 反推 hpTier (仅用于敌人受伤前) */
@@ -516,6 +530,13 @@ interface PhaseConfig {
   approachCap: number;
 }
 
+export interface DirectorFloorProfile {
+  floor: number;
+  p1Count: number; p2Count: number; p3Count: number;
+  p1Speed: number; p2Speed: number; p3Speed: number;
+  hpMultiplier: number;
+}
+
 const PHASES: Record<DirectorPhase, PhaseConfig> = {
   P1: { phase:'P1', totalEnemies:24, speedMul:1.00, targetOnScreen:[10,14], hardCap:16, approachCap:12 },
   P2: { phase:'P2', totalEnemies:30, speedMul:1.25, targetOnScreen:[12,16], hardCap:18, approachCap:12 },
@@ -588,6 +609,16 @@ export class PostEdictDirector {
     this._active = true;
     this._lastReason = 'start';
   }
+
+  /** V0811048: 按楼层配置Director参数 */
+  configureForFloor(p: DirectorFloorProfile): void {
+    this._floorProfile = p;
+    PHASES.P1.totalEnemies = p.p1Count; PHASES.P2.totalEnemies = p.p2Count; PHASES.P3.totalEnemies = p.p3Count;
+    PHASES.P1.speedMul = p.p1Speed; PHASES.P2.speedMul = p.p2Speed; PHASES.P3.speedMul = p.p3Speed;
+    this._hpMultiplier = p.hpMultiplier;
+  }
+  private _floorProfile: DirectorFloorProfile | null = null;
+  private _hpMultiplier = 1.0;
 
   get placementSeed(): number { return this._placementSeed; }
 
