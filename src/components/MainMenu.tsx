@@ -1,9 +1,10 @@
 import { useState, useMemo, useEffect } from "react";
 import type { HomeSnapshot } from "../game/services/ProgressionService";
-import { getEquippedBlades, restoreStaminaByAd, restoreStaminaByShare, readProgress, writeProgress, tickIdleAccumulation } from "../game/services/ProgressionService";
+import { getEquippedBlades, restoreStaminaByAd, restoreStaminaByShare, readProgress, writeProgress } from "../game/services/ProgressionService";
 import { getStageNameByFloor, MAIN_STAGE_GATES, getCurrentGate } from "../game/config/synthesis";
 import { IdleTreeAnimation, useRandomTip } from "./IdleTreeAnimation";
 import { ThunderGeneralPreview } from "./ThunderGeneralPreview";
+import { isIdleUnlocked } from "../game/idle/IdleService";
 
 type MainMenuProps = {
   unlockedLevel: number;
@@ -40,15 +41,6 @@ export function MainMenu({
 
   // 关卡信息
   const stageName = getStageNameByFloor(Math.max(1, home.highestFloor));
-
-  // 0814-01A: 静默挂机收益累积（每分钟一次），玩家层无金币输出
-  useEffect(() => {
-    const tick = () => { tickIdleAccumulation(); };
-    tick();
-    const timer = setInterval(tick, 60_000);
-    return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // 货币+号点击交互
   const [staminaModal, setStaminaModal] = useState(false);
@@ -127,10 +119,10 @@ export function MainMenu({
         {!pendingGate && (
           <button className="v3-idle-reward-btn"
             onClick={() => {
-              if (unlockedLevel >= 2) { if (onIdle) onIdle(); }
+              if (isIdleUnlocked()) { if (onIdle) onIdle(); }
               else showToast("通关第2关后解锁挂机");
             }}>
-            <span className="v3-idle-reward-icon">{unlockedLevel >= 2 ? "🛍" : "🔒"}</span>
+            <span className="v3-idle-reward-icon">{isIdleUnlocked() ? "🛍" : "🔒"}</span>
             <span className="v3-idle-reward-label">挂机</span>
           </button>
         )}
