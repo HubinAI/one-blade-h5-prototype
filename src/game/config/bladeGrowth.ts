@@ -143,7 +143,7 @@ export interface SlotConfig {
 
 export const SLOT_CONFIG: Record<BladeSlotId, SlotConfig> = {
   MAIN:  { slotId: "MAIN",  damageCoeff: 1.0,  unlockFloor: 0,   unlockText: "" },
-  SUB_1: { slotId: "SUB_1", damageCoeff: 0.28, unlockFloor: 3,   unlockText: "通关第3关解锁" },
+  SUB_1: { slotId: "SUB_1", damageCoeff: 0.28, unlockFloor: 1,   unlockText: "通关第1关解锁" },
   SUB_2: { slotId: "SUB_2", damageCoeff: 0.22, unlockFloor: 999, unlockText: "练气阶段解锁" },
 };
 

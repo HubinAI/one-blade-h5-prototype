@@ -1858,7 +1858,7 @@ export function isArmoryUnlocked(): boolean { return readProgress().highestFloor
 export function hasClearedFloor(floorId: number): boolean {
   return readProgress().clearedFloorRewards.includes(floorId);
 }
-export function isSub1Unlocked(): boolean { return hasClearedFloor(3); }
+export function isSub1Unlocked(): boolean { return hasClearedFloor(1); }
 export function isForgeUnlocked(): boolean { return hasClearedFloor(1); }
 export function isIdleUnlocked(): boolean { return hasClearedFloor(2); }
 
