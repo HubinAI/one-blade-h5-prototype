@@ -2735,7 +2735,7 @@ export class Game {
     if (!this.isLogicalLevel1()) return oldHp;
     const et = (kind === 'infantry' || kind === 'shield' || kind === 'powder' || kind === 'core') ? 'infantry' as const : null;
     if (!et) return oldHp;
-    return calcFinalHp(1, et, this._currentStageNode);
+    return calcFinalHp(this.level.id, et, this._currentStageNode);
   }
 
   /** 0814-01C: 主刀攻击力来自 bladeGrowth 配置 */
@@ -8621,7 +8621,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (this.postChestWaveIndex === 1) return 75;
     if (this.postChestWaveIndex === 2) return 83;
     if (this.postChestWaveIndex === 3) return 86;
-    return calcFinalHp(1, 'infantry', this._currentStageNode);
+    return calcFinalHp(this.level.id, 'infantry', this._currentStageNode);
   }
 
   burstSlashFloats(hits: { damage: number; x: number; y: number; isKill: boolean; isElite?: boolean }[], refAtk: number, slashId: string): void {
@@ -11812,7 +11812,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       `levelBaseHp: ${getLevelBaseStats(1).baseHp}`,
       `typeHpMul: ${getEnemyTypeHpMultiplier('infantry')}`,
       `nodeHpMul: ${getNodeConfig(this._currentStageNode).hpMultiplier}`,
-      `finalHp: ${calcFinalHp(1, 'infantry', this._currentStageNode)}`,
+      `finalHp: ${calcFinalHp(this.level.id, 'infantry', this._currentStageNode)}`,
       `entryEndY: ${z.entryEndY}`,
       `midfieldStartY: ${z.midfieldStartY}`,
       `harvestStartY: ${z.harvestStartY}`,

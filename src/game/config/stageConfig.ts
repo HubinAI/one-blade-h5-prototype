@@ -2,9 +2,10 @@
  * 0807-11B-3: 关卡与节点配置底层
  */
 import { BattlePhase } from '../types';
+import { getBaseHp, getBaseAttack, ENEMY_TYPE_HP_MULTIPLIER, getEnemyFinalHp } from './mainlineNumeric';
 
 // ═══════════════════════════════════════
-// 关卡基础属性
+// 关卡基础属性（公式化，V0811039）
 // ═══════════════════════════════════════
 
 export interface LevelBaseStats {
@@ -12,31 +13,18 @@ export interface LevelBaseStats {
   baseAttack: number;
 }
 
-const LEVEL_BASE_STATS: Record<number, LevelBaseStats> = {
-  1: { baseHp: 100, baseAttack: 10 },
-};
-
 export function getLevelBaseStats(levelId: number): LevelBaseStats {
-  return LEVEL_BASE_STATS[levelId] ?? { baseHp: 100, baseAttack: 10 };
+  return { baseHp: getBaseHp(levelId), baseAttack: getBaseAttack(levelId) };
 }
 
 // ═══════════════════════════════════════
 // 怪物类型倍率
 // ═══════════════════════════════════════
 
-export type EnemyType = 'infantry' | 'shield' | 'powder' | 'core' | 'elite' | 'boss';
-
-const ENEMY_TYPE_HP: Record<EnemyType, number> = {
-  infantry: 0.75,
-  shield: 1.0,
-  powder: 0.80,
-  core: 0.70,
-  elite: 1.0,  // 精英独立配置，不套公式
-  boss: 1.0,    // Boss独立配置，不套公式
-};
+export type EnemyType = 'infantry' | 'shield' | 'powder' | 'core' | 'splitter' | 'tractor' | 'elite' | 'boss';
 
 export function getEnemyTypeHpMultiplier(type: EnemyType): number {
-  return ENEMY_TYPE_HP[type] ?? 1.0;
+  return ENEMY_TYPE_HP_MULTIPLIER[type] ?? 1.0;
 }
 
 // ═══════════════════════════════════════
@@ -74,10 +62,7 @@ export function getNodeConfig(node: StageNode): NodeConfig {
 // ═══════════════════════════════════════
 
 export function calcFinalHp(levelId: number, enemyType: EnemyType, node: StageNode): number {
-  const lev = getLevelBaseStats(levelId);
-  const typeMul = getEnemyTypeHpMultiplier(enemyType);
-  const nodeMul = getNodeConfig(node).hpMultiplier;
-  return Math.round(lev.baseHp * typeMul * nodeMul);
+  return getEnemyFinalHp(levelId, enemyType, getNodeConfig(node).hpMultiplier);
 }
 
 // ═══════════════════════════════════════
