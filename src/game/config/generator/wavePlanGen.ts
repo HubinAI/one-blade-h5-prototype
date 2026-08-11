@@ -60,28 +60,22 @@ export function generateWavePlan(recipe: FloorRecipe): WavePlan {
 
   for (let w = 0; w < DEFAULT_WAVES; w++) {
     const weight = waveWeights[w];
-    let bc = w < DEFAULT_WAVES - 1 ? Math.round(baseQuota * weight) : baseRemaining;
+    if (w === DEFAULT_WAVES - 1) {
+      // Last wave cleans up all remaining
+      waves.push({ waveIndex: w + 1, baseCount: Math.max(0, baseRemaining), primary: Math.max(0, primaryRemaining), secondary: Math.max(0, secondaryRemaining), spawnWindow: [w * 4 + 2, w * 4 + 6] });
+      break;
+    }
+    let bc = Math.round(baseQuota * weight);
     let pc = 0, sc = 0;
-
-    // Allow special in waves 2-5 (index 1-4), rare in 0/5
     if (w >= 1 && w <= 4) {
-      const pAlloc = Math.round(primaryQuota * weight);
-      const sAlloc = Math.round(secondaryQuota * weight);
-      pc = Math.min(pAlloc, primaryRemaining);
-      sc = Math.min(sAlloc, secondaryRemaining);
+      pc = Math.min(Math.round(primaryQuota * weight), primaryRemaining);
+      sc = Math.min(Math.round(secondaryQuota * weight), secondaryRemaining);
       primaryRemaining -= pc;
       secondaryRemaining -= sc;
     }
-    bc = Math.max(0, Math.min(bc, baseRemaining));
+    bc = Math.min(bc, baseRemaining);
     baseRemaining -= bc;
-
-    waves.push({
-      waveIndex: w + 1,
-      baseCount: bc,
-      primary: pc,
-      secondary: sc,
-      spawnWindow: [w * 4 + 2, w * 4 + 6],
-    });
+    waves.push({ waveIndex: w + 1, baseCount: bc, primary: pc, secondary: sc, spawnWindow: [w * 4 + 2, w * 4 + 6] });
   }
 
   return { floor, seed, totalQuota, baseQuota, primaryQuota, secondaryQuota, waves, recipeSnapshot: recipe };
