@@ -7658,17 +7658,16 @@ h1 {
 /* 0814-03.8 ArmoryRewardModal + rate badge + Bling   */
 /* ═══════════════════════════════════════════════════ */
 .arm-modal-overlay { position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:400;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px); }
-.arm-modal { background:linear-gradient(180deg,#1e160c,#100c06);border:2px solid #ffd35a;border-radius:20px;padding:24px 20px;text-align:center;min-width:280px;max-width:96vw; }
-.arm-modal-title { font-size:24px;font-weight:800;color:#ffd35a;margin-bottom:18px;text-shadow:0 0 12px rgba(255,211,90,0.4); }
-/* icon grid reward — wraps multi-row */
-.arm-reward-grid { display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-bottom:16px;max-width:90vw; }
-.arm-reward-card { width:64px;height:84px;border:2px solid;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:rgba(22,18,12,0.85); }
-.arm-reward-card.pop-bling { animation:arm-bling 0.5s ease-out; }
-.arm-rw-icon { font-size:26px;line-height:1; }
-.arm-rw-ball { width:24px;height:24px;border-radius:50%; }
-.arm-rw-q { font-size:10px;font-weight:600; }
-.arm-rw-label { font-size:9px;color:#f6e7bd;line-height:1.1;text-align:center;word-break:keep-all;max-width:60px; }
-.arm-modal-close { background:rgba(255,211,90,0.2);border:1px solid #ffd35a;color:#ffd35a;padding:10px 28px;border-radius:10px;font-size:17px;font-weight:700;cursor:pointer;margin-top:8px; }
+.arm-modal { background:linear-gradient(180deg,#1e160c,#100c06);border:2px solid #ffd35a;border-radius:20px;padding:18px 14px;text-align:center;min-width:260px;max-width:94vw;max-height:82vh;overflow-y:auto; }
+.arm-modal-title { font-size:22px;font-weight:800;color:#ffd35a;margin-bottom:14px; }
+/* reward grid: 5-col max, no text, max-height+scroll */
+.arm-reward-grid { display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:14px;max-height:50vh;overflow-y:auto; }
+.arm-rw-card { width:48px;height:48px;border:2px solid;border-radius:10px;display:flex;align-items:center;justify-content:center; }
+.arm-rw-card.pop-bling { animation:arm-bling 0.4s ease-out; }
+.arm-rw-blade { font-size:24px;line-height:1; }
+.arm-rw-exp { width:32px;height:32px;border-radius:50%;border:2px solid;display:flex;align-items:center;justify-content:center; }
+@keyframes arm-bling { 0%{transform:scale(0.55);opacity:0;filter:brightness(2.5);}50%{transform:scale(1.15);opacity:1;filter:brightness(1.3);box-shadow:0 0 16px currentColor;}100%{transform:scale(1);opacity:1;filter:brightness(1);} }
+.arm-modal-close { background:rgba(255,211,90,0.2);border:1px solid #ffd35a;color:#ffd35a;padding:10px 28px;border-radius:10px;font-size:17px;font-weight:700;cursor:pointer; }
 /* rate badge — anchored to target via JS */
 .as-rate-badge { position:fixed;background:rgba(0,0,0,0.92);color:#ffd35a;font-size:15px;font-weight:800;padding:4px 12px;border-radius:6px;border:1px solid #ffd35a;z-index:300;pointer-events:none;white-space:nowrap; }
 /* merge target highlight */
@@ -7681,6 +7680,23 @@ h1 {
 .aet-item { border:2px solid;border-radius:10px;padding:6px 14px;display:flex;align-items:center;gap:6px;background:rgba(18,12,6,0.94);animation:pop-bling-fast 0.4s ease-out,aet-drift 1.4s ease-out forwards; }
 .aet-dot { width:20px;height:20px;border-radius:50%; }
 .aet-text { color:#f6e7bd;font-size:15px;font-weight:700; }
+/* ═══════════════════════════════════════════════════ */
+/* 0814-1013: Diamond slot layout + glow + aii badges  */
+/* ═══════════════════════════════════════════════════ */
+.as-equip-zone-diamond { display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-end;gap:8px;padding:8px 4px;position:relative; }
+.as-slot-diamond { border:2px solid rgba(255,255,255,0.1);border-radius:14px;padding:8px;text-align:center;cursor:pointer;transition:.15s; }
+.as-slot-diamond.main { width:100px;height:100px;order:1;margin-bottom:4px; }
+.as-slot-diamond.sub1 { width:72px;height:72px;order:0; }
+.as-slot-diamond.locked { width:72px;height:72px;order:2;border-color:#444;cursor:default;color:#555; }
+.as-slot-diamond .aii-wrap { margin:0 auto; }
+.as-slot-hint { display:block;font-size:10px;color:#666;margin-top:2px; }
+/* slot glow on valid drag target */
+.as-slot-diamond.slot-glow { border-color:#5bc0ff!important;box-shadow:0 0 16px rgba(91,192,255,0.5);animation:sg-pulse 0.5s ease-in-out infinite alternate; }
+@keyframes sg-pulse { from{box-shadow:0 0 8px rgba(91,192,255,0.4);}to{box-shadow:0 0 20px rgba(91,192,255,0.7);} }
+/* aii badges */
+.aii-lv { position:absolute;top:-2px;left:4px;font-size:9px;color:#ffd35a;background:rgba(0,0,0,0.8);padding:1px 4px;border-radius:3px;font-weight:700;line-height:1; }
+.aii-atk { position:absolute;bottom:-2px;left:50%;transform:translateX(-50%);font-size:9px;color:#ccc;background:rgba(0,0,0,0.8);padding:1px 5px;border-radius:3px;white-space:nowrap; }
+.aii-cnt { position:absolute;right:-2px;bottom:-2px;font-size:11px;color:#ffd35a;background:rgba(0,0,0,0.85);padding:1px 5px;border-radius:4px;font-weight:700; }
 @keyframes aet-drift { 0%{transform:translateY(0);opacity:1;}60%{transform:translateY(-18px);opacity:0.8;}100%{transform:translateY(-36px);opacity:0;} }
 /* ═══════════════════════════════════════════════════ */
 /* 0814-03.10 Simplified cards + detail modal           */

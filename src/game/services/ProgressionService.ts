@@ -1484,7 +1484,6 @@ export function forgeQualityBlades(quality: BladeQualityId): { pairs: number; su
   if (pairs < 1) return none;
   let ok = 0, ng = 0;
   const rewardEntries: ({type:"blade";quality:string;bladeName:string;level:number}|{type:"exp";quality:BladeQualityId;count:number})[] = [];
-  let expAdded = 0;
   for (let i = 0; i < pairs; i++) {
     const consumed = progress.blades.filter(b => b.quality === quality && !equipped.has(b.id)).slice(0, 2);
     progress.blades = progress.blades.filter(b => !consumed.find(c => c.id === b.id));
@@ -1499,12 +1498,12 @@ export function forgeQualityBlades(quality: BladeQualityId): { pairs: number; su
       rewardEntries.push({ type:"blade", quality:nb.quality, bladeName:nb.name, level:nb.level });
       progress.synFailCount[quality] = 0;
     } else {
-      ng++; expAdded += cfg.failureExpCount;
+      ng++;
       progress.expOrbs[cfg.failureExpQuality] = (progress.expOrbs[cfg.failureExpQuality] ?? 0) + cfg.failureExpCount;
+      rewardEntries.push({type:"exp",quality:cfg.failureExpQuality,count:cfg.failureExpCount});
       progress.synFailCount[quality] = fc + 1;
     }
   }
-  if(expAdded>0) rewardEntries.push({type:"exp", quality:cfg.failureExpQuality, count:expAdded});
   writeProgress(progress);
   return { pairs, successes: ok, fails: ng, targetQuality: cfg.targetQuality, rewardEntries };
 }
