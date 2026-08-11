@@ -14,6 +14,7 @@ export default function ItemDetailModal({ item, onClose, onRefresh }: Props) {
   const bs = isBlade ? (item as Blade) : null;
   const bc = meta?.color ?? "#888";
   const atk = bs ? Math.round(computeBladeAttack(quality, bs.level)) : 0;
+  const lvl = bs ? bs.level : 1;
 
   const handleReset = () => {
     if (!bs || bs.level < 2) return;
@@ -24,24 +25,37 @@ export default function ItemDetailModal({ item, onClose, onRefresh }: Props) {
   return (
     <div className="idm-overlay" onClick={onClose}>
       <div className="idm-panel" onClick={e => e.stopPropagation()}>
+        {/* Title bar */}
         <div className="idm-header">
           <span className="idm-title">道具详情</span>
           <button className="idm-close" onClick={onClose}>✕</button>
         </div>
+
+        {/* Summary row: icon | name, quality+lvl | reset */}
         <div className="idm-summary">
-          <div className="idm-icon" style={{borderColor:bc, color:bc}}>
-            {isBlade ? "⚔" : "●"}
-          </div>
+          {isBlade ? (
+            <div className="idm-icon" style={{borderColor:bc, color:bc}}>⚔</div>
+          ) : (
+            <div className="idm-icon-ball" style={{background:bc}} />
+          )}
           <div className="idm-info">
             <div className="idm-name">{isBlade ? (bs?.name ?? meta?.bladeName) : `${meta?.displayName}经验球`}</div>
-            <div className="idm-quality" style={{color:bc}}>{meta?.displayName}</div>
-            {isBlade && <div className="idm-stat">攻击力 {atk}</div>}
-            {isBlade && <div className="idm-stat">Lv.{bs?.level}</div>}
+            <div className="idm-q-lv">
+              <span style={{color:bc}}>{meta?.displayName}</span>
+              <span> Lv.{lvl}</span>
+            </div>
           </div>
+          {isBlade && bs && bs.level >= 2 && (
+            <button className="idm-reset-sm" onClick={handleReset}>重置</button>
+          )}
         </div>
+
+        {/* Description */}
         <div className="idm-desc">
           {isBlade ? `${meta?.displayName}品质刀胚锻造而成的武器。` : `用于升级${meta?.displayName}品质装备，拖到对应装备上可提升等级。`}
         </div>
+
+        {/* Properties (blade only) */}
         {isBlade && (
           <div className="idm-props">
             <div className="idm-prop-row"><span>主刀攻击</span><span>{atk}</span></div>
@@ -49,9 +63,6 @@ export default function ItemDetailModal({ item, onClose, onRefresh }: Props) {
             <div className="idm-prop-row"><span>副刀伤害</span><span>{Math.round(atk * 0.35)}</span></div>
             <div className="idm-prop-row"><span>副刀冷却</span><span>{getBladeQualityConfig(quality)?.subCooldown ?? 0}s</span></div>
           </div>
-        )}
-        {isBlade && bs && bs.level >= 2 && (
-          <button className="idm-reset" onClick={handleReset}>重置</button>
         )}
       </div>
     </div>

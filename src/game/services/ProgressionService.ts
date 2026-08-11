@@ -1473,18 +1473,17 @@ export function addGreenExpOrb(count: number): void {
 
 /** 0814-03.4R: 通用同品质批量炼器（任意quality→下一quality） */
 export function forgeQualityBlades(quality: BladeQualityId): { pairs: number; successes: number; fails: number; targetQuality: BladeQualityId | null;
-  createdBlades: {id:string;quality:string;name:string;level:number}[];
-  expReward: {quality: BladeQualityId; count: number} | null; } {
+  rewardEntries: ({type:"blade";quality:string;bladeName:string;level:number}|{type:"exp";quality:BladeQualityId;count:number})[]; } {
   const progress = readProgress();
   const cfg = getForgeConfigBySource(quality);
-  const none = { pairs: 0, successes: 0, fails: 0, targetQuality: null, createdBlades: [], expReward: null };
+  const none = { pairs: 0, successes: 0, fails: 0, targetQuality: null, rewardEntries: [] as any[] };
   if (!cfg) return none;
   const equipped = new Set([progress.equippedMainBladeId, ...progress.equippedSubBladeIds].filter(Boolean));
   const forgeable = progress.blades.filter(b => b.quality === quality && !equipped.has(b.id));
   const pairs = Math.floor(forgeable.length / 2);
   if (pairs < 1) return none;
   let ok = 0, ng = 0;
-  const createdBlades: {id:string;quality:string;name:string;level:number}[] = [];
+  const rewardEntries: ({type:"blade";quality:string;bladeName:string;level:number}|{type:"exp";quality:BladeQualityId;count:number})[] = [];
   let expAdded = 0;
   for (let i = 0; i < pairs; i++) {
     const consumed = progress.blades.filter(b => b.quality === quality && !equipped.has(b.id)).slice(0, 2);
@@ -1497,7 +1496,7 @@ export function forgeQualityBlades(quality: BladeQualityId): { pairs: number; su
       ok++;
       const nb = createBladeInstance(cfg.targetQuality, 1);
       progress.blades.push(nb);
-      createdBlades.push({id:nb.id, quality:nb.quality, name:nb.name, level:nb.level});
+      rewardEntries.push({ type:"blade", quality:nb.quality, bladeName:nb.name, level:nb.level });
       progress.synFailCount[quality] = 0;
     } else {
       ng++; expAdded += cfg.failureExpCount;
@@ -1505,8 +1504,9 @@ export function forgeQualityBlades(quality: BladeQualityId): { pairs: number; su
       progress.synFailCount[quality] = fc + 1;
     }
   }
+  if(expAdded>0) rewardEntries.push({type:"exp", quality:cfg.failureExpQuality, count:expAdded});
   writeProgress(progress);
-  return { pairs, successes: ok, fails: ng, targetQuality: cfg.targetQuality, createdBlades, expReward: expAdded>0?{quality:cfg.failureExpQuality,count:expAdded}:null };
+  return { pairs, successes: ok, fails: ng, targetQuality: cfg.targetQuality, rewardEntries };
 }
 
 /** 0814-03.4: 经验球合成 — floor(N/2)组二合，逐组用ForgeConfig计算 */

@@ -124,7 +124,12 @@ export default function ArmoryScreen({onBack,debug}:{onBack:()=>void;debug?:bool
     const te=document.elementFromPoint(e.clientX,e.clientY)as HTMLElement|null;
     const dE=te?.closest('[data-drop-key]')as HTMLElement|null;const rect=dE?.getBoundingClientRect()??null;
     const r=resolveDragAction(src,tgt,rect);
-    if(r.action==="FORGE"){const fr=forgeQualityBlades(src.quality);const items:RewardItem[]=[];for(const b of fr.createdBlades)items.push({label:bn(b.quality),quality:b.quality as BladeQualityId,isBlade:true});if(fr.expReward)items.push({label:`${qn(fr.expReward.quality)}经验球 ×${fr.expReward.count}`,quality:fr.expReward.quality,isBlade:false});if(items.length>0)setRewardItems(items);rf();}
+    if(r.action==="FORGE"){const fr=forgeQualityBlades(src.quality);const items:RewardItem[]=[];
+      for(const e of fr.rewardEntries){
+        if(e.type==="blade")items.push({label:e.bladeName,quality:e.quality as BladeQualityId,isBlade:true});
+        else items.push({label:`${qn(e.quality)}经验球 ×${e.count}`,quality:e.quality,isBlade:false});
+      }
+      if(items.length>0)setRewardItems(items);rf();}
     else if(r.action==="MERGE_EXP"){const mr=mergeExpOrbs(src.quality);const ers:{quality:BladeQualityId;count:number}[]=[];if(mr.successes>0&&mr.targetQuality)ers.push({quality:mr.targetQuality,count:mr.successes});if(mr.fails>0)ers.push({quality:src.quality,count:mr.fails});if(ers.length>0)setExpRewards(ers);rf();}
     else if(r.action==="EQUIP_MAIN"||r.action==="EQUIP_SUB1"){const slot=r.action==="EQUIP_MAIN"?"MAIN":"SUB_1";if(src.kind==="blade"){equipBladeToSlot(src.bladeId,slot);rf();}}
     else if(r.action==="UPGRADE_MAIN"||r.action==="UPGRADE_SUB1"){const bl=r.action==="UPGRADE_MAIN"?eq.main:eq.sub1;if(bl&&r.upgradeCanAfford){const u=upgradeBladeExp(bl.id);st(u.ok?`升级到 Lv${u.newLevel}!`:u.reason??"失败");rf();}else if(bl&&bl.level>=40)st("已满级");else if(bl)st("经验不足");else st("需要同品质经验球");}
@@ -169,7 +174,7 @@ export default function ArmoryScreen({onBack,debug}:{onBack:()=>void;debug?:bool
   const sa=sb?Math.round(computeBladeAttack(sb.quality as BladeQualityId,sb.level)):0;
 
   return(<div className="as-root">
-    {rewardItems&&<ArmoryRewardModal items={rewardItems} onClose={()=>setRewardItems(null)}/>}
+    {rewardItems&&<ArmoryRewardModal entries={rewardItems} onClose={()=>setRewardItems(null)}/>}
     {expRewards&&<ArmoryExpRewardToast rewards={expRewards} onDone={()=>setExpRewards(null)}/>}
     {detailItem&&<ItemDetailModal item={detailItem} onClose={()=>setDetailItem(null)} onRefresh={()=>{rf();setDetailItem(null);}}/>}
     <div className="as-header"><button className="as-back"onClick={onBack}>←</button><h2>装备</h2></div>
