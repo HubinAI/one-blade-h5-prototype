@@ -11168,26 +11168,15 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 右下角临时效果图标（鼓/魂/油）— 含圆形倒计时
     this.drawPickupBuffs(ctx);
 
-    // 0814-1032R: SUB_1仅第3关后绘制
+    // V0811036: 副刀槽始终显示, 解锁前显示锁+文案
+    const leftSlot = this.getSubBladeSlotLayout(0);
     if (isSub1Unlocked()) {
-      const leftSlot = this.getSubBladeSlotLayout(0);
-      const slotColor = 0x5bc0ff;
-      this.drawSubBladeSlot(ctx, 0, leftSlot.boxX, leftSlot.boxY, leftSlot.iconR, slotColor);
+      this.drawSubBladeSlot(ctx, 0, leftSlot.boxX, leftSlot.boxY, leftSlot.iconR, 0x5bc0ff);
+    } else {
+      this.drawLockedSlot(ctx, leftSlot.boxX, leftSlot.boxY, leftSlot.iconR, SLOT_CONFIG.SUB_1.unlockText);
     }
     const rightSlot = this.getSubBladeSlotLayout(1);
-    // SUB_2 锁定显示
-    ctx.save();
-    const rx = rightSlot.boxX, ry = rightSlot.boxY, rR = rightSlot.iconR;
-    ctx.fillStyle = "rgba(18, 16, 14, 0.92)";
-    ctx.beginPath(); ctx.arc(rx + rR, ry + rR, rR + 1, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(rx + rR, ry + rR, rR, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = "rgba(136, 136, 136, 0.4)";
-    ctx.font = '700 16px "Microsoft YaHei", sans-serif';
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText("🔒", rx + rR, ry + rR);
-    ctx.restore();
+    this.drawLockedSlot(ctx, rightSlot.boxX, rightSlot.boxY, rightSlot.iconR, SLOT_CONFIG.SUB_2.unlockText);
 
     // 刀势三段能量条 —— 屏幕底部居中（窄条），普通关与 Boss 关共用
     // V0730001: 统一使用 low/mid/high 档位，40%/70% 分界
@@ -11553,6 +11542,26 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.font = '700 11px "Microsoft YaHei", sans-serif';
     if (!blade) {
       ctx.fillText(genericLabel, x + iconR, y + iconR * 2 + 6);
+    }
+    ctx.restore();
+  }
+
+  /** V0811036: 锁定副刀槽绘制 (🔒 + 解锁文案) */
+  private drawLockedSlot(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, text: string) {
+    ctx.save();
+    ctx.fillStyle = "rgba(18, 16, 14, 0.92)";
+    ctx.beginPath(); ctx.arc(x + r, y + r, r + 1, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(x + r, y + r, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = "rgba(136, 136, 136, 0.4)";
+    ctx.font = '700 16px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("🔒", x + r, y + r);
+    if (text) {
+      ctx.fillStyle = "rgba(136,136,136,0.5)";
+      ctx.font = '10px "Microsoft YaHei", sans-serif';
+      ctx.fillText(text, x + r, y + r + r + 10);
     }
     ctx.restore();
   }

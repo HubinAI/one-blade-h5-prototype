@@ -136,26 +136,15 @@ export type BladeSlotId = "MAIN" | "SUB_1" | "SUB_2";
 
 export interface SlotConfig {
   slotId: BladeSlotId;
-  damageCoeff: number;     // 伤害系数（主刀=1.0，副刀=0.28）
-  unlockFloor: number;     // 解锁所需关卡（0=初始解锁）
+  damageCoeff: number;
+  unlockFloor: number;
+  unlockText: string;
 }
 
 export const SLOT_CONFIG: Record<BladeSlotId, SlotConfig> = {
-  MAIN: {
-    slotId: "MAIN",
-    damageCoeff: 1.0,
-    unlockFloor: 0,        // 初始即解锁
-  },
-  SUB_1: {
-    slotId: "SUB_1",
-    damageCoeff: 0.28,
-    unlockFloor: 3,        // 第3关解锁（首测）
-  },
-  SUB_2: {
-    slotId: "SUB_2",
-    damageCoeff: 0.28,
-    unlockFloor: 999,      // 暂未开放（练气前段开放）
-  },
+  MAIN:  { slotId: "MAIN",  damageCoeff: 1.0,  unlockFloor: 0,   unlockText: "" },
+  SUB_1: { slotId: "SUB_1", damageCoeff: 0.28, unlockFloor: 3,   unlockText: "通关第3关解锁" },
+  SUB_2: { slotId: "SUB_2", damageCoeff: 0.22, unlockFloor: 999, unlockText: "练气阶段解锁" },
 };
 
 // ---- 炼器（二合）配置 ----
