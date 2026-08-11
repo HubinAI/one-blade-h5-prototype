@@ -3902,8 +3902,7 @@ export class Game {
             frElite.hp = Math.max(0, frElite.hp - dmg);
             frElite.flash = Math.max(frElite.flash, 0.3);
             // V0811032R: HP归零立即击杀, 终止环循环
-            if (frElite.hp <= 0 && frElite.alive) {
-              frElite.alive = false;
+            if (frElite.hp <= 0) {
               this.handleDirectEnemyKilledBySystem(frElite, "system");
             }
             // 0809-11E-5A-1: 环伤用实际HP损失
