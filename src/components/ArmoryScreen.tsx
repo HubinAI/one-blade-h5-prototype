@@ -1,30 +1,31 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getBladeInventory, initBladeGrowthDefaults, getEquippedBladeInfo, equipBladeToSlot, upgradeBladeExp, getExpOrbInventory, readProgress } from "../game/services/ProgressionService";
 import { resetForgeFailCount, getForgeRate, addWhiteBladeMaterial, addGreenExpOrb, mergeExpOrbs, forgeQualityBlades } from "../game/services/ProgressionService";
-import { getBladeLevelConfig, computeBladeAttack, getForgeConfigBySource, QUALITY_META, type BladeQualityId, getSlotConfig } from "../game/config/bladeGrowth";
+import { getBladeLevelConfig, computeBladeAttack, getForgeConfigBySource, QUALITY_META, type BladeQualityId } from "../game/config/bladeGrowth";
 import type { Blade } from "../game/services/BladeService";
 import ArmoryRewardModal, { type RewardItem } from "./ArmoryRewardModal";
 import ArmoryExpRewardToast from "./ArmoryExpRewardToast";
 import ItemDetailModal from "./ItemDetailModal";
 import ArmoryItemIcon from "./armory/ArmoryItemIcon";
 
-/* ── QUALITY_META helpers ── */
+/* ── helpers ── */
 function qn(q:string){return QUALITY_META[q as BladeQualityId]?.displayName??q;}
 function qc(q:string){return QUALITY_META[q as BladeQualityId]?.color??"#888";}
 function bn(q:string){return QUALITY_META[q as BladeQualityId]?.bladeName??"刀";}
 const QO:BladeQualityId[]=["rainbow","pink","gold","red","orange","purple","blue","green","white"];
-const SLOT_IDS=["MAIN","SUB_1"] as const; type SlotId=typeof SLOT_IDS[number];
+const SLOT_IDS=["MAIN","SUB_1"]as const;type SlotId=typeof SLOT_IDS[number];
 function parseSlotId(raw:string|null|undefined):SlotId|null{return SLOT_IDS.includes(raw as any)?(raw as SlotId):null;}
+function isSlotUnlocked(s:SlotId):boolean{if(s==="MAIN")return true;return(readProgress().highestFloor??1)>=3;}
 
 type BpItem=Blade|{kind:"exp";quality:BladeQualityId;count:number;viewKey:string};
 function isE(i:BpItem):i is{kind:"exp";quality:BladeQualityId;count:number;viewKey:string}{return(i as any).kind==="exp";}
 function isB(i:BpItem):i is Blade{return!isE(i);}
-function buildBackpack():BpItem[]{const inv=getBladeInventory();const eq=getEquippedBladeInfo();const eIds=new Set([eq.main?.id,eq.sub1?.id].filter(Boolean));const orbs=getExpOrbInventory();const items:BpItem[]=[];for(const q of QO){const o=orbs.find(e=>e.quality===q);if(!o||o.count<=0)continue;if(o.count===1)items.push({kind:"exp",quality:q as BladeQualityId,count:1,viewKey:`exp:${q}:0`});else{const a=Math.ceil(o.count/2),b=Math.floor(o.count/2);items.push({kind:"exp",quality:q as BladeQualityId,count:a,viewKey:`exp:${q}:0`});items.push({kind:"exp",quality:q as BladeQualityId,count:b,viewKey:`exp:${q}:1`});}}for(const q of QO)for(const b of inv.filter(b2=>b2.quality===q&&!eIds.has(b2.id)))items.push(b);return items;}
+function buildBackpack():BpItem[]{const inv=getBladeInventory();const eq=getEquippedBladeInfo();const eIds=new Set([eq.main?.id,eq.sub1?.id].filter(Boolean));const orbs=getExpOrbInventory();const items:BpItem[]=[];for(const q of QO){const o=orbs.find(e=>e.quality===q);if(!o||o.count<=0)continue;if(o.count===1)items.push({kind:"exp",quality:q,count:1,viewKey:`exp:${q}:0`});else{items.push({kind:"exp",quality:q,count:Math.ceil(o.count/2),viewKey:`exp:${q}:0`});items.push({kind:"exp",quality:q,count:Math.floor(o.count/2),viewKey:`exp:${q}:1`});}}for(const q of QO)for(const b of inv.filter(b2=>(b2.quality as string)===q&&!eIds.has(b2.id)))items.push(b);return items;}
 
 type DragSource={kind:"blade";bladeId:string;quality:BladeQualityId}|{kind:"exp";quality:BladeQualityId;viewKey:string};
 type DropTarget={kind:"blade";bladeId:string;quality:BladeQualityId}|{kind:"exp";quality:BladeQualityId;viewKey:string}|{kind:"slot";slot:SlotId;quality?:BladeQualityId}|{kind:"none"};
 type DragAction="FORGE"|"MERGE_EXP"|"EQUIP_MAIN"|"EQUIP_SUB1"|"UPGRADE_MAIN"|"UPGRADE_SUB1"|"NONE";
-type ReasonCode="NONE"|"SAME_QUALITY_REQUIRED"|"WRONG_EXP_QUALITY"|"NO_RECIPE"|"NOT_ENOUGH_BLADES"|"NOT_ENOUGH_EXP";
+type ReasonCode="NONE"|"SAME_QUALITY_REQUIRED"|"WRONG_EXP_QUALITY"|"NO_RECIPE"|"NOT_ENOUGH_BLADES"|"NOT_ENOUGH_EXP"|"LOCKED_SLOT";
 interface DragResult{action:DragAction;tooltip:string;rateDisplay:string;rateX:number;rateY:number;upgradeCost:number;upgradeCanAfford:boolean;batchIds:string[];targetViewKey:string;reason:ReasonCode;targetSlot:SlotId|null;}
 
 function getSource(item:BpItem):DragSource{if(isE(item))return{kind:"exp",quality:item.quality as BladeQualityId,viewKey:item.viewKey};return{kind:"blade",bladeId:item.id,quality:item.quality as BladeQualityId};}
@@ -36,12 +37,13 @@ function resolveDragAction(src:DragSource,tgt:DropTarget,targetRect:DOMRect|null
   if(tgt.kind==="none")return none;
   if(src.kind==="blade"&&tgt.kind==="blade"&&src.bladeId===tgt.bladeId)return none;
   if(src.kind==="exp"&&tgt.kind==="exp"&&src.viewKey===tgt.viewKey)return none;
+  // Locked slot check
+  if((src.kind==="blade"||src.kind==="exp")&&tgt.kind==="slot"&&!isSlotUnlocked(tgt.slot))return{...none,reason:"LOCKED_SLOT",tooltip:"未解锁"};
   if(src.kind==="exp"&&tgt.kind==="slot"){
     const eq=getEquippedBladeInfo();const bl=tgt.slot==="MAIN"?eq.main:eq.sub1;
     if(!bl||bl.quality!==src.quality)return{...none,reason:"WRONG_EXP_QUALITY",tooltip:"需要同品质经验球",rateX:rx,rateY:ry,targetSlot:tgt.slot};
     if(bl.level>=40)return{...none,tooltip:"已满级",rateX:rx,rateY:ry,targetSlot:tgt.slot};
-    const lv=getBladeLevelConfig(bl.level);const cost=lv?.expCostToNextLevel??0;
-    const total=readProgress().expOrbs[src.quality]??0;const can=total>=cost;
+    const lv=getBladeLevelConfig(bl.level);const cost=lv?.expCostToNextLevel??0;const total=readProgress().expOrbs[src.quality]??0;const can=total>=cost;
     const act:DragAction=tgt.slot==="MAIN"?"UPGRADE_MAIN":"UPGRADE_SUB1";
     return{...none,action:act,tooltip:can?`消耗 ${cost} 个`:`消耗 ${cost} 个 (不足)`,upgradeCost:cost,upgradeCanAfford:can,rateX:rx,rateY:ry,targetSlot:tgt.slot};
   }
@@ -55,14 +57,15 @@ export default function ArmoryScreen({onBack,debug}:{onBack:()=>void;debug?:bool
   const[t,setT]=useState(0);const rf=()=>setT(t=>t+1);
   useEffect(()=>{initBladeGrowthDefaults();rf();},[]);
   const eq=getEquippedBladeInfo();const bp=buildBackpack();const bpr=useRef<HTMLDivElement>(null);
-  const srcRef=useRef<DragSource|null>(null);const batchIdsRef=useRef<Set<string>>(new Set());const resultRef=useRef<DragResult>({action:"NONE",tooltip:"",rateDisplay:"",rateX:0,rateY:0,upgradeCost:0,upgradeCanAfford:false,batchIds:[],targetViewKey:"",reason:"NONE",targetSlot:null});
+  const srcRef=useRef<DragSource|null>(null);const batchIdsRef=useRef<Set<string>>(new Set());
+  const resultRef=useRef<DragResult>({action:"NONE",tooltip:"",rateDisplay:"",rateX:0,rateY:0,upgradeCost:0,upgradeCanAfford:false,batchIds:[],targetViewKey:"",reason:"NONE",targetSlot:null});
   const startPosRef=useRef<{x:number;y:number}|null>(null);
-  const [sTick,setST]=useState(0);const [ghost,setGhost]=useState<{x:number;y:number;text:string}|null>(null);
-  const [rewardItems,setRewardItems]=useState<RewardItem[]|null>(null);
-  const [expRewards,setExpRewards]=useState<{quality:BladeQualityId;count:number}[]|null>(null);
-  const [detailItem,setDetailItem]=useState<Blade|BpItem|null>(null);
-  const [toast,setTx]=useState<string|null>(null);const st=(m:string)=>{setTx(m);setTimeout(()=>setTx(null),1800);};
-  const [sp,setSp]=useState<"top"|"bot">("top");
+  const[sTick,setST]=useState(0);const[ghost,setGhost]=useState<{x:number;y:number;text:string}|null>(null);
+  const[rewardItems,setRewardItems]=useState<RewardItem[]|null>(null);
+  const[expRewards,setExpRewards]=useState<{quality:BladeQualityId;count:number}[]|null>(null);
+  const[detailItem,setDetailItem]=useState<Blade|BpItem|null>(null);
+  const[toast,setTx]=useState<string|null>(null);const st=(m:string)=>{setTx(m);setTimeout(()=>setTx(null),1800);};
+  const[sp,setSp]=useState<"top"|"bot">("top");
   const us=()=>{const el=bpr.current;if(!el)return;setSp(el.scrollTop+el.clientHeight>=el.scrollHeight-10?"bot":"top");};
   const sc=(d:"top"|"bot")=>{const el=bpr.current;if(!el)return;el.scrollTo({top:d==="bot"?el.scrollHeight:0,behavior:"smooth"});setTimeout(us,400);};
   const cancelDrag=useCallback(()=>{srcRef.current=null;batchIdsRef.current=new Set();startPosRef.current=null;resultRef.current={action:"NONE",tooltip:"",rateDisplay:"",rateX:0,rateY:0,upgradeCost:0,upgradeCanAfford:false,batchIds:[],targetViewKey:"",reason:"NONE",targetSlot:null};setGhost(null);setST(t=>t+1);},[]);
@@ -93,8 +96,7 @@ export default function ArmoryScreen({onBack,debug}:{onBack:()=>void;debug?:bool
   useEffect(()=>{document.addEventListener("pointermove",onPointerMove);document.addEventListener("pointerup",onPointerUp);document.addEventListener("pointercancel",onPointerCancel);return()=>{document.removeEventListener("pointermove",onPointerMove);document.removeEventListener("pointerup",onPointerUp);document.removeEventListener("pointercancel",onPointerCancel);};},[onPointerMove,onPointerUp,onPointerCancel]);
   const onPointerDown=useCallback((e:React.PointerEvent)=>{
     const se=(e.target as HTMLElement).closest('.as-scroll-btn,.as-scroll-zone');if(se)return;const be=(e.target as HTMLElement).closest('.as-modal-overlay,.as-toast,.as-debug');if(be)return;
-    const el=(e.target as HTMLElement).closest('[data-item-idx]')as HTMLElement|null;if(!el)return;
-    const idx=parseInt(el.dataset.itemIdx||"-1");if(idx<0||idx>=bp.length)return;const item=bp[idx];if(!item)return;e.preventDefault();
+    const el=(e.target as HTMLElement).closest('[data-item-idx]')as HTMLElement|null;if(!el)return;const idx=parseInt(el.dataset.itemIdx||"-1");if(idx<0||idx>=bp.length)return;const item=bp[idx];if(!item)return;e.preventDefault();
     srcRef.current=getSource(item);batchIdsRef.current=new Set();startPosRef.current={x:e.clientX,y:e.clientY};
     resultRef.current={action:"NONE",tooltip:"",rateDisplay:"",rateX:0,rateY:0,upgradeCost:0,upgradeCanAfford:false,batchIds:[],targetViewKey:"",reason:"NONE",targetSlot:null};setST(t=>t+1);
   },[bp]);
@@ -104,17 +106,15 @@ export default function ArmoryScreen({onBack,debug}:{onBack:()=>void;debug?:bool
     const sel=isB(item)&&batchIds?.has(item.id);const bc=qc(item.quality);
     const isSrc=srcRef.current&&getSource(item).kind===srcRef.current.kind&&(srcRef.current.kind==="blade"?isB(item)&&srcRef.current.bladeId===item.id:isE(item)&&srcRef.current.viewKey===item.viewKey);
     const cls=`as-item${isSrc?" dragging":""}${sel?" batch-selected":""}`;
-    if(isE(item))return(<div key={`e${i}`}className={cls}style={{borderColor:bc}}data-item-idx={i}data-drop-key="true"data-drop-type="item"data-drop-quality={item.quality}><ArmoryItemIcon type="EXP"quality={item.quality as BladeQualityId}size="NORMAL"showExpText={true}/><span className="as-item-count">{item.count}</span></div>);
+    if(isE(item))return(<div key={`e${i}`}className={cls}data-item-idx={i}data-drop-key="true"data-drop-type="item"data-drop-quality={item.quality}><ArmoryItemIcon type="EXP"quality={item.quality as BladeQualityId}size="NORMAL"showExpText={true}/><span className="as-item-count">{item.count}</span></div>);
     const atk=Math.round(computeBladeAttack(item.quality as BladeQualityId,item.level));
-    return(<div key={`b${i}`}className={cls}style={{borderColor:bc}}data-item-idx={i}data-drop-key="true"data-drop-type="item"data-drop-quality={item.quality}><ArmoryItemIcon type="BLADE"quality={item.quality as BladeQualityId}size="NORMAL"showLevel={true}level={item.level}showAttack={true}attack={atk}/></div>);
+    return(<div key={`b${i}`}className={cls}data-item-idx={i}data-drop-key="true"data-drop-type="item"data-drop-quality={item.quality}><ArmoryItemIcon type="BLADE"quality={item.quality as BladeQualityId}size="NORMAL"showLevel={true}level={item.level}showAttack={true}attack={atk}/></div>);
   };
   const mb=eq.main,sb=eq.sub1;
   const ma=mb?Math.round(computeBladeAttack(mb.quality as BladeQualityId,mb.level)):0;
   const sa=sb?Math.round(computeBladeAttack(sb.quality as BladeQualityId,sb.level)):0;
-  const slotUnlockText=(s:SlotId)=>{if(s==="MAIN")return"";return"通关第3关解锁";};
-
-  // target slot glow
-  const slotClass=(s:SlotId)=>{const ts=result.targetSlot;if(!ts)return"";if(ts!==s)return"";if(result.action==="EQUIP_MAIN"||result.action==="EQUIP_SUB1"||result.action==="UPGRADE_MAIN"||result.action==="UPGRADE_SUB1")return" slot-glow";return"";};
+  const slotClass=(s:SlotId)=>{const ts=result.targetSlot;if(!ts||ts!==s)return"";if(result.reason==="LOCKED_SLOT")return"";if(result.action==="EQUIP_MAIN"||result.action==="EQUIP_SUB1"||result.action==="UPGRADE_MAIN"||result.action==="UPGRADE_SUB1")return" slot-glow";return"";};
+  const sub1Unlocked=isSlotUnlocked("SUB_1");
 
   return(<div className="as-root">
     {rewardItems&&<ArmoryRewardModal entries={rewardItems} onClose={()=>setRewardItems(null)}/>}
@@ -122,21 +122,22 @@ export default function ArmoryScreen({onBack,debug}:{onBack:()=>void;debug?:bool
     {detailItem&&<ItemDetailModal item={detailItem} onClose={()=>setDetailItem(null)} onRefresh={()=>{rf();setDetailItem(null);}}/>}
     <div className="as-header"><button className="as-back"onClick={onBack}>←</button><h2>装备</h2></div>
     <div className="as-equip-zone-diamond">
-      {/* MAIN center top */}
-      <div className={`as-slot-diamond main${slotClass("MAIN")}`} data-drop-key="true"data-drop-type="slot"data-drop-slot="MAIN"data-drop-quality={mb?.quality??""}
+      {/* MAIN — always unlocked */}
+      <div className={`as-slot-diamond main${slotClass("MAIN")}`}data-drop-key="true"data-drop-type="slot"data-drop-slot="MAIN"data-drop-quality={mb?.quality??""}
         onClick={()=>{if(mb)setDetailItem(mb);}}>
         {mb?<ArmoryItemIcon type="BLADE"quality={mb.quality as BladeQualityId}size="LARGE"showLevel={true}level={mb.level}showAttack={true}attack={ma}/>
         :<><div className="as-slot-empty">主刀</div><span className="as-slot-hint">已解锁</span></>}
       </div>
-      {/* SUB_1 left bottom */}
-      <div className={`as-slot-diamond sub1${slotClass("SUB_1")}`} data-drop-key="true"data-drop-type="slot"data-drop-slot="SUB_1"data-drop-quality={sb?.quality??""}
+      {/* SUB_1 — locked until floor 3 */}
+      <div className={`as-slot-diamond sub1${sub1Unlocked?slotClass("SUB_1"):""}`}
+        data-drop-key={sub1Unlocked?"true":undefined} data-drop-type={sub1Unlocked?"slot":undefined} data-drop-slot={sub1Unlocked?"SUB_1":undefined} data-drop-quality={sb?.quality??""}
         onClick={()=>{if(sb)setDetailItem(sb);}}>
         {sb?<ArmoryItemIcon type="BLADE"quality={sb.quality as BladeQualityId}size="NORMAL"showLevel={true}level={sb.level}showAttack={true}attack={sa}/>
         :<><div className="as-lock">🔒</div><span className="as-slot-hint">通关第3关解锁</span></>}
       </div>
-      {/* SUB_2 right bottom locked */}
+      {/* SUB_2 — always locked */}
       <div className="as-slot-diamond locked">
-        <div className="as-lock">🔒</div><span className="as-slot-hint">练气前段解锁</span>
+        <div className="as-lock">🔒</div><span className="as-slot-hint">练气阶段解锁</span>
       </div>
     </div>
     <div className="as-backpack"ref={bpr}onScroll={us}><h3>背包</h3><div className="as-grid"onPointerDown={onPointerDown}>{bp.map((item,i)=>ri(item,i))}{bp.length===0&&<div className="as-empty">暂无物品</div>}</div></div>
