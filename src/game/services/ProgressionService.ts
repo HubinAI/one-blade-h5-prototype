@@ -1076,14 +1076,15 @@ export function getPendingGate(): StageGate | null {
 
 /** P3.10：主线通关原子函数——记录通关、处理突破 */
 export function recordMainlineClear(clearedFloor: number): { nextFloor: number; requiresBreakthrough: boolean; gate: StageGate | null } {
-  const progress = readProgress();
-  // V0811050: 原子写入clearedFloors + 自动首通奖励
+  let progress = readProgress();
   if (!progress.clearedFloors.includes(clearedFloor)) {
     progress.clearedFloors.push(clearedFloor);
-    // 自动首通奖励（与防重复领奖解耦）
+    writeProgress(progress);
+    // auto reward AFTER writing clearedFloors
     claimFloorFirstReward(clearedFloor);
+    // re-read to get latest state
+    progress = readProgress();
   }
-  writeProgress(progress);
   // ...gate logic unchanged...
   const gate = MAIN_STAGE_GATES.find(item => item.afterStage === clearedFloor) ?? null;
 
@@ -1579,6 +1580,7 @@ export function getEquippedBladeInfo(): { main: Blade | null; sub1: Blade | null
 /** 0814-03: 装备刀到指定槽位，被替换的刀回库 */
 export function equipBladeToSlot(bladeId: string, slot: "MAIN" | "SUB_1"): boolean {
   const progress = readProgress();
+  if (slot === "SUB_1" && !isSub1Unlocked()) return false;
   const blade = progress.blades.find(b => b.id === bladeId);
   if (!blade || blade.quality === "white") return false;
   // 不能同时占两个槽
