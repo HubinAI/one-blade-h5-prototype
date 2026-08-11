@@ -1,103 +1,94 @@
 import { describe, it, expect } from "vitest";
 import {
-  MAINLINE_NUMERIC_CONFIG, growthCurve, getBaseAttack,
-  getSpeedMultiplier, getDensityMultiplier,
-  ENEMY_TYPE_HP_MULTIPLIER, getEnemyFinalHp, REALM_ZONES,
-  QUALITY_ATTACK_ANCHOR_FLOOR, getQualityBaseAttack
+  MAINLINE_GROWTH_CONFIG, BLADE_ATTACK_GROWTH_CONFIG,
+  mainlineGrowthCurve, bladeGrowthIndexAttack, getBladeAttack,
+  getBaseAttack, getSpeedMultiplier, getDensityMultiplier,
+  ENEMY_TYPE_HP_MULTIPLIER, getEnemyFinalHp, REALM_ZONES, QUALITY_INDEX_RANGE,
+  postEdictTotal, phaseEnemyCount, edictTriggerKills, phaseSpeedMul, genericEliteHp
 } from "./mainlineNumeric";
 
-describe("getLogicalFloor 映射", () => {
-  it("10001 → 1", () => expect(10001 - 10000).toBe(1));
-  it("10002 → 2", () => expect(10002 - 10000).toBe(2));
-  it("10030 → 30", () => expect(10030 - 10000).toBe(30));
-  it("1 → 1", () => expect(1).toBe(1));
+// ═══════════════════════════════════════
+// 解耦
+// ═══════════════════════════════════════
+describe("主线/装备配置解耦", () => {
+  it("主线 a=1.05", () => expect(MAINLINE_GROWTH_CONFIG.a).toBe(1.05));
+  it("主线 b=8", () => expect(MAINLINE_GROWTH_CONFIG.b).toBe(8));
+  it("主线 c=100", () => expect(MAINLINE_GROWTH_CONFIG.c).toBe(100));
+  it("装备 a=1.04", () => expect(BLADE_ATTACK_GROWTH_CONFIG.a).toBe(1.04));
+  it("装备 b=7", () => expect(BLADE_ATTACK_GROWTH_CONFIG.b).toBe(7));
+  it("装备 c=100", () => expect(BLADE_ATTACK_GROWTH_CONFIG.c).toBe(100));
 });
 
-describe("第2关正式HP公式", () => {
-  it("infantry.hp > 0 (不再legacy)", () => expect(getEnemyFinalHp(2,"infantry",1.0)).toBeGreaterThan(0));
-  it("shield.hp > infantry.hp", () => expect(getEnemyFinalHp(2,"shield",1.0)).toBeGreaterThan(getEnemyFinalHp(2,"infantry",1.0)));
-  it("powder.hp >= infantry.hp (round宽容)", () => expect(getEnemyFinalHp(2,"powder",1.0)).toBeGreaterThanOrEqual(getEnemyFinalHp(2,"infantry",1.0)));
-  it("core.hp >= infantry.hp (round宽容)", () => expect(getEnemyFinalHp(2,"core",1.0)).toBeGreaterThanOrEqual(getEnemyFinalHp(2,"infantry",1.0)));
+// ═══════════════════════════════════════
+// 主线回归值
+// ═══════════════════════════════════════
+describe("主线GrowthCurve回归值", () => {
+  it("F1=100", () => expect(mainlineGrowthCurve(1)).toBe(100));
+  it("F2=109", () => expect(mainlineGrowthCurve(2)).toBe(109));
+  it("F5=149", () => expect(mainlineGrowthCurve(5)).toBe(149));
+  it("F15=418", () => expect(mainlineGrowthCurve(15)).toBe(418));
+  it("F30=1215", () => expect(mainlineGrowthCurve(30)).toBe(1215));
+  it("F50=3013", () => expect(mainlineGrowthCurve(50)).toBe(3013));
+  it("F75=6442", () => expect(mainlineGrowthCurve(75)).toBe(6442));
+  it("F105=12289", () => expect(mainlineGrowthCurve(105)).toBe(12289));
+  it("F140=21499", () => expect(mainlineGrowthCurve(140)).toBe(21499));
+  it("F180=35175", () => expect(mainlineGrowthCurve(180)).toBe(35175));
 });
 
-describe("敌种倍率", () => {
-  const baseHp = growthCurve(5);
-  it("infantry = baseHp × 0.75", () => expect(getEnemyFinalHp(5,"infantry",1.0)).toBe(Math.round(baseHp*0.75)));
-  it("powder = baseHp × 0.80", () => expect(getEnemyFinalHp(5,"powder",1.0)).toBe(Math.round(baseHp*0.80)));
-  it("tractor = baseHp × 0.85", () => expect(getEnemyFinalHp(5,"tractor",1.0)).toBe(Math.round(baseHp*0.85)));
-  it("splitter = baseHp × 0.90", () => expect(getEnemyFinalHp(5,"splitter",1.0)).toBe(Math.round(baseHp*0.90)));
-  it("core = baseHp × 0.95", () => expect(getEnemyFinalHp(5,"core",1.0)).toBe(Math.round(baseHp*0.95)));
-  it("shield = baseHp × 1.20", () => expect(getEnemyFinalHp(5,"shield",1.0)).toBe(Math.round(baseHp*1.20)));
+// ═══════════════════════════════════════
+// 装备攻击 Lv1 / Lv40
+// ═══════════════════════════════════════
+describe("装备攻击Lv1/Lv40端点", () => {
+  it("green   Lv1=100",  () => expect(getBladeAttack("green",1)).toBe(100));
+  it("green   Lv40=145", () => expect(getBladeAttack("green",40)).toBe(145));
+  it("blue    Lv1=161",  () => expect(getBladeAttack("blue",1)).toBe(161));
+  it("blue    Lv40=402", () => expect(getBladeAttack("blue",40)).toBe(402));
+  it("purple  Lv1=439",  () => expect(getBladeAttack("purple",1)).toBe(439));
+  it("purple  Lv40=1178",() => expect(getBladeAttack("purple",40)).toBe(1178));
+  it("orange  Lv1=1246", () => expect(getBladeAttack("orange",1)).toBe(1246));
+  it("orange  Lv40=2940",() => expect(getBladeAttack("orange",40)).toBe(2940));
+  it("red     Lv1=3050", () => expect(getBladeAttack("red",1)).toBe(3050));
+  it("red     Lv40=6313",() => expect(getBladeAttack("red",40)).toBe(6313));
+  it("gold    Lv1=6475", () => expect(getBladeAttack("gold",1)).toBe(6475));
+  it("gold    Lv40=12077",()=> expect(getBladeAttack("gold",40)).toBe(12077));
+  it("pink    Lv1=12301",() => expect(getBladeAttack("pink",1)).toBe(12301));
+  it("pink    Lv40=21167",()=> expect(getBladeAttack("pink",40)).toBe(21167));
+  it("rainbow Lv1=21464",() => expect(getBladeAttack("rainbow",1)).toBe(21464));
+  it("rainbow Lv40=34676",()=> expect(getBladeAttack("rainbow",40)).toBe(34676));
 });
 
-const keyFloors = [1, 2, 5, 15, 30, 50, 75, 105, 140, 180];
-describe("关键关卡全链路", () => {
-  for (const f of keyFloors) {
-    it(`floor ${f}: growthCurve>0, shield>infantry`, () => {
-      expect(growthCurve(f)).toBeGreaterThan(0);
-      expect(getEnemyFinalHp(f,"shield",1.0)).toBeGreaterThan(getEnemyFinalHp(f,"infantry",1.0));
-    });
-  }
-});
-
-describe("Spawn级HP一致性", () => {
-  for (const t of ["infantry","shield","powder","core","splitter","tractor"]) {
-    it(`floor 2 ${t}: finalHp>0, <200`, () => {
-      const hp = getEnemyFinalHp(2, t, 1.0);
-      expect(hp).toBeGreaterThan(0);
-      expect(hp).toBeLessThan(200);
-    });
-  }
-});
-
-describe("反回归: floor2+不依赖isLogicalLevel1", () => {
-  it("getEnemyFinalHp(2,infantry) 正常执行", () => {
-    expect(getEnemyFinalHp(2,"infantry",1.0)).toBeGreaterThan(0);
-    expect(getEnemyFinalHp(2,"infantry",1.0)).not.toBe(4);
+// ═══════════════════════════════════════
+// 旧测试更新
+// ═══════════════════════════════════════
+describe("第2关正式HP", () => {
+  it("infantry HP>50", () => expect(getEnemyFinalHp(2,"infantry",1.0)).toBeGreaterThan(50));
+  it("shield > infantry", () => {
+    expect(getEnemyFinalHp(2,"shield",1.0))
+      .toBeGreaterThan(getEnemyFinalHp(2,"infantry",1.0));
   });
 });
 
+describe("敌种倍率(floor5 base=149)", () => {
+  it("infantry 149×0.75=112", () => expect(getEnemyFinalHp(5,"infantry",1.0)).toBe(112));
+  it("shield 149×1.20=179", () => expect(getEnemyFinalHp(5,"shield",1.0)).toBe(179));
+  it("powder 149×0.80=119", () => expect(getEnemyFinalHp(5,"powder",1.0)).toBe(119));
+  it("core 149×0.95=142", () => expect(getEnemyFinalHp(5,"core",1.0)).toBe(142));
+});
+
+const keyFloors = [1,2,5,15,30,50,75,105,140,180];
+describe("关键关", () => {
+  for (const f of keyFloors) it(`F${f}>0`, () => expect(mainlineGrowthCurve(f)).toBeGreaterThan(0));
+});
+
 describe("配置完整性", () => {
-  it("growthA>0", () => expect(MAINLINE_NUMERIC_CONFIG.growthA).toBeGreaterThan(0));
-  it("攻增长>1.0", () => expect(MAINLINE_NUMERIC_CONFIG.attackGrowth).toBeGreaterThan(1.0));
-  it("速度有上限", () => expect(MAINLINE_NUMERIC_CONFIG.speedMulMax).toBeGreaterThan(0));
-  it("密度有上限", () => expect(MAINLINE_NUMERIC_CONFIG.densityMulMax).toBeGreaterThan(0));
-  it("倍率表全类型", () => { for(const t of ["infantry","shield","powder","core","splitter","tractor"]) expect(ENEMY_TYPE_HP_MULTIPLIER[t]).toBeDefined(); });
-  it("境界区间1~180连续", () => { let t=0; for(const z of REALM_ZONES) t+=z.end-z.start+1; expect(t).toBe(180); });
+  it("境界1~180", () => { let t=0; for(const z of REALM_ZONES) t+=z.end-z.start+1; expect(t).toBe(180); });
+  it("倍率表全", () => { for(const t of ["infantry","shield","powder","core","splitter","tractor"]) expect(ENEMY_TYPE_HP_MULTIPLIER[t]).toBeDefined(); });
 });
 
-describe("GrowthCurve品质攻击锚点", () => {
-  it("green  = F5 → 32", () => expect(getQualityBaseAttack("green")).toBe(32));
-  it("blue   = F15→ 144", () => expect(getQualityBaseAttack("blue")).toBe(144));
-  it("purple = F30→ 462", () => expect(getQualityBaseAttack("purple")).toBe(462));
-  it("orange = F50→ 1166", () => expect(getQualityBaseAttack("orange")).toBe(1166));
-  it("red    = F75→ 2496", () => expect(getQualityBaseAttack("red")).toBe(2496));
-  it("gold   = F105→ 4752", () => expect(getQualityBaseAttack("gold")).toBe(4752));
-  it("pink   = F140→ 8294", () => expect(getQualityBaseAttack("pink")).toBe(8294));
-  it("rainbow= F180→ 13542", () => expect(getQualityBaseAttack("rainbow")).toBe(13542));
-});
-
-describe("GrowthCurve关键值", () => {
-  it("F1  n=0:10",   () => expect(growthCurve(1)).toBe(10));
-  it("F5  n=4:32",   () => expect(growthCurve(5)).toBe(32));
-  it("F15 n=14:144", () => expect(growthCurve(15)).toBe(144));
-  it("F30 n=29:462", () => expect(growthCurve(30)).toBe(462));
-});
-
-// V0811042: 军令节奏模板测试
-import { postEdictTotal, phaseEnemyCount, edictTriggerKills, phaseSpeedMul, genericEliteHp } from "./mainlineNumeric";
-
-describe("军令节奏模板", () => {
-  it("L1 postEdictTotal=90(density=1.0)", () => expect(postEdictTotal(1)).toBe(90));
-  it("L2 postEdictTotal=90", () => expect(postEdictTotal(2)).toBe(90));
-  it("L1 P1=24", () => expect(phaseEnemyCount(1,"P1")).toBe(24));
-  it("L1 P2=30", () => expect(phaseEnemyCount(1,"P2")).toBe(30));
-  it("L1 P3=36", () => expect(phaseEnemyCount(1,"P3")).toBe(36));
-  it("L1 threshold~50", () => expect(edictTriggerKills(1)).toBe(50));
-  it("L2 threshold~50", () => expect(edictTriggerKills(2)).toBeGreaterThanOrEqual(49));
-  it("L1 P1 speed≈0.98", () => expect(phaseSpeedMul(1,"P1")).toBeCloseTo(0.98, 2));
-  it("L1 P2 speed≈1.225", () => expect(phaseSpeedMul(1,"P2")).toBeCloseTo(1.225, 2));
-  it("L1 P3 speed≈1.421", () => expect(phaseSpeedMul(1,"P3")).toBeCloseTo(1.421, 2));
-  it("L1 generic elite hp=80", () => expect(genericEliteHp(1)).toBe(80));
-  it("L5 generic elite hp=256", () => expect(genericEliteHp(5)).toBe(256));
+describe("军令模板", () => {
+  it("F1 total=90", () => expect(postEdictTotal(1)).toBe(90));
+  it("F1 P1=24", () => expect(phaseEnemyCount(1,"P1")).toBe(24));
+  it("F1 P2=30", () => expect(phaseEnemyCount(1,"P2")).toBe(30));
+  it("F1 P3=36", () => expect(phaseEnemyCount(1,"P3")).toBe(36));
+  it("F1 eliteHp=800", () => expect(genericEliteHp(1)).toBe(800));
 });

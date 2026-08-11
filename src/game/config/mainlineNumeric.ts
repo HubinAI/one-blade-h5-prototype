@@ -1,62 +1,99 @@
 /**
- * V0811043: 主线数值配置 + GrowthCurve 二次曲线
- * 唯一源：主线BaseHP / 品质攻击锚点 / 速度 / 密度
+ * V0811043R: 主线 GrowthCurve = round(1.05*n² + 8*n + 100), n=floor-1
+ * V0811044:  装备 GrowthCurve = round(1.04*n² + 7*n + 100), n=index-1
+ * 两套配置互相独立，禁止交叉引用。
  */
+
+// ═══════════════════════════════════════
+// 主线
+// ═══════════════════════════════════════
+
+export interface GrowthParams { a: number; b: number; c: number; }
+
+export const MAINLINE_GROWTH_CONFIG: GrowthParams = { a: 1.05, b: 8, c: 100 };
+
 export interface MainlineNumericConfig {
-  growthA: number; growthB: number; growthC: number;
-  baseAttackStart: number; attackGrowth: number;
+  attackStart: number; attackGrowth: number;
   speedMulBase: number; speedMulPerFloor: number; speedMulMax: number;
   densityMulBase: number; densityMulPerFloor: number; densityMulMax: number;
 }
 
 export const MAINLINE_NUMERIC_CONFIG: MainlineNumericConfig = {
-  growthA: 0.4, growthB: 4, growthC: 10,
-  baseAttackStart: 10, attackGrowth: 1.008,
+  attackStart: 10, attackGrowth: 1.008,
   speedMulBase: 0.98, speedMulPerFloor: 0.0021, speedMulMax: 1.35,
   densityMulBase: 1.00, densityMulPerFloor: 0.0025, densityMulMax: 1.45,
 };
 
-const Cfg = MAINLINE_NUMERIC_CONFIG;
-
-/** GrowthCurve = round(a*n² + b*n + c), n = floor-1 */
-export function growthCurve(floor: number): number {
+/** 主线 baseHp = round(a*n² + b*n + c), n=floor-1 */
+export function mainlineGrowthCurve(floor: number): number {
   const n = floor - 1;
-  return Math.round(Cfg.growthA * n * n + Cfg.growthB * n + Cfg.growthC);
+  const g = MAINLINE_GROWTH_CONFIG;
+  return Math.round(g.a * n * n + g.b * n + g.c);
 }
 
-/** 品质攻击锚点 — 品质对应基准关卡 */
-export const QUALITY_ATTACK_ANCHOR_FLOOR: Record<string, number> = {
-  green: 5, blue: 15, purple: 30, orange: 50, red: 75,
-  gold: 105, pink: 140, rainbow: 180,
+// ═══════════════════════════════════════
+// 装备（独立）
+// ═══════════════════════════════════════
+
+export const BLADE_ATTACK_GROWTH_CONFIG: GrowthParams = { a: 1.04, b: 7, c: 100 };
+
+/** 装备 growthIndex → attack, n=index-1 */
+export function bladeGrowthIndexAttack(growthIndex: number): number {
+  const n = growthIndex - 1;
+  const g = BLADE_ATTACK_GROWTH_CONFIG;
+  return Math.round(g.a * n * n + g.b * n + g.c);
+}
+
+/** 品质 → growthIndex 区间 */
+export const QUALITY_INDEX_RANGE: Record<string, [number, number]> = {
+  green:   [1, 5],
+  blue:    [6, 15],
+  purple:  [16, 30],
+  orange:  [31, 50],
+  red:     [51, 75],
+  gold:    [76, 105],
+  pink:    [106, 140],
+  rainbow: [141, 180],
 };
 
-export function getQualityBaseAttack(quality: string): number {
-  return growthCurve(QUALITY_ATTACK_ANCHOR_FLOOR[quality] ?? 1);
+/** Lv1~40 线性映射到品质区间内 growthIndex */
+export function bladeLevelToGrowthIndex(quality: string, level: number): number {
+  const range = QUALITY_INDEX_RANGE[quality] ?? [1, 5];
+  const t = (level - 1) / 39; // 0..1
+  return Math.round(range[0] + t * (range[1] - range[0]));
 }
 
-// 乘数表
+export function getBladeAttack(quality: string, level: number): number {
+  return bladeGrowthIndexAttack(bladeLevelToGrowthIndex(quality, level));
+}
+
+// ═══════════════════════════════════════
+// 通用
+// ═══════════════════════════════════════
+
 export const ENEMY_TYPE_HP_MULTIPLIER: Record<string, number> = {
   infantry: 0.75, powder: 0.80, tractor: 0.85, splitter: 0.90,
   core: 0.95, shield: 1.20,
 };
 
-// 公式
-export function getBaseHp(floor: number): number { return growthCurve(floor); }
+export function getBaseHp(floor: number): number { return mainlineGrowthCurve(floor); }
 
 export function getBaseAttack(floor: number): number {
-  return Math.round(Cfg.baseAttackStart * Math.pow(Cfg.attackGrowth, floor - 1));
+  return Math.round(MAINLINE_NUMERIC_CONFIG.attackStart * Math.pow(MAINLINE_NUMERIC_CONFIG.attackGrowth, floor - 1));
 }
 
 export function getSpeedMultiplier(floor: number): number {
-  return Math.min(Cfg.speedMulMax, Cfg.speedMulBase + (floor - 1) * Cfg.speedMulPerFloor);
+  const c = MAINLINE_NUMERIC_CONFIG;
+  return Math.min(c.speedMulMax, c.speedMulBase + (floor - 1) * c.speedMulPerFloor);
 }
 
 export function getDensityMultiplier(floor: number): number {
-  return Math.min(Cfg.densityMulMax, Cfg.densityMulBase + (floor - 1) * Cfg.densityMulPerFloor);
+  const c = MAINLINE_NUMERIC_CONFIG;
+  return Math.min(c.densityMulMax, c.densityMulBase + (floor - 1) * c.densityMulPerFloor);
 }
 
 export function getEnemyFinalHp(floor: number, enemyType: string, nodeHpMul: number): number {
-  return Math.round(growthCurve(floor) * (ENEMY_TYPE_HP_MULTIPLIER[enemyType] ?? 1.0) * nodeHpMul);
+  return Math.round(mainlineGrowthCurve(floor) * (ENEMY_TYPE_HP_MULTIPLIER[enemyType] ?? 1.0) * nodeHpMul);
 }
 
 // 境界区间
@@ -71,36 +108,21 @@ export const REALM_ZONES = [
   { name: "渡劫",   start: 141, end: 180 },
 ];
 
-// ═══════════════════════════════════════
 // V0811042: 军令节奏模板
-// ═══════════════════════════════════════
-
-/** 军令后总敌数 = round(90 × densityMul(floor)) */
 export function postEdictTotal(floor: number): number {
   return Math.round(90 * getDensityMultiplier(floor));
 }
-
-/** P1/P2/P3 拆分比例 */
 export const PHASE_SPLIT = { P1: 24, P2: 30, P3: 36 } as const;
-
 export function phaseEnemyCount(floor: number, phase: 'P1' | 'P2' | 'P3'): number {
-  const total = postEdictTotal(floor);
-  const sum = PHASE_SPLIT.P1 + PHASE_SPLIT.P2 + PHASE_SPLIT.P3;
-  return Math.round(total * PHASE_SPLIT[phase] / sum);
+  const sum = 90; return Math.round(postEdictTotal(floor) * PHASE_SPLIT[phase] / sum);
 }
-
-/** 军令触发阈值 = round(当前关postEdictTotal × 0.55) */
 export function edictTriggerKills(floor: number): number {
   return Math.round(postEdictTotal(floor) * 0.55);
 }
-
-/** 阶段速度 = base × speedMul(floor), base=[1.00,1.25,1.45] */
 export function phaseSpeedMul(floor: number, phase: 'P1' | 'P2' | 'P3'): number {
   const bases = { P1: 1.00, P2: 1.25, P3: 1.45 };
   return bases[phase] * getSpeedMultiplier(floor);
 }
-
-/** generic elite hp = growthCurve(floor) × 8 */
 export function genericEliteHp(floor: number): number {
-  return growthCurve(floor) * 8;
+  return mainlineGrowthCurve(floor) * 8;
 }

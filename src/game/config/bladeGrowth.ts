@@ -233,11 +233,11 @@ export function getBladeLevelConfig(level: number): BladeLevelConfig {
 }
 
 /** 计算指定品质+等级的最终攻击 */
-import { getQualityBaseAttack } from "./mainlineNumeric";
+import { getBladeAttack } from "./mainlineNumeric";
 
 export function computeBladeAttack(qualityId: BladeQualityId, level: number): number {
   const l = getBladeLevelConfig(level);
-  return getQualityBaseAttack(qualityId) * l.attackMultiplier;
+  return getBladeAttack(qualityId, level) * l.attackMultiplier;
 }
 
 /** 根据槽位ID获取槽位配置 */
