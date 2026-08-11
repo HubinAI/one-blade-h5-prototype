@@ -7654,7 +7654,7 @@ h1 {
 .arm-modal-overlay { position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:400;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px); }
 .arm-modal { background:linear-gradient(180deg,#1e160c,#100c06);border:2px solid #ffd35a;border-radius:20px;padding:18px 14px 14px;text-align:center;width:280px;height:430px;max-width:94vw;max-height:85vh;display:flex;flex-direction:column; }
 .arm-modal-title { font-size:22px;font-weight:800;color:#ffd35a;margin-bottom:12px;flex-shrink:0; }
-.arm-reward-grid { display:flex;flex-wrap:wrap;gap:6px;justify-content:center;flex:1 1 auto;overflow-y:auto;padding:2px 0;scrollbar-width:none;-ms-overflow-style:none; }
+.arm-reward-grid { display:grid;grid-template-columns:repeat(4,48px);gap:6px;justify-content:center;align-content:start;flex:1 1 auto;overflow-y:auto;padding:2px 0;scrollbar-width:none;-ms-overflow-style:none; }
 .arm-reward-grid::-webkit-scrollbar { display:none;width:0;height:0; }
 .arm-rw-card { width:48px;height:48px;border:2px solid;border-radius:10px;display:flex;align-items:center;justify-content:center; }
 .arm-rw-card.pop-bling { animation:arm-bling 0.4s ease-out; }
