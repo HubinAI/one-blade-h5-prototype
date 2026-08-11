@@ -296,21 +296,9 @@ function applyTimeProgress(progress: PlayerProgress) {
     changed = true;
   }
 
-  const offlineWindow = REWARD_CONFIG.offline.maxHours * MS_PER_HOUR;
-  const offlineElapsed = Math.min(Math.max(0, now - progress.lastSeenAt), offlineWindow);
-  const offlineHours = Math.floor(offlineElapsed / MS_PER_HOUR);
-  if (offlineHours > 0) {
-    const maxOfflineCoins = REWARD_CONFIG.offline.maxHours * REWARD_CONFIG.offline.coinsPerHour;
-    progress.offlineCoins = Math.min(
-      maxOfflineCoins,
-      progress.offlineCoins + offlineHours * REWARD_CONFIG.offline.coinsPerHour
-    );
-    // 离线产出白色刀（每小时2把=48把/天）
-    const bladeCount = offlineHours * 2;
-    for (let i = 0; i < bladeCount; i++) {
-      const blade = generateBlade("white");
-      progress.blades.push(blade);
-    }
+  // 0814-04A: 旧离线金币/白刀产出已断开，挂机产出统一走 IdleService
+  // 只更新 lastSeenAt 用于计算离线时长（供 IdleService tick 使用）
+  if (now - progress.lastSeenAt > 0) {
     progress.lastSeenAt = now;
     changed = true;
   }
