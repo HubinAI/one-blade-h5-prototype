@@ -58,6 +58,8 @@ export default function ArmoryScreen({onBack,debug}:{onBack:()=>void;debug?:bool
   useEffect(()=>{initBladeGrowthDefaults();rf();},[]);
   const eq=getEquippedBladeInfo();const bp=buildBackpack();const bpr=useRef<HTMLDivElement>(null);
   const srcRef=useRef<DragSource|null>(null);const batchIdsRef=useRef<Set<string>>(new Set());
+  const candidateSlotRef=useRef<Set<SlotId>>(new Set());
+  const candidateItemRef=useRef<Set<string>>(new Set());
   const resultRef=useRef<DragResult>({action:"NONE",tooltip:"",rateDisplay:"",rateX:0,rateY:0,upgradeCost:0,upgradeCanAfford:false,batchIds:[],targetViewKey:"",reason:"NONE",targetSlot:null});
   const startPosRef=useRef<{x:number;y:number}|null>(null);
   const[sTick,setST]=useState(0);const[ghost,setGhost]=useState<{x:number;y:number;text:string}|null>(null);
@@ -68,7 +70,7 @@ export default function ArmoryScreen({onBack,debug}:{onBack:()=>void;debug?:bool
   const[sp,setSp]=useState<"top"|"bot">("top");
   const us=()=>{const el=bpr.current;if(!el)return;setSp(el.scrollTop+el.clientHeight>=el.scrollHeight-10?"bot":"top");};
   const sc=(d:"top"|"bot")=>{const el=bpr.current;if(!el)return;el.scrollTo({top:d==="bot"?el.scrollHeight:0,behavior:"smooth"});setTimeout(us,400);};
-  const cancelDrag=useCallback(()=>{srcRef.current=null;batchIdsRef.current=new Set();startPosRef.current=null;resultRef.current={action:"NONE",tooltip:"",rateDisplay:"",rateX:0,rateY:0,upgradeCost:0,upgradeCanAfford:false,batchIds:[],targetViewKey:"",reason:"NONE",targetSlot:null};setGhost(null);setST(t=>t+1);},[]);
+  const cancelDrag=useCallback(()=>{srcRef.current=null;batchIdsRef.current=new Set();candidateSlotRef.current=new Set();candidateItemRef.current=new Set();startPosRef.current=null;resultRef.current={action:"NONE",tooltip:"",rateDisplay:"",rateX:0,rateY:0,upgradeCost:0,upgradeCanAfford:false,batchIds:[],targetViewKey:"",reason:"NONE",targetSlot:null};setGhost(null);setST(t=>t+1);},[]);
 
   const onPointerMove=useCallback((e:PointerEvent)=>{
     const src=srcRef.current;if(!src)return;const start=startPosRef.current;
@@ -98,14 +100,31 @@ export default function ArmoryScreen({onBack,debug}:{onBack:()=>void;debug?:bool
     const se=(e.target as HTMLElement).closest('.as-scroll-btn,.as-scroll-zone');if(se)return;const be=(e.target as HTMLElement).closest('.as-modal-overlay,.as-toast,.as-debug');if(be)return;
     const el=(e.target as HTMLElement).closest('[data-item-idx]')as HTMLElement|null;if(!el)return;const idx=parseInt(el.dataset.itemIdx||"-1");if(idx<0||idx>=bp.length)return;const item=bp[idx];if(!item)return;e.preventDefault();
     srcRef.current=getSource(item);batchIdsRef.current=new Set();startPosRef.current={x:e.clientX,y:e.clientY};
+    // Compute candidate targets
+    const cs=new Set<SlotId>();const ci=new Set<string>();
+    const s=getSource(item);
+    if(s.kind==="blade"){
+      const peq=getEquippedBladeInfo();
+      if(isSlotUnlocked("MAIN")&&peq.main&&(peq.main.quality as string)!==s.quality){const qo=["rainbow","pink","gold","red","orange","purple","blue","green","white"];if(qo.indexOf(s.quality)<qo.indexOf(peq.main.quality as string))cs.add("MAIN");}
+      if(isSlotUnlocked("SUB_1")&&peq.sub1&&(peq.sub1.quality as string)!==s.quality){const qo=["rainbow","pink","gold","red","orange","purple","blue","green","white"];if(qo.indexOf(s.quality)<qo.indexOf(peq.sub1.quality as string))cs.add("SUB_1");}
+      if(cs.size===0){const inv=getBladeInventory();const eq2=getEquippedBladeInfo();const eIds2=new Set([eq2.main?.id,eq2.sub1?.id].filter(Boolean));for(const b of inv){if((b.quality as string)===s.quality&&b.id!==s.bladeId&&!eIds2.has(b.id))ci.add(b.id);}}
+    }else{
+      const peq=getEquippedBladeInfo();
+      if(isSlotUnlocked("MAIN")&&peq.main&&peq.main.quality===s.quality&&peq.main.level<40)cs.add("MAIN");
+      if(isSlotUnlocked("SUB_1")&&peq.sub1&&peq.sub1.quality===s.quality&&peq.sub1.level<40)cs.add("SUB_1");
+      if(cs.size===0){const orbs=getExpOrbInventory();const o=orbs.find(e=>e.quality===s.quality);if(o&&o.count>=2)ci.add(`exp:${s.quality}:${s.viewKey===`exp:${s.quality}:0`?"1":"0"}`);}
+    }
+    candidateSlotRef.current=cs;candidateItemRef.current=ci;
     resultRef.current={action:"NONE",tooltip:"",rateDisplay:"",rateX:0,rateY:0,upgradeCost:0,upgradeCanAfford:false,batchIds:[],targetViewKey:"",reason:"NONE",targetSlot:null};setST(t=>t+1);
   },[bp]);
   const batchIds=batchIdsRef.current;const result=resultRef.current;
+  const candidateSlots=candidateSlotRef.current;const candidateItems=candidateItemRef.current;
 
   const ri=(item:BpItem,i:number)=>{
-    const sel=isB(item)&&batchIds?.has(item.id);const bc=qc(item.quality);
+    const sel=isB(item)&&batchIds?.has(item.id);
+    const pre=isB(item)?candidateItems.has(item.id):isE(item)&&candidateItems.has(item.viewKey);
     const isSrc=srcRef.current&&getSource(item).kind===srcRef.current.kind&&(srcRef.current.kind==="blade"?isB(item)&&srcRef.current.bladeId===item.id:isE(item)&&srcRef.current.viewKey===item.viewKey);
-    const cls=`as-item${isSrc?" dragging":""}${sel?" batch-selected":""}`;
+    const cls=`as-item${isSrc?" dragging":""}${sel?" batch-selected":""}${pre&&!isSrc?" candidate-glow":""}`;
     if(isE(item))return(<div key={`e${i}`}className={cls}data-item-idx={i}data-drop-key="true"data-drop-type="item"data-drop-quality={item.quality}><ArmoryItemIcon type="EXP"quality={item.quality as BladeQualityId}size="NORMAL"showExpText={true}/><span className="as-item-count">{item.count}</span></div>);
     const atk=Math.round(computeBladeAttack(item.quality as BladeQualityId,item.level));
     return(<div key={`b${i}`}className={cls}data-item-idx={i}data-drop-key="true"data-drop-type="item"data-drop-quality={item.quality}><ArmoryItemIcon type="BLADE"quality={item.quality as BladeQualityId}size="NORMAL"showLevel={true}level={item.level}showAttack={true}attack={atk}/></div>);
@@ -113,7 +132,13 @@ export default function ArmoryScreen({onBack,debug}:{onBack:()=>void;debug?:bool
   const mb=eq.main,sb=eq.sub1;
   const ma=mb?Math.round(computeBladeAttack(mb.quality as BladeQualityId,mb.level)):0;
   const sa=sb?Math.round(computeBladeAttack(sb.quality as BladeQualityId,sb.level)):0;
-  const slotClass=(s:SlotId)=>{const ts=result.targetSlot;if(!ts||ts!==s)return"";if(result.reason==="LOCKED_SLOT")return"";if(result.action==="EQUIP_MAIN"||result.action==="EQUIP_SUB1"||result.action==="UPGRADE_MAIN"||result.action==="UPGRADE_SUB1")return" slot-glow";return"";};
+  const slotClass=(s:SlotId)=>{
+    const ts=result.targetSlot; const isHover=ts===s&&result.action!=="NONE"&&result.reason!=="LOCKED_SLOT";
+    const isCand=candidateSlots.has(s);
+    if(isHover)return" slot-glow-strong";
+    if(isCand)return" slot-glow";
+    return"";
+  };
   const sub1Unlocked=isSlotUnlocked("SUB_1");
 
   return(<div className="as-root">

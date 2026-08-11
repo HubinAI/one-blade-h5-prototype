@@ -7683,9 +7683,12 @@ h1 {
 .as-slot-diamond.locked { width:72px;height:72px;order:2;border-color:#444;cursor:default;color:#555; }
 .as-slot-diamond .aii-wrap { margin:0 auto; }
 .as-slot-hint { display:block;font-size:10px;color:#666;margin-top:2px; }
-/* slot glow on valid drag target */
-.as-slot-diamond.slot-glow { border-color:#5bc0ff!important;box-shadow:0 0 16px rgba(91,192,255,0.5);animation:sg-pulse 0.5s ease-in-out infinite alternate; }
-@keyframes sg-pulse { from{box-shadow:0 0 8px rgba(91,192,255,0.4);}to{box-shadow:0 0 20px rgba(91,192,255,0.7);} }
+/* slot glow: candidate (soft) vs hover (strong) */
+.as-slot-diamond.slot-glow { border-color:#5bc0ff!important;box-shadow:0 0 10px rgba(91,192,255,0.3); }
+.as-slot-diamond.slot-glow-strong { border-color:#5bc0ff!important;box-shadow:0 0 20px rgba(91,192,255,0.7);animation:sg-pulse 0.5s ease-in-out infinite alternate; }
+@keyframes sg-pulse { from{box-shadow:0 0 10px rgba(91,192,255,0.5);}to{box-shadow:0 0 24px rgba(91,192,255,0.8);} }
+/* item candidate pre-glow */
+.as-item.candidate-glow { box-shadow:0 0 12px rgba(255,211,90,0.35); }
 /* aii badges */
 .aii-lv { position:absolute;top:-2px;left:4px;font-size:9px;color:#ffd35a;background:rgba(0,0,0,0.8);padding:1px 4px;border-radius:3px;font-weight:700;line-height:1; }
 .aii-atk { position:absolute;bottom:-2px;left:50%;transform:translateX(-50%);font-size:9px;color:#ccc;background:rgba(0,0,0,0.8);padding:1px 5px;border-radius:3px;white-space:nowrap; }
