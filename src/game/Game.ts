@@ -711,7 +711,7 @@ export class Game {
       const isLevel1 = this.isLogicalLevel1() && this.runContext.mode !== "freeBurst";
       if (this.runContext.mode === "freeBurst") {
         this.energy = BALANCE.swordEnergy.max;
-      } else if (isLevel1) {
+      } else if (isNormalLine) {
         this.bladeMomentumMax = BLADE_MOMENTUM_CONFIG.baseMax;
         this.energy = Math.round(this.bladeMomentumMax * normalProfile.initialRatio);
       } else {
@@ -1354,9 +1354,9 @@ export class Game {
         this.energy = 50; this._eliteEntryBoostDone = true;
       }
     }
-    const isLevel1 = this.isLogicalLevel1();
+    const isNormalLine = this.isNormalMainline();
     if (!this.currentSlash?.active && !this.pendingSlash && this.regenDelayTimer <= 0 && this.warDrumNoDecayTimer <= 0 && this._momentumState !== 'bursting') {
-      if (isLevel1) {
+      if (isNormalLine) {
         const recovery = resolveBladePassiveRecovery(this.energy, this.bladeMomentumMax, scaledDt);
         this.energy = recovery.newCurrent;
       } else {
@@ -2443,8 +2443,8 @@ export class Game {
     // V0731012: 凝霜令 — 主刀命中未死亡敌人施加霜冻
     const slashBonus = this.getSlashScoreBonus(trail.kills);
     if (slashBonus > 0) this.score += slashBonus;
-    const isLevel1 = this.isLogicalLevel1();
-    if (isLevel1) {
+    const isNormalLine = this.isNormalMainline();
+    if (isNormalLine) {
       // V0730015: 统一结算改用 directMainKills（不含连锁/爆炸/副刀）
       const hitCount = trail.directMainKills;
       // 0807-11D-4C: 基于唯一命中数统一结算
@@ -2834,6 +2834,10 @@ export class Game {
   /** V0730003: 第1关统一判断（兼容静态id=1和动态id=10001） */
   private isLogicalLevel1(): boolean {
     return this.gameMode === "normal" && this.getLogicalFloor() === 1;
+  }
+  /** V0811050: 正常主线 (刀势/军令/Director/精英共享底座) */
+  private isNormalMainline(): boolean {
+    return this.gameMode === "normal";
   }
 
   // ═══════════════════ V0731005: 进度宝箱 ═══════════════════
@@ -5909,9 +5913,9 @@ export class Game {
   /** 0814-01C: 统一副刀单目标伤害 — bladeGrowth配置 × slot系数 */
   private applySubBladeDamage(target: Enemy, baseDamage: number) {
     if (!target.alive) return;
-    const isLevel1 = this.isLogicalLevel1();
+    const isNormalLine = this.isNormalMainline();
     let damage: number;
-    if (isLevel1) {
+    if (isNormalLine) {
       if (target.kind === "elite") {
         damage = Math.ceil(target.maxHp * 0.06);
       } else {
@@ -6016,7 +6020,7 @@ export class Game {
     // V0730002: 第1关禁用强制满刀势（由统一刀势系统管理）
     if (!this._act1Triggered && this.elapsed >= 15) {
       this._act1Triggered = true;
-      const isLevel1 = this.isLogicalLevel1();
+      const isNormalLine = this.isNormalMainline();
       if (!isLevel1) {
         this.triggerMomentumBurst();
       }
@@ -6327,7 +6331,7 @@ export class Game {
 
     // ── 决定是否触发事件波（20%概率，同局不重复，第1波不触发）──
     // V0730002: 第1关关闭随机事件潮
-    const isLevel1 = this.isLogicalLevel1();
+    const isNormalLine = this.isNormalMainline();
     const triggerEvent = !isLevel1 && this.wavesSpawned > 1 && Math.random() < 0.2;
     // 事件波按关卡解锁
     // P3.9：使用逻辑层数，避免动态主线 level.id=10000+floor 误触发

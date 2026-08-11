@@ -1077,6 +1077,14 @@ export function getPendingGate(): StageGate | null {
 /** P3.10：主线通关原子函数——记录通关、处理突破 */
 export function recordMainlineClear(clearedFloor: number): { nextFloor: number; requiresBreakthrough: boolean; gate: StageGate | null } {
   const progress = readProgress();
+  // V0811050: 原子写入clearedFloors + 自动首通奖励
+  if (!progress.clearedFloors.includes(clearedFloor)) {
+    progress.clearedFloors.push(clearedFloor);
+    // 自动首通奖励（与防重复领奖解耦）
+    claimFloorFirstReward(clearedFloor);
+  }
+  writeProgress(progress);
+  // ...gate logic unchanged...
   const gate = MAIN_STAGE_GATES.find(item => item.afterStage === clearedFloor) ?? null;
 
   if (gate) {
