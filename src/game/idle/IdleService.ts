@@ -11,12 +11,15 @@ export interface IdleSnapshot {
   unlocked: boolean;
   accumulatedSeconds: number;
   capSeconds: number;
-  progressRatio: number;       // 0..100
+  progressRatio: number;
   dropQuality: string;
   dropPerHour: number;
   pendingBladeCount: number;
   lastCollectAt: number;
   timeStr: string;
+  fastIdleEnabled: boolean;
+  fastIdleUsed: number;
+  fastIdleLimit: number;
 }
 
 // ── 配置读取 ──
@@ -67,6 +70,9 @@ export function getIdleSnapshot(): IdleSnapshot {
     pendingBladeCount: pending,
     lastCollectAt: progress.lastIdleCollectAt ?? Date.now(),
     timeStr: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
+    fastIdleEnabled: false,
+    fastIdleUsed: 0,
+    fastIdleLimit: 4,
   };
 }
 

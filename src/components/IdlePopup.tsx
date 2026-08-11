@@ -67,23 +67,22 @@ export default function IdlePopup({ onClose, debug }: { onClose: () => void; deb
           <div className="ip-time-bar-outer">
             <div className="ip-time-bar-inner" style={{width: `${snap.progressRatio}%`}} />
           </div>
-          <div className="ip-fast-idle">快速挂机：0/4</div>
+          <div className="ip-fast-idle">快速挂机：{snap.fastIdleUsed}/{snap.fastIdleLimit} {!snap.fastIdleEnabled ? "暂未开放" : ""}</div>
           <button className="ip-claim-btn" disabled={snap.pendingBladeCount <= 0} onClick={claim}>
             {snap.pendingBladeCount > 0 ? "收获奖励" : "暂无挂机奖励"}
           </button>
         </div>
-
-        {/* Debug (separate zone) */}
-        {debug && (
-          <div className="ip-debug">
-            <button onClick={() => { debugSimulateIdleHours(1); rf(); }}>+1h</button>
-            <button onClick={() => { debugSimulateIdleHours(8); rf(); }}>+8h</button>
-            <button onClick={() => { debugSimulateIdleHours(24); rf(); }}>+24h</button>
-            <button onClick={() => { debugResetIdle(); rf(); }}>重置</button>
-          </div>
-        )}
       </div>
 
+      {/* Debug outside panel */}
+      {debug && (
+        <div className="ip-debug-outside">
+          <button onClick={() => { debugSimulateIdleHours(1); rf(); }}>+1h</button>
+          <button onClick={() => { debugSimulateIdleHours(8); rf(); }}>+8h</button>
+          <button onClick={() => { debugSimulateIdleHours(24); rf(); }}>+24h</button>
+          <button onClick={() => { debugResetIdle(); rf(); }}>重置</button>
+        </div>
+      )}
       {/* Mini reward toast */}
       {rewardCount !== null && (
         <div className="ip-reward-toast">

@@ -7652,6 +7652,8 @@ h1 {
 .ip-reward-toast { position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(18,12,6,0.96);border:2px solid rgba(255,211,90,0.4);border-radius:14px;padding:14px 22px;display:flex;align-items:center;gap:10px;z-index:420;animation:ip-reward-pop 0.4s ease-out; }
 .ip-reward-toast-icon { width:28px;height:28px;border-radius:50%; }
 @keyframes ip-reward-pop { 0%{transform:translate(-50%,-50%) scale(0.7);opacity:0;}50%{transform:translate(-50%,-50%) scale(1.05);opacity:1;}100%{transform:translate(-50%,-50%) scale(1);opacity:1;} }
+.ip-debug-outside { position:fixed;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:420; }
+.ip-debug-outside button { font-size:12px;padding:6px 12px;border:1px solid rgba(255,211,90,0.25);border-radius:6px;background:rgba(22,18,12,0.9);color:#ccc;cursor:pointer; }
 /* ═══════════════════════════════════════════════════ */
 /* 0814-03.8 ArmoryRewardModal + rate badge + Bling   */
 /* ═══════════════════════════════════════════════════ */
