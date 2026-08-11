@@ -74,7 +74,14 @@ export function getBladeAttack(quality: string, level: number): number {
 export const ENEMY_TYPE_HP_MULTIPLIER: Record<string, number> = {
   infantry: 0.75, powder: 0.80, tractor: 0.85, splitter: 0.90,
   core: 0.95, shield: 1.20,
+  elite_fireRing: 35, elite_aura: 40, elite_heal: 45,
 };
+
+/** V0811057: 统一精英HP = baseHp × multiplier */
+export function eliteMaxHp(floor: number, eliteKind: string): number {
+  const mul = ENEMY_TYPE_HP_MULTIPLIER[`elite_${eliteKind}`] ?? 8;
+  return Math.round(mainlineGrowthCurve(floor) * mul);
+}
 
 export function getBaseHp(floor: number): number { return mainlineGrowthCurve(floor); }
 

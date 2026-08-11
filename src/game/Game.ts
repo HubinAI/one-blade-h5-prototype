@@ -28,7 +28,7 @@ import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles"
 import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, resolveDamage, resolveThreatDamage, type PlayerRunStats, type DamageRequest, type DamageResult, type DamageSourceType } from "./systems/damageSystem";
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
-import { getEnemyFinalHp, mainlineGrowthCurve, phaseEnemyCount, phaseSpeedMul, genericEliteHp, postEdictTotal } from "./config/mainlineNumeric";
+import { getEnemyFinalHp, mainlineGrowthCurve, phaseEnemyCount, phaseSpeedMul, genericEliteHp, postEdictTotal, eliteMaxHp } from "./config/mainlineNumeric";
 import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, inertiaEase, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS, SHADOW_MOVE_DURATION, SHADOW_SPEED_REF, SHADOW_MOVE_DURATION_MIN, SHADOW_MOVE_DURATION_MAX, SHADOW_STAGGER_MS, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
 import { playSwing, playHit, playExplosion, playPlayerHurt, playEliteKill, playVictory, initSfx, setBgmBattle, setBgmElite, setBgmOff, playRouletteTick } from "./sfx";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
@@ -12534,14 +12534,16 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
   /** 创建精英怪 */
   private createElite(kind: EliteKind, x: number, y: number, conf: import("./config/elites").EliteConfig): Enemy {
+    const floor = this.getLogicalFloor();
+    const eliteHp = this.gameMode === "normal" ? eliteMaxHp(floor, kind) : conf.maxHp;
     return {
       id: this.nextId("elite"),
       kind: "elite",
       eliteKind: kind,
       x, y,
       radius: conf.radius,
-      hp: conf.maxHp,
-      maxHp: conf.maxHp,
+      hp: eliteHp,
+      maxHp: eliteHp,
       speed: conf.speed,
       hpDamage: conf.defenseDamage,
       score: conf.score,
