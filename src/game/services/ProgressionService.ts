@@ -1859,7 +1859,7 @@ export function hasClearedFloor(floorId: number): boolean {
   return readProgress().clearedFloorRewards.includes(floorId);
 }
 export function isSub1Unlocked(): boolean { return hasClearedFloor(3); }
-export function isForgeUnlocked(): boolean { return hasClearedFloor(3); }
+export function isForgeUnlocked(): boolean { return hasClearedFloor(1); }
 export function isIdleUnlocked(): boolean { return hasClearedFloor(2); }
 
 /** 领取某关首通奖励 */

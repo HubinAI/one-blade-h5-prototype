@@ -155,7 +155,7 @@ export function MainMenu({
           <div className="v3-side-icon">🏯</div>
           <div className="v3-side-label">排行榜</div>
         </button>
-        <button className="v3-side-btn" onClick={() => { if (isForgeUnlocked()) onBag(); else showToast("通关第3关后解锁炼器合成"); }}>
+        <button className="v3-side-btn" onClick={() => { if (isForgeUnlocked()) onBag(); else showToast("通关第1关后解锁炼器合成"); }}>
           <div className="v3-side-icon forge-icon">{isForgeUnlocked() ? "⚒" : "🔒"}</div>
           <div className="v3-side-label">炼器合成</div>
         </button>
