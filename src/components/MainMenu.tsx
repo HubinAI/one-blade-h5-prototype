@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import type { HomeSnapshot } from "../game/services/ProgressionService";
-import { getEquippedBlades, restoreStaminaByAd, restoreStaminaByShare, readProgress, writeProgress, claimAutoIdle } from "../game/services/ProgressionService";
+import { getEquippedBlades, restoreStaminaByAd, restoreStaminaByShare, readProgress, writeProgress, tickIdleAccumulation } from "../game/services/ProgressionService";
 import { getStageNameByFloor, MAIN_STAGE_GATES, getCurrentGate } from "../game/config/synthesis";
 import { IdleTreeAnimation, useRandomTip } from "./IdleTreeAnimation";
 import { ThunderGeneralPreview } from "./ThunderGeneralPreview";
@@ -43,7 +43,7 @@ export function MainMenu({
 
   // 0814-01A: 静默挂机收益累积（每分钟一次），玩家层无金币输出
   useEffect(() => {
-    const tick = () => { claimAutoIdle(); };
+    const tick = () => { tickIdleAccumulation(); };
     tick();
     const timer = setInterval(tick, 60_000);
     return () => clearInterval(timer);

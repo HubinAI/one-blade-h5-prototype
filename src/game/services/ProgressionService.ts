@@ -1990,3 +1990,19 @@ export function debugResetToNewPlayer(): void {
   fresh.pendingBreakthroughId = null;
   writeProgress(fresh);
 }
+
+// ═══════════════════════════════════════════════════
+// 0814-04A-1: 通用资产发放API
+// ═══════════════════════════════════════════════════
+
+export function grantBladeInstances(quality: string, count: number, reason: string): { instanceIds: string[] } {
+  const progress = readProgress();
+  const ids: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const b = createBladeInstance(quality as BladeQualityId, 1);
+    progress.blades.push(b);
+    ids.push(b.id);
+  }
+  writeProgress(progress);
+  return { instanceIds: ids };
+}
