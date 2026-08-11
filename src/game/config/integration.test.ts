@@ -23,11 +23,16 @@ describe("通关→解锁→奖励集成", () => {
     expect(isIdleUnlocked()).toBe(false);
   });
 
-  it("通1: 炼器+SUB1解锁, 挂机未解锁", () => {
+  it("通1: 炼器解锁, SUB_1未解锁, 挂机未解锁", () => {
     recordClear(1);
     expect(isForgeUnlocked()).toBe(true);
-    expect(isSub1Unlocked()).toBe(true);
+    expect(isSub1Unlocked()).toBe(false);
     expect(isIdleUnlocked()).toBe(false);
+  });
+
+  it("通3: SUB_1解锁", () => {
+    recordClear(1); recordClear(2); recordClear(3);
+    expect(isSub1Unlocked()).toBe(true);
   });
 
   it("通2: 挂机解锁", () => {
