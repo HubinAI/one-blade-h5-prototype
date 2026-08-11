@@ -2841,11 +2841,10 @@ export class Game {
   }
 
   // ═══════════════════ V0731005: 进度宝箱 ═══════════════════
-  /** V0811055: 军令阈值安全波次 — 唯一入口 */
+  /** V0811055: 军令阈值5整数化 — 唯一入口 */
   private calcMainlineEdictThreshold(): number {
     if (this.gameMode !== "normal") return 30;
     let totalBudget = 0;
-    const cumulative: number[] = [];
     for (const w of this.level.waves as any[]) {
       if (!w.enemies) continue;
       for (const e of w.enemies) {
@@ -2853,24 +2852,17 @@ export class Game {
         if (kind === "elite" || kind === "boss" || kind === "fireRing") continue;
         totalBudget += e.count ?? 1;
       }
-      cumulative.push(totalBudget);
     }
-    const target = totalBudget * 0.55;
-    // find nearest cumulative
-    let best = cumulative[0] ?? target;
-    let bestDist = Math.abs(cumulative[0] - target);
-    for (let i = 1; i < cumulative.length; i++) {
-      const d = Math.abs(cumulative[i] - target);
-      if (d < bestDist) { best = cumulative[i]; bestDist = d; }
-    }
+    const raw = totalBudget * 0.55;
+    const threshold = Math.ceil(raw / 5) * 5;
     this._debugPreBudget = totalBudget;
-    this._debugTarget55 = target;
-    this._debugSafeWave = cumulative.findIndex(c => c === best) + 1;
-    return best;
+    this._debugRaw55 = raw;
+    this._debugThreshold5 = threshold;
+    return threshold;
   }
   private _debugPreBudget = 0;
-  private _debugTarget55 = 0;
-  private _debugSafeWave = 0;
+  private _debugRaw55 = 0;
+  private _debugThreshold5 = 0;
   private _initProgressChest() {
     if (this.gameMode !== "normal") { this._chestRuntime = { stageIndex: 0, progress: 0, threshold: 0, status: "complete", maxChestCount: 0, lastCountedEnemyId: "", lastKillSource: "" }; return; }
     const maxChest = this.level.maxChestCount ?? getUnlockedChestCount(this._readMainlineLevel());
