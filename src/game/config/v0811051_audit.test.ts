@@ -76,8 +76,11 @@ describe("SUB_1 装备业务锁", () => {
   it("通3后: equipBladeToSlot SUB_1 成功", () => {
     debugResetToNewPlayer();
     recordMainlineClear(1); recordMainlineClear(2); recordMainlineClear(3);
+    // grant a non-white blade
+    grantBladeInstances("green", 1, "test");
     const p = readProgress();
-    const blade = p.blades.find(b=>b.quality==="green");
+    const blade = p.blades.find(b=>b.quality==="green" && b.id !== p.equippedMainBladeId);
+    expect(blade).toBeDefined();
     const result = equipBladeToSlot(blade!.id, "SUB_1");
     expect(result).toBe(true);
   });
