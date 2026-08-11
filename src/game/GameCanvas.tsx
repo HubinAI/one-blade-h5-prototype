@@ -3,6 +3,7 @@ import { DESIGN_HEIGHT, DESIGN_WIDTH } from "./config/constants";
 import { Game, type ReviveOffer } from "./Game";
 import type { BattleResult, BossPhaseState, LevelConfig, Vec2 } from "./types";
 import { TribulationOverlay } from "../components/TribulationOverlay";
+import { debugResetToNewPlayer } from "../game/services/ProgressionService";
 
 type GameCanvasProps = {
   level: LevelConfig;
@@ -158,7 +159,8 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
       } else if (event.key === "0") {
         gameRef.current?.restartLevel1();
       } else if (event.key === "`") {
-        import("../game/services/ProgressionService").then(m => { m.debugResetToNewPlayer(); window.location.reload(); });
+        debugResetToNewPlayer();
+        window.location.reload();
       }
     };
 
