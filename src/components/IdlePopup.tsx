@@ -6,17 +6,27 @@ export default function IdlePopup({ onClose, debug }: { onClose: () => void; deb
   const rf = () => setTick(t => t + 1);
   const snap = getIdleSnapshot();
   const nodes = [1, 2, 3, 4, 5];
+  const perDay = snap.dropPerHour * 24;
+
+  // Mini reward toast
+  const [rewardCount, setRewardCount] = useState<number | null>(null);
 
   const claim = () => {
     const r = claimIdleReward();
-    if (r.ok) rf();
+    if (r.ok && r.count) {
+      setRewardCount(r.count);
+      setTimeout(() => { setRewardCount(null); onClose(); }, 1200);
+    }
+    rf();
   };
 
   return (
     <div className="ip-overlay" onClick={onClose}>
       <div className="ip-panel" onClick={e => e.stopPropagation()}>
+        {/* Zone 1: Title */}
         <div className="ip-title">挂机奖励</div>
 
+        {/* Zone 2: Mainline progress */}
         <div className="ip-nodes">
           <div className="ip-node-bar">
             {nodes.map(n => (
@@ -28,12 +38,14 @@ export default function IdlePopup({ onClose, debug }: { onClose: () => void; deb
           </div>
         </div>
 
+        {/* Zone 3: Efficiency — daily */}
         <div className="ip-efficiency">
           <span className="ip-eff-left"><span className="ip-eff-icon" style={{background:"#d0d0d0"}} /> 白色刀胚</span>
-          <span className="ip-eff-right">{snap.dropPerHour}把/小时</span>
+          <span className="ip-eff-right">{perDay}把/天</span>
         </div>
         <div className="ip-bonus">挂机加成：0%</div>
 
+        {/* Zone 4: Drop preview */}
         <div className="ip-drops">
           <div className="ip-drops-title">掉落道具</div>
           <div className="ip-drops-grid">
@@ -48,6 +60,7 @@ export default function IdlePopup({ onClose, debug }: { onClose: () => void; deb
           </div>
         </div>
 
+        {/* Zone 5: Time + actions */}
         <div className="ip-time-section">
           <div className="ip-time-label">挂机时间</div>
           <div className="ip-time-value">{snap.timeStr} / 24:00:00</div>
@@ -56,19 +69,28 @@ export default function IdlePopup({ onClose, debug }: { onClose: () => void; deb
           </div>
           <div className="ip-fast-idle">快速挂机：0/4</div>
           <button className="ip-claim-btn" disabled={snap.pendingBladeCount <= 0} onClick={claim}>
-            收获奖励
+            {snap.pendingBladeCount > 0 ? "收获奖励" : "暂无挂机奖励"}
           </button>
         </div>
 
+        {/* Debug (separate zone) */}
         {debug && (
           <div className="ip-debug">
             <button onClick={() => { debugSimulateIdleHours(1); rf(); }}>+1h</button>
             <button onClick={() => { debugSimulateIdleHours(8); rf(); }}>+8h</button>
             <button onClick={() => { debugSimulateIdleHours(24); rf(); }}>+24h</button>
-            <button onClick={() => { debugResetIdle(); rf(); }}>清零</button>
+            <button onClick={() => { debugResetIdle(); rf(); }}>重置</button>
           </div>
         )}
       </div>
+
+      {/* Mini reward toast */}
+      {rewardCount !== null && (
+        <div className="ip-reward-toast">
+          <div className="ip-reward-toast-icon" style={{background:"#d0d0d0"}} />
+          <span>收获奖励  白色刀胚 ×{rewardCount}</span>
+        </div>
+      )}
     </div>
   );
 }
