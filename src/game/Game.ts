@@ -3901,6 +3901,11 @@ export class Game {
             const hpBefore = frElite.hp;
             frElite.hp = Math.max(0, frElite.hp - dmg);
             frElite.flash = Math.max(frElite.flash, 0.3);
+            // V0811032R: HP归零立即击杀, 终止环循环
+            if (frElite.hp <= 0 && frElite.alive) {
+              frElite.alive = false;
+              this.handleDirectEnemyKilledBySystem(frElite, "system");
+            }
             // 0809-11E-5A-1: 环伤用实际HP损失
             this._eliteBudgetRing += (hpBefore - Math.max(0, frElite.hp));
             // 0808-11E-Final: -8%反馈
@@ -11164,11 +11169,13 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 右下角临时效果图标（鼓/魂/油）— 含圆形倒计时
     this.drawPickupBuffs(ctx);
 
-    // 0814-01C: SUB_1装备槽 + SUB_2锁定槽
-    const leftSlot = this.getSubBladeSlotLayout(0);
+    // 0814-1032R: SUB_1仅第3关后绘制
+    if (isSub1Unlocked()) {
+      const leftSlot = this.getSubBladeSlotLayout(0);
+      const slotColor = 0x5bc0ff;
+      this.drawSubBladeSlot(ctx, 0, leftSlot.boxX, leftSlot.boxY, leftSlot.iconR, slotColor);
+    }
     const rightSlot = this.getSubBladeSlotLayout(1);
-    const slotColor = 0x5bc0ff;
-    this.drawSubBladeSlot(ctx, 0, leftSlot.boxX, leftSlot.boxY, leftSlot.iconR, slotColor);
     // SUB_2 锁定显示
     ctx.save();
     const rx = rightSlot.boxX, ry = rightSlot.boxY, rR = rightSlot.iconR;
