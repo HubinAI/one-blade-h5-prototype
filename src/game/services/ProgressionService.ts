@@ -1472,15 +1472,20 @@ export function addGreenExpOrb(count: number): void {
 }
 
 /** 0814-03.4R: 通用同品质批量炼器（任意quality→下一quality） */
-export function forgeQualityBlades(quality: BladeQualityId): { pairs: number; successes: number; fails: number; targetQuality: BladeQualityId | null } {
+export function forgeQualityBlades(quality: BladeQualityId): { pairs: number; successes: number; fails: number; targetQuality: BladeQualityId | null;
+  createdBlades: {id:string;quality:string;name:string;level:number}[];
+  expReward: {quality: BladeQualityId; count: number} | null; } {
   const progress = readProgress();
   const cfg = getForgeConfigBySource(quality);
-  if (!cfg) return { pairs: 0, successes: 0, fails: 0, targetQuality: null };
+  const none = { pairs: 0, successes: 0, fails: 0, targetQuality: null, createdBlades: [], expReward: null };
+  if (!cfg) return none;
   const equipped = new Set([progress.equippedMainBladeId, ...progress.equippedSubBladeIds].filter(Boolean));
   const forgeable = progress.blades.filter(b => b.quality === quality && !equipped.has(b.id));
   const pairs = Math.floor(forgeable.length / 2);
-  if (pairs < 1) return { pairs: 0, successes: 0, fails: 0, targetQuality: null };
+  if (pairs < 1) return none;
   let ok = 0, ng = 0;
+  const createdBlades: {id:string;quality:string;name:string;level:number}[] = [];
+  let expAdded = 0;
   for (let i = 0; i < pairs; i++) {
     const consumed = progress.blades.filter(b => b.quality === quality && !equipped.has(b.id)).slice(0, 2);
     progress.blades = progress.blades.filter(b => !consumed.find(c => c.id === b.id));
@@ -1488,11 +1493,20 @@ export function forgeQualityBlades(quality: BladeQualityId): { pairs: number; su
     const fc = progress.synFailCount[quality] ?? 0;
     const rate = Math.min(cfg.baseSuccessRate + fc * cfg.failureRateAdd, cfg.maxSuccessRate);
     const success = (fc === 0 && cfg.tutorialFirstGuaranteedSuccess) ? true : Math.random() < rate;
-    if (success) { ok++; progress.blades.push(createBladeInstance(cfg.targetQuality, 1)); progress.synFailCount[quality] = 0; }
-    else { ng++; progress.expOrbs[cfg.failureExpQuality] = (progress.expOrbs[cfg.failureExpQuality] ?? 0) + cfg.failureExpCount; progress.synFailCount[quality] = fc + 1; }
+    if (success) {
+      ok++;
+      const nb = createBladeInstance(cfg.targetQuality, 1);
+      progress.blades.push(nb);
+      createdBlades.push({id:nb.id, quality:nb.quality, name:nb.name, level:nb.level});
+      progress.synFailCount[quality] = 0;
+    } else {
+      ng++; expAdded += cfg.failureExpCount;
+      progress.expOrbs[cfg.failureExpQuality] = (progress.expOrbs[cfg.failureExpQuality] ?? 0) + cfg.failureExpCount;
+      progress.synFailCount[quality] = fc + 1;
+    }
   }
   writeProgress(progress);
-  return { pairs, successes: ok, fails: ng, targetQuality: cfg.targetQuality };
+  return { pairs, successes: ok, fails: ng, targetQuality: cfg.targetQuality, createdBlades, expReward: expAdded>0?{quality:cfg.failureExpQuality,count:expAdded}:null };
 }
 
 /** 0814-03.4: 经验球合成 — floor(N/2)组二合，逐组用ForgeConfig计算 */
