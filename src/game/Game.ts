@@ -1393,7 +1393,7 @@ export class Game {
 
     // V0730001: high档位就绪提示（ratio ≥ 70%）
     const bmStateNow = createBladeMomentumState(this.energy, this.bladeMomentumMax);
-    const isHighBand = this.isLogicalLevel1()
+    const isHighBand = this.isNormalMainline()
       ? bmStateNow.band === "high"
       : this.energy >= 90; // 第2～10关保持旧逻辑
     if (!this.currentSlash?.active && isHighBand) {
@@ -2150,7 +2150,7 @@ export class Game {
     // 0807-11D-4D: 刀势决定有效刀路长度 (仅L1普通, 起刀时锁定)
     let lockedMomentumRatio = 0;
     let momentumPathMul = 1.0;
-    if (this.isLogicalLevel1() && !isReactiveMode) {
+    if (this.isNormalMainline() && !isReactiveMode) {
       if (this._momentumState === 'bursting') {
         momentumPathMul = 1.20;
         lockedMomentumRatio = 1.0;
@@ -2252,7 +2252,7 @@ export class Game {
       }
     } else {
       // V0730001: 统一刀势 — 固定挥刀消耗 8 点（0807-11D-4C-1: L1改用挥刀结束统一结算，不预扣）
-      if (!this.isLogicalLevel1()) {
+      if (!this.isNormalMainline()) {
         this.energy = spendBladeMomentum(this.energy, this.bladeMomentumMax, BLADE_MOMENTUM_CONFIG.slash.baseCost);
       }
     }
@@ -2335,7 +2335,7 @@ export class Game {
             const tt=clamp(-(eax*abx+eay*aby)/dot,0,1);
             if(Math.sqrt((a.x+abx*tt-enemy.x)**2+(a.y+aby*tt-enemy.y)**2)>rad)continue;
             // 0807-11D-5B/5B-1: 三刀流去重 — 双向
-            if (this.isLogicalLevel1() && this._slashDirectHitIds.has(enemy.id)) {
+            if (this.isNormalMainline() && this._slashDirectHitIds.has(enemy.id)) {
               this._directHitDedupCount++;
               continue;
             }
@@ -2514,7 +2514,7 @@ export class Game {
     // V0730009: 拆开主刀直接击杀（不含连锁/爆炸）和副刀击杀统计
     this.stats.maxDirectMainSlashKills = Math.max(this.stats.maxDirectMainSlashKills, trail.directMainKills);
     // V0730009: L1有效主刀计数（≥3主刀直接击杀才算一次有效主刀）
-    if (this.isLogicalLevel1() && trail.directMainKills >= 3) {
+    if (this.isNormalMainline() && trail.directMainKills >= 3) {
       this._l1MainSlashCount++;
     }
     this.stats.maxChain = Math.max(this.stats.maxChain, trail.chain);
@@ -2837,7 +2837,7 @@ export class Game {
   }
   /** V0811050: 正常主线 (刀势/军令/Director/精英共享底座) */
   private isNormalMainline(): boolean {
-    return this.gameMode === "normal";
+    return this.gameMode === "normal" && this.runContext.mode === "normal" && this.level.id >= 10000;
   }
 
   // ═══════════════════ V0731005: 进度宝箱 ═══════════════════
@@ -4276,7 +4276,7 @@ export class Game {
     if (enemy.kind === "infantry") {
       if (!isEnemyCombatTargetable(enemy)) return; // 0807-11D-3G: 影化不可战斗
       // 0807-11D-5B: 本刀去重 — 同一敌人只结算1次直接伤害
-      if (this.isLogicalLevel1() && this._slashDirectHitIds.has(enemy.id)) {
+      if (this.isNormalMainline() && this._slashDirectHitIds.has(enemy.id)) {
         this._directHitDedupCount++;
         return;
       }
@@ -4455,7 +4455,7 @@ export class Game {
       if (this._eliteDamageDedup.has(dedupKey)) return;
       this._eliteDamageDedup.add(dedupKey);
       let eliteDmg: number;
-      if (this.isLogicalLevel1()) {
+      if (this.isNormalMainline()) {
         // 统一伤害公式：currentAttack × skillCoefficient × (1+bladeBonus)
         const stats = trail._damageSnapshot ?? this.captureDamageSnapshot();
         const req: DamageRequest = {
@@ -6106,7 +6106,7 @@ export class Game {
     // P4.4A.1-R3: Boss模式阻断所有波次
     if (this.gameMode === "boss") return;
     // V0730017: L1三组教学状态机控制波次
-    if (this.isLogicalLevel1()) {
+    if (this.isNormalMainline()) {
       const phase = this._l1TutorialPhase;
       if (phase === "group1_active" || phase === "wait_group2") {
         if (this.wavesSpawned >= 1) return; // 阻塞 ≥1
@@ -6508,7 +6508,7 @@ export class Game {
       this.pickupsSpawned += 1;
     } else if (
       // V0731005: 正常流程屏蔽随机拾取物
-      !this.isLogicalLevel1() &&
+      !this.isNormalMainline() &&
       Math.random() < this.getEffectivePickupChance() &&
       this.pickupsSpawned < this.getEffectivePickupLimit()
     ) {
@@ -7493,7 +7493,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 前5关有精英但没配置 postChestWaves 时，提供默认军令爆发
     if (this.level.eliteSpawnAt && this.level.eliteKind && this.getLogicalFloor() <= 5) {
       // V0730005: 第1关全程只有 infantry，使用纯基础兵军令
-      if (this.isLogicalLevel1()) {
+      if (this.isNormalMainline()) {
         return this.getDefaultPostChestWavesForLevel1();
       }
       return this.getDefaultPostChestWavesForEarlyLevel();
@@ -11015,7 +11015,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
 
   private drawDefenseAndWarrior(ctx: CanvasRenderingContext2D) {
     ctx.save();
-    const bmMaxDraw = this.isLogicalLevel1() ? this.bladeMomentumMax : BALANCE.swordEnergy.max;
+    const bmMaxDraw = this.isNormalMainline() ? this.bladeMomentumMax : BALANCE.swordEnergy.max;
     const energyRatio = bmMaxDraw > 0 ? this.energy / bmMaxDraw : 0;
     // V0730001: 统一档位判定（用于能量条，stage 仍保留用于气场颜色）
     const bmStateDraw = createBladeMomentumState(this.energy, bmMaxDraw);
@@ -11199,7 +11199,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const eBarH = 14;
     const eBarX = (DESIGN_WIDTH - eBarW) / 2;
     const eBarY = 800;
-    const bmMax = this.isLogicalLevel1() ? this.bladeMomentumMax : BALANCE.swordEnergy.max;
+    const bmMax = this.isNormalMainline() ? this.bladeMomentumMax : BALANCE.swordEnergy.max;
     const energyPct = bmMax > 0 ? this.energy / bmMax : 0;
     const bmState = createBladeMomentumState(this.energy, bmMax);
     const bmBand = bmState.band;
@@ -13051,7 +13051,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         this.particles.push(...sparkBurst(ev.hitPoint, pc, "#ffffff", 30 + (tier === "high" ? 20 : 0)));  // 白闪
         this.particles.push(glowParticle(ev.hitPoint, "#ffd700", 2.0, 40 + (tier === "high" ? 30 : tier === "mid" ? 15 : 5)));
         // V0730001: 刀势回流 — 使用统一接口（0807-11D-4C: L1改用挥刀结束统一结算）
-        if (!this.isLogicalLevel1()) {
+        if (!this.isNormalMainline()) {
           const momentumGain = tier === "high" ? 22 : tier === "mid" ? 15 : 10;
           this.energy = gainBladeMomentum(this.energy, BLADE_MOMENTUM_CONFIG.baseMax, momentumGain);
         }
