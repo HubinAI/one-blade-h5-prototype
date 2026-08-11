@@ -154,6 +154,8 @@ export function DebugScreen({ onBack }: DebugScreenProps) {
           <h3>主线测试</h3>
           <div className="debug-btn-grid">
             <button className="debug-btn" onClick={() => { debugJumpToFloor(1); refresh(); }}>跳到第1关</button>
+            <button className="debug-btn" onClick={() => { debugJumpToFloor(2); refresh(); }}>跳到第2关</button>
+            <button className="debug-btn" onClick={() => { debugJumpToFloor(3); refresh(); }}>跳到第3关</button>
             <button className="debug-btn" onClick={() => { debugJumpToFloor(4); refresh(); }}>跳到第4关：分裂兵教学</button>
             <button className="debug-btn" onClick={() => { debugJumpToFloor(5); refresh(); }}>跳到第5关：分裂巩固</button>
             <button className="debug-btn" onClick={() => { debugJumpToFloor(6); refresh(); }}>跳到第6关：突破后主线</button>
