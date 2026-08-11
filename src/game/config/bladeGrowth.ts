@@ -236,8 +236,7 @@ export function getBladeLevelConfig(level: number): BladeLevelConfig {
 import { getBladeAttack } from "./mainlineNumeric";
 
 export function computeBladeAttack(qualityId: BladeQualityId, level: number): number {
-  const l = getBladeLevelConfig(level);
-  return getBladeAttack(qualityId, level) * l.attackMultiplier;
+  return getBladeAttack(qualityId, level);
 }
 
 /** 根据槽位ID获取槽位配置 */

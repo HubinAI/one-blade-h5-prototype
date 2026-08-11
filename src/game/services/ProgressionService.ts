@@ -80,7 +80,8 @@ export type PlayerProgress = {
   pendingBreakthroughId: string | null;
   /** 0814-04A: 已领取首通奖励的关卡ID集合 */
   clearedFloorRewards: number[];
-  /** 0814-04B-2: 上次领取挂机奖励的时间戳 */
+  /** V0811047: 真正通关的关卡ID集合 */
+  clearedFloors: number[];  /** 0814-04B-2: 上次领取挂机奖励的时间戳 */
   lastIdleCollectAt: number;
   /** 0814-04B-2: 当前累计挂机秒数 (≤ capHours*3600) */
   idleAccumulatedSeconds: number;
@@ -218,7 +219,7 @@ function createDefaultProgress(): PlayerProgress {
     expOrbs: {},
     clearedBreakthroughs: [],
     clearedFloorRewards: [],
-    lastIdleCollectAt: Date.now(),
+    clearedFloors: [],    lastIdleCollectAt: Date.now(),
     idleAccumulatedSeconds: 0,
     pendingBreakthroughId: null,
   };
@@ -1311,7 +1312,8 @@ function addExpOrbToProgress(progress: PlayerProgress, quality: Quality, count: 
 // ═════════════════════════════════════════════════════════════════
 // 0814-03 bladeGrowth 炼器 + 经验 + 装备系统
 // ═════════════════════════════════════════════════════════════════
-import { getForgeConfig, getForgeConfigBySource, getBladeLevelConfig, getBladeQualityConfig, getFloorRewardConfig, BLADE_QUALITY_CONFIG, BLADE_LEVEL_CONFIG, FORGE_CONFIG } from "../config/bladeGrowth";
+import { getForgeConfig, getForgeConfigBySource, getBladeLevelConfig, getBladeQualityConfig, BLADE_QUALITY_CONFIG, BLADE_LEVEL_CONFIG, FORGE_CONFIG } from "../config/bladeGrowth";
+import { getFloorRewardConfig as getFirstClearReward } from "../config/firstClearReward";
 import type { BladeQualityId } from "../config/bladeGrowth";
 
 let _bladeIdCounter = Date.now();
@@ -1856,7 +1858,7 @@ export function isArmoryUnlocked(): boolean { return readProgress().highestFloor
 /** 检查SUB_1是否正式开放 (第3关首通) */
 /** V0811033: 统一首通判断 — 禁止直接用 highestFloor>=N */
 export function hasClearedFloor(floorId: number): boolean {
-  return readProgress().clearedFloorRewards.includes(floorId);
+  return readProgress().clearedFloors.includes(floorId);
 }
 export function isSub1Unlocked(): boolean { return hasClearedFloor(1); }
 export function isForgeUnlocked(): boolean { return hasClearedFloor(1); }
@@ -1864,24 +1866,15 @@ export function isIdleUnlocked(): boolean { return hasClearedFloor(2); }
 
 /** 领取某关首通奖励 */
 export function claimFloorFirstReward(floorId: number): { items: string[]; bladeCount: number } | null {
-  const cfg = getFloorRewardConfig(floorId);
-  if (!cfg) return null;
+  const reward = getFirstClearReward(floorId);
   const progress = readProgress();
   if (progress.clearedFloorRewards.includes(floorId)) return null;
-  let bladeCount = 0;
-  const items: string[] = [];
-  for (const reward of cfg.firstClearReward) {
-    if (reward.quality === "white") {
-      for (let i = 0; i < reward.count; i++) {
-        progress.blades.push(createBladeInstance("white", 1));
-        bladeCount++;
-      }
-      items.push(`白色刀胚 ×${reward.count}`);
-    }
-  }
-  progress.clearedFloorRewards.push(floorId);
-  writeProgress(progress);
-  return { items, bladeCount };
+  const result = grantBladeInstances(reward.quality, reward.count, "first_clear");
+  // re-read: grantBladeInstances写入了blades
+  const p2 = readProgress();
+  p2.clearedFloorRewards.push(floorId);
+  writeProgress(p2);
+  return { items: [`${reward.quality}刀胚 ×${reward.count}`], bladeCount: reward.count };
 }
 
 /** Debug: 清除某关首通记录 */
@@ -1968,7 +1961,7 @@ export function debugResetToNewPlayer(): void {
   fresh.equippedMainBladeId = fresh.blades[0].id;
   fresh.equippedSubBladeIds = [];
   fresh.clearedFloorRewards = [];
-  fresh.clearedBreakthroughs = [];
+  fresh.clearedFloors = [];  fresh.clearedBreakthroughs = [];
   fresh.expOrbs = {};
   fresh.firstGreenForgeGuaranteedUsed = false;
   fresh.synFailCount = {};
