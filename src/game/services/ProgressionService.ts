@@ -1849,13 +1849,18 @@ export function hasClearedFloorReward(floorId: number): boolean {
 }
 
 /** 检查挂机是否已解锁 (第2关首通) */
-export function isIdleUnlocked(): boolean { return readProgress().highestFloor >= 2; }
 
 /** 检查装备/炼器是否已解锁 (第3关首通) */
 export function isArmoryUnlocked(): boolean { return readProgress().highestFloor >= 3; }
 
 /** 检查SUB_1是否正式开放 (第3关首通) */
-export function isSub1Unlocked(): boolean { return readProgress().highestFloor >= 3; }
+/** V0811033: 统一首通判断 — 禁止直接用 highestFloor>=N */
+export function hasClearedFloor(floorId: number): boolean {
+  return readProgress().clearedFloorRewards.includes(floorId);
+}
+export function isSub1Unlocked(): boolean { return hasClearedFloor(3); }
+export function isForgeUnlocked(): boolean { return hasClearedFloor(3); }
+export function isIdleUnlocked(): boolean { return hasClearedFloor(2); }
 
 /** 领取某关首通奖励 */
 export function claimFloorFirstReward(floorId: number): { items: string[]; bladeCount: number } | null {

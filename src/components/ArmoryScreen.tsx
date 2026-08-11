@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { getBladeInventory, initBladeGrowthDefaults, getEquippedBladeInfo, equipBladeToSlot, upgradeBladeExp, getExpOrbInventory, readProgress } from "../game/services/ProgressionService";
+import { getBladeInventory, initBladeGrowthDefaults, getEquippedBladeInfo, equipBladeToSlot, upgradeBladeExp, getExpOrbInventory, readProgress, isSub1Unlocked } from "../game/services/ProgressionService";
 import { resetForgeFailCount, getForgeRate, addWhiteBladeMaterial, addGreenExpOrb, mergeExpOrbs, forgeQualityBlades } from "../game/services/ProgressionService";
 import { getBladeLevelConfig, computeBladeAttack, getForgeConfigBySource, QUALITY_META, type BladeQualityId } from "../game/config/bladeGrowth";
 import type { Blade } from "../game/services/BladeService";
@@ -15,7 +15,7 @@ function bn(q:string){return QUALITY_META[q as BladeQualityId]?.bladeName??"刀"
 const QO:BladeQualityId[]=["rainbow","pink","gold","red","orange","purple","blue","green","white"];
 const SLOT_IDS=["MAIN","SUB_1"]as const;type SlotId=typeof SLOT_IDS[number];
 function parseSlotId(raw:string|null|undefined):SlotId|null{return SLOT_IDS.includes(raw as any)?(raw as SlotId):null;}
-function isSlotUnlocked(s:SlotId):boolean{if(s==="MAIN")return true;return(readProgress().highestFloor??1)>=3;}
+function isSlotUnlocked(s:SlotId):boolean{if(s==="MAIN")return true;return isSub1Unlocked();}
 
 type BpItem=Blade|{kind:"exp";quality:BladeQualityId;count:number;viewKey:string};
 function isE(i:BpItem):i is{kind:"exp";quality:BladeQualityId;count:number;viewKey:string}{return(i as any).kind==="exp";}

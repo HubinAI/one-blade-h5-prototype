@@ -1,5 +1,5 @@
 /** 0814 IdleService — 配置全文 IDLE_CONFIG, 纯计算 + claim + debug */
-import { readProgress, writeProgress, grantBladeInstances } from "../services/ProgressionService";
+import { readProgress, writeProgress, grantBladeInstances, hasClearedFloor } from "../services/ProgressionService";
 import { getIdleConfig } from "../config/bladeGrowth";
 
 let _cfg: ReturnType<typeof getIdleConfig> | null = null;
@@ -13,7 +13,8 @@ export interface IdleSnapshot {
 }
 
 export function isIdleUnlocked(progress?: ReturnType<typeof readProgress>): boolean {
-  return ((progress ?? readProgress()).highestFloor ?? 1) >= cfg().unlockedFloor;
+  if (progress) return progress.clearedFloorRewards.includes(2);
+  return hasClearedFloor(2);
 }
 
 export function getIdleSnapshot(): IdleSnapshot {
