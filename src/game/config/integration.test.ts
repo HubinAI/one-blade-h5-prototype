@@ -75,18 +75,19 @@ describe("挂机产出集成", () => {
     expect(snap.unlocked).toBe(false);
   });
 
-  it("通2后: 挂机产出white", () => {
+  it("通2后: 挂机pools有白100%", () => {
     recordClear(1); recordClear(2);
     const snap = getIdleSnapshot();
     expect(snap.unlocked).toBe(true);
-    expect(snap.dropQuality).toBe("white");
-    expect(snap.dropPerHour).toBe(2.0);
+    expect(snap.pools.length).toBe(1);
+    expect(snap.pools[0].quality).toBe("white");
   });
 
-  it("通31后: 挂机产出绿色", () => {
+  it("通31后: pools含白+绿", () => {
     for (let f=1; f<=31; f++) recordClear(f);
     const snap = getIdleSnapshot();
-    expect(snap.dropQuality).toBe("green");
+    expect(snap.pools.length).toBe(2);
+    expect(snap.pools.map(p=>p.quality)).toContain("green");
   });
 });
 

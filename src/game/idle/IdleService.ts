@@ -1,12 +1,13 @@
-/** 0814 IdleService — 纯计算 + claim + debug, 唯一读idleProduction.ts */
+/** 0814 IdleService — 品质概率池 + per-blade Roll + claim */
 import { readProgress, writeProgress, grantBladeInstances, hasClearedFloor } from "../services/ProgressionService";
-import { getIdleQuality, getIdleRatePerHour, IDLE_CONFIG_COMMON } from "../config/idleProduction";
+import { getIdleRatePerHour, getIdleQualityPool, rollIdleQuality, IDLE_CONFIG_COMMON } from "../config/idleProduction";
 
 export interface IdleSnapshot {
   unlocked: boolean; currentFloor: number; accumulatedSeconds: number;
-  capSeconds: number; progressRatio: number; dropQuality: string;
+  capSeconds: number; progressRatio: number;
   dropPerHour: number; pendingBladeCount: number; timeStr: string;
   fastIdleEnabled: boolean; fastIdleUsed: number; fastIdleLimit: number;
+  pools: { quality: string; weight: number }[];
 }
 
 export function isIdleUnlocked(progress?: ReturnType<typeof readProgress>): boolean {
@@ -14,34 +15,48 @@ export function isIdleUnlocked(progress?: ReturnType<typeof readProgress>): bool
   return hasClearedFloor(2);
 }
 
+function bestFloor(): number {
+  const p = readProgress();
+  return p.clearedFloors.length > 0 ? Math.max(...p.clearedFloors) : 1;
+}
+
 export function getIdleSnapshot(): IdleSnapshot {
   const progress = readProgress();
   const unlocked = hasClearedFloor(2);
   const c = IDLE_CONFIG_COMMON;
-  const bestFloor = progress.clearedFloors.length > 0 ? Math.max(...progress.clearedFloors) : 1;
+  const floor = bestFloor();
   if (!unlocked) {
-    return { unlocked: false, currentFloor: bestFloor, accumulatedSeconds: 0, capSeconds: c.capHours * 3600, progressRatio: 0, dropQuality: "white", dropPerHour: 0, pendingBladeCount: 0, timeStr: "00:00:00", fastIdleEnabled: false, fastIdleUsed: 0, fastIdleLimit: c.fastIdleLimit };
+    return { unlocked: false, currentFloor: floor, accumulatedSeconds: 0, capSeconds: c.capHours * 3600, progressRatio: 0, dropPerHour: 0, pendingBladeCount: 0, timeStr: "00:00:00", fastIdleEnabled: false, fastIdleUsed: 0, fastIdleLimit: c.fastIdleLimit, pools: [] };
   }
-  const rate = getIdleRatePerHour(bestFloor);
-  const quality = getIdleQuality(bestFloor);
+  const rate = getIdleRatePerHour(floor);
   const storedSec = progress.idleAccumulatedSeconds ?? 0;
   const elapsed = Math.max(0, (Date.now() - (progress.lastIdleCollectAt ?? Date.now())) / 1000);
   const effSec = Math.min(c.capHours * 3600, storedSec + elapsed);
   const pending = Math.floor((effSec / 3600) * rate);
   const h = Math.floor(effSec / 3600), m = Math.floor((effSec % 3600) / 60), s = Math.floor(effSec % 60);
-  return { unlocked: true, currentFloor: bestFloor, accumulatedSeconds: effSec, capSeconds: c.capHours * 3600, progressRatio: Math.min(100, Math.round((effSec / (c.capHours * 3600)) * 100)), dropQuality: quality, dropPerHour: rate, pendingBladeCount: pending, timeStr: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`, fastIdleEnabled: false, fastIdleUsed: 0, fastIdleLimit: c.fastIdleLimit };
+  return { unlocked: true, currentFloor: floor, accumulatedSeconds: effSec, capSeconds: c.capHours * 3600, progressRatio: Math.min(100, Math.round((effSec / (c.capHours * 3600)) * 100)), dropPerHour: rate, pendingBladeCount: pending, timeStr: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`, fastIdleEnabled: false, fastIdleUsed: 0, fastIdleLimit: c.fastIdleLimit, pools: getIdleQualityPool(floor) };
 }
 
-export function claimIdleReward(): { ok: boolean; quality?: string; count?: number; reason?: string } {
+export function claimIdleReward(): { ok: boolean; quality?: string; count?: number; items?: { quality: string; count: number }[]; reason?: string } {
   const snap = getIdleSnapshot();
   if (!snap.unlocked) return { ok: false, reason: "挂机未解锁" };
   if (snap.pendingBladeCount <= 0) return { ok: false, reason: "暂无奖励" };
-  const result = grantBladeInstances(snap.dropQuality, snap.pendingBladeCount, "idle");
+  const floor = bestFloor();
+  const byQuality: Record<string, number> = {};
+  for (let i = 0; i < snap.pendingBladeCount; i++) {
+    const q = rollIdleQuality(floor);
+    byQuality[q] = (byQuality[q] ?? 0) + 1;
+  }
+  const items: { quality: string; count: number }[] = [];
+  for (const [q, n] of Object.entries(byQuality)) {
+    grantBladeInstances(q, n, "idle");
+    items.push({ quality: q, count: n });
+  }
   const progress = readProgress();
   progress.idleAccumulatedSeconds = 0;
   progress.lastIdleCollectAt = Date.now();
   writeProgress(progress);
-  return { ok: true, quality: snap.dropQuality, count: snap.pendingBladeCount };
+  return { ok: true, count: snap.pendingBladeCount, items };
 }
 
 export function debugSimulateIdleHours(hours: number): void {

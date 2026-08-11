@@ -46,3 +46,33 @@ export function getIdleQuality(floor: number): string {
   if (floor < 2) return "white";
   return getIdleStage(floor).quality;
 }
+
+// ═══════════════════════════════════════
+// V0811049: 品质概率池
+// ═══════════════════════════════════════
+
+export interface QualityPoolEntry { quality: string; weight: number; }
+
+export const IDLE_QUALITY_POOLS: { floorStart: number; floorEnd: number; pools: QualityPoolEntry[] }[] = [
+  { floorStart: 2,  floorEnd: 30,  pools: [{ quality:"white", weight:100 }] },
+  { floorStart: 31, floorEnd: 50,  pools: [{ quality:"white", weight:70 }, { quality:"green", weight:30 }] },
+  { floorStart: 51, floorEnd: 75,  pools: [{ quality:"green",weight:80 }, { quality:"blue",  weight:20 }] },
+  { floorStart: 76, floorEnd: 105, pools: [{ quality:"blue", weight:85 }, { quality:"purple",weight:15 }] },
+  { floorStart: 106,floorEnd: 140, pools: [{ quality:"purple",weight:90 }, { quality:"orange",weight:10 }] },
+  { floorStart: 141,floorEnd: 180, pools: [{ quality:"orange",weight:95 }, { quality:"red",   weight:5 }] },
+];
+
+export function getIdleQualityPool(floor: number): QualityPoolEntry[] {
+  const p = IDLE_QUALITY_POOLS.find(p => floor >= p.floorStart && floor <= p.floorEnd);
+  if (p) return p.pools;
+  if (floor < 2) return [{ quality: "white", weight: 100 }];
+  return IDLE_QUALITY_POOLS[IDLE_QUALITY_POOLS.length - 1].pools;
+}
+
+export function rollIdleQuality(floor: number): string {
+  const pool = getIdleQualityPool(floor);
+  const total = pool.reduce((s, e) => s + e.weight, 0);
+  let r = Math.random() * total;
+  for (const e of pool) { r -= e.weight; if (r <= 0) return e.quality; }
+  return pool[0].quality;
+}
