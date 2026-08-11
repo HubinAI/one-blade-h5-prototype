@@ -1160,7 +1160,7 @@ export class Game {
   /** V0801009: 统一单局状态重置——重试/退出/新局均从此入口清理 */
   private resetRunState(): void {
     // 宝箱与开奖
-    this._chestRuntime = { stageIndex: 0, progress: 0, threshold: 30, status: "charging", maxChestCount: 1, lastCountedEnemyId: "", lastKillSource: "" };
+    this._chestRuntime = { stageIndex: 0, progress: 0, threshold: this.calcMainlineEdictThreshold(), status: "charging", maxChestCount: 1, lastCountedEnemyId: "", lastKillSource: "" };
     this._chestOpeningPhase = "idle";
     this._pendingEdictId = null;
     this._chestRouletteTimer = 0; this._chestRouletteSpeed = 0; this._chestRouletteIndex = 0; this._chestRouletteResult = null;
@@ -2841,20 +2841,36 @@ export class Game {
   }
 
   // ═══════════════════ V0731005: 进度宝箱 ═══════════════════
-  /** V0811052: 军令动态阈值 = round(本关普通怪预算 × 0.55) */
+  /** V0811055: 军令阈值安全波次 — 唯一入口 */
   private calcMainlineEdictThreshold(): number {
     if (this.gameMode !== "normal") return 30;
-    let budget = 0;
+    let totalBudget = 0;
+    const cumulative: number[] = [];
     for (const w of this.level.waves as any[]) {
       if (!w.enemies) continue;
       for (const e of w.enemies) {
         const kind = e.kind ?? "";
         if (kind === "elite" || kind === "boss" || kind === "fireRing") continue;
-        budget += e.count ?? 1;
+        totalBudget += e.count ?? 1;
       }
+      cumulative.push(totalBudget);
     }
-    return Math.round(budget * 0.55);
+    const target = totalBudget * 0.55;
+    // find nearest cumulative
+    let best = cumulative[0] ?? target;
+    let bestDist = Math.abs(cumulative[0] - target);
+    for (let i = 1; i < cumulative.length; i++) {
+      const d = Math.abs(cumulative[i] - target);
+      if (d < bestDist) { best = cumulative[i]; bestDist = d; }
+    }
+    this._debugPreBudget = totalBudget;
+    this._debugTarget55 = target;
+    this._debugSafeWave = cumulative.findIndex(c => c === best) + 1;
+    return best;
   }
+  private _debugPreBudget = 0;
+  private _debugTarget55 = 0;
+  private _debugSafeWave = 0;
   private _initProgressChest() {
     if (this.gameMode !== "normal") { this._chestRuntime = { stageIndex: 0, progress: 0, threshold: 0, status: "complete", maxChestCount: 0, lastCountedEnemyId: "", lastKillSource: "" }; return; }
     const maxChest = this.level.maxChestCount ?? getUnlockedChestCount(this._readMainlineLevel());
@@ -6120,7 +6136,7 @@ export class Game {
     // P4.4A.1-R3: Boss模式阻断所有波次
     if (this.gameMode === "boss") return;
     // V0730017: L1三组教学状态机控制波次
-    if (this.isNormalMainline()) {
+    if (this.isLogicalLevel1()) {
       const phase = this._l1TutorialPhase;
       if (phase === "group1_active" || phase === "wait_group2") {
         if (this.wavesSpawned >= 1) return; // 阻塞 ≥1
