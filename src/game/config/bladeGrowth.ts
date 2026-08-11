@@ -66,8 +66,9 @@ export const BLADE_QUALITY_CONFIG: Record<BladeQualityId, BladeQualityConfig | n
     appearanceId: "",
   },
   // 后续品质已预留 qualityName+bladeName，正式配置留 null，接入时填写完整
-  blue: null,
-  purple: null,
+  // TEST_CONFIG: 非正式长期数值，仅供Debug验证炼器链路和显示
+  blue: { qualityId:"blue", qualityName:"蓝色", bladeName:"玄锋刀", equipable:true, baseAttack:130, mainMomentumEfficiency:1.03, subCooldown:7.0, appearanceId:"" },
+  purple: { qualityId:"purple", qualityName:"紫色", bladeName:"灵霄刀", equipable:true, baseAttack:170, mainMomentumEfficiency:1.06, subCooldown:9.0, appearanceId:"" },
   orange: null,
   red: null,
   gold: null,
@@ -276,3 +277,30 @@ export function getFloorRewardConfig(floorId: number): FloorRewardConfig | undef
 export function getIdleConfig(): IdleDropConfig {
   return IDLE_CONFIG;
 }
+
+/** 0814-03.7: 按sourceQuality查找ForgeConfig（白→绿、绿→蓝、蓝→紫） */
+export function getForgeConfigBySource(sourceQuality: BladeQualityId): ForgeConfig | undefined {
+  return FORGE_CONFIG.find(f => f.sourceQuality === sourceQuality);
+}
+
+// ═══════════════════════════════════════════════════
+// 0814-03.7: 唯一品质元数据 QUALITY_META
+// ═══════════════════════════════════════════════════
+export interface QualityMeta {
+  displayName: string;
+  bladeName: string;
+  color: string;
+  order: number;
+}
+
+export const QUALITY_META: Record<BladeQualityId, QualityMeta> = {
+  white:   { displayName:"白色", bladeName:"凡铁刀胚", color:"#d0d0d0", order:8 },
+  green:   { displayName:"绿色", bladeName:"青锋刀", color:"#4ade80", order:7 },
+  blue:    { displayName:"蓝色", bladeName:"玄锋刀", color:"#60a5fa", order:6 },
+  purple:  { displayName:"紫色", bladeName:"灵霄刀", color:"#c084fc", order:5 },
+  orange:  { displayName:"橙色", bladeName:"镇岳刀", color:"#fb923c", order:4 },
+  red:     { displayName:"红色", bladeName:"赤霄刀", color:"#f87171", order:3 },
+  gold:    { displayName:"金色", bladeName:"天罡刀", color:"#fbbf24", order:2 },
+  pink:    { displayName:"粉色", bladeName:"太虚刀", color:"#f472b6", order:1 },
+  rainbow: { displayName:"彩色", bladeName:"开天刀", color:"#5eead4", order:0 },
+};

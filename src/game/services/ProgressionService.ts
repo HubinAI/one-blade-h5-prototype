@@ -1319,7 +1319,7 @@ function addExpOrbToProgress(progress: PlayerProgress, quality: Quality, count: 
 // ═════════════════════════════════════════════════════════════════
 // 0814-03 bladeGrowth 炼器 + 经验 + 装备系统
 // ═════════════════════════════════════════════════════════════════
-import { getForgeConfig, getBladeLevelConfig, getBladeQualityConfig, getFloorRewardConfig, BLADE_QUALITY_CONFIG, BLADE_LEVEL_CONFIG, FORGE_CONFIG } from "../config/bladeGrowth";
+import { getForgeConfig, getForgeConfigBySource, getBladeLevelConfig, getBladeQualityConfig, getFloorRewardConfig, BLADE_QUALITY_CONFIG, BLADE_LEVEL_CONFIG, FORGE_CONFIG } from "../config/bladeGrowth";
 import type { BladeQualityId } from "../config/bladeGrowth";
 
 let _bladeIdCounter = Date.now();
@@ -1380,7 +1380,7 @@ function createBladeInstance(quality: BladeQualityId, level: number): Blade {
 /** 0814-03: 白→绿炼器，基于ForgeConfig */
 export function forgeWhiteToGreen(forceSuccess?: boolean, forceFail?: boolean): { success: boolean; blade?: Blade; expOrbs?: number; newRate: number } {
   const progress = readProgress();
-  const cfg = getForgeConfig("white", "green");
+  const cfg = getForgeConfigBySource("white");
   if (!cfg) return { success: false, newRate: 0 };
 
   const whiteCount = progress.blades.filter(b => b.quality === "white").length;
@@ -1474,7 +1474,7 @@ export function addGreenExpOrb(count: number): void {
 /** 0814-03.4R: 通用同品质批量炼器（任意quality→下一quality） */
 export function forgeQualityBlades(quality: BladeQualityId): { pairs: number; successes: number; fails: number; targetQuality: BladeQualityId | null } {
   const progress = readProgress();
-  const cfg = getForgeConfig(quality, quality);
+  const cfg = getForgeConfigBySource(quality);
   if (!cfg) return { pairs: 0, successes: 0, fails: 0, targetQuality: null };
   const equipped = new Set([progress.equippedMainBladeId, ...progress.equippedSubBladeIds].filter(Boolean));
   const forgeable = progress.blades.filter(b => b.quality === quality && !equipped.has(b.id));
@@ -1502,7 +1502,7 @@ export function mergeExpOrbs(quality: BladeQualityId): { pairs: number; successe
   const pairs = Math.floor(total / 2);
   if (pairs < 1) return { pairs: 0, successes: 0, fails: 0, targetQuality: null };
 
-  const cfg = getForgeConfig(quality, quality);
+  const cfg = getForgeConfigBySource(quality);
   if (!cfg) return { pairs: 0, successes: 0, fails: 0, targetQuality: null };
 
   const qOrder: BladeQualityId[] = ["rainbow","pink","gold","red","orange","purple","blue","green","white"];
@@ -1540,7 +1540,7 @@ export function resetForgeFailCount(): void {
 /** 0814-03.6: 获取任意品质当前锻造成功率 */
 export function getForgeRate(quality: BladeQualityId): number {
   const progress = readProgress();
-  const cfg = getForgeConfig(quality, quality);
+  const cfg = getForgeConfigBySource(quality);
   if (!cfg) return 0;
   const failCount = progress.synFailCount[quality] ?? 0;
   return Math.min(cfg.baseSuccessRate + failCount * cfg.failureRateAdd, cfg.maxSuccessRate);
@@ -1549,7 +1549,7 @@ export function getForgeRate(quality: BladeQualityId): number {
 /** 0814-03: 获取当前白→绿成功率 */
 export function getWhiteGreenForgeRate(): number {
   const progress = readProgress();
-  const cfg = getForgeConfig("white", "green");
+  const cfg = getForgeConfigBySource("white");
   if (!cfg) return 0;
   const failCount = progress.synFailCount["white"] ?? 0;
   return Math.min(cfg.baseSuccessRate + failCount * cfg.failureRateAdd, cfg.maxSuccessRate);
