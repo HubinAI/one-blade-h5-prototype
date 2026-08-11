@@ -1,42 +1,33 @@
-/** 0814 IdleService — 纯计算Snapshot + claim写入 + debug */
+/** 0814 IdleService — 配置全文 IDLE_CONFIG, 纯计算 + claim + debug */
 import { readProgress, writeProgress, grantBladeInstances } from "../services/ProgressionService";
 import { getIdleConfig } from "../config/bladeGrowth";
 
-export interface IdleSnapshot {
-  unlocked: boolean;
-  currentFloor: number;
-  accumulatedSeconds: number;
-  capSeconds: number;
-  progressRatio: number;
-  dropQuality: string;
-  dropPerHour: number;
-  pendingBladeCount: number;
-  timeStr: string;
-  fastIdleEnabled: boolean;
-  fastIdleUsed: number;
-  fastIdleLimit: number;
-}
+let _cfg: ReturnType<typeof getIdleConfig> | null = null;
+function cfg() { return _cfg ?? (_cfg = getIdleConfig()); }
 
-function getIdleParams(){const c=getIdleConfig();return{dropQuality:c.dropQuality??"white",baseDropPerHour:c.baseDropPerHour??2,capHours:c.capHours??24,quantityMultiplier:1.0};}
+export interface IdleSnapshot {
+  unlocked: boolean; currentFloor: number; accumulatedSeconds: number;
+  capSeconds: number; progressRatio: number; dropQuality: string;
+  dropPerHour: number; pendingBladeCount: number; timeStr: string;
+  fastIdleEnabled: boolean; fastIdleUsed: number; fastIdleLimit: number;
+}
 
 export function isIdleUnlocked(progress?: ReturnType<typeof readProgress>): boolean {
-  const p = progress ?? readProgress();
-  return (p.highestFloor ?? 1) >= 2;
+  return ((progress ?? readProgress()).highestFloor ?? 1) >= cfg().unlockedFloor;
 }
 
-/** Pure computation. Does NOT write progress. */
 export function getIdleSnapshot(): IdleSnapshot {
   const progress = readProgress();
-  const p = getIdleParams();
+  const c = cfg();
   if (!isIdleUnlocked(progress)) {
-    return { unlocked: false, currentFloor: progress.highestFloor ?? 1, accumulatedSeconds: 0, capSeconds: p.capHours * 3600, progressRatio: 0, dropQuality: p.dropQuality, dropPerHour: p.baseDropPerHour, pendingBladeCount: 0, timeStr: "00:00:00", fastIdleEnabled: false, fastIdleUsed: 0, fastIdleLimit: 4 };
+    return { unlocked: false, currentFloor: progress.highestFloor ?? 1, accumulatedSeconds: 0, capSeconds: c.capHours * 3600, progressRatio: 0, dropQuality: c.dropQuality, dropPerHour: c.baseDropPerHour, pendingBladeCount: 0, timeStr: "00:00:00", fastIdleEnabled: c.fastIdleEnabled, fastIdleUsed: 0, fastIdleLimit: c.fastIdleLimit };
   }
   const storedSec = progress.idleAccumulatedSeconds ?? 0;
   const elapsed = Math.max(0, (Date.now() - (progress.lastIdleCollectAt ?? Date.now())) / 1000);
-  const effSec = Math.min(p.capHours * 3600, storedSec + elapsed);
-  const pending = Math.floor((effSec / 3600) * p.baseDropPerHour * p.quantityMultiplier);
+  const effSec = Math.min(c.capHours * 3600, storedSec + elapsed);
+  const pending = Math.floor((effSec / 3600) * c.baseDropPerHour * c.quantityMultiplier);
   const h = Math.floor(effSec / 3600), m = Math.floor((effSec % 3600) / 60), s = Math.floor(effSec % 60);
-  return { unlocked: true, currentFloor: progress.highestFloor ?? 1, accumulatedSeconds: effSec, capSeconds: p.capHours * 3600, progressRatio: Math.min(100, Math.round((effSec / (p.capHours * 3600)) * 100)), dropQuality: p.dropQuality, dropPerHour: p.baseDropPerHour, pendingBladeCount: pending, timeStr: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`, fastIdleEnabled: false, fastIdleUsed: 0, fastIdleLimit: 4 };
+  return { unlocked: true, currentFloor: progress.highestFloor ?? 1, accumulatedSeconds: effSec, capSeconds: c.capHours * 3600, progressRatio: Math.min(100, Math.round((effSec / (c.capHours * 3600)) * 100)), dropQuality: c.dropQuality, dropPerHour: c.baseDropPerHour, pendingBladeCount: pending, timeStr: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`, fastIdleEnabled: c.fastIdleEnabled, fastIdleUsed: 0, fastIdleLimit: c.fastIdleLimit };
 }
 
 export function claimIdleReward(): { ok: boolean; quality?: string; count?: number; createdBladeIds?: string[]; reason?: string } {
@@ -52,9 +43,9 @@ export function claimIdleReward(): { ok: boolean; quality?: string; count?: numb
 }
 
 export function debugSimulateIdleHours(hours: number): void {
-  const p = getIdleParams();
+  const c = cfg();
   const progress = readProgress();
-  progress.idleAccumulatedSeconds = Math.min(p.capHours * 3600, (progress.idleAccumulatedSeconds ?? 0) + hours * 3600);
+  progress.idleAccumulatedSeconds = Math.min(c.capHours * 3600, (progress.idleAccumulatedSeconds ?? 0) + hours * 3600);
   progress.lastIdleCollectAt = Date.now();
   writeProgress(progress);
 }

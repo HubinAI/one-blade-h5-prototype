@@ -208,15 +208,25 @@ export const FLOOR_REWARD_CONFIG: FloorRewardConfig[] = [
 // ---- 挂机最小配置 ----
 
 export interface IdleDropConfig {
-  dropQuality: BladeQualityId;   // 掉落刀品质
-  baseDropPerHour: number;       // 每小时基础掉落数（TODO: 正式挂机经济待设计）
-  capHours: number;              // 收益封顶小时数（TODO: 正式挂机经济待设计）
+  dropQuality: BladeQualityId;
+  baseDropPerHour: number;
+  capHours: number;
+  quantityMultiplier: number;
+  unlockedFloor: number;
+  fastIdleEnabled: boolean;
+  fastIdleLimit: number;
+  fastIdleMinutes: number;
 }
 
 export const IDLE_CONFIG: IdleDropConfig = {
   dropQuality: "white",
-  baseDropPerHour: 2,           // 首测占位值
-  capHours: 24,                 // 首测占位值
+  baseDropPerHour: 2,
+  capHours: 24,
+  quantityMultiplier: 1.0,
+  unlockedFloor: 2,
+  fastIdleEnabled: false,
+  fastIdleLimit: 4,
+  fastIdleMinutes: 120,
 };
 
 // ---- 配置读取工具函数 ----
