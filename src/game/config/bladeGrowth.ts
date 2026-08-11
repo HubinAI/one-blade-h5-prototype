@@ -65,15 +65,14 @@ export const BLADE_QUALITY_CONFIG: Record<BladeQualityId, BladeQualityConfig | n
     subCooldown: 5.0,
     appearanceId: "",
   },
-  // 后续品质已预留 qualityName+bladeName，正式配置留 null，接入时填写完整
-  // TEST_CONFIG: 非正式长期数值，仅供Debug验证炼器链路和显示
-  blue: { qualityId:"blue", qualityName:"蓝色", bladeName:"玄锋刀", equipable:true, baseAttack:130, mainMomentumEfficiency:1.03, subCooldown:7.0, appearanceId:"" },
-  purple: { qualityId:"purple", qualityName:"紫色", bladeName:"灵霄刀", equipable:true, baseAttack:170, mainMomentumEfficiency:1.06, subCooldown:9.0, appearanceId:"" },
-  orange: null,
-  red: null,
-  gold: null,
-  pink: null,
-  rainbow: null,
+  // ══ 全品质配置 (0814-12A) ══
+  blue:  { qualityId:"blue",  qualityName:"蓝色", bladeName:"玄锋刀", equipable:true, baseAttack:130, mainMomentumEfficiency:1.03, subCooldown:4.8, appearanceId:"" },
+  purple:{ qualityId:"purple",qualityName:"紫色", bladeName:"灵霄刀", equipable:true, baseAttack:170, mainMomentumEfficiency:1.06, subCooldown:4.6, appearanceId:"" },
+  orange:{ qualityId:"orange",qualityName:"橙色", bladeName:"镇岳刀", equipable:true, baseAttack:240, mainMomentumEfficiency:1.09, subCooldown:4.4, appearanceId:"" },
+  red:   { qualityId:"red",   qualityName:"红色", bladeName:"赤霄刀", equipable:true, baseAttack:340, mainMomentumEfficiency:1.12, subCooldown:4.2, appearanceId:"" },
+  gold:  { qualityId:"gold",  qualityName:"金色", bladeName:"天罡刀", equipable:true, baseAttack:480, mainMomentumEfficiency:1.15, subCooldown:4.0, appearanceId:"" },
+  pink:  { qualityId:"pink",  qualityName:"粉色", bladeName:"太虚刀", equipable:true, baseAttack:680, mainMomentumEfficiency:1.18, subCooldown:3.8, appearanceId:"" },
+  rainbow:{qualityId:"rainbow",qualityName:"彩色",bladeName:"开天刀", equipable:true, baseAttack:960, mainMomentumEfficiency:1.21, subCooldown:3.6, appearanceId:"" },
 };
 
 // ---- 等级配置 ----
@@ -173,32 +172,16 @@ export interface ForgeConfig {
   tutorialFirstGuaranteedSuccess: boolean; // 教学首炼必成
 }
 
-/** 炼器配方表（本轮仅白→绿） */
+/** 炼器配方表（8段完整，0814-12A） */
 export const FORGE_CONFIG: ForgeConfig[] = [
-  {
-    sourceQuality: "white",
-    targetQuality: "green",
-    materialCount: 2,
-    baseSuccessRate: 0.80,
-    failureRateAdd: 0.20,
-    maxSuccessRate: 1.00,
-    failureExpQuality: "green",
-    failureExpCount: 1,
-    tutorialFirstGuaranteedSuccess: true,
-  },
-  // ══ 质量对齐测试用（0814-03.4R）══
-  {
-    sourceQuality: "green", targetQuality: "blue",
-    materialCount: 2, baseSuccessRate: 0.70, failureRateAdd: 0.15,
-    maxSuccessRate: 1.00, failureExpQuality: "blue", failureExpCount: 1,
-    tutorialFirstGuaranteedSuccess: false,
-  },
-  {
-    sourceQuality: "blue", targetQuality: "purple",
-    materialCount: 2, baseSuccessRate: 0.60, failureRateAdd: 0.12,
-    maxSuccessRate: 0.95, failureExpQuality: "purple", failureExpCount: 1,
-    tutorialFirstGuaranteedSuccess: false,
-  },
+  { sourceQuality:"white", targetQuality:"green",   materialCount:2, baseSuccessRate:0.80, failureRateAdd:0.20, maxSuccessRate:1.00, failureExpQuality:"green",   failureExpCount:1, tutorialFirstGuaranteedSuccess:true },
+  { sourceQuality:"green", targetQuality:"blue",    materialCount:2, baseSuccessRate:0.70, failureRateAdd:0.15, maxSuccessRate:1.00, failureExpQuality:"blue",    failureExpCount:1, tutorialFirstGuaranteedSuccess:false },
+  { sourceQuality:"blue",  targetQuality:"purple",  materialCount:2, baseSuccessRate:0.60, failureRateAdd:0.15, maxSuccessRate:1.00, failureExpQuality:"purple",  failureExpCount:1, tutorialFirstGuaranteedSuccess:false },
+  { sourceQuality:"purple",targetQuality:"orange",  materialCount:2, baseSuccessRate:0.45, failureRateAdd:0.15, maxSuccessRate:1.00, failureExpQuality:"orange",  failureExpCount:1, tutorialFirstGuaranteedSuccess:false },
+  { sourceQuality:"orange",targetQuality:"red",     materialCount:2, baseSuccessRate:0.30, failureRateAdd:0.15, maxSuccessRate:1.00, failureExpQuality:"red",     failureExpCount:1, tutorialFirstGuaranteedSuccess:false },
+  { sourceQuality:"red",   targetQuality:"gold",    materialCount:2, baseSuccessRate:0.20, failureRateAdd:0.15, maxSuccessRate:1.00, failureExpQuality:"gold",    failureExpCount:1, tutorialFirstGuaranteedSuccess:false },
+  { sourceQuality:"gold",  targetQuality:"pink",    materialCount:2, baseSuccessRate:0.15, failureRateAdd:0.15, maxSuccessRate:1.00, failureExpQuality:"pink",    failureExpCount:1, tutorialFirstGuaranteedSuccess:false },
+  { sourceQuality:"pink",  targetQuality:"rainbow", materialCount:2, baseSuccessRate:0.15, failureRateAdd:0.15, maxSuccessRate:1.00, failureExpQuality:"rainbow", failureExpCount:1, tutorialFirstGuaranteedSuccess:false },
 ];
 
 // ---- 关卡首通奖励配置 ----
