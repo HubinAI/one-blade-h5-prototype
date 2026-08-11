@@ -2841,13 +2841,27 @@ export class Game {
   }
 
   // ═══════════════════ V0731005: 进度宝箱 ═══════════════════
+  /** V0811052: 军令动态阈值 = round(本关普通怪预算 × 0.55) */
+  private calcMainlineEdictThreshold(): number {
+    if (this.gameMode !== "normal") return 30;
+    let budget = 0;
+    for (const w of this.level.waves as any[]) {
+      if (!w.enemies) continue;
+      for (const e of w.enemies) {
+        const kind = e.kind ?? "";
+        if (kind === "elite" || kind === "boss" || kind === "fireRing") continue;
+        budget += e.count ?? 1;
+      }
+    }
+    return Math.round(budget * 0.55);
+  }
   private _initProgressChest() {
     if (this.gameMode !== "normal") { this._chestRuntime = { stageIndex: 0, progress: 0, threshold: 0, status: "complete", maxChestCount: 0, lastCountedEnemyId: "", lastKillSource: "" }; return; }
     const maxChest = this.level.maxChestCount ?? getUnlockedChestCount(this._readMainlineLevel());
     this._chestRuntime = {
       stageIndex: 0,
       progress: 0,
-      threshold: PROGRESS_CHEST_CONFIG.thresholds[0],
+      threshold: this.calcMainlineEdictThreshold(),
       status: "charging",
       maxChestCount: maxChest,
       lastCountedEnemyId: "",
@@ -7493,7 +7507,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     // 前5关有精英但没配置 postChestWaves 时，提供默认军令爆发
     if (this.level.eliteSpawnAt && this.level.eliteKind && this.getLogicalFloor() <= 5) {
       // V0730005: 第1关全程只有 infantry，使用纯基础兵军令
-      if (this.isNormalMainline()) {
+      if (this.isLogicalLevel1()) {
         return this.getDefaultPostChestWavesForLevel1();
       }
       return this.getDefaultPostChestWavesForEarlyLevel();
