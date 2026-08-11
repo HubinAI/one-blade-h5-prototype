@@ -385,6 +385,15 @@ export class Game {
   private _eliteBudgetOther = 0;
   private _eliteBudgetHumanActive = false;
 
+  /** V0811064: 氛围将护盾纯派生 — 统计实时可攻击护卫 */
+  private getAuraGuardState(auraEnemy: Enemy): number {
+    const others = this.enemies.filter(e =>
+      e.alive && e !== auraEnemy && e.kind !== "elite" && e.kind !== "boss" && e.kind !== "fireRing"
+      && isEnemyCombatTargetable(e)
+    );
+    return Math.min(6, others.length);
+  }
+
   private _getFireRingPressureProfile(round: number) {
     const r = Math.min(round, 3);
     if (r === 1) return { humanDur: 0.65, times: [0.25, 0.62, 0.98], dur: 1.05, gather: 0.32, reform: 0.42, gc: { x: 190, y: 350 }, tperm: [80, 190, 300] };
@@ -4451,25 +4460,13 @@ export class Game {
         } // 0807-11E-1A: 禁用块结束
       }
       if (enemy.eliteKind === "aura") {
-        // 氛围将：护盾机制 - 强锋以上可一次扣2护盾
-        const shieldValue = enemy.skillTimer ?? 2;
-        const prevShield = shieldValue;
-        if (shieldValue > 0 && stage.damage <= 1) {
-          // 低伤刀打不穿护盾
+        // V0811064: 护盾纯派生 — 实时统计可攻击护卫
+        const guardCount = this.getAuraGuardState(enemy);
+        if (guardCount > 0) {
           enemy.flash = 0.15;
-          enemy.skillTimer = Math.max(0, shieldValue - 0.5);
-          this.addText(enemy.x, enemy.y - 24, `护盾 ${Math.ceil(shieldValue)}`, "#8e44ad", 13);
+          this.addText(enemy.x, enemy.y - 24, `护盾 ${guardCount}`, "#8e44ad", 13);
           this.particles.push(...sparkBurst(enemy, 6, "#8e44ad"));
           return;
-        } else if (shieldValue > 0 && stage.damage >= 2) {
-          // 强锋/破阵锋：一次扣2护盾
-          enemy.skillTimer = Math.max(0, shieldValue - 2);
-          this.addText(enemy.x, enemy.y - 24, `护盾击穿 ${Math.ceil(shieldValue)}→${Math.max(0, shieldValue - 2)}`, "#8e44ad", 13);
-          this.particles.push(...sparkBurst(enemy, 8, "#8e44ad"));
-        }
-        // P2：护盾破裂反馈
-        if (prevShield > 0 && (enemy.skillTimer ?? 0) <= 0) {
-          this.triggerEliteShieldBreak(enemy);
         }
       }
       // V0730020: L1精英百分比伤害 → 0807-11B-1 迁移到统一公式
@@ -12403,9 +12400,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       }
 
       if (enemy.eliteKind === "aura") {
-        // 氛围将：实时计算护盾（降低难度：1+others/2, max 4）
-        const aliveOthers = this.enemies.filter(e => e.alive && e !== enemy && e.kind !== "elite" && e.kind !== "boss").length;
-        enemy.skillTimer = Math.min(4, 1 + Math.floor(aliveOthers / 2));
+        // V0811064: 实时统计可攻击护卫
+        enemy.skillTimer = this.getAuraGuardState(enemy);
       }
     }
   }
