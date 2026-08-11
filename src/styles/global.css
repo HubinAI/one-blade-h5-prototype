@@ -7559,9 +7559,9 @@ h1 {
 .as-slot.locked { opacity:0.4; }
 .as-slot-q { font-size:11px;font-weight:700; }
 .as-slot-name { font-size:13px;font-weight:700; }
-.as-slot-lv { color:#5bc0ff;font-weight:700;font-size:14px; }
-.as-slot-atk { color:#ccc;font-size:12px; }
-.as-slot-empty { color:#555;font-size:13px; }
+.as-slot-lv { color:#5bc0ff;font-weight:700;font-size:14px;pointer-events:none; }
+.as-slot-atk { color:#ccc;font-size:12px;pointer-events:none; }
+.as-slot-empty { color:#555;font-size:13px;pointer-events:none; }
 .as-slot-hint { position:absolute;bottom:-22px;background:rgba(0,0,0,0.85);color:#ffd35a;font-size:11px;padding:2px 8px;border-radius:4px;white-space:nowrap; }
 .as-slot-hint.invalid { color:#f05050; }
 .as-lock { font-size:24px;margin-bottom:2px; }
@@ -7690,7 +7690,7 @@ h1 {
 .as-blade-atk-bar { font-size:11px;color:#f6e7bd;margin-top:2px; }
 .as-item .as-item-count { position:absolute;right:3px;bottom:3px;font-size:12px;color:#ffd35a;font-weight:700;background:rgba(0,0,0,0.75);padding:1px 4px;border-radius:3px; }
 .as-slot-clickable { cursor:pointer; }
-.as-slot-sword { margin-bottom:2px; }
+.as-slot-sword { margin-bottom:2px;pointer-events:none; }
 .idm-overlay { position:fixed;inset:0;background:rgba(0,0,0,0.78);z-index:410;display:flex;align-items:center;justify-content:center; }
 .idm-panel { background:linear-gradient(180deg,#1a140e,#100a04);border:2px solid rgba(255,211,90,0.25);border-radius:16px;padding:20px;width:300px;max-width:92vw;color:#f6e7bd; }
 .idm-header { display:flex;justify-content:space-between;align-items:center;margin-bottom:12px; }
