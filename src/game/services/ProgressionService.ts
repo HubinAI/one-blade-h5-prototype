@@ -70,6 +70,8 @@ export type PlayerProgress = {
   equippedSubBladeIds: string[];
   /** 各品质合成失败计数 */
   synFailCount: Record<string, number>;
+  /** 0814-1025: 白→绿首次炼器教学保证是否已用 */
+  firstGreenForgeGuaranteedUsed: boolean;
   /** 0814-03: 经验球库存 key=品质 value=数量 */
   expOrbs: Record<string, number>;
   /** 已完成的突破ID列表 */
@@ -212,6 +214,7 @@ function createDefaultProgress(): PlayerProgress {
     equippedMainBladeId: null,
     equippedSubBladeIds: [],
     synFailCount: {},
+    firstGreenForgeGuaranteedUsed: false,
     expOrbs: {},
     clearedBreakthroughs: [],
     clearedFloorRewards: [],
@@ -249,6 +252,7 @@ function normalizeProgress(raw: Partial<PlayerProgress> | null): PlayerProgress 
     codex: Array.from(new Set(raw?.codex ?? fallback.codex)),
     daily: normalizeDaily(raw?.daily),
     expOrbs: raw?.expOrbs ?? fallback.expOrbs ?? {},
+    firstGreenForgeGuaranteedUsed: raw?.firstGreenForgeGuaranteedUsed ?? fallback.firstGreenForgeGuaranteedUsed ?? false,
     synFailCount: raw?.synFailCount ?? fallback.synFailCount ?? {},
   };
   repairBreakthroughProgress(progress);
@@ -1317,33 +1321,23 @@ export function initBladeGrowthDefaults(): void {
   const progress = readProgress();
   let changed = false;
 
-  // 确保有至少2把青锋刀（MAIN + SUB_1各一把独立实例）
+  // 0814-1025: 新号只有1把绿色青锋刀, 只装备MAIN, SUB_1为空
   const greenBlades = progress.blades.filter(b => b.quality === "green");
-  if (greenBlades.length < 2) {
-    const need = 2 - greenBlades.length;
-    for (let i = 0; i < need; i++) {
-      const b = createBladeInstance("green", 1);
-      progress.blades.push(b);
-      if (i === 0 && !progress.equippedMainBladeId) progress.equippedMainBladeId = b.id;
-      if (i === 1 && progress.equippedSubBladeIds.length === 0) progress.equippedSubBladeIds = [b.id];
-    }
+  if (greenBlades.length < 1) {
+    const b = createBladeInstance("green", 1);
+    progress.blades.push(b);
+    if (!progress.equippedMainBladeId) progress.equippedMainBladeId = b.id;
     changed = true;
   }
 
-  // 确保 MAIN 已装备
+  // ensure MAIN
   if (!progress.equippedMainBladeId || !progress.blades.find(b => b.id === progress.equippedMainBladeId)) {
-    const g = progress.blades.find(b => b.quality === "green" && b.id !== progress.equippedSubBladeIds[0]);
+    const g = progress.blades.find(b => b.quality === "green");
     if (g) { progress.equippedMainBladeId = g.id; changed = true; }
   }
 
-  // 0814-04A: SUB_1 仅第3关后解锁
-  if (progress.highestFloor >= 3) {
-    if (progress.equippedSubBladeIds.length === 0 || !progress.blades.find(b => b.id === progress.equippedSubBladeIds[0])) {
-    const g = progress.blades.find(b => b.quality === "green" && b.id !== progress.equippedMainBladeId);
-    if (g) { progress.equippedSubBladeIds = [g.id]; changed = true; }
-  }
-  } else {
-    // 未解锁：清空 SUB_1 装备
+  // SUB_1 解锁后不再自动装备绿刀
+  if (progress.highestFloor < 3) {
     if (progress.equippedSubBladeIds.length > 0) { progress.equippedSubBladeIds = []; changed = true; }
   }
 
@@ -1478,7 +1472,7 @@ export function forgeQualityBlades(quality: BladeQualityId): { pairs: number; su
     if (consumed.length < 2) break;
     const fc = progress.synFailCount[quality] ?? 0;
     const rate = Math.min(cfg.baseSuccessRate + fc * cfg.failureRateAdd, cfg.maxSuccessRate);
-    const success = (fc === 0 && cfg.tutorialFirstGuaranteedSuccess) ? true : Math.random() < rate;
+    const success = (!progress.firstGreenForgeGuaranteedUsed && fc === 0 && cfg.tutorialFirstGuaranteedSuccess) ? (progress.firstGreenForgeGuaranteedUsed = true, true) : Math.random() < rate;
     if (success) {
       ok++;
       const nb = createBladeInstance(cfg.targetQuality, 1);
@@ -1971,6 +1965,7 @@ export function debugResetToNewPlayer(): void {
   fresh.clearedFloorRewards = [];
   fresh.clearedBreakthroughs = [];
   fresh.expOrbs = {};
+  fresh.firstGreenForgeGuaranteedUsed = false;
   fresh.synFailCount = {};
   fresh.idleAccumulatedSeconds = 0;
   fresh.lastIdleCollectAt = Date.now();
