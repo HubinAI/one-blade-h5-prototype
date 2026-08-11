@@ -11,14 +11,13 @@ import { getBladeLevelConfig, computeBladeAttack, getForgeConfigBySource,
 import type { Blade } from "../game/services/BladeService";
 import ArmoryRewardModal, { type RewardItem } from "./ArmoryRewardModal";
 import ArmoryExpRewardToast from "./ArmoryExpRewardToast";
+import ItemDetailModal from "./ItemDetailModal";
 
-/* ── QUALITY_META helpers ── */
-function qn(q:string){ return QUALITY_META[q as BladeQualityId]?.displayName ?? q; }
-function qc(q:string){ return QUALITY_META[q as BladeQualityId]?.color ?? "#888"; }
-function bn(q:string){ return QUALITY_META[q as BladeQualityId]?.bladeName ?? "刀"; }
+function qn(q:string){return QUALITY_META[q as BladeQualityId]?.displayName??q;}
+function qc(q:string){return QUALITY_META[q as BladeQualityId]?.color??"#888";}
+function bn(q:string){return QUALITY_META[q as BladeQualityId]?.bladeName??"刀";}
 const QO:BladeQualityId[]=["rainbow","pink","gold","red","orange","purple","blue","green","white"];
 
-/* ── ViewModel ── */
 type BpItem = Blade | {kind:"exp";quality:BladeQualityId;count:number;viewKey:string};
 function isE(i:BpItem):i is{kind:"exp";quality:BladeQualityId;count:number;viewKey:string}{return (i as any).kind==="exp";}
 function isB(i:BpItem):i is Blade{return !isE(i);}
@@ -34,16 +33,15 @@ function buildBackpack():BpItem[]{
   return items;
 }
 
-/* ── Drag types ── */
-type DragSource = {kind:"blade";bladeId:string;quality:BladeQualityId} | {kind:"exp";quality:BladeQualityId;viewKey:string};
-type DropTarget = {kind:"blade";bladeId:string;quality:BladeQualityId} | {kind:"exp";quality:BladeQualityId;viewKey:string} | {kind:"slot";slot:"MAIN"|"SUB_1";quality?:BladeQualityId} | {kind:"none"};
+type DragSource = {kind:"blade";bladeId:string;quality:BladeQualityId}|{kind:"exp";quality:BladeQualityId;viewKey:string};
+type DropTarget = {kind:"blade";bladeId:string;quality:BladeQualityId}|{kind:"exp";quality:BladeQualityId;viewKey:string}|{kind:"slot";slot:"MAIN"|"SUB_1";quality?:BladeQualityId}|{kind:"none"};
 type DragAction = "FORGE"|"MERGE_EXP"|"EQUIP_MAIN"|"EQUIP_SUB1"|"UPGRADE_MAIN"|"UPGRADE_SUB1"|"NONE";
 type ReasonCode = "NONE"|"SAME_QUALITY_REQUIRED"|"WRONG_EXP_QUALITY"|"NO_RECIPE"|"NOT_ENOUGH_BLADES"|"NOT_ENOUGH_EXP";
 interface DragResult {action:DragAction;tooltip:string;rateDisplay:string;rateX:number;rateY:number;upgradeCost:number;upgradeCanAfford:boolean;batchIds:string[];targetViewKey:string;reason:ReasonCode;}
 
 function getSource(item:BpItem):DragSource{
-  if(isE(item)) return {kind:"exp",quality:item.quality as BladeQualityId,viewKey:item.viewKey};
-  return {kind:"blade",bladeId:item.id,quality:item.quality as BladeQualityId};
+  if(isE(item))return{kind:"exp",quality:item.quality as BladeQualityId,viewKey:item.viewKey};
+  return{kind:"blade",bladeId:item.id,quality:item.quality as BladeQualityId};
 }
 
 function findDropTarget(x:number,y:number):DropTarget{
@@ -51,70 +49,25 @@ function findDropTarget(x:number,y:number):DropTarget{
   const dE=el.closest('[data-drop-key]')as HTMLElement|null;if(!dE)return{kind:"none"};
   const type=dE.dataset.dropType;
   if(type==="slot"){const s=(dE.dataset.dropSlot||"MAIN")as"MAIN"|"SUB_1";const q=(dE.dataset.dropQuality||"")as BladeQualityId;return{kind:"slot",slot:s,quality:q};}
-  if(type==="item"){
-    const idx=parseInt(dE.dataset.itemIdx||"-1");const bp=buildBackpack();const item=bp[idx];
-    if(!item)return{kind:"none"};
+  if(type==="item"){const idx=parseInt(dE.dataset.itemIdx||"-1");const bp=buildBackpack();const item=bp[idx];if(!item)return{kind:"none"};
     if(isE(item))return{kind:"exp",quality:item.quality as BladeQualityId,viewKey:item.viewKey};
-    return{kind:"blade",bladeId:item.id,quality:item.quality as BladeQualityId};
-  }
+    return{kind:"blade",bladeId:item.id,quality:item.quality as BladeQualityId};}
   return{kind:"none"};
 }
 
-/* ── pure drag resolver ── */
 function resolveDragAction(src:DragSource,tgt:DropTarget,targetRect:DOMRect|null):DragResult{
   const none:DragResult={action:"NONE",tooltip:"",rateDisplay:"",rateX:0,rateY:0,upgradeCost:0,upgradeCanAfford:false,batchIds:[],targetViewKey:"",reason:"NONE"};
-  const rx=targetRect?targetRect.left+targetRect.width/2:0;
-  const ry=targetRect?targetRect.top-6:0;
-
+  const rx=targetRect?targetRect.left+targetRect.width/2:0;const ry=targetRect?targetRect.top-6:0;
   if(tgt.kind==="none")return none;
-
-  // Self-drag = cancel
   if(src.kind==="blade"&&tgt.kind==="blade"&&src.bladeId===tgt.bladeId)return none;
   if(src.kind==="exp"&&tgt.kind==="exp"&&src.viewKey===tgt.viewKey)return none;
-
-  // EXP -> SLOT
-  if(src.kind==="exp"&&tgt.kind==="slot"){
-    const eq=getEquippedBladeInfo();const bl=tgt.slot==="MAIN"?eq.main:eq.sub1;
-    if(!bl||bl.quality!==src.quality)return{...none,reason:"WRONG_EXP_QUALITY",tooltip:"需要同品质经验球",rateX:rx,rateY:ry};
-    if(bl.level>=40)return{...none,tooltip:"已满级",rateX:rx,rateY:ry};
-    const lv=getBladeLevelConfig(bl.level);const cost=lv?.expCostToNextLevel??0;
-    const total=readProgress().expOrbs[src.quality]??0;const can=total>=cost;
-    const act:DragAction=tgt.slot==="MAIN"?"UPGRADE_MAIN":"UPGRADE_SUB1";
-    return{...none,action:act,tooltip:can?`消耗 ${cost} 个`:`消耗 ${cost} 个 (不足)`,upgradeCost:cost,upgradeCanAfford:can,rateX:rx,rateY:ry};
-  }
-
-  // BLADE -> SLOT
-  if(src.kind==="blade"&&tgt.kind==="slot"&&src.quality!=="white"){
-    const act:DragAction=tgt.slot==="MAIN"?"EQUIP_MAIN":"EQUIP_SUB1";
-    return{...none,action:act,tooltip:tgt.slot==="MAIN"?"装备主刀":"装备副刀1",rateX:rx,rateY:ry};
-  }
-
-  // BLADE -> BLADE
-  if(src.kind==="blade"&&tgt.kind==="blade"){
-    if(src.quality!==tgt.quality)return{...none,reason:"SAME_QUALITY_REQUIRED",tooltip:"相同品质才能合成",rateX:rx,rateY:ry};
-    const cfg=getForgeConfigBySource(src.quality);
-    if(!cfg)return{...none,reason:"NO_RECIPE",tooltip:"无recipe",rateX:rx,rateY:ry};
-    const inv=getBladeInventory();const eq=getEquippedBladeInfo();
-    const eIds=new Set([eq.main?.id,eq.sub1?.id].filter(Boolean));
-    const fb=inv.filter(b=>b.quality===src.quality&&!eIds.has(b.id));
-    if(fb.length<2)return{...none,reason:"NOT_ENOUGH_BLADES",tooltip:"同品质刀不足2把",rateX:rx,rateY:ry};
-    const rate=getForgeRate(src.quality);const groups=Math.floor(fb.length/2);
-    return{...none,action:"FORGE",tooltip:`${groups}组`,rateDisplay:`成功率 ${Math.round(rate*100)}%`,rateX:rx,rateY:ry,batchIds:fb.map(b=>b.id)};
-  }
-
-  // EXP -> EXP
-  if(src.kind==="exp"&&tgt.kind==="exp"){
-    if(src.quality!==tgt.quality)return{...none,reason:"SAME_QUALITY_REQUIRED",tooltip:"相同品质才能合成",rateX:rx,rateY:ry};
-    const total=readProgress().expOrbs[src.quality]??0;
-    if(total<2)return{...none,reason:"NOT_ENOUGH_EXP",tooltip:"需要至少2个同品质经验球",rateX:rx,rateY:ry};
-    const rate=getForgeRate(src.quality);
-    return{...none,action:"MERGE_EXP",tooltip:"经验合成",rateDisplay:`成功率 ${Math.round(rate*100)}%`,rateX:rx,rateY:ry,targetViewKey:tgt.viewKey};
-  }
-
+  if(src.kind==="exp"&&tgt.kind==="slot"){const eq=getEquippedBladeInfo();const bl=tgt.slot==="MAIN"?eq.main:eq.sub1;if(!bl||bl.quality!==src.quality)return{...none,reason:"WRONG_EXP_QUALITY",tooltip:"需要同品质经验球",rateX:rx,rateY:ry};if(bl.level>=40)return{...none,tooltip:"已满级",rateX:rx,rateY:ry};const lv=getBladeLevelConfig(bl.level);const cost=lv?.expCostToNextLevel??0;const total=readProgress().expOrbs[src.quality]??0;const can=total>=cost;const act:DragAction=tgt.slot==="MAIN"?"UPGRADE_MAIN":"UPGRADE_SUB1";return{...none,action:act,tooltip:can?`消耗 ${cost} 个`:`消耗 ${cost} 个 (不足)`,upgradeCost:cost,upgradeCanAfford:can,rateX:rx,rateY:ry};}
+  if(src.kind==="blade"&&tgt.kind==="slot"&&src.quality!=="white"){const act:DragAction=tgt.slot==="MAIN"?"EQUIP_MAIN":"EQUIP_SUB1";return{...none,action:act,tooltip:tgt.slot==="MAIN"?"装备主刀":"装备副刀1",rateX:rx,rateY:ry};}
+  if(src.kind==="blade"&&tgt.kind==="blade"){if(src.quality!==tgt.quality)return{...none,reason:"SAME_QUALITY_REQUIRED",tooltip:"相同品质才能合成",rateX:rx,rateY:ry};const cfg=getForgeConfigBySource(src.quality);if(!cfg)return{...none,reason:"NO_RECIPE",tooltip:"无recipe",rateX:rx,rateY:ry};const inv=getBladeInventory();const eq=getEquippedBladeInfo();const eIds=new Set([eq.main?.id,eq.sub1?.id].filter(Boolean));const fb=inv.filter(b=>b.quality===src.quality&&!eIds.has(b.id));if(fb.length<2)return{...none,reason:"NOT_ENOUGH_BLADES",tooltip:"同品质刀不足2把",rateX:rx,rateY:ry};const rate=getForgeRate(src.quality);const groups=Math.floor(fb.length/2);return{...none,action:"FORGE",tooltip:`${groups}组`,rateDisplay:`成功率 ${Math.round(rate*100)}%`,rateX:rx,rateY:ry,batchIds:fb.map(b=>b.id)};}
+  if(src.kind==="exp"&&tgt.kind==="exp"){if(src.quality!==tgt.quality)return{...none,reason:"SAME_QUALITY_REQUIRED",tooltip:"相同品质才能合成",rateX:rx,rateY:ry};const total=readProgress().expOrbs[src.quality]??0;if(total<2)return{...none,reason:"NOT_ENOUGH_EXP",tooltip:"需要至少2个同品质经验球",rateX:rx,rateY:ry};const rate=getForgeRate(src.quality);return{...none,action:"MERGE_EXP",tooltip:"经验合成",rateDisplay:`成功率 ${Math.round(rate*100)}%`,rateX:rx,rateY:ry,targetViewKey:tgt.viewKey};}
   return none;
 }
 
-/* ═══ Component ═══ */
 export default function ArmoryScreen({onBack,debug}:{onBack:()=>void;debug?:boolean}){
   const[t,setT]=useState(0);const rf=()=>setT(t=>t+1);
   useEffect(()=>{initBladeGrowthDefaults();rf();},[]);
@@ -125,10 +78,12 @@ export default function ArmoryScreen({onBack,debug}:{onBack:()=>void;debug?:bool
   const batchIdsRef=useRef<Set<string>>(new Set());
   const targetViewKeyRef=useRef<string>("");
   const resultRef=useRef<DragResult>({action:"NONE",tooltip:"",rateDisplay:"",rateX:0,rateY:0,upgradeCost:0,upgradeCanAfford:false,batchIds:[],targetViewKey:"",reason:"NONE"});
+  const startPosRef=useRef<{x:number;y:number}|null>(null);  // for click vs drag
   const [sTick,setST]=useState(0);
   const [ghost,setGhost]=useState<{x:number;y:number;text:string}|null>(null);
   const [rewardItems,setRewardItems]=useState<RewardItem[]|null>(null);
   const [expRewards,setExpRewards]=useState<{quality:BladeQualityId;count:number}[]|null>(null);
+  const [detailItem,setDetailItem]=useState<Blade|BpItem|null>(null);
   const [toast,setTx]=useState<string|null>(null);
   const st=(m:string)=>{setTx(m);setTimeout(()=>setTx(null),1800);};
   const [sp,setSp]=useState<"top"|"bot">("top");
@@ -137,60 +92,45 @@ export default function ArmoryScreen({onBack,debug}:{onBack:()=>void;debug?:bool
   const sc=(d:"top"|"bot")=>{const el=bpr.current;if(!el)return;el.scrollTo({top:d==="bot"?el.scrollHeight:0,behavior:"smooth"});setTimeout(us,400);};
 
   const cancelDrag=useCallback(()=>{
-    srcRef.current=null;batchIdsRef.current=new Set();targetViewKeyRef.current="";
+    srcRef.current=null;batchIdsRef.current=new Set();targetViewKeyRef.current="";startPosRef.current=null;
     resultRef.current={action:"NONE",tooltip:"",rateDisplay:"",rateX:0,rateY:0,upgradeCost:0,upgradeCanAfford:false,batchIds:[],targetViewKey:"",reason:"NONE"};
     setGhost(null);setST(t=>t+1);
   },[]);
 
   const onPointerMove=useCallback((e:PointerEvent)=>{
     const src=srcRef.current;if(!src)return;
+    const start=startPosRef.current;
+    // Start ghost only after 4px move
+    if(start&&Math.abs(e.clientX-start.x)<8&&Math.abs(e.clientY-start.y)<8)return;
     setGhost(prev=>prev?{...prev,x:e.clientX,y:e.clientY}:null);
     const tgt=findDropTarget(e.clientX,e.clientY);
     if(tgt.kind==="none"){batchIdsRef.current=new Set();targetViewKeyRef.current="";resultRef.current={...resultRef.current,action:"NONE",rateDisplay:"",tooltip:"",batchIds:[],reason:"NONE",rateX:0,rateY:0,targetViewKey:""};setST(t=>t+1);return;}
-    // Get target rect for rate badge anchor
     const te=document.elementFromPoint(e.clientX,e.clientY)as HTMLElement|null;
-    const dE=te?.closest('[data-drop-key]')as HTMLElement|null;
-    const rect=dE?.getBoundingClientRect()??null;
+    const dE=te?.closest('[data-drop-key]')as HTMLElement|null;const rect=dE?.getBoundingClientRect()??null;
     const r=resolveDragAction(src,tgt,rect);
     resultRef.current=r;batchIdsRef.current=new Set(r.batchIds);targetViewKeyRef.current=r.targetViewKey;setST(t=>t+1);
   },[]);
 
   const onPointerUp=useCallback((e:PointerEvent)=>{
-    const src=srcRef.current;if(!src){cancelDrag();return;}
+    const src=srcRef.current;
+    const start=startPosRef.current;
+    // Click detection (<8px): trigger detail modal
+    if(src&&start&&Math.abs(e.clientX-start.x)<8&&Math.abs(e.clientY-start.y)<8&&!ghost){
+      const item=bp.find((_,i)=>src.kind==="blade"?isB(bp[i])&&bp[i].id===src.bladeId:isE(bp[i])&&bp[i].viewKey===src.viewKey);
+      if(item){setDetailItem(item);cancelDrag();return;}
+    }
+    if(!src){cancelDrag();return;}
     const tgt=findDropTarget(e.clientX,e.clientY);
     const te=document.elementFromPoint(e.clientX,e.clientY)as HTMLElement|null;
-    const dE=te?.closest('[data-drop-key]')as HTMLElement|null;
-    const rect=dE?.getBoundingClientRect()??null;
+    const dE=te?.closest('[data-drop-key]')as HTMLElement|null;const rect=dE?.getBoundingClientRect()??null;
     const r=resolveDragAction(src,tgt,rect);
-
-    if(r.action==="FORGE"){
-      const fr=forgeQualityBlades(src.quality);
-      const items:RewardItem[]=[];
-      for(const b of fr.createdBlades) items.push({label:bn(b.quality),quality:b.quality as BladeQualityId,isBlade:true});
-      if(fr.expReward) items.push({label:`${qn(fr.expReward.quality)}经验球 ×${fr.expReward.count}`,quality:fr.expReward.quality,isBlade:false});
-      if(items.length>0)setRewardItems(items);
-      rf();
-    }else if(r.action==="MERGE_EXP"){
-      const mr=mergeExpOrbs(src.quality);
-      const ers:{quality:BladeQualityId;count:number}[]=[];
-      if(mr.successes>0&&mr.targetQuality)ers.push({quality:mr.targetQuality,count:mr.successes});
-      if(mr.fails>0)ers.push({quality:src.quality,count:mr.fails});
-      if(ers.length>0)setExpRewards(ers);
-      rf();
-    }else if(r.action==="EQUIP_MAIN"||r.action==="EQUIP_SUB1"){
-      const slot=r.action==="EQUIP_MAIN"?"MAIN":"SUB_1";
-      if(src.kind==="blade"){equipBladeToSlot(src.bladeId,slot);rf();}
-    }else if(r.action==="UPGRADE_MAIN"||r.action==="UPGRADE_SUB1"){
-      const bl=r.action==="UPGRADE_MAIN"?eq.main:eq.sub1;
-      if(bl&&r.upgradeCanAfford){const u=upgradeBladeExp(bl.id);st(u.ok?`升级到 Lv${u.newLevel}!`:u.reason??"失败");rf();}
-      else if(bl&&bl.level>=40)st("已满级");
-      else if(bl)st("经验不足");
-      else st("需要同品质经验球");
-    }else if(r.reason==="SAME_QUALITY_REQUIRED"){
-      st("相同品质才能合成");
-    }
+    if(r.action==="FORGE"){const fr=forgeQualityBlades(src.quality);const items:RewardItem[]=[];for(const b of fr.createdBlades)items.push({label:bn(b.quality),quality:b.quality as BladeQualityId,isBlade:true});if(fr.expReward)items.push({label:`${qn(fr.expReward.quality)}经验球 ×${fr.expReward.count}`,quality:fr.expReward.quality,isBlade:false});if(items.length>0)setRewardItems(items);rf();}
+    else if(r.action==="MERGE_EXP"){const mr=mergeExpOrbs(src.quality);const ers:{quality:BladeQualityId;count:number}[]=[];if(mr.successes>0&&mr.targetQuality)ers.push({quality:mr.targetQuality,count:mr.successes});if(mr.fails>0)ers.push({quality:src.quality,count:mr.fails});if(ers.length>0)setExpRewards(ers);rf();}
+    else if(r.action==="EQUIP_MAIN"||r.action==="EQUIP_SUB1"){const slot=r.action==="EQUIP_MAIN"?"MAIN":"SUB_1";if(src.kind==="blade"){equipBladeToSlot(src.bladeId,slot);rf();}}
+    else if(r.action==="UPGRADE_MAIN"||r.action==="UPGRADE_SUB1"){const bl=r.action==="UPGRADE_MAIN"?eq.main:eq.sub1;if(bl&&r.upgradeCanAfford){const u=upgradeBladeExp(bl.id);st(u.ok?`升级到 Lv${u.newLevel}!`:u.reason??"失败");rf();}else if(bl&&bl.level>=40)st("已满级");else if(bl)st("经验不足");else st("需要同品质经验球");}
+    else if(r.reason==="SAME_QUALITY_REQUIRED"){st("相同品质才能合成");}
     cancelDrag();
-  },[cancelDrag,rf,eq]);
+  },[cancelDrag,rf,eq,bp,ghost]);
 
   const onPointerCancel=useCallback(()=>{cancelDrag();},[cancelDrag]);
 
@@ -201,13 +141,14 @@ export default function ArmoryScreen({onBack,debug}:{onBack:()=>void;debug?:bool
 
   const onPointerDown=useCallback((e:React.PointerEvent)=>{
     const se=(e.target as HTMLElement).closest('.as-scroll-btn,.as-scroll-zone');if(se)return;
-    const be=(e.target as HTMLElement).closest('.as-modal-overlay,.as-toast,.as-debug');if(be)return;
+    const be=(e.target as HTMLElement).closest('.as-modal-overlay,.as-toast,.as-debug,idm-overlay');if(be)return;
     const el=(e.target as HTMLElement).closest('[data-item-idx]')as HTMLElement|null;if(!el)return;
     const idx=parseInt(el.dataset.itemIdx||"-1");if(idx<0||idx>=bp.length)return;
     const item=bp[idx];if(!item)return;e.preventDefault();
     srcRef.current=getSource(item);batchIdsRef.current=new Set();targetViewKeyRef.current="";
+    startPosRef.current={x:e.clientX,y:e.clientY};
     resultRef.current={action:"NONE",tooltip:"",rateDisplay:"",rateX:0,rateY:0,upgradeCost:0,upgradeCanAfford:false,batchIds:[],targetViewKey:"",reason:"NONE"};
-    setST(t=>t+1);setGhost({x:e.clientX,y:e.clientY,text:isE(item)?`${qn(item.quality)}经验`:bn(item.quality)});
+    setST(t=>t+1);
   },[bp]);
 
   const batchIds=batchIdsRef.current;const result=resultRef.current;const tvk=targetViewKeyRef.current;
@@ -216,11 +157,11 @@ export default function ArmoryScreen({onBack,debug}:{onBack:()=>void;debug?:bool
     const sel=isB(item)&&batchIds?.has(item.id);
     const bc=qc(item.quality);
     const isSrc=srcRef.current&&getSource(item).kind===srcRef.current.kind&&(srcRef.current.kind==="blade"?isB(item)&&srcRef.current.bladeId===item.id:isE(item)&&srcRef.current.viewKey===item.viewKey);
-    const isExpTarget=srcRef.current&&srcRef.current.kind==="exp"&&isE(item)&&tvk===item.viewKey&&result.action==="MERGE_EXP";
-    const cls=`as-item${isSrc?" dragging":""}${sel?" batch-selected":""}${isExpTarget?" merge-target":""}`;
-    if(isE(item))return(<div key={`e${i}`}className={cls}style={{borderColor:bc}}data-item-idx={i}data-drop-key="true"data-drop-type="item"data-drop-quality={item.quality}><div className="as-exp-ball"style={{background:bc}}/><span className="as-item-label">{qn(item.quality)}经验</span><span className="as-item-count">{item.count}</span></div>);
+    const isExpTgt=srcRef.current&&srcRef.current.kind==="exp"&&isE(item)&&tvk===item.viewKey&&result.action==="MERGE_EXP";
+    const cls=`as-item${isSrc?" dragging":""}${sel?" batch-selected":""}${isExpTgt?" merge-target":""}`;
+    if(isE(item))return(<div key={`e${i}`}className={cls}style={{borderColor:bc}}data-item-idx={i}data-drop-key="true"data-drop-type="item"data-drop-quality={item.quality}><div className="as-blade-icon"><div className="as-blade-icon-ball"style={{background:bc,width:38,height:38}}/></div><span className="as-item-count">{item.count}</span></div>);
     const atk=Math.round(computeBladeAttack(item.quality as BladeQualityId,item.level));
-    return(<div key={`b${i}`}className={cls}style={{borderColor:bc}}data-item-idx={i}data-drop-key="true"data-drop-type="item"data-drop-quality={item.quality}><div className="as-blade-sq"style={{borderColor:bc,borderWidth:2,borderStyle:"solid"}}>⚔</div><span className="as-item-label">{bn(item.quality)}</span><span className="as-item-lv">Lv.{item.level} 攻{atk}</span></div>);
+    return(<div key={`b${i}`}className={cls}style={{borderColor:bc}}data-item-idx={i}data-drop-key="true"data-drop-type="item"data-drop-quality={item.quality}><div className="as-blade-icon"><div className="as-blade-icon-sword"style={{color:bc,fontSize:28}}>⚔</div></div><div className="as-blade-lv-badge">Lv.{item.level}</div><div className="as-blade-atk-bar">攻{atk}</div></div>);
   };
 
   const mb=eq.main,sb=eq.sub1;
@@ -230,10 +171,13 @@ export default function ArmoryScreen({onBack,debug}:{onBack:()=>void;debug?:bool
   return(<div className="as-root">
     {rewardItems&&<ArmoryRewardModal items={rewardItems} onClose={()=>setRewardItems(null)}/>}
     {expRewards&&<ArmoryExpRewardToast rewards={expRewards} onDone={()=>setExpRewards(null)}/>}
+    {detailItem&&<ItemDetailModal item={detailItem} onClose={()=>setDetailItem(null)} onRefresh={()=>{rf();setDetailItem(null);}}/>}
     <div className="as-header"><button className="as-back"onClick={onBack}>←</button><h2>装备</h2></div>
     <div className="as-equip-zone">
-      <div className="as-slot sub"style={{borderColor:sb?qc(sb.quality):"#5bc0ff"}}data-drop-key="true"data-drop-type="slot"data-drop-slot="sub1"data-drop-quality={sb?.quality??""}>{sb?<><div className="as-slot-q"style={{color:qc(sb.quality)}}>{qn(sb.quality)}</div><div className="as-slot-name">{bn(sb.quality)}</div><div className="as-slot-lv">Lv.{sb.level}</div><div className="as-slot-atk">攻{sa}</div></>:<div className="as-slot-empty">副刀1</div>}</div>
-      <div className="as-slot main"style={{borderColor:mb?qc(mb.quality):"#ffd35a"}}data-drop-key="true"data-drop-type="slot"data-drop-slot="main"data-drop-quality={mb?.quality??""}>{mb?<><div className="as-slot-q"style={{color:qc(mb.quality)}}>{qn(mb.quality)}</div><div className="as-slot-name">{bn(mb.quality)}</div><div className="as-slot-lv">Lv.{mb.level}</div><div className="as-slot-atk">攻{ma}</div></>:<div className="as-slot-empty">主刀</div>}</div>
+      <div className="as-slot sub as-slot-clickable"style={{borderColor:sb?qc(sb.quality):"#5bc0ff"}}data-drop-key="true"data-drop-type="slot"data-drop-slot="sub1"data-drop-quality={sb?.quality??""}onPointerDown={()=>{if(sb)setDetailItem(sb);}}>
+        {sb?<><div className="as-blade-icon-sword as-slot-sword"style={{color:qc(sb.quality),fontSize:24}}>⚔</div><div className="as-slot-lv">Lv.{sb.level}</div><div className="as-slot-atk">攻{sa}</div></>:<div className="as-slot-empty">副刀1</div>}</div>
+      <div className="as-slot main as-slot-clickable"style={{borderColor:mb?qc(mb.quality):"#ffd35a"}}data-drop-key="true"data-drop-type="slot"data-drop-slot="main"data-drop-quality={mb?.quality??""}onPointerDown={()=>{if(mb)setDetailItem(mb);}}>
+        {mb?<><div className="as-blade-icon-sword as-slot-sword"style={{color:qc(mb.quality),fontSize:28}}>⚔</div><div className="as-slot-lv">Lv.{mb.level}</div><div className="as-slot-atk">攻{ma}</div></>:<div className="as-slot-empty">主刀</div>}</div>
       <div className="as-slot locked"style={{borderColor:"#444"}}><div className="as-lock">🔒</div><span>副刀2 · 未开放</span></div>
     </div>
     <div className="as-backpack"ref={bpr}onScroll={us}><h3>背包</h3><div className="as-grid"onPointerDown={onPointerDown}>{bp.map((item,i)=>ri(item,i))}{bp.length===0&&<div className="as-empty">暂无物品</div>}</div></div>

@@ -7670,9 +7670,35 @@ h1 {
 /* ═══════════════════════════════════════════════════ */
 /* 0814-03.9 ArmoryExpRewardToast                      */
 /* ═══════════════════════════════════════════════════ */
-.aet-root { position:fixed;bottom:120px;left:50%;transform:translateX(-50%);display:flex;gap:10px;z-index:350;pointer-events:none; }
-.aet-item { border:2px solid;border-radius:10px;padding:6px 14px;display:flex;align-items:center;gap:6px;background:rgba(18,12,6,0.94); }
+.aet-root { position:fixed;top:18%;left:50%;transform:translateX(-50%);display:flex;gap:10px;z-index:350;pointer-events:none; }
+.aet-item { border:2px solid;border-radius:10px;padding:6px 14px;display:flex;align-items:center;gap:6px;background:rgba(18,12,6,0.94);animation:pop-bling-fast 0.4s ease-out,aet-drift 1.4s ease-out forwards; }
 .aet-dot { width:20px;height:20px;border-radius:50%; }
 .aet-text { color:#f6e7bd;font-size:15px;font-weight:700; }
-.pop-bling-fast { animation:arm-bling-fast 0.4s ease-out; }
+@keyframes aet-drift { 0%{transform:translateY(0);opacity:1;}60%{transform:translateY(-18px);opacity:0.8;}100%{transform:translateY(-36px);opacity:0;} }
+/* ═══════════════════════════════════════════════════ */
+/* 0814-03.10 Simplified cards + detail modal           */
+/* ═══════════════════════════════════════════════════ */
+.as-blade-icon { display:flex;align-items:center;justify-content:center;padding:4px 0; }
+.as-blade-icon-sword { line-height:1; }
+.as-blade-icon-ball { border-radius:50%; }
+.as-blade-lv-badge { position:absolute;top:3px;left:5px;font-size:10px;color:#ffd35a;background:rgba(0,0,0,0.75);padding:1px 5px;border-radius:3px;font-weight:700; }
+.as-blade-atk-bar { font-size:11px;color:#f6e7bd;margin-top:2px; }
+.as-item .as-item-count { position:absolute;right:3px;bottom:3px;font-size:12px;color:#ffd35a;font-weight:700;background:rgba(0,0,0,0.75);padding:1px 4px;border-radius:3px; }
+.as-slot-clickable { cursor:pointer; }
+.as-slot-sword { margin-bottom:2px; }
+.idm-overlay { position:fixed;inset:0;background:rgba(0,0,0,0.78);z-index:410;display:flex;align-items:center;justify-content:center; }
+.idm-panel { background:linear-gradient(180deg,#1a140e,#100a04);border:2px solid rgba(255,211,90,0.25);border-radius:16px;padding:20px;width:300px;max-width:92vw;color:#f6e7bd; }
+.idm-header { display:flex;justify-content:space-between;align-items:center;margin-bottom:12px; }
+.idm-title { font-size:17px;font-weight:700;color:#ffd35a; }
+.idm-close { background:none;border:none;color:#888;font-size:18px;cursor:pointer; }
+.idm-summary { display:flex;gap:12px;align-items:center;margin-bottom:10px; }
+.idm-icon { width:56px;height:56px;border:2px solid;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:30px; }
+.idm-info { display:flex;flex-direction:column;gap:2px; }
+.idm-name { font-size:15px;font-weight:700;color:#f6e7bd; }
+.idm-quality { font-size:13px;font-weight:600; }
+.idm-stat { font-size:12px;color:#aaa; }
+.idm-desc { font-size:12px;color:#999;margin-bottom:10px;line-height:1.5; }
+.idm-props { background:rgba(255,255,255,0.04);border-radius:8px;padding:8px 10px;margin-bottom:10px; }
+.idm-prop-row { display:flex;justify-content:space-between;font-size:13px;color:#ccc;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.06); }
+.idm-reset { width:100%;padding:10px;font-size:14px;font-weight:700;background:rgba(255,80,80,0.15);border:1px solid rgba(255,80,80,0.4);color:#f87171;border-radius:8px;cursor:pointer; }
 @keyframes arm-bling-fast { 0%{transform:scale(0.6);opacity:0;filter:brightness(2);}50%{transform:scale(1.1);opacity:1;filter:brightness(1.2);box-shadow:0 0 16px currentColor;}100%{transform:scale(1);opacity:1;filter:brightness(1);} }
