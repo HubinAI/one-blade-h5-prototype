@@ -3,7 +3,7 @@ import {
   getBladeInventory, initBladeGrowthDefaults, getEquippedBladeInfo,
   equipBladeToSlot, upgradeBladeExp, getExpOrbInventory, readProgress,
 } from "../game/services/ProgressionService";
-import { getWhiteGreenForgeRate, resetForgeFailCount,
+import { getWhiteGreenForgeRate, resetForgeFailCount, getForgeRate,
   addWhiteBladeMaterial, addGreenExpOrb, mergeExpOrbs, forgeQualityBlades,
 } from "../game/services/ProgressionService";
 import { getBladeLevelConfig, computeBladeAttack, getForgeConfig } from "../game/config/bladeGrowth";
@@ -94,7 +94,7 @@ function resolveAction(src:BpItem|null, hoveredItemIdx:number, hoveredSlot:strin
     if(!cfg) return {...empty, hoveredItemIdx, sourceType:"blade", sourceQuality:src.quality, tooltip:"无recipe"};
     const fb = getUnequippedBlades(src.quality);
     if(fb.length<2) return {...empty, hoveredItemIdx, sourceType:"blade", sourceQuality:src.quality, tooltip:"同品质刀不足2把"};
-    const rate = getWhiteGreenForgeRate();
+    const rate = getForgeRate(src.quality as BladeQualityId);
     const groups = Math.floor(fb.length/2);
     return {...empty, sourceType:"blade", sourceQuality:src.quality, action:"FORGE", batchIds:fb.map(b=>b.id), hoveredItemIdx, targetQuality:src.quality, tooltip:`合成成功率 ${Math.round(rate*100)}% · ${groups}组`};
   }

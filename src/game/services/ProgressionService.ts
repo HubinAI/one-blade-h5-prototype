@@ -1537,6 +1537,15 @@ export function resetForgeFailCount(): void {
   writeProgress(progress);
 }
 
+/** 0814-03.6: 获取任意品质当前锻造成功率 */
+export function getForgeRate(quality: BladeQualityId): number {
+  const progress = readProgress();
+  const cfg = getForgeConfig(quality, quality);
+  if (!cfg) return 0;
+  const failCount = progress.synFailCount[quality] ?? 0;
+  return Math.min(cfg.baseSuccessRate + failCount * cfg.failureRateAdd, cfg.maxSuccessRate);
+}
+
 /** 0814-03: 获取当前白→绿成功率 */
 export function getWhiteGreenForgeRate(): number {
   const progress = readProgress();
