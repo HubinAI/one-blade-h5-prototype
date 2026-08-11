@@ -230,6 +230,10 @@ describe('0807-11D-6G-2 P3纵向band', () => {
   });
 
   it('P3 3 band不连续重复(按pulse)', () => {
+    const orig = Math.random;
+    let s = 54321;
+    Math.random = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+    try {
     const d = new PostEdictDirector(); d.start(); let ms = 0;
     const bands: string[] = [];
     let lastMbId = '';
@@ -253,6 +257,7 @@ describe('0807-11D-6G-2 P3纵向band', () => {
     for (let i = 1; i < bands.length; i++) {
       expect(bands[i]).not.toBe(bands[i - 1]);
     }
+    } finally { Math.random = orig; }
   });
 
   it('P3下区每3 pulse最多1次', () => {
