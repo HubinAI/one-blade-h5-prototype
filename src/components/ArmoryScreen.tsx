@@ -25,7 +25,7 @@ function buildBackpack():BpItem[]{const inv=getBladeInventory();const eq=getEqui
 type DragSource={kind:"blade";bladeId:string;quality:BladeQualityId}|{kind:"exp";quality:BladeQualityId;viewKey:string};
 type DropTarget={kind:"blade";bladeId:string;quality:BladeQualityId}|{kind:"exp";quality:BladeQualityId;viewKey:string}|{kind:"slot";slot:SlotId;quality?:BladeQualityId}|{kind:"none"};
 type DragAction="FORGE"|"MERGE_EXP"|"EQUIP_MAIN"|"EQUIP_SUB1"|"UPGRADE_MAIN"|"UPGRADE_SUB1"|"NONE";
-type ReasonCode="NONE"|"SAME_QUALITY_REQUIRED"|"WRONG_EXP_QUALITY"|"NO_RECIPE"|"NOT_ENOUGH_BLADES"|"NOT_ENOUGH_EXP"|"LOCKED_SLOT";
+type ReasonCode="NONE"|"SAME_QUALITY_REQUIRED"|"WRONG_EXP_QUALITY"|"NO_RECIPE"|"NOT_ENOUGH_BLADES"|"NOT_ENOUGH_EXP"|"LOCKED_SLOT"|"EQUIP_QUALITY_REQUIRED";
 interface DragResult{action:DragAction;tooltip:string;rateDisplay:string;rateX:number;rateY:number;upgradeCost:number;upgradeCanAfford:boolean;batchIds:string[];targetViewKey:string;reason:ReasonCode;targetSlot:SlotId|null;}
 
 function getSource(item:BpItem):DragSource{if(isE(item))return{kind:"exp",quality:item.quality as BladeQualityId,viewKey:item.viewKey};return{kind:"blade",bladeId:item.id,quality:item.quality as BladeQualityId};}
@@ -41,7 +41,7 @@ function resolveDragAction(src:DragSource,tgt:DropTarget,targetRect:DOMRect|null
   if((src.kind==="blade"||src.kind==="exp")&&tgt.kind==="slot"&&!isSlotUnlocked(tgt.slot))return{...none,reason:"LOCKED_SLOT",tooltip:"未解锁"};
   if(src.kind==="exp"&&tgt.kind==="slot"){
     const eq=getEquippedBladeInfo();const bl=tgt.slot==="MAIN"?eq.main:eq.sub1;
-    if(!bl||bl.quality!==src.quality)return{...none,reason:"WRONG_EXP_QUALITY",tooltip:"需要同品质经验球",rateX:rx,rateY:ry,targetSlot:tgt.slot};
+    if(!bl||bl.quality!==src.quality)return{...none,reason:"WRONG_EXP_QUALITY",tooltip:"相同品质才能升级",rateX:rx,rateY:ry,targetSlot:tgt.slot};
     if(bl.level>=40)return{...none,tooltip:"已满级",rateX:rx,rateY:ry,targetSlot:tgt.slot};
     const lv=getBladeLevelConfig(bl.level);const cost=lv?.expCostToNextLevel??0;const total=readProgress().expOrbs[src.quality]??0;const can=total>=cost;
     const act:DragAction=tgt.slot==="MAIN"?"UPGRADE_MAIN":"UPGRADE_SUB1";
@@ -49,7 +49,7 @@ function resolveDragAction(src:DragSource,tgt:DropTarget,targetRect:DOMRect|null
   }
   if(src.kind==="blade"&&tgt.kind==="slot"&&src.quality!=="white"){const act:DragAction=tgt.slot==="MAIN"?"EQUIP_MAIN":"EQUIP_SUB1";return{...none,action:act,tooltip:tgt.slot==="MAIN"?"装备主刀":"装备副刀1",rateX:rx,rateY:ry,targetSlot:tgt.slot};}
   // White blade → slot: rejected with reason
-  if(src.kind==="blade"&&tgt.kind==="slot"&&src.quality==="white")return{...none,reason:"WRONG_EXP_QUALITY" as ReasonCode,tooltip:"需要绿色及以上装备",rateX:rx,rateY:ry,targetSlot:tgt.slot};
+  if(src.kind==="blade"&&tgt.kind==="slot"&&src.quality==="white")return{...none,reason:"EQUIP_QUALITY_REQUIRED" as ReasonCode,tooltip:"需要绿色及以上装备",rateX:rx,rateY:ry,targetSlot:tgt.slot};
   if(src.kind==="blade"&&tgt.kind==="blade"){if(src.quality!==tgt.quality)return{...none,reason:"SAME_QUALITY_REQUIRED",tooltip:"相同品质才能合成",rateX:rx,rateY:ry};const cfg=getForgeConfigBySource(src.quality);if(!cfg)return{...none,reason:"NO_RECIPE",tooltip:"无recipe",rateX:rx,rateY:ry};const inv=getBladeInventory();const eq=getEquippedBladeInfo();const eIds=new Set([eq.main?.id,eq.sub1?.id].filter(Boolean));const fb=inv.filter(b=>b.quality===src.quality&&!eIds.has(b.id));if(fb.length<2)return{...none,reason:"NOT_ENOUGH_BLADES",tooltip:"同品质刀不足2把",rateX:rx,rateY:ry};const rate=getForgeRate(src.quality);const groups=Math.floor(fb.length/2);return{...none,action:"FORGE",tooltip:`${groups}组`,rateDisplay:`成功率 ${Math.round(rate*100)}%`,rateX:rx,rateY:ry,batchIds:fb.map(b=>b.id)};}
   if(src.kind==="exp"&&tgt.kind==="exp"){if(src.quality!==tgt.quality)return{...none,reason:"SAME_QUALITY_REQUIRED",tooltip:"相同品质才能合成",rateX:rx,rateY:ry};const total=readProgress().expOrbs[src.quality]??0;if(total<2)return{...none,reason:"NOT_ENOUGH_EXP",tooltip:"需要至少2个同品质经验球",rateX:rx,rateY:ry};const rate=getForgeRate(src.quality);return{...none,action:"MERGE_EXP",tooltip:"经验合成",rateDisplay:`成功率 ${Math.round(rate*100)}%`,rateX:rx,rateY:ry,targetViewKey:tgt.viewKey};}
   return none;
@@ -94,6 +94,7 @@ export default function ArmoryScreen({onBack,debug}:{onBack:()=>void;debug?:bool
     else if(r.action==="UPGRADE_MAIN"||r.action==="UPGRADE_SUB1"){const bl=r.action==="UPGRADE_MAIN"?eq.main:eq.sub1;if(bl&&r.upgradeCanAfford){const u=upgradeBladeExp(bl.id);st(u.ok?`升级到 Lv${u.newLevel}!`:u.reason??"失败");rf();}else if(bl&&bl.level>=40)st("已满级");else if(bl)st("经验不足");else st("需要同品质经验球");}
     else if(r.reason==="SAME_QUALITY_REQUIRED"){st("相同品质才能合成");}
     else if(r.reason==="WRONG_EXP_QUALITY"){st(r.tooltip||"相同品质才能升级");}
+    else if(r.reason==="EQUIP_QUALITY_REQUIRED"){st(r.tooltip||"需要绿色及以上装备");}
     cancelDrag();
   },[cancelDrag,rf,eq,bp,ghost]);
   const onPointerCancel=useCallback(()=>{cancelDrag();},[cancelDrag]);
