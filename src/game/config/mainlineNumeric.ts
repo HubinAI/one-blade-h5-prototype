@@ -70,3 +70,37 @@ export const REALM_ZONES = [
   { name: "大乘",   start: 106, end: 140 },
   { name: "渡劫",   start: 141, end: 180 },
 ];
+
+// ═══════════════════════════════════════
+// V0811042: 军令节奏模板
+// ═══════════════════════════════════════
+
+/** 军令后总敌数 = round(90 × densityMul(floor)) */
+export function postEdictTotal(floor: number): number {
+  return Math.round(90 * getDensityMultiplier(floor));
+}
+
+/** P1/P2/P3 拆分比例 */
+export const PHASE_SPLIT = { P1: 24, P2: 30, P3: 36 } as const;
+
+export function phaseEnemyCount(floor: number, phase: 'P1' | 'P2' | 'P3'): number {
+  const total = postEdictTotal(floor);
+  const sum = PHASE_SPLIT.P1 + PHASE_SPLIT.P2 + PHASE_SPLIT.P3;
+  return Math.round(total * PHASE_SPLIT[phase] / sum);
+}
+
+/** 军令触发阈值 = round(当前关postEdictTotal × 0.55) */
+export function edictTriggerKills(floor: number): number {
+  return Math.round(postEdictTotal(floor) * 0.55);
+}
+
+/** 阶段速度 = base × speedMul(floor), base=[1.00,1.25,1.45] */
+export function phaseSpeedMul(floor: number, phase: 'P1' | 'P2' | 'P3'): number {
+  const bases = { P1: 1.00, P2: 1.25, P3: 1.45 };
+  return bases[phase] * getSpeedMultiplier(floor);
+}
+
+/** generic elite hp = growthCurve(floor) × 8 */
+export function genericEliteHp(floor: number): number {
+  return growthCurve(floor) * 8;
+}

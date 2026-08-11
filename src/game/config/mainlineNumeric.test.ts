@@ -83,3 +83,21 @@ describe("GrowthCurve关键值", () => {
   it("F15 n=14:144", () => expect(growthCurve(15)).toBe(144));
   it("F30 n=29:462", () => expect(growthCurve(30)).toBe(462));
 });
+
+// V0811042: 军令节奏模板测试
+import { postEdictTotal, phaseEnemyCount, edictTriggerKills, phaseSpeedMul, genericEliteHp } from "./mainlineNumeric";
+
+describe("军令节奏模板", () => {
+  it("L1 postEdictTotal=90(density=1.0)", () => expect(postEdictTotal(1)).toBe(90));
+  it("L2 postEdictTotal=90", () => expect(postEdictTotal(2)).toBe(90));
+  it("L1 P1=24", () => expect(phaseEnemyCount(1,"P1")).toBe(24));
+  it("L1 P2=30", () => expect(phaseEnemyCount(1,"P2")).toBe(30));
+  it("L1 P3=36", () => expect(phaseEnemyCount(1,"P3")).toBe(36));
+  it("L1 threshold~50", () => expect(edictTriggerKills(1)).toBe(50));
+  it("L2 threshold~50", () => expect(edictTriggerKills(2)).toBeGreaterThanOrEqual(49));
+  it("L1 P1 speed≈0.98", () => expect(phaseSpeedMul(1,"P1")).toBeCloseTo(0.98, 2));
+  it("L1 P2 speed≈1.225", () => expect(phaseSpeedMul(1,"P2")).toBeCloseTo(1.225, 2));
+  it("L1 P3 speed≈1.421", () => expect(phaseSpeedMul(1,"P3")).toBeCloseTo(1.421, 2));
+  it("L1 generic elite hp=80", () => expect(genericEliteHp(1)).toBe(80));
+  it("L5 generic elite hp=256", () => expect(genericEliteHp(5)).toBe(256));
+});
