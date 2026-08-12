@@ -47,8 +47,10 @@ export default function RewardModal({ entries, onClose }: { entries: RewardEntry
 export function expandIdleRewards(items: { quality: string; count: number }[]): RewardEntry[] {
   const out: RewardEntry[] = [];
   for (const it of items) {
+    const meta = QUALITY_META[it.quality as BladeQualityId];
+    const name = meta?.bladeName ?? it.quality;
     for (let i = 0; i < it.count; i++) {
-      out.push({ quality: it.quality, label: `${it.quality}刀胚`, isBlade: true });
+      out.push({ quality: it.quality, label: name, isBlade: true });
     }
   }
   return out;

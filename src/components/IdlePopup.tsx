@@ -52,7 +52,7 @@ export default function IdlePopup({ onClose, debug }: { onClose: () => void; deb
               const qc = QUALITY_META[p.quality as BladeQualityId]?.color ?? "#d0d0d0";
               return <span key={i} style={{ marginRight: 4 }}>
                 <span className="ip-eff-icon" style={{ background: qc, display: "inline-block", width: 10, height: 10, borderRadius: 2, verticalAlign: "middle", marginRight: 2 }} />
-                {p.quality as string} {p.weight}%
+                {QUALITY_META[p.quality as BladeQualityId]?.displayName ?? p.quality} {p.weight}%
               </span>;
             })}
           </span>
@@ -68,7 +68,7 @@ export default function IdlePopup({ onClose, debug }: { onClose: () => void; deb
                   const qc = QUALITY_META[p.quality as BladeQualityId]?.color ?? "#d0d0d0";
                   return <span key={i} style={{ marginRight: 6 }}>
                     <span className="ip-drop-icon" style={{ background: qc, display: "inline-block", width: 12, height: 12, borderRadius: 2, verticalAlign: "middle", marginRight: 2 }} />
-                    {p.quality as string}
+                    {QUALITY_META[p.quality as BladeQualityId]?.bladeName ?? p.quality}
                   </span>;
                 })}
                 <span style={{ marginLeft: 8 }}>×{snap.pendingBladeCount}</span>
