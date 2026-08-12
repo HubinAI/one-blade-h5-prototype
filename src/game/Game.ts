@@ -28,7 +28,7 @@ import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles"
 import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, resolveDamage, resolveThreatDamage, type PlayerRunStats, type DamageRequest, type DamageResult, type DamageSourceType } from "./systems/damageSystem";
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
-import { getEnemyFinalHp, mainlineGrowthCurve, phaseEnemyCount, phaseSpeedMul, genericEliteHp, postEdictTotal, eliteMaxHp } from "./config/mainlineNumeric";
+import { getEnemyFinalHp, mainlineGrowthCurve, phaseEnemyCount, eliteMaxHp } from "./config/mainlineNumeric";
 import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, inertiaEase, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, SHADOW_MOVE_DURATION, SHADOW_SPEED_REF, SHADOW_MOVE_DURATION_MIN, SHADOW_MOVE_DURATION_MAX, SHADOW_STAGGER_MS, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
 import { playSwing, playHit, playExplosion, playPlayerHurt, playEliteKill, playVictory, initSfx, setBgmBattle, setBgmElite, setBgmOff, playRouletteTick } from "./sfx";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
@@ -1500,7 +1500,10 @@ export class Game {
     // P4.2: 统一播报更新
     this.updateBattleNotice(scaledDt);
     this.updateBattlePhase();
-    this._currentStageNode = resolveLevel1Node(this.battlePhase, this.wavesSpawned, this.postChestWaveIndex);
+    // V0812010: Director活跃时不覆盖_currentStageNode, 每个item自带stageNode
+    if (!postEdictDirector.active) {
+      this._currentStageNode = resolveLevel1Node(this.battlePhase, this.wavesSpawned, this.postChestWaveIndex);
+    }
     this.updateBuffChoiceTriggers();
     this.checkBattleEnd();
     this.updateVictoryTransition(scaledDt);
@@ -6196,9 +6199,8 @@ export class Game {
       if (postEdictDirector.allComplete) {
         this.allPostChestWavesSpawned = true;
         this.edictBurstRoundIndex = this.edictBurstRoundTotal;
-        if (aliveTotal === 0 && this.subSpawnQueue.length === 0) {
-          this.setPostChestSequenceState('complete', 'director_all_done');
-        }
+        // V0812010: Director全部完成后自动标记complete, 放行精英
+        this.setPostChestSequenceState('complete', 'director_all_done');
       }
       return;
     }
@@ -7242,29 +7244,21 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   /** 二次打磨：自动切换 battlePhase HUD 显示 */
   private updateBattlePhase() {
     if (this.finished) { this.battlePhase = 'result'; return; }
-    // V0804003: 自愈 — edictPostWavesQueued=true 但 state=inactive，最多恢复 5 次
-    // 0807-11D: 导演启动后不再需要 getEffectivePostChestWaves
-    if (this.edictPostWavesQueued && this.postChestSequenceState === 'inactive' && this._stateRecoveryCount < 5) {
-      this._stateRecoveryCount += 1;
-      this.setPostChestSequenceState('waiting_spawn', 'recovery_after_reset');
-      if (this.debugEnabled && this._stateRecoveryCount === 1) {
-        console.error('[POST-STATE] DETECTED inactive after edict confirm — recovering');
-      }
-    }
     if (this.edictRewardState === "modal") return;
     // V0804009: K 锁宝箱时, 8波完成后不应卡死, 自动跳过宝箱启动 post-edict
     if (this.allNormalWavesSpawned && this.postChestStartAt === null && this._chestProgressPaused && this.getEffectivePostChestWaves().length > 0) {
-      this.postChestWaveIndex = 0;
       this.setPostChestSequenceState('waiting_spawn', 'chest_paused_skip');
       this.startEdictBurstOnce();
     }
-    // V0731006: 新流程精英后怪潮期间保持 edict_burst
-    // 0807-11D: 导演运行中优先检查
+    // V0812010: 正常主线军令 — Director唯一生产链
     if (postEdictDirector.active && postEdictDirector.isRunning) {
       this.battlePhase = 'edict_burst'; return;
     }
-    if (this.edictPostWavesQueued && (!this.allPostChestWavesSpawned || this.subSpawnQueue.length > 0 || this.enemies.some(e => e.alive))) {
-      this.battlePhase = 'edict_burst'; return;
+    // Director P3完成后仍有敌人在场
+    if (this.edictPostWavesQueued && this.postChestSequenceState !== 'complete' && this.postChestSequenceState !== 'inactive') {
+      if (this.subSpawnQueue.length > 0 || this.enemies.some(e => e.alive)) {
+        this.battlePhase = 'edict_burst'; return;
+      }
     }
 
     // P3.5：军令爆发阶段（不再用 chestDone 永久锁死）
@@ -8053,30 +8047,26 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const p1C = phaseEnemyCount(floor, "P1");
     const p2C = phaseEnemyCount(floor, "P2");
     const p3C = phaseEnemyCount(floor, "P3");
-    const p1S = phaseSpeedMul(floor, "P1");
-    const p2S = phaseSpeedMul(floor, "P2");
-    const p3S = phaseSpeedMul(floor, "P3");
+    // V0812010: Director只传纯阶段倍率(不含FloorSpeed), createEnemy统一乘一次FloorSpeed
+    const p1S = 1.00;
+    const p2S = 1.25;
+    const p3S = 1.45;
     postEdictDirector.configureForFloor({ floor, p1Count:p1C, p2Count:p2C, p3Count:p3C, p1Speed:p1S, p2Speed:p2S, p3Speed:p3S, hpMultiplier:hMul });
     // budget-based threshold
     const budget = p1C + p2C + p3C;
     this._edictTriggerKills = Math.round(budget * 0.55);
-    // legacy postChestWaves for compatibility
-    const postWaves = this.getEffectivePostChestWaves();
+    // V0812010: 正常主线军令只由Director控制, 清除legacy postChestWaves状态
     this.battlePhase = "edict_burst";
     this.postChestStartAt = this.elapsed;
-    this.postChestWaveIndex = 0;
     this.allPostChestWavesSpawned = false;
     this.edictBurstRoundIndex = 1;
-    this.edictBurstRoundTotal = postWaves.length || 1;
-    if (!this.edictPostWavesQueued) {
-      this.edictPostWavesQueued = true;
-    }
+    this.edictBurstRoundTotal = 3; // P1/P2/P3
+    this.edictPostWavesQueued = true;
     postEdictDirector.start();
     postEdictDirector.setPhaseStartMs(this.elapsed * 1000);
     this._directorPhaseStartMs = this.elapsed * 1000;
     this._hpTierTracker = { phase: 'P1' };
     this._edictArrivalTimer = 0;
-    // state 统一由 completeEliteChestReward 设置，此处不重复
   }
 
   /** P3.7：确认军令弹窗→启动飞行（恢复 playing 防止卡死） */
@@ -11998,17 +11988,19 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private updateEliteSpawn() {
     if (this.eliteSpawned || !this.level.eliteSpawnAt || !this.level.eliteKind) return;
     if (!this.allNormalWavesSpawned) { this._eliteGateReason = 'no(not_all_waves)'; this._lastEliteGateBlocked = true; return; }
-    // V0803036+0803039: 军令后验证潮 — 导演优先检查
-    // 0807-11D: 导演运行中时禁止精英(handoff允许)
+    // V0812010: 正常主线精英门控 — 只认Director完成
     if (postEdictDirector.active && postEdictDirector.isRunning && !postEdictDirector.p3HandoffReady) {
       this._eliteGateReason = 'no(director_running)'; this._lastEliteGateBlocked = true; return;
     }
-    const hasPostWaves = this.getEffectivePostChestWaves().length > 0;
-    if (this.postChestSequenceState === 'inactive' && hasPostWaves) {
-      this._eliteGateReason = 'no(inactive+hasPostWaves)'; this._lastEliteGateBlocked = true; return;
-    }
-    if (this.postChestSequenceState !== 'inactive' && this.postChestSequenceState !== 'complete') {
-      this._eliteGateReason = `no(state=${this.postChestSequenceState})`; this._lastEliteGateBlocked = true; return;
+    const hasPostEdict = this.level.eliteSpawnAt && (this.edictPostWavesQueued || this.getEffectivePostChestWaves().length > 0);
+    if (hasPostEdict && this.postChestSequenceState !== 'complete') {
+      if (this.postChestSequenceState === 'inactive') {
+        this._eliteGateReason = 'no(inactive)'; this._lastEliteGateBlocked = true; return;
+      }
+      // Director完成前不放行(handoff除外)
+      if (!postEdictDirector.p3HandoffReady) {
+        this._eliteGateReason = `no(state=${this.postChestSequenceState})`; this._lastEliteGateBlocked = true; return;
+      }
     }
     this._eliteGateReason = `yes(state=${this.postChestSequenceState})`; this._lastEliteGateBlocked = false;
 

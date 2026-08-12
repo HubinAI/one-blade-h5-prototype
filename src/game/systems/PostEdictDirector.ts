@@ -786,9 +786,8 @@ export class PostEdictDirector {
         const enemyKind = (tier as string) === 'splitter' ? 'splitter' : 'infantry';
         const x = xRange[0] + Math.random() * (xRange[1] - xRange[0]);
         const y = yPulse + (Math.random() - 0.5) * 6;
-        // 0809-11F-1: speed ±12%个别波动
-        const speedJitter = 1 + (Math.random() - 0.5) * 0.24;
-        const speedMul = (phase.speedMul + mb.speedBonus) * speedJitter;
+        // V0812010: 个体速度扰动由createEnemy统一提供, Director只传阶段倍率
+        const speedMul = phase.speedMul + mb.speedBonus;
         items.push({
           x: Math.round(x + (Math.random() - 0.5) * 6), y: y - 20,
           speedMul: speedMul,

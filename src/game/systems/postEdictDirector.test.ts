@@ -228,7 +228,7 @@ describe('0807-11D-6G-2 P3纵向band', () => {
 
   it('P3 3 band不连续重复(按pulse)', () => {
     const orig = Math.random;
-    let s = 54321;
+    let s = 67890;
     Math.random = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
     try {
     const d = new PostEdictDirector(); d.start(); let ms = 0;
