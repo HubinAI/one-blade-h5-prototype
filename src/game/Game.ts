@@ -742,6 +742,15 @@ export class Game {
       throw new Error(`[MODE_LEAK] boss controller created in normal run (gameMode=${this.gameMode})`);
     }
     this.maxHp = Math.min(level.hp + this.progressionModifiers.openingShield, BALANCE.player.maxHp + this.progressionModifiers.openingShield);
+    // V0812020: 构造时直接读URL — 避免useEffect闭包时序问题
+    if (typeof window !== 'undefined') {
+      try {
+        const usp = new URLSearchParams(window.location.search);
+        if (usp.get('enemytest') === '1' && typeof this.activateEnemyTest === 'function') {
+          this.activateEnemyTest();
+        }
+      } catch (e) { /* ignore */ }
+    }
     this.hp = this.maxHp;
     // P0: reactive模式使用独立能量初始值
     if (this.gameMode === "bossReactive") {
@@ -1185,7 +1194,12 @@ export class Game {
   }
 
   // ═══ V0812019: EnemyTest工具 ═══
-  activateEnemyTest(): void { this._enemyTestActive = true; this.debugEnabled = true; this._debugShowDetail = false; }
+  activateEnemyTest(): void {
+    this._enemyTestActive = true;
+    this.debugEnabled = true;
+    this._debugShowDetail = false;
+    console.warn("[V0812019] EnemyTest ACTIVATED — [/]切怪 [J/K]刷 [L]清场 [点底部条]切换");
+  }
   private _spawnTestEnemy(count = 1) {
     const kind = (NORMAL_IMPLEMENTED as readonly string[])[this._enemyTestKind % NORMAL_IMPLEMENTED.length] as EnemyKind;
     const spacing = Math.min(340 / Math.max(count, 1), 60);
@@ -1642,6 +1656,7 @@ export class Game {
     if (this._numericalTestMode) {
       this._drawNumericalTestHUD(ctx);
     } else if (this.debugEnabled) {
+      if (this._enemyTestActive) this._drawEnemyTestStrip(ctx); // V0812020
       if (this._debugShowDetail) { this.drawDebugPanel(ctx); }
       else { this._drawDebugCompact(ctx); }
     if (this._showHpOverlay) this._drawHpOverlay(ctx);

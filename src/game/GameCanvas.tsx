@@ -51,8 +51,13 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
     const game = new Game(level, onFinish, onReviveOffer, effectiveMode, bossFlow);
     gameRef.current = game;
     // V0812019: EnemyTest activation
-    if (new URLSearchParams(window.location.search).get('enemytest') === '1') {
+    const isTest = new URLSearchParams(window.location.search).get('enemytest') === '1';
+    if (isTest) {
+      console.warn("[V0812019] URL ?enemytest=1 detected, activating...");
       game.activateEnemyTest();
+      console.warn("[V0812019] active flag =", gameRef.current === game);
+    } else {
+      console.warn("[V0812019] URL has NO enemytest=1, current =", window.location.search);
     }
     let frame = 0;
     let last = performance.now();
