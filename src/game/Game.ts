@@ -28,7 +28,7 @@ import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles"
 import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, resolveDamage, resolveThreatDamage, type PlayerRunStats, type DamageRequest, type DamageResult, type DamageSourceType } from "./systems/damageSystem";
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
-import { NORMAL_IMPLEMENTED } from "./config/enemyRegistry";
+import { NORMAL_IMPLEMENTED, ENEMY_META } from "./config/enemyRegistry";
 import { getEnemyFinalHp, mainlineGrowthCurve, phaseEnemyCount, eliteMaxHp } from "./config/mainlineNumeric";
 import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, inertiaEase, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, SHADOW_MOVE_DURATION, SHADOW_SPEED_REF, SHADOW_MOVE_DURATION_MIN, SHADOW_MOVE_DURATION_MAX, SHADOW_STAGGER_MS, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
 import { playSwing, playHit, playExplosion, playPlayerHurt, playEliteKill, playVictory, initSfx, setBgmBattle, setBgmElite, setBgmOff, playRouletteTick } from "./sfx";
@@ -1188,8 +1188,10 @@ export class Game {
   activateEnemyTest(): void { this._enemyTestActive = true; this.debugEnabled = true; this._debugShowDetail = false; }
   private _spawnTestEnemy(count = 1) {
     const kind = (NORMAL_IMPLEMENTED as readonly string[])[this._enemyTestKind % NORMAL_IMPLEMENTED.length] as EnemyKind;
+    const spacing = Math.min(340 / Math.max(count, 1), 60);
+    const startX = 28 + Math.max(0, (340 - spacing * count) / 2);
     for (let i = 0; i < count; i++) {
-      const x = 28 + (Math.random() * 340);
+      const x = startX + spacing * i + (Math.random() - 0.5) * 8;
       const e = this.createEnemy(kind, x, -20, 1);
       this.enemies.push(e);
     }
@@ -1199,6 +1201,19 @@ export class Game {
   enemyTestSpawn1() { this._spawnTestEnemy(1); }
   enemyTestSpawn10() { this._spawnTestEnemy(10); }
   enemyTestClear() { for (const e of this.enemies) e.alive = false; this.enemies = []; this.subSpawnQueue = []; this.projectiles = []; }
+  /** 处理EnemyTest debug条点击, 返回true表示消费事件(禁止挥刀) */
+  handleEnemyTestClick(px: number, py: number): boolean {
+    if (!this._enemyTestActive) return false;
+    if (py >= DESIGN_HEIGHT - 30 && py <= DESIGN_HEIGHT) {
+      const leftThird = px < DESIGN_WIDTH / 3;
+      const rightThird = px > DESIGN_WIDTH * 2 / 3;
+      if (leftThird) { this.enemyTestPrev(); }
+      else if (rightThird) { this.enemyTestNext(); }
+      else { this.enemyTestSpawn10(); }
+      return true; // 消费点击, 不挥刀
+    }
+    return false;
+  }
 
   /** P4.4A: 调试用跳过Boss开场（按 I 触发） */
   debugSkipBossIntro() {
@@ -8473,9 +8488,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const balance = ENEMY_BALANCE[kind];
     const dailyShieldBonus = this.runContext.mode === "dailyChallenge" && this.runContext.dailyChallengeId === "hard_shield" && kind === "shield" ? 1 : 0;
     // 0807-11B-3: infantry HP 由节点倍率管理，不再叠加 waveHpBonus
-    const isBasicEnemy = kind === "infantry" || kind === "shield" || kind === "powder" || kind === "core";
-    const hpBonus = 0; // V0811067: 正常主线纯倍率, 删除waveHpBonus
-    // 第六轮修正：精英也使用 entryPhase（使用 ENTRY_PROFILE_ELITE）
+    const isBasicEnemy = (NORMAL_IMPLEMENTED as readonly string[]).includes(kind);
+    const hpBonus = 0;
     const shouldUseEntryPhase = isBasicEnemy || kind === "elite";
     // 第一轮修正：优先使用传入的 entryProfile，fallback 到 getEntryProfile()
     const profile = entryProfile ?? this.getEntryProfile();
@@ -11989,19 +12003,51 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (!this._enemyTestActive) return;
     const kinds = NORMAL_IMPLEMENTED as readonly string[];
     const idx = this._enemyTestKind % kinds.length;
-    const name = kinds[idx];
+    const kind = kinds[idx];
+    const meta = ENEMY_META[kind];
+    const name = meta?.displayName ?? kind;
+    const alive = this.enemies.filter(e => e.alive).length;
+
     ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,0.75)";
-    ctx.fillRect(0, DESIGN_HEIGHT - 36, DESIGN_WIDTH, 36);
-    ctx.font = "bold 13px monospace";
+    // 顶部信息
+    ctx.fillStyle = "rgba(0,0,0,0.82)";
+    ctx.fillRect(0, 0, DESIGN_WIDTH, 54);
+    ctx.font = "bold 15px monospace";
     ctx.textAlign = "center";
-    ctx.fillStyle = "#a0a0a0";
-    ctx.fillText("[ <", 50, DESIGN_HEIGHT - 12);
     ctx.fillStyle = "#ffd35a";
-    ctx.fillText(name, DESIGN_WIDTH / 2, DESIGN_HEIGHT - 12);
+    ctx.fillText(`怪物测试 — 当前: ${name} (${kind})  ${idx+1}/${kinds.length}  场上: ${alive}只`, DESIGN_WIDTH / 2, 28);
+    // 底部控制条
+    ctx.fillStyle = "rgba(0,0,0,0.75)";
+    ctx.fillRect(0, DESIGN_HEIGHT - 30, DESIGN_WIDTH, 30);
+    ctx.font = "13px monospace";
     ctx.fillStyle = "#a0a0a0";
-    ctx.fillText("> ]", DESIGN_WIDTH - 50, DESIGN_HEIGHT - 12);
-    ctx.fillText("[J]刷1  [K]刷10  [L]清场", DESIGN_WIDTH / 2, DESIGN_HEIGHT - 12 + 18);
+    ctx.fillText("[◀]切换  [J]刷1  [K]刷10  [L]清场  [▶]", DESIGN_WIDTH / 2, DESIGN_HEIGHT - 8);
+    ctx.restore();
+    // 每只测试怪头顶标签
+    this._drawEnemyTestLabels(ctx);
+  }
+
+  /** V0812019: 测试怪头顶行为标签 */
+  private _drawEnemyTestLabels(ctx: CanvasRenderingContext2D) {
+    if (!this._enemyTestActive) return;
+    ctx.save();
+    ctx.font = "10px monospace";
+    ctx.textAlign = "center";
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      const meta = ENEMY_META[e.kind] as any;
+      const dname = meta?.displayName ?? e.kind;
+      let state = '';
+      if (e.kind === 'charger') state = ' | ' + (e._chargeState ?? 'idle');
+      if (e.kind === 'mover') state = ' | ' + (e._movePattern ?? 'idle');
+      if (e.kind === 'shooter') state = ' | ' + (e._shootState ?? 'idle');
+      ctx.fillStyle = "rgba(0,0,0,0.65)";
+      const text = dname + state;
+      const tw = ctx.measureText(text).width + 8;
+      ctx.fillRect(e.x - tw / 2, e.y - e.radius - 20, tw, 14);
+      ctx.fillStyle = "#ffd35a";
+      ctx.fillText(text, e.x, e.y - e.radius - 10);
+    }
     ctx.restore();
   }
 

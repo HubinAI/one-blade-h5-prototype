@@ -35,9 +35,13 @@ export function updateMovementPattern(enemy: Enemy, dt: number): boolean {
 
   if (pattern === 'diagonal') {
     vx = dir * baseSpeed * 0.6 * dt;
-    vy = baseSpeed * dt; // 用speed替代自动Y移动
+    vy = baseSpeed * dt;
     enemy._movePhase = (enemy._movePhase ?? 0) + dt * 0.8;
-    if (Math.sin(enemy._movePhase) > 0.85) enemy._moveDir = -(enemy._moveDir ?? 1);
+    // 平滑方向翻转: 只在phase穿过0.85的瞬间翻转一次
+    const prevPhase = (enemy._movePhase ?? 0) - dt * 0.8;
+    if (Math.sin(enemy._movePhase) > 0.85 && Math.sin(prevPhase) <= 0.85) {
+      enemy._moveDir = -(enemy._moveDir ?? 1);
+    }
   } else if (pattern === 'arc') {
     vy = baseSpeed * dt;
     enemy._movePhase = (enemy._movePhase ?? 0) + dt * 1.5;

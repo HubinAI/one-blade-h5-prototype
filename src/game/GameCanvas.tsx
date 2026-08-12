@@ -204,7 +204,9 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
         onPointerDown={(event) => {
           event.preventDefault();
           event.currentTarget.setPointerCapture(event.pointerId);
-          gameRef.current?.handlePointerDown(toGamePoint(event));
+          const pt = toGamePoint(event);
+          if (gameRef.current?.handleEnemyTestClick?.(pt.x, pt.y)) return; // V0812020: debug条消费点击
+          gameRef.current?.handlePointerDown(pt);
         }}
         onPointerMove={(event) => {
           event.preventDefault();

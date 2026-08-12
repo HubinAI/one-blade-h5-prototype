@@ -43,8 +43,13 @@ export function updateChargeBehavior(enemy: Enemy, dt: number): boolean {
 
   if (state === 'telegraph') {
     enemy._chargeTimer = (enemy._chargeTimer ?? 0) - dt;
-    // 明显停顿: 不移动
-    return true; // Behavior owns movement, 禁止baseMove
+    if ((enemy._chargeTimer ?? 0) <= 0) {
+      enemy._chargeState = 'dashing';
+      enemy._chargeDashSpeed = DASH_SPEED;
+      enemy._chargeTraveled = 0;
+      enemy.visualState = undefined;
+    }
+    return true; // Behavior owns movement
   }
 
   if (state === 'dashing') {
