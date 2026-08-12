@@ -130,4 +130,19 @@ describe("180关体验签名", () => {
     expect(recipes[0].primaryExperienceAxis).toBe("MASS");
     expect(recipes[0].resolvedRuntimeType).toBe("infantry");
   });
+
+  it("PRESSURE rhythm不使用RUSH/BREACH(Mode专属)", () => {
+    for (const r of recipes) {
+      if (r.intensityRole === "PRESSURE") {
+        expect(["PULSE","FRONT","ALTERNATE"]).toContain(r.rhythm);
+      }
+    }
+  });
+
+  it("所有rhythm在合法集合(STEADY/PULSE/FRONT/BACK/ALTERNATE)", () => {
+    const VALID = new Set(["STEADY","PULSE","FRONT","BACK","ALTERNATE"]);
+    for (const r of recipes) {
+      expect(VALID.has(r.rhythm)).toBe(true);
+    }
+  });
 });

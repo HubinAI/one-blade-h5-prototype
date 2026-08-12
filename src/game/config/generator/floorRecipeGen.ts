@@ -126,7 +126,7 @@ export function generateAllRecipes(): FloorRecipe[] {
     // Rhythm + pressure boost
     let rhythm = pickFrom(rng, RHYTHMS);
     if (role === "PRESSURE") {
-      rhythm = pickFrom(rng, ["PULSE","RUSH","BREACH"] as any, [prev.rhythm]);
+      rhythm = pickFrom(rng, ["PULSE","FRONT","ALTERNATE"] as any, [prev.rhythm]);
     }
     if (prev2) {
       if (new Set([prev2.formation,prev.formation,formation]).size<2) formation = pickFrom(rng, FORMATIONS, [prev.formation,prev2.formation]);
