@@ -3,6 +3,7 @@ import { LEVEL1_TUTORIAL_WAVES } from "../../data/levels";
 import { generateAllRecipes } from "./generator/floorRecipeGen";
 import { generateWavePlan } from "./generator/wavePlanGen";
 import { resolveEnemyType } from "./enemyRegistry";
+import { getSpeedMultiplier } from "./mainlineNumeric";
 
 // ════════════════════════════════════════════
 // 品质阶梯
@@ -563,11 +564,9 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
   // 第1关：使用硬编码激进割草配置
   if (floor === 1) return createLevel1Config();
 
-  const stats = getFloorStats(floor);
-  // V0811069: F2-180 → Recipe → WavePlan Generator
+  // V0811071R: FloorRecipe consumer only — no mutation
   const allRecipes = generateAllRecipes();
   const recipe = allRecipes.find(r => r.floor === floor) ?? allRecipes[0];
-  if (floor === 2) { recipe.primaryEnemy = "powder"; recipe.secondaryEnemy = null; }
   recipe.elite = resolveEnemyType(recipe.elite).runtimeType;
   const plan = generateWavePlan(recipe as any);
   const primaryKind = resolveEnemyType(recipe.primaryEnemy).runtimeType;
@@ -578,20 +577,20 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
     enemies.push({ kind: "infantry", count: ws.baseCount, x: 48, yOffset: 0 } as any);
     if (ws.primary > 0) enemies.push({ kind: primaryKind, count: ws.primary, x: 140, yOffset: 8 } as any);
     if (ws.secondary > 0 && secKind) enemies.push({ kind: secKind, count: ws.secondary, x: 236, yOffset: 16 } as any);
-    return { name: `波${idx+1}`, delay: 0.2, spawnAt: idx * 4.5, speedMultiplier: 1 + floor * 0.005, enemies };
+    return { name: `波${idx+1}`, delay: 0.2, spawnAt: idx * 4.5, speedMultiplier: 1, enemies };
   });
 
-  // V0811069: Elite from Recipe shuffle bag (proxy resolved)
   const eKind = recipe.elite as any;
   const eliteSpawnAt = Math.max(8, waves.length * 1.8);
+  const speedMul = getSpeedMultiplier(floor);
 
   return {
     id: 10000 + floor,
-    title: "第" + floor + "关",
+    title: `第${floor}关`,
     subtitle: recipe.mode ?? "",
     initialEnergy: 30,
-    hp: stats.enemyHp,
-    enemySpeed: stats.enemySpeed,
+    hp: 3,
+    enemySpeed: speedMul,
     pickupChance: 0,
     durationSeconds: 90,
     buffTimes: [],
