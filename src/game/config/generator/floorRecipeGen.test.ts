@@ -13,9 +13,13 @@ describe("FloorRecipe 1-180", () => {
     expect(r.scene).toBe("tutorial");
   });
 
-  it("F2~180 primary全部在池内", () => {
-    const pool = ["infantry","powder","tractor","splitter","core","shield","charger","mover","shooter"];
-    for (const r of recipes.slice(1)) expect(pool).toContain(r.primaryEnemy);
+  it("F2~5 primary只有early池(infantry/powder/shield)", () => {
+    const early = ["infantry","powder","shield"];
+    for (const r of recipes.slice(1,5)) expect(early).toContain(r.primaryEnemy);
+  });
+  it("F31~180 primary全部9种", () => {
+    const all9 = ["infantry","powder","shield","splitter","tractor","core","charger","mover","shooter"];
+    for (const r of recipes.slice(30)) expect(all9).toContain(r.primaryEnemy);
   });
 
   it("相邻关 primary不重复", () => {
@@ -48,6 +52,13 @@ describe("FloorRecipe 1-180", () => {
   it("deterministic: 重跑一致", () => {
     const r2 = generateAllRecipes();
     for (let i=0; i<180; i++) expect(r2[i]).toEqual(recipes[i]);
+  });
+
+  it("intensityRole 5关循环 RELAX→INTRO→MIX→PRESSURE→CHECK", () => {
+    const cycle = ["RELAX","INTRO","MIX","PRESSURE","CHECK"];
+    for (let f=1; f<=180; f++) {
+      expect(recipes[f-1].intensityRole).toBe(cycle[(f-1)%5]);
+    }
   });
 
   it("审计 无违规", () => {
