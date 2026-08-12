@@ -291,10 +291,11 @@ export type Enemy = {
   _dirEntryTargetX?: number;
   _dirEntryEndYOverride?: number;
   /** V0812018: 冲锋兵状态 */
-  _chargeState?: 'idle' | 'telegraph' | 'dashing' | 'recovery';
+  _chargeState?: 'idle' | 'telegraph' | 'dashing' | 'recovery' | 'recovery_short';
   _chargeTimer?: number; _chargeDashAngle?: number; _chargeDashSpeed?: number;
   _chargeDashDist?: number; _chargeTraveled?: number;
-  _chargeTargetX?: number; _chargeTargetY?: number; // V0812022: 冲锋目标坐标
+  _chargeTargetX?: number; _chargeTargetY?: number;
+  _chargeDoubleDash?: number; // V0812028: DOUBLE phase (1=first, 2=second)
   /** V0812018: 游袭兵运动模式 */
   _movePattern?: 'diagonal' | 'arc';
   /** V0812025: 受击scale punch + hit kick */

@@ -12131,7 +12131,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       if (!e.alive) continue;
       const meta = ENEMY_META[e.kind] as any;
       let label = meta?.displayName ?? e.kind;
-      if (e.kind === 'charger') label = '冲 | ' + (e._chargeState === 'telegraph' ? '预警' : e._chargeState === 'dashing' ? '冲锋' : e._chargeState === 'recovery' ? '硬直' : 'idle');
+      if (e.kind === 'charger') label = '冲 | ' + (e._chargeState === 'telegraph' ? (e._chargeDoubleDash === 2 ? '预警2' : '预警') : e._chargeState === 'dashing' ? (e._chargeDoubleDash === 2 ? '冲锋2' : '冲锋') : e._chargeState === 'recovery_short' ? '短停' : e._chargeState === 'recovery' ? '硬直' : 'idle');
       else if (e.kind === 'mover') label = '飘 | ' + (e._movePattern ?? 'idle');
       else if (e.kind === 'shooter') label = '弹 | ' + (e._shootState === 'telegraph' ? '蓄力' : e._shootState === 'cooldown' ? '冷却' : e._shootState ?? 'idle');
       ctx.fillStyle = "rgba(0,0,0,0.55)";
