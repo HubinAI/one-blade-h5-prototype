@@ -50,6 +50,10 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
 
     const game = new Game(level, onFinish, onReviveOffer, effectiveMode, bossFlow);
     gameRef.current = game;
+    // V0812019: EnemyTest activation
+    if (new URLSearchParams(window.location.search).get('enemytest') === '1') {
+      game.activateEnemyTest();
+    }
     let frame = 0;
     let last = performance.now();
 
@@ -154,6 +158,19 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
         gameRef.current?.setDebugSub1Level(10);
       } else if (event.key === "9" && event.ctrlKey) {
         gameRef.current?.setDebugSub1Level(40);
+      } else if (event.key.toLowerCase() === "l") {
+        // V0812019: EnemyTest 清场
+        gameRef.current?.enemyTestClear();
+      } else if (event.key.toLowerCase() === "j") {
+        // V0812019: EnemyTest 刷1 (覆盖旧的sub1 key)
+        gameRef.current?.enemyTestSpawn1();
+      } else if (event.key.toLowerCase() === "k") {
+        // V0812019: EnemyTest 刷10 (覆盖旧的chest toggle)
+        gameRef.current?.enemyTestSpawn10();
+      } else if (event.key === "[") {
+        gameRef.current?.enemyTestPrev();
+      } else if (event.key === "]") {
+        gameRef.current?.enemyTestNext();
       } else if (event.key.toLowerCase() === "j") {
         gameRef.current?.setDebugSub1ForceEnable();
       } else if (event.key === "0") {

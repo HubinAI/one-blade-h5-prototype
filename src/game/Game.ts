@@ -28,6 +28,7 @@ import { normalProfile, bossChaseProfile } from "./config/bladeMomentumProfiles"
 import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, resolveDamage, resolveThreatDamage, type PlayerRunStats, type DamageRequest, type DamageResult, type DamageSourceType } from "./systems/damageSystem";
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
+import { NORMAL_IMPLEMENTED } from "./config/enemyRegistry";
 import { getEnemyFinalHp, mainlineGrowthCurve, phaseEnemyCount, eliteMaxHp } from "./config/mainlineNumeric";
 import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, inertiaEase, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, SHADOW_MOVE_DURATION, SHADOW_SPEED_REF, SHADOW_MOVE_DURATION_MIN, SHADOW_MOVE_DURATION_MAX, SHADOW_STAGGER_MS, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
 import { playSwing, playHit, playExplosion, playPlayerHurt, playEliteKill, playVictory, initSfx, setBgmBattle, setBgmElite, setBgmOff, playRouletteTick } from "./sfx";
@@ -501,6 +502,9 @@ export class Game {
   /** Debug数值测试模式 */
   private _numericalTestMode = false;
   private _debugShowDetail = false;
+  // V0812019: EnemyTest工具
+  private _enemyTestActive = false;
+  private _enemyTestKind = 0; // index into NORMAL_IMPLEMENTED
   /** 0807-11B-1: 同刀去重 */
   private _slashDedupTestTarget: string | null = null;
   private _slashDedupFireRings: Set<string> = new Set();
@@ -1180,6 +1184,22 @@ export class Game {
     this.addText(DESIGN_WIDTH / 2, 240, "+ 破绽 调试触发", "#ff6a33", 18, 1.2);
   }
 
+  // ═══ V0812019: EnemyTest工具 ═══
+  activateEnemyTest(): void { this._enemyTestActive = true; this.debugEnabled = true; this._debugShowDetail = false; }
+  private _spawnTestEnemy(count = 1) {
+    const kind = (NORMAL_IMPLEMENTED as readonly string[])[this._enemyTestKind % NORMAL_IMPLEMENTED.length] as EnemyKind;
+    for (let i = 0; i < count; i++) {
+      const x = 28 + (Math.random() * 340);
+      const e = this.createEnemy(kind, x, -20, 1);
+      this.enemies.push(e);
+    }
+  }
+  enemyTestNext() { this._enemyTestKind = (this._enemyTestKind + 1) % ((NORMAL_IMPLEMENTED as readonly string[]).length); }
+  enemyTestPrev() { this._enemyTestKind = (this._enemyTestKind - 1 + ((NORMAL_IMPLEMENTED as readonly string[]).length)) % ((NORMAL_IMPLEMENTED as readonly string[]).length); }
+  enemyTestSpawn1() { this._spawnTestEnemy(1); }
+  enemyTestSpawn10() { this._spawnTestEnemy(10); }
+  enemyTestClear() { for (const e of this.enemies) e.alive = false; this.enemies = []; this.subSpawnQueue = []; this.projectiles = []; }
+
   /** P4.4A: 调试用跳过Boss开场（按 I 触发） */
   debugSkipBossIntro() {
     if (this.bossController) {
@@ -1556,6 +1576,7 @@ export class Game {
     this._drawScorchFlames(ctx);
     this.drawPickups(ctx);
     this.drawEnemies(ctx);
+    this._drawBehaviorTelegraphs(ctx); // V0812019
     this._drawProjectiles(ctx); // V0812018
     // L3: 敌人挂载（敌人上方、浮字下方）
     this._drawEnemyScorchAttachments(ctx);
@@ -1907,7 +1928,7 @@ export class Game {
       }
     }
     // 4. Debug/Flash
-    if (this.debugEnabled) this.drawDebugPanel(ctx);
+    if (this.debugEnabled) { this._drawEnemyTestStrip(ctx); this.drawDebugPanel(ctx); }
     if (this.flash > 0) {
       ctx.fillStyle = `rgba(255, 232, 146, ${this.flash * 0.18})`;
       ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
@@ -2795,7 +2816,8 @@ export class Game {
     if (this.gameMode !== "normal") return oldHp;
     const kindMap: Record<string, string | undefined> = {
       infantry:"infantry", shield:"shield", powder:"powder", core:"core",
-      splitter:"splitter", tractor:"tractor"
+      splitter:"splitter", tractor:"tractor",
+      charger:"charger", mover:"mover", shooter:"shooter",
     };
     const et = kindMap[kind];
     if (!et) return oldHp;
@@ -5118,6 +5140,8 @@ export class Game {
         const flowMul = enemy.flow?.currentSpeedMultiplier ?? 1;
         if (enemy.kind === "elite" && enemy.eliteKind) {
           this._elitePatrolUpdate(enemy, dt);
+        } else if ((enemy as any)._behaviorOwnsMove) {
+          // V0812019: Behavior独占本帧移动, 跳过baseMove
         } else {
           enemy.y += enemy.speed * entryMultiplier * rushMultiplier * statusSlow * fortressSlow * flowMul * dt;
         }
@@ -5262,29 +5286,25 @@ export class Game {
     }
   }
 
-  // ═══ V0812018: 新怪行为统一入口 ═══
+  // ═══ V0812019: 新怪行为统一入口 — 返回ownership标记 ═══
   private _updateBehaviors(dt: number) {
     for (const enemy of this.enemies) {
       if (!enemy.alive) continue;
-      if (enemy.entryPhase?.active) continue; // 入场阶段不执行行为
-      if (enemy.kind === "charger") updateChargeBehavior(enemy, dt);
-      if (enemy.kind === "mover") updateMovementPattern(enemy, dt);
-      if (enemy.kind === "shooter") updateProjectileBehavior(enemy, dt, this.projectiles);
+      let owns = false;
+      if (enemy.kind === "charger") owns = updateChargeBehavior(enemy, dt);
+      if (enemy.kind === "mover") owns = updateMovementPattern(enemy, dt);
+      if (enemy.kind === "shooter") owns = updateProjectileBehavior(enemy, dt, this.projectiles);
+      (enemy as any)._behaviorOwnsMove = owns;
     }
   }
 
   private _updateProjectiles(dt: number) {
-    updateProjectiles(this.projectiles, dt);
+    updateProjectiles(this.projectiles, dt, BATTLEFIELD_ZONES.defenseLineY, (p) => {
+      if (!p.alive) return;
+      this.hp = Math.max(0, this.hp - p.damage);
+      this.screenShake = Math.max(this.screenShake, 0.05);
+    });
     this.projectiles = this.projectiles.filter(p => p.alive);
-    // 弹幕命中玩家防线
-    for (const p of this.projectiles) {
-      if (!p.alive) continue;
-      if (p.y >= BATTLEFIELD_ZONES.defenseLineY) {
-        p.alive = false;
-        this.hp = Math.max(0, this.hp - p.damage);
-        this.screenShake = Math.max(this.screenShake, 0.05);
-      }
-    }
   }
 
   private updatePickups(dt: number) {
@@ -6219,6 +6239,7 @@ export class Game {
   /** P4.3A.4: 普通波调度——固定截止时间+压力提前接入 */
   private updateWaves(dt: number) {
     if (this.gameMode === "boss") return;
+    if (this._enemyTestActive) return; // V0812019
     // V0812012: 军令后永久关闭普通Wave, 不可恢复
     if (this.mainWaveScheduleClosedByEdict) return;
     // V0730017: L1三组教学状态机控制波次
@@ -10054,6 +10075,60 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.restore();
   }
 
+  /** V0812019: 绘制行为telegraph */
+  private _drawBehaviorTelegraphs(ctx: CanvasRenderingContext2D) {
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      // charger telegraph: 方向箭头
+      if (e.kind === "charger" && e._chargeState === 'telegraph') {
+        const angle = e._chargeDashAngle ?? 1.65;
+        ctx.save();
+        ctx.strokeStyle = "rgba(255,100,30,0.7)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(e.x, e.y);
+        ctx.lineTo(e.x + Math.cos(angle) * 50, e.y + Math.sin(angle) * 50);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // arrowhead
+        const hx = e.x + Math.cos(angle) * 48;
+        const hy = e.y + Math.sin(angle) * 48;
+        ctx.beginPath();
+        ctx.arc(hx, hy, 6, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,100,30,0.8)";
+        ctx.fill();
+        ctx.restore();
+      }
+      // charger dashing: 短残影
+      if (e.kind === "charger" && e._chargeState === 'dashing') {
+        ctx.fillStyle = "rgba(255,80,20,0.15)";
+        ctx.beginPath();
+        ctx.arc(e.x + 8, e.y + 6, e.radius * 1.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // mover trail
+      if (e.kind === "mover" && !e.entryPhase?.active) {
+        ctx.fillStyle = "rgba(142,68,173,0.08)";
+        ctx.beginPath();
+        ctx.arc(e.x + 6, e.y + 4, e.radius * 1.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // shooter telegraph: 蓄力圈
+      if (e.kind === "shooter" && e._shootState === 'telegraph') {
+        ctx.save();
+        ctx.strokeStyle = "rgba(41,128,185,0.7)";
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, e.radius + 8, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = "rgba(41,128,185,0.12)";
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
   /** V0812018: 绘制弹幕 */
   private _drawProjectiles(ctx: CanvasRenderingContext2D) {
     ctx.save();
@@ -11909,6 +11984,27 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.restore();
   }
 
+  /** V0812019: EnemyTest debug strip */
+  private _drawEnemyTestStrip(ctx: CanvasRenderingContext2D) {
+    if (!this._enemyTestActive) return;
+    const kinds = NORMAL_IMPLEMENTED as readonly string[];
+    const idx = this._enemyTestKind % kinds.length;
+    const name = kinds[idx];
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.75)";
+    ctx.fillRect(0, DESIGN_HEIGHT - 36, DESIGN_WIDTH, 36);
+    ctx.font = "bold 13px monospace";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#a0a0a0";
+    ctx.fillText("[ <", 50, DESIGN_HEIGHT - 12);
+    ctx.fillStyle = "#ffd35a";
+    ctx.fillText(name, DESIGN_WIDTH / 2, DESIGN_HEIGHT - 12);
+    ctx.fillStyle = "#a0a0a0";
+    ctx.fillText("> ]", DESIGN_WIDTH - 50, DESIGN_HEIGHT - 12);
+    ctx.fillText("[J]刷1  [K]刷10  [L]清场", DESIGN_WIDTH / 2, DESIGN_HEIGHT - 12 + 18);
+    ctx.restore();
+  }
+
   private drawDebugPanel(ctx: CanvasRenderingContext2D) {
     if (!this.debugEnabled) return;
     // chaseFlash 模式有自己的 FSM 诊断面板（drawFsmDiagnostics in BossChaseHUD），不需要旧的通用调试面板
@@ -13262,7 +13358,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       this.renderPlayerCombatLayer(ctx);
       this.drawFloatingTexts(ctx);
     this._drawComboPresentation(ctx); this.drawEdgeFlash(ctx);
-      if (this.debugEnabled) this.drawDebugPanel(ctx);
+      if (this.debugEnabled) { this._drawEnemyTestStrip(ctx); this.drawDebugPanel(ctx); }
       if (this.flash > 0) { ctx.fillStyle = `rgba(255, 232, 146, ${this.flash * 0.18})`; ctx.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT); }
     }
     const es = snap.state;

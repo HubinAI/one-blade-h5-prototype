@@ -1,88 +1,66 @@
 /**
- * V0812018: 冲锋兵 ChargeBehavior — 可复用模块
- * T1: single dash only
- * Flow: idle → telegraph(0.6s) → dashing → recovery(0.3s) → idle
+ * V0812019: 冲锋兵 ChargeBehavior — Entry互斥 + Movement独占 + 确定性seed
+ * T1: single dash. State: idle → telegraph(0.6s) → dashing → recovery(0.3s) → idle
  */
-
 import type { Enemy } from "../types";
 import { BATTLEFIELD_ZONES, BATTLE_SAFE_X } from "../config/balance";
 
 const TELEGRAPH_DURATION = 0.6;
-const DASH_SPEED = 180;   // px/s
-const DASH_DISTANCE = 120; // px
+const DASH_SPEED = 180;
+const DASH_DISTANCE = 120;
 const RECOVERY_DURATION = 0.3;
 const COOLDOWN = 2.5;
 
-/** 合法冲锋区域: 不越防线, 不越安全区 */
-function clampDashTarget(x: number, y: number, angle: number, dist: number): { tx: number; ty: number } {
-  const tx = x + Math.cos(angle) * dist;
-  const ty = y + Math.sin(angle) * dist;
-  return {
-    tx: Math.max(BATTLE_SAFE_X.normalMin + 10, Math.min(BATTLE_SAFE_X.normalMax - 10, tx)),
-    ty: Math.min(BATTLEFIELD_ZONES.defenseLineY - 50, Math.max(BATTLEFIELD_ZONES.entryEndY + 30, ty)),
-  };
+/** 确定性: 用enemy id hash决定角度偏移 */
+function stableAngle(enemy: Enemy): number {
+  let h = 0; const s = enemy.id;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return 1.60 + (Math.abs(h) % 20) * 0.005; // ~1.60~1.70 rad
 }
 
 export function initChargeBehavior(enemy: Enemy): void {
   enemy._chargeState = 'idle';
-  enemy._chargeTimer = 1.0; // 初始冷却
-  enemy._chargeDashAngle = 0;
-  enemy._chargeDashSpeed = 0;
-  enemy._chargeDashDist = 0;
-  enemy._chargeTraveled = 0;
+  enemy._chargeTimer = 1.0;
 }
 
-export function updateChargeBehavior(enemy: Enemy, dt: number): void {
-  if (!enemy.alive) return;
+/** Returns true if Behavior owns this frame's movement */
+export function updateChargeBehavior(enemy: Enemy, dt: number): boolean {
+  if (!enemy.alive) return false;
+  if (enemy.entryPhase?.active) return false; // Entry未完成, 不启动Behavior
+
   const state = enemy._chargeState ?? 'idle';
 
   if (state === 'idle') {
-    enemy._chargeTimer = (enemy._chargeTimer ?? 0) - dt * enemy.speed / 42;
+    enemy._chargeTimer = (enemy._chargeTimer ?? 0) - dt;
     if ((enemy._chargeTimer ?? 0) <= 0 && enemy.y > BATTLEFIELD_ZONES.entryEndY && enemy.y < BATTLEFIELD_ZONES.defenseLineY - 70) {
       enemy._chargeState = 'telegraph';
       enemy._chargeTimer = TELEGRAPH_DURATION;
       enemy.visualState = 'charging_warning';
-      // 锁定方向: 朝左下方(玩家方向偏左)或朝左下/右下交替
-      const angle = ((enemy.id.charCodeAt(0) % 3) - 1) * 0.18 + 1.65; // ~95°±10°
-      enemy._chargeDashAngle = angle;
-      enemy._chargeDashDist = DASH_DISTANCE;
+      enemy._chargeDashAngle = stableAngle(enemy);
     }
-    return;
+    return false; // idle → baseMove handles movement
   }
 
   if (state === 'telegraph') {
     enemy._chargeTimer = (enemy._chargeTimer ?? 0) - dt;
-    if ((enemy._chargeTimer ?? 0) <= 0) {
-      enemy._chargeState = 'dashing';
-      enemy._chargeDashSpeed = DASH_SPEED;
-      enemy._chargeTraveled = 0;
-      enemy.visualState = undefined;
-    }
-    return;
+    // 明显停顿: 不移动
+    return true; // Behavior owns movement, 禁止baseMove
   }
 
   if (state === 'dashing') {
-    const spd = enemy._chargeDashSpeed ?? DASH_SPEED;
-    const angle = enemy._chargeDashAngle ?? 1.65;
-    const dist = enemy._chargeDashDist ?? DASH_DISTANCE;
-    const step = spd * dt;
-    const dx = Math.cos(angle) * step;
-    const dy = Math.sin(angle) * step;
-
-    enemy.x += dx;
-    enemy.y += dy;
-    enemy._chargeTraveled = (enemy._chargeTraveled ?? 0) + step;
-
-    // 边界Clamp
-    const { tx, ty } = clampDashTarget(enemy.x, enemy.y, angle, 0);
+    const angle = enemy._chargeDashAngle ?? stableAngle(enemy);
+    const step = (enemy._chargeDashSpeed ?? DASH_SPEED) * dt;
+    enemy.x += Math.cos(angle) * step;
+    enemy.y += Math.sin(angle) * step;
+    // Clamp
     enemy.x = Math.max(BATTLE_SAFE_X.normalMin + 10, Math.min(BATTLE_SAFE_X.normalMax - 10, enemy.x));
     enemy.y = Math.min(BATTLEFIELD_ZONES.defenseLineY - 50, enemy.y);
-
-    if ((enemy._chargeTraveled ?? 0) >= dist || enemy.y >= BATTLEFIELD_ZONES.defenseLineY - 50) {
+    enemy._chargeTraveled = (enemy._chargeTraveled ?? 0) + step;
+    if ((enemy._chargeTraveled ?? 0) >= DASH_DISTANCE || enemy.y >= BATTLEFIELD_ZONES.defenseLineY - 50) {
       enemy._chargeState = 'recovery';
       enemy._chargeTimer = RECOVERY_DURATION;
     }
-    return;
+    return true; // Behavior独占dash移动
   }
 
   if (state === 'recovery') {
@@ -90,11 +68,14 @@ export function updateChargeBehavior(enemy: Enemy, dt: number): void {
     if ((enemy._chargeTimer ?? 0) <= 0) {
       enemy._chargeState = 'idle';
       enemy._chargeTimer = COOLDOWN;
+      enemy.visualState = undefined;
     }
-    return;
+    return true; // recovery短停, 不移动
   }
+
+  return false;
 }
 
 export function isChargeActive(enemy: Enemy): boolean {
-  return (enemy._chargeState === 'telegraph' || enemy._chargeState === 'dashing');
+  return enemy._chargeState === 'telegraph' || enemy._chargeState === 'dashing';
 }

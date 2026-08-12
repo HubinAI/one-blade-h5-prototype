@@ -1,55 +1,50 @@
 /**
- * V0812018: 游袭兵 MovementPattern — 可复用模块
+ * V0812019: 游袭兵 MovementPattern — Entry互斥 + Movement独占 + 确定性seed
  * T1: DIAGONAL + ARC
- * 未来: S_CURVE, SPIRAL
  */
-
 import type { Enemy } from "../types";
 import { BATTLEFIELD_ZONES, BATTLE_SAFE_X } from "../config/balance";
 
 export type MovePattern = 'diagonal' | 's_curve' | 'arc' | 'spiral';
 
-/** 为敌人分配运动模式, 偏好左右侧入场 */
-export function initMovementPattern(enemy: Enemy, pattern?: MovePattern): void {
-  const patterns: MovePattern[] = pattern ? [pattern] : ['diagonal', 'arc'];
-  enemy._movePattern = patterns[Math.floor(enemy.id.charCodeAt(0) % patterns.length)];
-  enemy._moveOriginX = enemy.x;
-  enemy._moveOriginY = enemy.y;
-  enemy._movePhase = Math.random() * Math.PI * 2;
-  // 横向方向: 左半=+1, 右半=-1
-  enemy._moveDir = enemy.x < 145 ? 1 : -1;
+/** 确定性: 用enemy id hash选择pattern和方向 */
+function stableHash(enemy: Enemy): number {
+  let h = 0; const s = enemy.id;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
 }
 
-export function updateMovementPattern(enemy: Enemy, dt: number): void {
-  if (!enemy.alive) return;
+export function initMovementPattern(enemy: Enemy, pattern?: MovePattern): void {
+  const h = stableHash(enemy);
+  const patterns: MovePattern[] = pattern ? [pattern] : ['diagonal', 'arc'];
+  enemy._movePattern = patterns[h % patterns.length];
+  enemy._movePhase = (h % 1000) / 1000 * Math.PI * 2;
+  enemy._moveDir = h % 2 === 0 ? 1 : -1;
+}
+
+/** Returns true if Behavior owns this frame's movement */
+export function updateMovementPattern(enemy: Enemy, dt: number): boolean {
+  if (!enemy.alive) return false;
+  if (enemy.entryPhase?.active) return false;
+
   const pattern = enemy._movePattern ?? 'diagonal';
   const dir = enemy._moveDir ?? 1;
   const baseSpeed = enemy.speed;
 
-  // 基础向下移动
-  let vx = 0, vy = baseSpeed * dt;
+  let vx = 0, vy = 0;
 
   if (pattern === 'diagonal') {
-    // 斜向下: 横向±baseSpeed*0.6
     vx = dir * baseSpeed * 0.6 * dt;
-    // 周期性反转向
+    vy = baseSpeed * dt; // 用speed替代自动Y移动
     enemy._movePhase = (enemy._movePhase ?? 0) + dt * 0.8;
-    if (Math.sin(enemy._movePhase) > 0.9) enemy._moveDir = -(enemy._moveDir ?? 1);
+    if (Math.sin(enemy._movePhase) > 0.85) enemy._moveDir = -(enemy._moveDir ?? 1);
   } else if (pattern === 'arc') {
-    // 弧线: sin摆动 + 整体横向偏移
+    vy = baseSpeed * dt;
     enemy._movePhase = (enemy._movePhase ?? 0) + dt * 1.5;
-    vx = dir * baseSpeed * 0.5 * dt + Math.sin(enemy._movePhase) * baseSpeed * 0.3 * dt;
+    vx = dir * baseSpeed * 0.3 * dt + Math.sin(enemy._movePhase) * baseSpeed * 0.4 * dt;
   }
 
-  // Clamp到合法区域
   enemy.x = Math.max(BATTLE_SAFE_X.normalMin + 8, Math.min(BATTLE_SAFE_X.normalMax - 8, enemy.x + vx));
   enemy.y = Math.min(BATTLEFIELD_ZONES.defenseLineY - 20, enemy.y + vy);
-}
-
-/** 渲染回调用: 运动轨迹残影 */
-export function getMoveTrailAlpha(enemy: Enemy): number {
-  if (!enemy.alive) return 0;
-  const p = enemy._movePattern;
-  if (p === 'diagonal' || p === 'arc') return 0.12;
-  return 0;
+  return true; // Behavior独占移动, 禁止baseMove
 }
