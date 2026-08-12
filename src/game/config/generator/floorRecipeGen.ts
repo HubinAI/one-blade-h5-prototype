@@ -2,9 +2,13 @@
  * V0811071: 1~180 FloorRecipe — 阶段怪物池 + 五关心流
  */
 
+import { ENEMY_META, resolveEnemyType } from "../enemyRegistry";
+
 export interface FloorRecipe {
   floor: number;
   primaryEnemy: string;
+  primaryExperienceAxis: string;
+  resolvedRuntimeType: string;
   secondaryEnemy: string | null;
   mode: string;
   formation: string;
@@ -79,7 +83,8 @@ export function generateAllRecipes(): FloorRecipe[] {
     const pool = floorPool(f);
 
     if (f === 1) {
-      recipes.push({ floor:1, primaryEnemy:"infantry", secondaryEnemy:null, mode:"STANDARD", formation:"CENTER", rhythm:"STEADY", environment:"NONE", elite:"fireRing", intensityRole:"TUTORIAL", scene:"tutorial", seed:BASE_SEED });
+      const resolved = resolveEnemyType("infantry");
+      recipes.push({ floor:1, primaryEnemy:"infantry", primaryExperienceAxis:"MASS", resolvedRuntimeType:resolved.runtimeType, secondaryEnemy:null, mode:"STANDARD", formation:"CENTER", rhythm:"STEADY", environment:"NONE", elite:"fireRing", intensityRole:"TUTORIAL", scene:"tutorial", seed:BASE_SEED });
       continue;
     }
 
@@ -131,7 +136,8 @@ export function generateAllRecipes(): FloorRecipe[] {
     const environment = pickFrom(rng, ENVS);
     const elite = eliteBag.next([prev.elite]);
 
-    recipes.push({ floor:f, primaryEnemy:primary, secondaryEnemy:secondary, mode, formation, rhythm, environment, elite, intensityRole:role, scene:`mainline_${f}`, seed:BASE_SEED+f });
+    const resolved = resolveEnemyType(primary);
+    recipes.push({ floor:f, primaryEnemy:primary, primaryExperienceAxis:ENEMY_META[primary]?.experienceAxis??"MASS", resolvedRuntimeType:resolved.runtimeType, secondaryEnemy:secondary, mode, formation, rhythm, environment, elite, intensityRole:role, scene:`mainline_${f}`, seed:BASE_SEED+f });
   }
   return recipes;
 }
@@ -140,10 +146,18 @@ export function generateAllRecipes(): FloorRecipe[] {
 export function auditRecipes(recipes: FloorRecipe[]) {
   const primaries: Record<string,number>={}, modes: Record<string,number>={}, formations: Record<string,number>={}, rhythms: Record<string,number>={}, elites: Record<string,number>={}, roles: Record<string,number>={};
   let consecutiveViolations=0, primaryRepeat3=0, modeRepeat=0;
+  let axisRepeat3=0, runtimeRepeat3=0;
   for (let i=0;i<recipes.length;i++){
     const r=recipes[i];primaries[r.primaryEnemy]=(primaries[r.primaryEnemy]??0)+1;modes[r.mode]=(modes[r.mode]??0)+1;formations[r.formation]=(formations[r.formation]??0)+1;rhythms[r.rhythm]=(rhythms[r.rhythm]??0)+1;elites[r.elite]=(elites[r.elite]??0)+1;roles[r.intensityRole]=(roles[r.intensityRole]??0)+1;
     if(i>=1){const p=recipes[i-1];let diffs=0;if(r.mode!==p.mode)diffs++;if(r.formation!==p.formation)diffs++;if(r.rhythm!==p.rhythm)diffs++;if(diffs<2)consecutiveViolations++;if(r.mode===p.mode)modeRepeat++;}
     if(i>=2&&r.primaryEnemy===recipes[i-1].primaryEnemy&&r.primaryEnemy===recipes[i-2].primaryEnemy)primaryRepeat3++;
+    // V0811072: axis + runtime audit
+    if(i>=2) {
+      const a1=recipes[i-2].primaryExperienceAxis, a2=recipes[i-1].primaryExperienceAxis, a3=r.primaryExperienceAxis;
+      if(a1===a2&&a2===a3) axisRepeat3++;
+      const r1=recipes[i-2].resolvedRuntimeType, r2=recipes[i-1].resolvedRuntimeType, rr=r.resolvedRuntimeType;
+      if(r1===r2&&r2===rr) runtimeRepeat3++;
+    }
   }
-  return {primaries,modes,formations,rhythms,elites,roles,consecutiveViolations,primaryRepeat3,modeRepeat,total:recipes.length};
+  return {primaries,modes,formations,rhythms,elites,roles,consecutiveViolations,primaryRepeat3,modeRepeat,axisRepeat3,runtimeRepeat3,total:recipes.length};
 }
