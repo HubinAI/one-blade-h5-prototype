@@ -17,7 +17,7 @@ export interface FloorRecipe {
 }
 
 const BASE_SEED = 20260811;
-const NORMAL_POOL = ["infantry","powder","tractor","splitter","core","shield","charger","flanker","linker"];
+const NORMAL_POOL = ["infantry","powder","tractor","splitter","core","shield","charger","mover","shooter"];
 const MODES = ["STANDARD","SWARM","BREACH","RUSH","FLANK"];
 const FORMATIONS = ["WIDE","CENTER","WINGS","COLUMN","STAGGER","WALL"];
 const RHYTHMS = ["STEADY","PULSE","FRONT","BACK","ALTERNATE"];

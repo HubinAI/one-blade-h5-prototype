@@ -1,17 +1,38 @@
 /**
- * V0811059: Enemy Registry — 统一ID + Proxy回退
- * 新ID未实现机制时自动代理到已有类型
+ * V0811070: Enemy Registry — 统一ID + 体验身份 + Proxy回退
  */
+
+// ══════════════════ 元数据 ══════════════════
+
+export interface EnemyMeta {
+  displayName: string;
+  experienceAxis: string;
+  unlockFloor: number;
+  proxyType: string | null;
+  implemented: boolean;
+}
+
+export const ENEMY_META: Record<string, EnemyMeta> = {
+  infantry: { displayName:"步兵",  experienceAxis:"MASS",      unlockFloor:1,  proxyType:null,      implemented:true },
+  shield:   { displayName:"盾兵",  experienceAxis:"HARD",      unlockFloor:1,  proxyType:null,      implemented:true },
+  powder:   { displayName:"爆炸兵",experienceAxis:"OPPORTUNITY",unlockFloor:1,  proxyType:null,      implemented:true },
+  splitter: { displayName:"分裂兵",experienceAxis:"TIMING",    unlockFloor:4,  proxyType:null,      implemented:true },
+  tractor:  { displayName:"牵引兵",experienceAxis:"GATHER",    unlockFloor:7,  proxyType:null,      implemented:true },
+  core:     { displayName:"核心兵",experienceAxis:"PRIORITY",  unlockFloor:50, proxyType:null,      implemented:true },
+  charger:  { displayName:"冲锋兵",experienceAxis:"TIMING_THREAT",unlockFloor:0,proxyType:"tractor", implemented:false },
+  mover:    { displayName:"游袭兵",experienceAxis:"MOVEMENT",  unlockFloor:0,  proxyType:"infantry",implemented:false },
+  shooter:  { displayName:"弹幕兵",experienceAxis:"PROJECTILE",unlockFloor:0,  proxyType:"powder",  implemented:false },
+};
 
 // ══════════════════ 普通怪 ══════════════════
 
 export const NORMAL_IMPLEMENTED = ["infantry","powder","tractor","splitter","core","shield"] as const;
-export const NORMAL_RESERVED    = ["charger","flanker","linker"] as const;
+export const NORMAL_RESERVED    = ["charger","mover","shooter"] as const;
 
 export const NORMAL_PROXY: Record<string, string> = {
   charger: "tractor",
-  flanker: "infantry",
-  linker:  "shield",
+  mover:   "infantry",
+  shooter: "powder",
 };
 
 // ══════════════════ 精英 ══════════════════
@@ -26,7 +47,6 @@ export const ELITE_PROXY: Record<string, string> = {
 
 // ══════════════════ 统一入口 ══════════════════
 
-/** 返回 runtimeType (real behavior), 保留 logicalId 在返回元数据中 */
 export function resolveEnemyType(logicalId: string): {
   logicalType: string; runtimeType: string; isProxy: boolean;
 } {

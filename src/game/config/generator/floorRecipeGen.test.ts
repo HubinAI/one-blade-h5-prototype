@@ -14,7 +14,7 @@ describe("FloorRecipe 1-180", () => {
   });
 
   it("F2~180 primary全部在池内", () => {
-    const pool = ["infantry","powder","tractor","splitter","core","shield","charger","flanker","linker"];
+    const pool = ["infantry","powder","tractor","splitter","core","shield","charger","mover","shooter"];
     for (const r of recipes.slice(1)) expect(pool).toContain(r.primaryEnemy);
   });
 
