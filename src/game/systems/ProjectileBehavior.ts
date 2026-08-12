@@ -35,8 +35,11 @@ export function updateProjectileBehavior(enemy: Enemy, dt: number, projectiles: 
     enemy._shootTimer = (enemy._shootTimer ?? 0) - dt;
     if ((enemy._shootTimer ?? 0) <= 0) {
       enemy._shootState = 'firing'; enemy.visualState = undefined;
-      const spread = (enemy as any)._shootVariant === 'SPREAD3' ? [-0.314, 0, 0.314] : [0];
-      for (const offset of spread) {
+      const isSpread = (enemy as any)._shootVariant;
+      let angles: number[] = [0];
+      if (isSpread === 'SPREAD3') angles = [-0.314, 0, 0.314];
+      else if (isSpread === 'SPREAD5') angles = [-0.471, -0.236, 0, 0.236, 0.471]; // ±27°=54°总展开
+      for (const offset of angles) {
         projectiles.push({
           id: np(), x: enemy.x, y: enemy.y + 10,
           vx: Math.sin(offset), vy: Math.cos(offset),
