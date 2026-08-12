@@ -2901,7 +2901,8 @@ export class Game {
   private _debugThreshold5 = 0;
   private _initProgressChest() {
     if (this.gameMode !== "normal") { this._chestRuntime = { stageIndex: 0, progress: 0, threshold: 0, status: "complete", maxChestCount: 0, lastCountedEnemyId: "", lastKillSource: "" }; return; }
-    const maxChest = this.level.maxChestCount ?? getUnlockedChestCount(this._readMainlineLevel());
+    // V0812011: 正常主线强制1次军令, Mainline Combat Rhythm Template = 1 Edict
+    const maxChest = 1;
     this._chestRuntime = {
       stageIndex: 0,
       progress: 0,
@@ -6375,9 +6376,9 @@ export class Game {
     this.waveHpBonus = 0; // V0811067: 正常主线纯倍率HP, 波次不再加额外HP
 
     // ── 决定是否触发事件波（20%概率，同局不重复，第1波不触发）──
-    // V0730002: 第1关关闭随机事件潮
+    // V0812011: 正常主线禁止旧随机事件, 未来体验由Encounter Mode/Environment/Recipe驱动
     const isNormalLine = this.isNormalMainline();
-    const triggerEvent = this.getLogicalFloor() >= 2 && this.wavesSpawned > 1 && Math.random() < 0.2;
+    const triggerEvent = !isNormalLine && this.getLogicalFloor() >= 2 && this.wavesSpawned > 1 && Math.random() < 0.2;
     // 事件波按关卡解锁
     // P3.9：使用逻辑层数，避免动态主线 level.id=10000+floor 误触发
     const e = this.getLogicalFloor();
@@ -8042,8 +8043,6 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   private startEdictBurstOnce() {
     if (postEdictDirector.active) return;
     const floor = this.getLogicalFloor();
-    const hBase = mainlineGrowthCurve(floor);
-    const hMul = hBase / 100;
     const p1C = phaseEnemyCount(floor, "P1");
     const p2C = phaseEnemyCount(floor, "P2");
     const p3C = phaseEnemyCount(floor, "P3");
@@ -8051,7 +8050,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const p1S = 1.00;
     const p2S = 1.25;
     const p3S = 1.45;
-    postEdictDirector.configureForFloor({ floor, p1Count:p1C, p2Count:p2C, p3Count:p3C, p1Speed:p1S, p2Speed:p2S, p3Speed:p3S, hpMultiplier:hMul });
+    postEdictDirector.configureForFloor({ floor, p1Count:p1C, p2Count:p2C, p3Count:p3C, p1Speed:p1S, p2Speed:p2S, p3Speed:p3S });
     // budget-based threshold
     const budget = p1C + p2C + p3C;
     this._edictTriggerKills = Math.round(budget * 0.55);
@@ -11852,6 +11851,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       `lastKillSource: ${this._chestRuntime.lastKillSource}`,
       `--- ${APP_VERSION} Debug ---`,
       `stageNode: ${this._currentStageNode}`,
+      // V0812011: MainlineRhythmSnapshot
+      `[RHYTHM] bpHp: ${getNodeConfig(this._currentStageNode).hpMultiplier} spdMul: ${postEdictDirector.currentPhase ? (postEdictDirector.currentPhase === 'P1' ? '1.00' : postEdictDirector.currentPhase === 'P2' ? '1.25' : '1.45') : '-'}`,
+      `[EDICT] preBudget: ${this._debugPreBudget} raw55: ${this._debugRaw55?.toFixed(1)} th: ${this._debugThreshold5} prog: ${this._chestRuntime.progress}/${this._chestRuntime.threshold}`,
+      `[DIRECTOR] phase: ${postEdictDirector.currentPhase ?? '-'} beat: ${postEdictDirector.currentBeatId} active: ${postEdictDirector.active} complete: ${postEdictDirector.allComplete}`,
+      `[DIRECTOR] seed: ${postEdictDirector.placementSeed} p3Handoff: ${postEdictDirector.p3HandoffReady}`,
+      `[SPAWN] dir: ${this.subSpawnQueue.filter(q => q.source === 'edict').length} leg: 0 src: ${this._lastSpawnSource}`,
+      `[COUNT] alive: ${aliveCount} queue: ${this.subSpawnQueue.length} budget: ${this.enemies.filter(e => (e as any)._dirPhase).length}`,
+      `---`,
       `levelBaseHp: ${getLevelBaseStats(1).baseHp}`,
       `typeHpMul: ${getEnemyTypeHpMultiplier('infantry')}`,
       `nodeHpMul: ${getNodeConfig(this._currentStageNode).hpMultiplier}`,

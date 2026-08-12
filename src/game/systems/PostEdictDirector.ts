@@ -8,6 +8,24 @@
 import { BATTLEFIELD_ZONES, BATTLE_SAFE_X } from '../config/balance';
 import { randomRange } from '../../utils/math';
 
+// ═══════════════════ Seeded Random ═══════════════════
+
+/** V0812011: 确定性随机, 同seed 100%可复现 */
+class SeededRandom {
+  private _state: number;
+  constructor(seed: number) { this._state = seed | 0; }
+  /** [0, 1) */
+  next(): number {
+    this._state = (this._state * 1103515245 + 12345) & 0x7fffffff;
+    return this._state / 0x7fffffff;
+  }
+  /** [min, max) */
+  range(min: number, max: number): number { return min + this.next() * (max - min); }
+  /** [0, n) int */
+  int(n: number): number { return Math.floor(this.next() * n); }
+  shuffle<T>(arr: T[]): void { for (let i = arr.length - 1; i > 0; i--) { const j = this.int(i + 1); [arr[i], arr[j]] = [arr[j], arr[i]]; } }
+}
+
 const P3_ENTRY_Y_MIN = BATTLEFIELD_ZONES.midfieldStartY + 35; // 385
 const P3_ENTRY_Y_MAX = BATTLEFIELD_ZONES.harvestEndY - 70;     // 630
 
@@ -228,10 +246,10 @@ export const SHADOW_STAGGER_MS = [0, 40, 80];
 
 // ═══════════════════ HP 档位（语义，不含绝对HP） ═══════════════════
 
-export const HP_TIERS: Record<HpTier, { hpMul: number; scale: number; ringWidth: number }> = {
-  trash:      { hpMul: 1.33, scale: 1.00, ringWidth: 1.0 },
-  tough:      { hpMul: 2.27, scale: 1.06, ringWidth: 1.4 },
-  elite_wall: { hpMul: 3.47, scale: 1.11, ringWidth: 2.0 },
+export const HP_TIERS: Record<HpTier, { pressureWeight: number; scale: number; ringWidth: number }> = {
+  trash:      { pressureWeight: 1.33, scale: 1.00, ringWidth: 1.0 },
+  tough:      { pressureWeight: 2.27, scale: 1.06, ringWidth: 1.4 },
+  elite_wall: { pressureWeight: 3.47, scale: 1.11, ringWidth: 2.0 },
 };
 export const STANDARD_SLASH_DAMAGE = 125;
 
@@ -257,7 +275,7 @@ const X_CENTER = [130, 270] as [number, number];
 
 function rowEndY(row: 'back' | 'mid' | 'front', jitter = true): number {
   const r = row === 'back' ? BACK_ROW : row === 'mid' ? MID_ROW : FRONT_ROW;
-  return jitter ? r.min + Math.random() * (r.max - r.min) : (r.min + r.max) / 2;
+  return jitter ? r.min + Math.random() * (r.max - r.min) : (r.min + r.max) / 2; // 非Director核心随机,保留Math.random
 }
 
 // ═══ 0807-11D-4A: 聚团与特殊阵位 ═══
@@ -520,7 +538,6 @@ export interface DirectorFloorProfile {
   floor: number;
   p1Count: number; p2Count: number; p3Count: number;
   p1Speed: number; p2Speed: number; p3Speed: number;
-  hpMultiplier: number;
 }
 
 const PHASES: Record<DirectorPhase, PhaseConfig> = {
@@ -540,7 +557,6 @@ const BRIDGE_EARLY_JITTER = 0.10;
 
 export class PostEdictDirector {
   readonly beats = BEATS;
-  readonly phases = PHASES;
 
   private _active = false;
   private _allComplete = false;
@@ -571,6 +587,10 @@ export class PostEdictDirector {
   /** 0807-11D-4A: 阵位种子 (局内唯一, start时生成) */
   private _placementSeed = 0;
 
+  // V0812011: 实例隔离 — 不再修改共享const
+  private _rng!: SeededRandom;
+  private _runtimePhases!: Record<DirectorPhase, PhaseConfig>;
+
   private _nextState = 'READY';
   private _lastReason = '';
   private _currentFormationId = '';
@@ -591,20 +611,34 @@ export class PostEdictDirector {
 
   start(seed?: number): void {
     this.reset();
-    this._placementSeed = seed ?? (Math.floor(Date.now() / 1000) % 100000) ^ (Math.floor(Math.random() * 65536));
+    const s = seed ?? (Math.floor(Date.now() / 1000) % 100000) ^ (Math.floor(Math.random() * 65536));
+    this._placementSeed = s;
+    this._initRuntimePhases();
+    this._rng = new SeededRandom(s);
     this._active = true;
     this._lastReason = 'start';
   }
 
-  /** V0811048: 按楼层配置Director参数 */
+  private _initRuntimePhases(): void {
+    this._runtimePhases = {
+      P1: { ...PHASES.P1 },
+      P2: { ...PHASES.P2 },
+      P3: { ...PHASES.P3 },
+    };
+  }
+
+  /** V0811048/V0812011: 按楼层配置Director参数, 写入实例_runtimePhases而非共享const */
   configureForFloor(p: DirectorFloorProfile): void {
     this._floorProfile = p;
-    PHASES.P1.totalEnemies = p.p1Count; PHASES.P2.totalEnemies = p.p2Count; PHASES.P3.totalEnemies = p.p3Count;
-    PHASES.P1.speedMul = p.p1Speed; PHASES.P2.speedMul = p.p2Speed; PHASES.P3.speedMul = p.p3Speed;
-    this._hpMultiplier = p.hpMultiplier;
+    if (!this._runtimePhases) this._initRuntimePhases();
+    this._runtimePhases.P1.totalEnemies = p.p1Count;
+    this._runtimePhases.P2.totalEnemies = p.p2Count;
+    this._runtimePhases.P3.totalEnemies = p.p3Count;
+    this._runtimePhases.P1.speedMul = p.p1Speed;
+    this._runtimePhases.P2.speedMul = p.p2Speed;
+    this._runtimePhases.P3.speedMul = p.p3Speed;
   }
   private _floorProfile: DirectorFloorProfile | null = null;
-  private _hpMultiplier = 1.0;
 
   get placementSeed(): number { return this._placementSeed; }
 
@@ -657,7 +691,7 @@ export class PostEdictDirector {
     }
 
     const beat = this.beats[this._beatIndex];
-    const phase = this.phases[beat.phase];
+    const phase = this._runtimePhases[beat.phase];
 
     // 阶段完成
     if (this._phaseGenerated >= phase.totalEnemies) {
@@ -731,7 +765,7 @@ export class PostEdictDirector {
     const pulses: number[] = [];
     let remaining = mb.count;
     while (remaining > 0) {
-      const n = Math.min(1 + Math.floor(Math.random() * 3), remaining);
+      const n = Math.min(1 + this._rng.int(3), remaining);
       pulses.push(n); remaining -= n;
     }
     // 构建tier池, 分裂兵替换tough
@@ -743,7 +777,7 @@ export class PostEdictDirector {
         else tierPool.push(tier);
       }
     }
-    for (let i = tierPool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [tierPool[i], tierPool[j]] = [tierPool[j], tierPool[i]]; }
+    this._rng.shuffle(tierPool);
     let poolIdx = 0;
     let pulseDelayAccum = 0;
     // 0809-11F-1: 三区配置(静态)
@@ -765,16 +799,16 @@ export class PostEdictDirector {
       if (this._lastP3Band) useBands = useBands.filter(b => b.band !== this._lastP3Band);
       if (useBands.length === 0) useBands = allBands.filter(b => isP3 || b.band !== 'low');
       const totalW = useBands.reduce((s, b) => s + b.weight, 0);
-      let rw = Math.random() * totalW, pickedBand = useBands[0];
+      let rw = this._rng.next() * totalW, pickedBand = useBands[0];
       for (const b of useBands) { rw -= b.weight; if (rw <= 0) { pickedBand = b; break; } }
-      const yPulse = pickedBand.yMin + Math.random() * pickedBand.yRange;
+      const yPulse = pickedBand.yMin + this._rng.next() * pickedBand.yRange;
       this._lastP3Band = pickedBand.band;
       // 0809-11F-1: X区, 不连续重复Y+X
       let availX = xZones;
       const yxKey = pickedBand.band + '-' + (this._lastXZone || '');
       if (this._lastYZoombo) availX = availX.filter(x => (pickedBand.band + '-' + x.zone) !== this._lastYZoombo);
       if (availX.length === 0) availX = xZones;
-      const pickedX = availX[Math.floor(Math.random() * availX.length)];
+      const pickedX = availX[this._rng.int(availX.length)];
       this._lastXZone = pickedX.zone;
       this._lastYZoombo = pickedBand.band + '-' + pickedX.zone;
       const xRange = [pickedX.xMin, pickedX.xMin + pickedX.xRange] as [number, number];
@@ -784,12 +818,12 @@ export class PostEdictDirector {
       for (let k = 0; k < pc; k++) {
         const tier = tierPool[poolIdx++ % tierPool.length];
         const enemyKind = (tier as string) === 'splitter' ? 'splitter' : 'infantry';
-        const x = xRange[0] + Math.random() * (xRange[1] - xRange[0]);
-        const y = yPulse + (Math.random() - 0.5) * 6;
+        const x = xRange[0] + this._rng.next() * (xRange[1] - xRange[0]);
+        const y = yPulse + (this._rng.next() - 0.5) * 6;
         // V0812010: 个体速度扰动由createEnemy统一提供, Director只传阶段倍率
         const speedMul = phase.speedMul + mb.speedBonus;
         items.push({
-          x: Math.round(x + (Math.random() - 0.5) * 6), y: y - 20,
+          x: Math.round(x + (this._rng.next() - 0.5) * 6), y: y - 20,
           speedMul: speedMul,
           hpTier: (tier as string) === 'splitter' ? ('tough' as HpTier) : tier,
           formationId: mb.formationId,
@@ -802,7 +836,7 @@ export class PostEdictDirector {
       this._phaseGenerated += items.length;
       const delayMs = pulseDelayAccum > 0 ? pulseDelayAccum : 0;
       results.push({ phase: beat.phase, items, pulseDelayMs: delayMs > 0 ? delayMs : undefined });
-      pulseDelayAccum += (0.18 + Math.random() * 0.10) * 1000;
+      pulseDelayAccum += (0.18 + this._rng.next() * 0.10) * 1000;
     }
     this._lastReason = `rapidPulse_${mbId}_${pulses.length}pulses`;
     return results;
@@ -851,7 +885,7 @@ export class PostEdictDirector {
         const enemyKind = isPowder ? 'powder' : 'infantry';
         const itemSpawnInPlace = beat.phase === 'P3' || isPowder;
         items.push({
-          x: Math.round(p.x + (Math.random() - 0.5) * 6),
+          x: Math.round(p.x + (this._rng.next() - 0.5) * 6),
           y: -20 + (mb.row === 'back' ? 0 : mb.row === 'mid' ? -5 : -10),
           speedMul: phase.speedMul + mb.speedBonus,
           hpTier: tier,
@@ -903,7 +937,7 @@ export class PostEdictDirector {
 
     const mb = beat.microBatches[nextIdx];
     const earliestTime = mb.internalDelay > 0 ? 0 : 0; // 桥接提前量
-    const bridgeTime = BRIDGE_EARLY_SEC + Math.random() * BRIDGE_EARLY_JITTER;
+    const bridgeTime = BRIDGE_EARLY_SEC + this._rng.next() * BRIDGE_EARLY_JITTER;
     const phaseElapsedMs = elapsedMs - this._phaseStartMs;
 
     // 距 notBefore 还有足够时间才桥接
@@ -948,7 +982,7 @@ export class PostEdictDirector {
       for (let j = 0; j < cnt; j++) {
         const p = placements[idx];
         items.push({
-          x: Math.round(p.x + (Math.random() - 0.5) * 6),
+          x: Math.round(p.x + (this._rng.next() - 0.5) * 6),
           y: -20 + (mb.row === 'back' ? 0 : mb.row === 'mid' ? -5 : -10),
           speedMul: phase.speedMul + mb.speedBonus,
           hpTier: tier,
@@ -1051,7 +1085,7 @@ export class PostEdictDirector {
         notBeforeRemaining:0, microDelayRemaining:0, nextState:'-', formationId:'', phaseElapsed:0 };
     }
     const beat = this._beatIndex < this.beats.length ? this.beats[this._beatIndex] : null;
-    const phase = beat ? this.phases[beat.phase] : null;
+    const phase = beat ? this._runtimePhases[beat.phase] : null;
     const phaseElapsedMs = elapsedMs - this._phaseStartMs;
     const nbRemain = beat ? Math.max(0, beat.notBeforeMs - phaseElapsedMs) : 0;
     const mbElapsed = this._lastMbTime > 0 ? elapsedMs - this._lastMbTime : 0;

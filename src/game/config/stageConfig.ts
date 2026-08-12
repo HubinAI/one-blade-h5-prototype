@@ -69,20 +69,26 @@ export function calcFinalHp(levelId: number, enemyType: EnemyType, node: StageNo
 // 节点解析
 // ═══════════════════════════════════════
 
+/**
+ * V0812011: resolveLevel1Node — L1 tutorial专用 + pre-edict通用节点映射
+ *
+ * F2~180 pre-edict波次复用同一套 PRE_EARLY/PRE_LATE 节点映射。
+ * edict_burst分支和postChestWaveIndex分支是legacy, 正常主线Director不使用。
+ * Director活跃时由Game.ts line 1503跳过此函数。
+ */
 export function resolveLevel1Node(battlePhase: BattlePhase, wavesSpawned: number, postChestWaveIndex: number): StageNode {
   if (battlePhase === 'elite') return 'elite';
+  // LEGACY: edict_burst → post_edict_release, 正常主线Director已跳过此调用
   if (battlePhase === 'edict_modal' || battlePhase === 'edict_burst') return 'post_edict_release';
 
-  // 军令后波次：postChestWaveIndex 已激活
+  // LEGACY: postChestWaveIndex驱动, 旧postChestWaves使用, 正常主线不调用
   if (postChestWaveIndex > 0) {
-    // postChestWaveIndex 起始值为 1（spawnPostChestWave 后 +1）
-    // 实际波次映射：第1波→release, 第2波→understand, 第3波→adapt
     if (postChestWaveIndex <= 1) return 'post_edict_release';
     if (postChestWaveIndex === 2) return 'post_edict_understand';
     return 'post_edict_adapt';
   }
 
-  // 普通主波阶段
+  // 正常主线公共: pre-edict波次节点
   if (wavesSpawned <= 3) return 'tutorial';
   if (wavesSpawned <= 6) return 'pre_edict_early';
   return 'pre_edict_late'; // 7-8

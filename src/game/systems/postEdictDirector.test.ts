@@ -22,9 +22,9 @@ describe('总量与档位', () => {
   });
 
   it('D=125', () => { expect(STANDARD_SLASH_DAMAGE).toBe(125); });
-  it('杂兵 hpMul=1.33 一刀可斩', () => { expect(HP_TIERS.trash.hpMul).toBe(1.33); });
-  it('韧兵 hpMul=2.27 两刀可斩', () => { expect(HP_TIERS.tough.hpMul).toBe(2.27); });
-  it('压阵 hpMul=3.47 三刀可斩', () => { expect(HP_TIERS.elite_wall.hpMul).toBe(3.47); });
+  it('杂兵 pressureWeight=1.33', () => { expect(HP_TIERS.trash.pressureWeight).toBe(1.33); });
+  it('韧兵 pressureWeight=2.27', () => { expect(HP_TIERS.tough.pressureWeight).toBe(2.27); });
+  it('压阵 pressureWeight=3.47', () => { expect(HP_TIERS.elite_wall.pressureWeight).toBe(3.47); });
 });
 
 describe('测试总量', () => {
