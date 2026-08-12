@@ -4,6 +4,7 @@ import { generateAllRecipes } from "./generator/floorRecipeGen";
 import { generateWavePlan } from "./generator/wavePlanGen";
 import { resolveEnemyType, ENEMY_META } from "./enemyRegistry";
 import { getSpeedMultiplier } from "./mainlineNumeric";
+import { getFormation, getEnvironment } from "./mainlineEncounter";
 
 // ════════════════════════════════════════════
 // 品质阶梯
@@ -588,12 +589,41 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
     }
   }
 
+  // V0812017: Formation注入spawn zone + Environment轻量修正
+  const formation = getFormation(recipe.formation) ?? { spawnZone: [28, 340] as [number, number], columnStyle: "line" as const, mirror: true };
+  const env = getEnvironment(recipe.environment) ?? { effect: "none" as const, magnitude: 0 };
+  const zoneW = formation.spawnZone[1] - formation.spawnZone[0];
+
+  // Environment effect: gale → level speed +10%
+  const envSpeedMul = env.effect === "gale" ? (1 + env.magnitude) : 1;
+
+  // Formation: compute spawn x based on column style + zone
+  const spreadX = (kind: string, baseIdx: number, total: number): number => {
+    const [zMin, zMax] = formation.spawnZone;
+    if (formation.columnStyle === "line") {
+      const step = total > 1 ? zoneW / (total - 1) : 0;
+      const x = zMin + step * baseIdx;
+      return formation.mirror && baseIdx % 2 === 1 ? zMax - step * (baseIdx - 1) + step : x;
+    }
+    if (formation.columnStyle === "v") {
+      const third = total > 2 ? zoneW / 2 : 0;
+      return zMin + third * (baseIdx % 3) + (baseIdx * 4) % 12;
+    }
+    return zMin + Math.random() * zoneW; // scatter
+  };
+
   const waves: WaveConfig[] = plan.waves.map((ws, idx) => {
     const enemies: EnemySpawn[] = [];
-    enemies.push({ kind: "infantry", count: ws.baseCount, x: 48, yOffset: 0 } as any);
-    if (ws.primary > 0) enemies.push({ kind: primaryKind, count: ws.primary, x: 140, yOffset: 8 } as any);
-    if (ws.secondary > 0 && secKind) enemies.push({ kind: secKind, count: ws.secondary, x: 236, yOffset: 16 } as any);
-    return { name: `波${idx+1}`, delay: 0.2, spawnAt: idx * 4.5, speedMultiplier: 1, enemies };
+    // Formation determines x for each enemy group
+    const totalGroups = 1 + (ws.primary > 0 ? 1 : 0) + (ws.secondary > 0 ? 1 : 0);
+    let gi = 0;
+    enemies.push({ kind: "infantry", count: ws.baseCount, x: spreadX("infantry", gi++, totalGroups), yOffset: 0 } as any);
+    if (ws.primary > 0) enemies.push({ kind: primaryKind, count: ws.primary, x: spreadX("primary", gi++, totalGroups), yOffset: 8 } as any);
+    if (ws.secondary > 0 && secKind) enemies.push({ kind: secKind, count: ws.secondary, x: spreadX("secondary", gi++, totalGroups), yOffset: 16 } as any);
+    // Environment: GATHER → yOffset更近
+    const yAdj = env.effect === "gather" ? -6 * env.magnitude : 0;
+    for (const e of enemies) { (e as any).yOffset = ((e as any).yOffset ?? 0) + yAdj; }
+    return { name: `波${idx+1}`, delay: 0.2, spawnAt: idx * 4.5 * (plan.rhythm.waveGapMul ?? 1), speedMultiplier: envSpeedMul, enemies };
   });
 
   const eKind = recipe.elite as any;
@@ -603,7 +633,7 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
   return {
     id: 10000 + floor,
     title: `第${floor}关`,
-    subtitle: recipe.mode ?? "",
+    subtitle: `${recipe.mode}/${recipe.rhythm}/${recipe.formation}`,
     initialEnergy: 30,
     hp: 3,
     enemySpeed: speedMul,

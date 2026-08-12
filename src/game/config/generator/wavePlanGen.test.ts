@@ -123,4 +123,37 @@ describe("WavePlan Generator", () => {
       }
     }
   });
+
+  // V0812017 §8: Formation/Rhythm/Mode/Environment 对比验收
+  it("V0812017: 4组对比 — 同池不同Preset产出不同", () => {
+    const baseRecipe = { floor: 10, primaryEnemy: "infantry", secondaryEnemy: "shield", mode: "STANDARD", formation: "CENTER", rhythm: "STEADY", environment: "NONE", seed: 20260811 + 10 } as any;
+
+    const combos = [
+      { mode: "STANDARD", rhythm: "STEADY", formation: "CENTER", env: "NONE",   label: "标准基准" },
+      { mode: "SWARM",    rhythm: "PULSE",  formation: "WIDE",    env: "NONE",   label: "群潮脉动" },
+      { mode: "RUSH",     rhythm: "FRONT",  formation: "COLUMN",  env: "GALE",   label: "急速突破" },
+      { mode: "FLANK",    rhythm: "ALTERNATE", formation: "WINGS", env: "GATHER",label: "侧翼集结" },
+    ];
+
+    const plans = combos.map(c => generateWavePlan({ ...baseRecipe, mode: c.mode, rhythm: c.rhythm, formation: c.formation, environment: c.env }));
+
+    // TotalQuota必须一致
+    const t0 = plans[0].totalQuota;
+    for (let i = 1; i < plans.length; i++) expect(plans[i].totalQuota).toBe(t0);
+
+    // 波次时间/空间/组成明显不同
+    const fingerprints = plans.map(p => JSON.stringify(p.waves.map(w => [w.baseCount, w.primary, w.secondary])));
+    const unique = new Set(fingerprints);
+    expect(unique.size).toBeGreaterThanOrEqual(3); // 至少3种不同
+
+    // SWARM: baseQuota应高于BREACH
+    const swarmBase = plans[1].baseQuota / plans[1].totalQuota;
+    const breachBase = plans[2].baseQuota / plans[2].totalQuota;
+    // SWARM baseBias=1.25 → 更多base怪
+    expect(plans[1].mode.baseBias).toBe(1.25);
+
+    // Rhythm差异: waveWeights不同
+    expect(plans[0].rhythm.waveWeights).not.toEqual(plans[1].rhythm.waveWeights);
+    expect(plans[2].rhythm.waveWeights).not.toEqual(plans[3].rhythm.waveWeights);
+  });
 });

@@ -11882,6 +11882,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       `[DIRECTOR] phase: ${postEdictDirector.currentPhase ?? '-'} beat: ${postEdictDirector.currentBeatId} active: ${postEdictDirector.active} complete: ${postEdictDirector.allComplete}`,
       `[DIRECTOR] seed: ${postEdictDirector.placementSeed} p3Handoff: ${postEdictDirector.p3HandoffReady}`,
       `[SPAWN] dir: ${this.subSpawnQueue.filter(q => q.source === 'edict').length} leg: 0 src: ${this._lastSpawnSource}`,
+      `[PRESET] subtitle: ${this.level.subtitle} waves: ${this.level.waves.length} hpMul: ${getNodeConfig(this._currentStageNode).hpMultiplier}`,
       `[COUNT] alive: ${aliveCount} queue: ${this.subSpawnQueue.length} budget: ${this.enemies.filter(e => (e as any)._dirPhase).length}`,
       `---`,
       `levelBaseHp: ${getLevelBaseStats(1).baseHp}`,
