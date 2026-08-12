@@ -1502,12 +1502,19 @@ export class Game {
     // P4.2: 统一播报更新
     this.updateBattleNotice(scaledDt);
     this.updateBattlePhase();
-    // V0812010: Director活跃时不覆盖_currentStageNode, 每个item自带stageNode
-    if (!postEdictDirector.active) {
-      // V0812012: 军令关闭后防止回退到pre-edict节点
-      if (!this.mainWaveScheduleClosedByEdict) {
-        this._currentStageNode = resolveLevel1Node(this.battlePhase, this.wavesSpawned, this.postChestWaveIndex);
+    // V0812013: Director阶段与全局StageNode同步
+    if (postEdictDirector.active) {
+      const dp = postEdictDirector.currentPhase;
+      if (dp) this._currentStageNode = this._directorPhaseNodes[dp] as StageNode;
+    } else if (this.mainWaveScheduleClosedByEdict) {
+      if (this.eliteSpawned) {
+        this._currentStageNode = 'elite';
+      } else {
+        // Director完成后Elite接管前, 保持P3节点
+        this._currentStageNode = 'post_edict_director_p3';
       }
+    } else {
+      this._currentStageNode = resolveLevel1Node(this.battlePhase, this.wavesSpawned, this.postChestWaveIndex);
     }
     this.updateBuffChoiceTriggers();
     this.checkBattleEnd();
