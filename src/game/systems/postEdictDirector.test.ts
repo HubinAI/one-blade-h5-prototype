@@ -22,9 +22,9 @@ describe('总量与档位', () => {
   });
 
   it('D=125', () => { expect(STANDARD_SLASH_DAMAGE).toBe(125); });
-  it('杂兵100 一刀', () => { expect(HP_TIERS.trash.hp).toBe(100); expect(125>=100).toBe(true); });
-  it('韧兵170 两刀', () => { expect(HP_TIERS.tough.hp).toBe(170); expect(250>=170).toBe(true); });
-  it('压阵260 三刀', () => { expect(HP_TIERS.elite_wall.hp).toBe(260); expect(375>=260).toBe(true); });
+  it('杂兵 hpMul=1.33 一刀可斩', () => { expect(HP_TIERS.trash.hpMul).toBe(1.33); });
+  it('韧兵 hpMul=2.27 两刀可斩', () => { expect(HP_TIERS.tough.hpMul).toBe(2.27); });
+  it('压阵 hpMul=3.47 三刀可斩', () => { expect(HP_TIERS.elite_wall.hpMul).toBe(3.47); });
 });
 
 describe('测试总量', () => {
@@ -38,7 +38,7 @@ describe('测试总量', () => {
     expect(wall).toBe(0); // 6G移除了elite_wall
   });
 
-  it('rapidPulse HP档位正确(trash=100,tough=170,wall=260,splitter=170)', () => {
+  it('rapidPulse hpTier正确(trash/tough/splitter)', () => {
     const d = new PostEdictDirector(); d.start();
     let ms = 0;
     for (let i = 0; i < 5000; i++) {
@@ -46,18 +46,15 @@ describe('测试总量', () => {
       const reqs = tick(d, 0.5, 0, 0, 0, 0, ms, 0, 0, 0, 0);
       for (const r of reqs) {
         for (const item of r.items) {
-          // P3 rapidPulse: splitter=170, trash=100, tough=170, wall=260
-          expect(item.hpOverride).toBeGreaterThan(0);
+          // P3 rapidPulse: splitter→tough, trash, tough
           if (item.enemyKind === 'splitter') {
             expect(item.hpTier).toBe('tough');
-            expect(item.hpOverride).toBe(170);
           } else if (item.hpTier === 'trash') {
-            expect(item.hpOverride).toBe(100);
+            expect(item.hpTier).toBe('trash');
           } else if (item.hpTier === 'tough') {
-            expect(item.hpOverride).toBe(170);
-          } else if (item.hpTier === 'elite_wall') {
-            expect(item.hpOverride).toBe(260);
+            expect(item.hpTier).toBe('tough');
           }
+          // hpTier 语义存在，但不再携带绝对HP
         }
       }
       if (!d.active && d.allComplete) break;

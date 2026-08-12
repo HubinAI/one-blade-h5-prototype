@@ -20,7 +20,7 @@ export type FormationId = string;
 export interface SpawnItem {
   x: number; y: number;
   speedMul: number;
-  hpTier: HpTier; hpOverride: number;
+  hpTier: HpTier;
   formationId: FormationId;
   entryTargetX: number; entryEndYOverride: number;
   directorPhase: DirectorPhase;
@@ -226,30 +226,16 @@ export const MATERIALIZE_DURATION = 0.15;   // 凝实
 /** 确定性错峰 (ms) — 按 spawnOrder 循环 */
 export const SHADOW_STAGGER_MS = [0, 40, 80];
 
-// ═══════════════════ HP 配置 ═══════════════════
+// ═══════════════════ HP 档位（语义，不含绝对HP） ═══════════════════
 
-/** 基础HP档位 (floor=1), 用于缩放 */
-const BASE_HP = { trash: 100, tough: 170, elite_wall: 260 };
-
-export const HP_TIERS: Record<HpTier, { hp: number; hpMul: number; scale: number; ringWidth: number }> = {
-  trash:      { hp: BASE_HP.trash, hpMul: 1.33, scale: 1.00, ringWidth: 1.0 },
-  tough:      { hp: BASE_HP.tough, hpMul: 2.27, scale: 1.06, ringWidth: 1.4 },
-  elite_wall: { hp: BASE_HP.elite_wall, hpMul: 3.47, scale: 1.11, ringWidth: 2.0 },
+export const HP_TIERS: Record<HpTier, { hpMul: number; scale: number; ringWidth: number }> = {
+  trash:      { hpMul: 1.33, scale: 1.00, ringWidth: 1.0 },
+  tough:      { hpMul: 2.27, scale: 1.06, ringWidth: 1.4 },
+  elite_wall: { hpMul: 3.47, scale: 1.11, ringWidth: 2.0 },
 };
-
-/** V0811048: 按楼层比例缩放HP_TIERS */
-export function scaleHpTiers(floorMultiplier: number): Record<HpTier, { hp: number; hpMul: number; scale: number; ringWidth: number }> {
-  return {
-    trash:      { ...HP_TIERS.trash,      hp: Math.round(BASE_HP.trash      * floorMultiplier) },
-    tough:      { ...HP_TIERS.tough,      hp: Math.round(BASE_HP.tough      * floorMultiplier) },
-    elite_wall: { ...HP_TIERS.elite_wall, hp: Math.round(BASE_HP.elite_wall * floorMultiplier) },
-  };
-}
-
-export function getBaseHpTiers(): typeof BASE_HP { return BASE_HP; }
 export const STANDARD_SLASH_DAMAGE = 125;
 
-/** 由 HP 反推 hpTier (仅用于敌人受伤前) */
+/** 由 HP 反推 hpTier（仅用于旧兼容：已弃用，新敌人由 Director 直接设置 hpTier） */
 export function hpToTier(hp: number): HpTier {
   if (hp >= 220) return 'elite_wall';
   if (hp >= 136) return 'tough';
@@ -807,7 +793,6 @@ export class PostEdictDirector {
           x: Math.round(x + (Math.random() - 0.5) * 6), y: y - 20,
           speedMul: speedMul,
           hpTier: (tier as string) === 'splitter' ? ('tough' as HpTier) : tier,
-          hpOverride: (tier as string) === 'splitter' ? HP_TIERS.tough.hp : HP_TIERS[tier].hp,
           formationId: mb.formationId,
           entryTargetX: Math.round(x), entryEndYOverride: Math.round(y),
           directorPhase: beat.phase, directorBeatId: mbId, directorMicroBatchId: `${mbId}_p${Math.round(pulseDelayAccum)}`,
@@ -870,7 +855,7 @@ export class PostEdictDirector {
           x: Math.round(p.x + (Math.random() - 0.5) * 6),
           y: -20 + (mb.row === 'back' ? 0 : mb.row === 'mid' ? -5 : -10),
           speedMul: phase.speedMul + mb.speedBonus,
-          hpTier: tier, hpOverride: HP_TIERS[tier].hp,
+          hpTier: tier,
           formationId: mb.formationId,
           entryTargetX: p.x,
           entryEndYOverride: p.y,
@@ -967,7 +952,7 @@ export class PostEdictDirector {
           x: Math.round(p.x + (Math.random() - 0.5) * 6),
           y: -20 + (mb.row === 'back' ? 0 : mb.row === 'mid' ? -5 : -10),
           speedMul: phase.speedMul + mb.speedBonus,
-          hpTier: tier, hpOverride: HP_TIERS[tier].hp,
+          hpTier: tier,
           formationId: mb.formationId,
           entryTargetX: p.x,
           entryEndYOverride: p.y,

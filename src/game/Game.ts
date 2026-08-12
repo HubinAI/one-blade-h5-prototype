@@ -29,7 +29,7 @@ import { DAMAGE_SOURCE_REGISTRY, createDefaultPlayerStats, getCurrentAttack, res
 import { resolveDamageTier, FloatPriority, FLOAT_LIMITS } from "./systems/damageFloatSystem";
 import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getEnemyTypeHpMultiplier, getNodeConfig } from "./config/stageConfig";
 import { getEnemyFinalHp, mainlineGrowthCurve, phaseEnemyCount, phaseSpeedMul, genericEliteHp, postEdictTotal, eliteMaxHp } from "./config/mainlineNumeric";
-import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, inertiaEase, hpToTier, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, HP_TIERS, SHADOW_MOVE_DURATION, SHADOW_SPEED_REF, SHADOW_MOVE_DURATION_MIN, SHADOW_MOVE_DURATION_MAX, SHADOW_STAGGER_MS, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
+import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, inertiaEase, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, SHADOW_MOVE_DURATION, SHADOW_SPEED_REF, SHADOW_MOVE_DURATION_MIN, SHADOW_MOVE_DURATION_MAX, SHADOW_STAGGER_MS, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
 import { playSwing, playHit, playExplosion, playPlayerHurt, playEliteKill, playVictory, initSfx, setBgmBattle, setBgmElite, setBgmOff, playRouletteTick } from "./sfx";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
@@ -240,7 +240,7 @@ export class Game {
     attackEndPos: Vec2;
   }[] = [];
   // 多波多次刷新队列：每个子刷新有时间戳，到时间就spawn
-  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; stageNode?: string; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number; isTailCatchup?: boolean; hpOverride?: number; dirPhase?: string; dirBeatId?: string; dirMbId?: string; dirHpTier?: string; dirFormationId?: string; entryTargetX?: number; entryEndYOverride?: number; shadowAnchorX?: number; shadowAnchorY?: number; shadowSkip?: boolean; spawnInPlace?: boolean; enemyKind?: string }[] = [];
+  private subSpawnQueue: { time: number; kind: string; x: number; speedMultiplier: number; yOffset: number; battlePhase: BattlePhase; stageNode?: string; flowRole?: EnemyFlowRole; spawnGroupId?: string; spawnOrder?: number; entryEndYOffset?: number; source?: "normal" | "edict"; roundIndex?: number; isTailCatchup?: boolean; dirPhase?: string; dirBeatId?: string; dirMbId?: string; dirHpTier?: string; dirFormationId?: string; entryTargetX?: number; entryEndYOverride?: number; shadowAnchorX?: number; shadowAnchorY?: number; shadowSkip?: boolean; spawnInPlace?: boolean; enemyKind?: string }[] = [];
 
   // 0807-11D-3: debug-only 手势伤害观测
   private _gestureObs?: { phase: string; toughHit: number; toughKill: number; wallHit: number; wallKill: number; hits: Record<string,number> };
@@ -6260,7 +6260,6 @@ export class Game {
         entryEndYOffset: (item.entryEndYOverride - ENTRY_PROFILE_EDICT_BURST.entryEndY),
         source: 'edict',
         roundIndex: 0,
-        hpOverride: item.hpOverride,
         dirPhase: item.directorPhase,
         dirBeatId: item.directorBeatId,
         dirMbId: item.directorMicroBatchId,
@@ -6627,11 +6626,6 @@ export class Game {
     if (item.stageNode) { this._currentStageNode = item.stageNode as StageNode; }
     const enemy = this.createEnemy(item.kind as any, safeX, spawnY, item.speedMultiplier, profile);
     this._currentStageNode = savedNode;
-    // 0807-11D-1: hpOverride 覆盖 stageConfig 默认 HP
-    if (item.hpOverride !== undefined && item.hpOverride > 0) {
-      enemy.hp = item.hpOverride;
-      enemy.maxHp = item.hpOverride;
-    }
     // 0807-11D-2: 导演不可变元数据贯通
     if (item.dirPhase !== undefined) { (enemy as any)._dirPhase    = item.dirPhase; }
     if (item.dirBeatId !== undefined) { (enemy as any)._dirBeatId   = item.dirBeatId; }
