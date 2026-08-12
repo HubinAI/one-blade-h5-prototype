@@ -394,6 +394,30 @@ export class Game {
     return Math.min(6, others.length);
   }
 
+  /** V0811068: 精英通用战区巡逻 */
+  private _elitePatrolUpdate(enemy: Enemy, dt: number) {
+    const e = enemy as any;
+    const ZONE_X_MIN = BATTLE_SAFE_X.eliteMin, ZONE_X_MAX = BATTLE_SAFE_X.eliteMax;
+    const ZONE_Y_MIN = BATTLEFIELD_ZONES.midfieldStartY, ZONE_Y_MAX = Math.min(540, BATTLEFIELD_ZONES.harvestEndY - 160);
+    if (!e._patrolTarget) {
+      e._patrolTarget = {
+        x: ZONE_X_MIN + Math.random() * (ZONE_X_MAX - ZONE_X_MIN),
+        y: ZONE_Y_MIN + Math.random() * (ZONE_Y_MAX - ZONE_Y_MIN),
+      };
+      e._patrolSpeed = enemy.speed * 0.4;
+    }
+    const tgt = e._patrolTarget;
+    const dx = tgt.x - enemy.x, dy = tgt.y - enemy.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const spd = e._patrolSpeed || (enemy.speed * 0.4);
+    if (dist < 5) { e._patrolTarget = null; return; }
+    const move = Math.min(dist, spd * dt);
+    enemy.x += (dx / dist) * move;
+    enemy.y += (dy / dist) * move;
+    enemy.x = Math.max(ZONE_X_MIN, Math.min(ZONE_X_MAX, enemy.x));
+    enemy.y = Math.max(ZONE_Y_MIN, Math.min(ZONE_Y_MAX, enemy.y));
+  }
+
   private _getFireRingPressureProfile(round: number) {
     const r = Math.min(round, 3);
     if (r === 1) return { humanDur: 0.65, times: [0.25, 0.62, 0.98], dur: 1.05, gather: 0.32, reform: 0.42, gc: { x: 190, y: 350 }, tperm: [80, 190, 300] };
@@ -5055,10 +5079,11 @@ export class Game {
         }
         // ═══ END 影化生命周期 ═══
 
-        // P4.3A: 动态flow倍率替代固定harvestSlow
+        // V0811068: 精英战区巡逻 — 禁止防线漂移
         const flowMul = enemy.flow?.currentSpeedMultiplier ?? 1;
-        // 0808-11E-4A: fireRing精英开战后不参与普通Y下落
-        if (!(enemy.kind === "elite" && enemy.eliteKind === "fireRing" && this._eliteBattleActive && this._eliteInvuln === false)) {
+        if (enemy.kind === "elite" && enemy.eliteKind) {
+          this._elitePatrolUpdate(enemy, dt);
+        } else {
           enemy.y += enemy.speed * entryMultiplier * rushMultiplier * statusSlow * fortressSlow * flowMul * dt;
         }
         // V0731012: 凝霜减速 — 普通40%, 精英20%
