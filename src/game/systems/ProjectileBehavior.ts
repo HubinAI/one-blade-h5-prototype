@@ -1,7 +1,6 @@
 /**
- * V0812023: 弹幕兵 — 强化版 (强识别 + 弹幕不可切)
- * idle → telegraph(0.75s, 大蓄力圈) → fire SINGLE → cooldown(2.8s)
- * projectile.uncleavable=true → 刀切无效
+ * V0812024: 弹幕兵 — T1版 (弹幕可切)
+ * idle → telegraph(0.75s) → fire → cooldown(2.8s)
  */
 import type { Enemy, EnemyProjectile } from "../types";
 import { BATTLEFIELD_ZONES } from "../config/balance";
@@ -39,7 +38,6 @@ export function updateProjectileBehavior(enemy: Enemy, dt: number, projectiles: 
         id: np(), x: enemy.x, y: enemy.y + 10, vx: 0, vy: 1,
         speed: PROJ_SPEED, radius: PROJ_RADIUS, alive: true, damage: 1,
         sourceEnemyId: enemy.id,
-        uncleavable: true, // V0812023: 弹幕不可切
       });
     }
     return true;
@@ -59,6 +57,6 @@ export function updateProjectiles(projectiles: EnemyProjectile[], dt: number, de
 }
 
 export function checkProjectileSlashHit(proj: EnemyProjectile, sx: number, sy: number, sr: number): boolean {
-  if (!proj.alive || proj.uncleavable) return false; // V0812023
+  if (!proj.alive) return false;
   return Math.hypot(proj.x - sx, proj.y - sy) < proj.radius + sr;
 }

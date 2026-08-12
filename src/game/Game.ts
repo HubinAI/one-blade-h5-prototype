@@ -10729,20 +10729,21 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       // ═══ V0812023: 三新怪大字圆心 ═══
       if (enemy.kind === "charger" || enemy.kind === "mover" || enemy.kind === "shooter") {
         const ch = enemy.kind === "charger" ? "冲" : enemy.kind === "mover" ? "飘" : "弹";
-        const bg = enemy.kind === "charger" ? "#d6452c" : enemy.kind === "mover" ? "#129b8b" : "#5b3faa";
-        const glow = enemy.kind === "charger" ? "rgba(214,69,44,0.4)" : enemy.kind === "mover" ? "rgba(18,155,139,0.35)" : "rgba(91,63,170,0.35)";
+        const bgColor = enemy.kind === "charger" ? "#d6452c" : enemy.kind === "mover" ? "#129b8b" : "#5b3faa";
+        const glowColor = enemy.kind === "charger" ? "rgba(214,69,44,0.4)" : enemy.kind === "mover" ? "rgba(18,155,139,0.35)" : "rgba(91,63,170,0.35)";
+        // V0812024: 读取flash状态 — 被砍瞬间闪白
+        const bg = enemy.flash > 0 ? "#fff1b8" : bgColor;
+        const glow = enemy.flash > 0 ? "rgba(255,241,184,0.5)" : glowColor;
         ctx.save();
         ctx.globalAlpha = 1;
         ctx.shadowColor = "rgba(0,0,0,0)";
         ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-        // 发光底圈
         ctx.beginPath(); ctx.arc(0, 0, enemy.radius + 3, 0, Math.PI*2);
         ctx.fillStyle = glow; ctx.fill();
-        // 主圆
         ctx.beginPath(); ctx.arc(0, 0, enemy.radius, 0, Math.PI*2);
         ctx.fillStyle = bg; ctx.fill();
-        // 大字
-        ctx.fillStyle = "#fff"; ctx.font = `900 ${enemy.radius*1.35}px "Microsoft YaHei","SimHei",sans-serif`;
+        ctx.fillStyle = enemy.flash > 0 ? "#222" : "#fff";
+        ctx.font = `900 ${enemy.radius*1.35}px "Microsoft YaHei","SimHei",sans-serif`;
         ctx.textAlign = "center"; ctx.textBaseline = "middle";
         ctx.fillText(ch, 0, 1);
         ctx.restore();

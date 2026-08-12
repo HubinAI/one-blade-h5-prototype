@@ -296,8 +296,12 @@ export type Enemy = {
   _chargeDashDist?: number; _chargeTraveled?: number;
   _chargeTargetX?: number; _chargeTargetY?: number; // V0812022: 冲锋目标坐标
   /** V0812018: 游袭兵运动模式 */
-  _movePattern?: 'diagonal' | 's_curve' | 'arc' | 'spiral';
+  _movePattern?: 'diagonal' | 'arc';
   _moveOriginX?: number; _moveOriginY?: number; _movePhase?: number; _moveDir?: number;
+  _moveTargetX?: number; _moveTargetY?: number; _moveDur?: number; // V0812024
+  _moveArcStartX?: number; _moveArcStartY?: number;
+  _moveArcMidX?: number; _moveArcMidY?: number;
+  _moveArcEndX?: number; _moveArcEndY?: number;
   /** V0812018: 弹幕兵状态 */
   _shootState?: 'idle' | 'telegraph' | 'firing' | 'cooldown';
   _shootTimer?: number; _shootCooldown?: number;
@@ -309,7 +313,6 @@ export type EnemyProjectile = {
   vx: number; vy: number; speed: number;
   radius: number; alive: boolean;
   damage: number; sourceEnemyId: string;
-  uncleavable?: boolean; // V0812023
 };
 
 export type Pickup = {
