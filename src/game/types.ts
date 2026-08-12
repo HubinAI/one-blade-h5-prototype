@@ -6,7 +6,7 @@ export type Vec2 = {
 };
 
 export type BladeTier = "weak" | "normal" | "strong" | "burst";
-export type EnemyKind = "infantry" | "shield" | "powder" | "core" | "elite" | "boss" | "splitter" | "tractor";
+export type EnemyKind = "infantry" | "shield" | "powder" | "core" | "elite" | "boss" | "splitter" | "tractor" | "charger" | "mover" | "shooter";
 export type EliteKind = "fireRing" | "heal" | "aura";
 export type BossId = "yaoWang" | "moXiu" | "huaYao" | "thunderGeneral";
 /** P4.4A: Boss状态机阶段 */
@@ -290,6 +290,24 @@ export type Enemy = {
   _dirPhase?: string;
   _dirEntryTargetX?: number;
   _dirEntryEndYOverride?: number;
+  /** V0812018: 冲锋兵状态 */
+  _chargeState?: 'idle' | 'telegraph' | 'dashing' | 'recovery';
+  _chargeTimer?: number; _chargeDashAngle?: number; _chargeDashSpeed?: number;
+  _chargeDashDist?: number; _chargeTraveled?: number;
+  /** V0812018: 游袭兵运动模式 */
+  _movePattern?: 'diagonal' | 's_curve' | 'arc' | 'spiral';
+  _moveOriginX?: number; _moveOriginY?: number; _movePhase?: number; _moveDir?: number;
+  /** V0812018: 弹幕兵状态 */
+  _shootState?: 'idle' | 'telegraph' | 'firing' | 'cooldown';
+  _shootTimer?: number; _shootCooldown?: number;
+};
+
+/** V0812018: 弹幕 */
+export type EnemyProjectile = {
+  id: string; x: number; y: number;
+  vx: number; vy: number; speed: number;
+  radius: number; alive: boolean;
+  damage: number; sourceEnemyId: string;
 };
 
 export type Pickup = {

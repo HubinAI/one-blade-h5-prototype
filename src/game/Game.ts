@@ -31,6 +31,11 @@ import { calcFinalHp, resolveLevel1Node, type StageNode, getLevelBaseStats, getE
 import { getEnemyFinalHp, mainlineGrowthCurve, phaseEnemyCount, eliteMaxHp } from "./config/mainlineNumeric";
 import { postEdictDirector, isInCombatZone, isApproaching, isEnemyCombatTargetable, inertiaEase, type DirectorDebugInfo, type DirectorSpawnRequest, type SpawnItem, SHADOW_MOVE_DURATION, SHADOW_SPEED_REF, SHADOW_MOVE_DURATION_MIN, SHADOW_MOVE_DURATION_MAX, SHADOW_STAGGER_MS, MATERIALIZE_DURATION } from "./systems/PostEdictDirector";
 import { playSwing, playHit, playExplosion, playPlayerHurt, playEliteKill, playVictory, initSfx, setBgmBattle, setBgmElite, setBgmOff, playRouletteTick } from "./sfx";
+// V0812018: 新怪物行为模块
+import { initChargeBehavior, updateChargeBehavior } from "./systems/ChargeBehavior";
+import { initMovementPattern, updateMovementPattern } from "./systems/MovementPattern";
+import { initProjectileBehavior, updateProjectileBehavior, updateProjectiles, checkProjectileSlashHit } from "./systems/ProjectileBehavior";
+import type { EnemyProjectile } from "./types";
 import { REACTIVE_BOSS_CONFIG } from "./config/bossReactiveFlow";
 import { buildReactiveSlashGeometry, drawReactiveSlashDebug, type ReactiveSlashGeometry } from "./systems/reactiveSlashGeometry";
 import { applyBattleRewards, evaluateRating, getCurrentRunContext, getUpgradeModifiers, initBladeGrowthDefaults, getEquippedBladeInfo, equipBladeToSlot, claimFloorFirstReward, isSub1Unlocked } from "./services/ProgressionService";
@@ -213,6 +218,8 @@ export class Game {
   private chainKillTotal = 0;       // 连杀总数
 
   private enemies: Enemy[] = [];
+  /** V0812018: 弹幕 */
+  private projectiles: EnemyProjectile[] = [];
   private pickups: Pickup[] = [];
   private particles: Particle[] = [];
   private texts: FloatingText[] = [];
@@ -1213,7 +1220,7 @@ export class Game {
     // 通用战斗
     this.chestDone = false; this.chestDropped = false; this.chestDropX = 0; this.chestDropY = 0;
     this.finished = false; this.phase = "playing"; this.battlePhase = "main_waves";
-    this.enemies = []; this.subSpawnQueue = []; this.particles = [];
+    this.enemies = []; this.subSpawnQueue = []; this.particles = []; this.projectiles = [];
     this._explosionShockwaves = []; // 0807-11D-6F-4
     this.currentSlash = undefined; this.splitFlashes = [];
     this.screenShake = 0; this.flash = 0; this.hitStopTimer = 0; this.slowMoTimer = 0;
@@ -1476,6 +1483,9 @@ export class Game {
     this.updateEnemies(scaledDt);
     this._updateFuseEnemies(scaledDt); // 0807-11D-6F-4
     this.updatePickups(scaledDt);
+    // V0812018: 新怪行为 + 弹幕
+    this._updateBehaviors(scaledDt);
+    this._updateProjectiles(scaledDt);
     this.updateParticles(scaledDt);
     this.updateTexts(scaledDt);
     this._updateComboPresentation(scaledDt);
@@ -1546,6 +1556,7 @@ export class Game {
     this._drawScorchFlames(ctx);
     this.drawPickups(ctx);
     this.drawEnemies(ctx);
+    this._drawProjectiles(ctx); // V0812018
     // L3: 敌人挂载（敌人上方、浮字下方）
     this._drawEnemyScorchAttachments(ctx);
     this._drawEliteFragments(ctx);
@@ -3948,7 +3959,7 @@ export class Game {
 
     // P0: Reactive Boss模式路由到弹幕/护甲检测
     if (this.gameMode === "bossReactive" && this.reactiveController) {
-      this.checkReactiveProjectileHits(a, b, trail);
+      this.checkReactiveEnemyProjectileHits(a, b, trail);
       return;
     }
     const stage = SWORD_STAGE_BY_ID[trail.tier];
@@ -4120,6 +4131,14 @@ export class Game {
         }
     }
   }
+  // V0812018: 弹幕被刀切
+  for (const proj of this.projectiles) {
+    if (!proj.alive) continue;
+    if (checkProjectileSlashHit(proj, b.x, b.y, bladeReach + 8)) {
+      proj.alive = false;
+      this.particles.push(...sparkBurst({ x: proj.x, y: proj.y } as any, 3, "#5bc0ff"));
+    }
+  }
   }
 
   /** P0: Reactive Boss弹幕/护甲检测 */
@@ -4259,7 +4278,7 @@ export class Game {
     ctx.restore();
   }
 
-  private checkReactiveProjectileHits(a: Vec2, b: Vec2, trail: SlashTrail): void {
+  private checkReactiveEnemyProjectileHits(a: Vec2, b: Vec2, trail: SlashTrail): void {
     const rc = this.reactiveController;
     if (!rc) return;
 
@@ -5239,6 +5258,31 @@ export class Game {
         b.x += clampedPush * 0.5;
         this.clampEnemyToVisibleArea(a);
         this.clampEnemyToVisibleArea(b);
+      }
+    }
+  }
+
+  // ═══ V0812018: 新怪行为统一入口 ═══
+  private _updateBehaviors(dt: number) {
+    for (const enemy of this.enemies) {
+      if (!enemy.alive) continue;
+      if (enemy.entryPhase?.active) continue; // 入场阶段不执行行为
+      if (enemy.kind === "charger") updateChargeBehavior(enemy, dt);
+      if (enemy.kind === "mover") updateMovementPattern(enemy, dt);
+      if (enemy.kind === "shooter") updateProjectileBehavior(enemy, dt, this.projectiles);
+    }
+  }
+
+  private _updateProjectiles(dt: number) {
+    updateProjectiles(this.projectiles, dt);
+    this.projectiles = this.projectiles.filter(p => p.alive);
+    // 弹幕命中玩家防线
+    for (const p of this.projectiles) {
+      if (!p.alive) continue;
+      if (p.y >= BATTLEFIELD_ZONES.defenseLineY) {
+        p.alive = false;
+        this.hp = Math.max(0, this.hp - p.damage);
+        this.screenShake = Math.max(this.screenShake, 0.05);
       }
     }
   }
@@ -8425,7 +8469,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (this.debugEnabled && this.postChestSequenceState !== 'inactive') {
       console.warn(`[SPAWN-HP] pNode=${this._lastSpawnPassedNode} uNode=${this._currentStageNode} cfgHp=${baseHp} hp=${realHp}`);
     }
-    return {
+    const newEnemy: Enemy = {
       id: this.nextId("enemy"),
       kind,
       x,
@@ -8465,7 +8509,12 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       rushTimer: isBasicEnemy && kind === "infantry" && Math.random() < 0.3 ? 0.8 : undefined,
       _spawnSource: this._lastSpawnSource,
       _spawnBatchId: this._spawnBatchId,
-    } as any;
+    };
+    // V0812018: 新怪行为初始化
+    if (kind === "charger") initChargeBehavior(newEnemy);
+    if (kind === "mover") initMovementPattern(newEnemy);
+    if (kind === "shooter") initProjectileBehavior(newEnemy);
+    return newEnemy;
   }
 
   private createPickup(kind: PickupKind, x: number, y: number): Pickup {
@@ -10002,6 +10051,23 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.beginPath();
     ctx.ellipse(x2, yOff, w2, h2, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
+  }
+
+  /** V0812018: 绘制弹幕 */
+  private _drawProjectiles(ctx: CanvasRenderingContext2D) {
+    ctx.save();
+    for (const p of this.projectiles) {
+      if (!p.alive) continue;
+      ctx.fillStyle = "#ff6a33";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,211,90,0.6)";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius + 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
   }
 

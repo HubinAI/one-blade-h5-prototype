@@ -462,7 +462,38 @@ export const ENEMY_BALANCE: Record<
     score: TRACTOR_CONFIG.score,
     energyReward: 5,
     behavior: "normal"
-  }
+  },
+  // V0812018: 新普通怪
+  charger: {
+    name: "冲锋兵",
+    hp: 1,
+    speed: 38,
+    radius: 16,
+    defenseDamage: 1,
+    score: 80,
+    energyReward: 4,
+    behavior: "charge"
+  },
+  mover: {
+    name: "游袭兵",
+    hp: 1,
+    speed: 36,
+    radius: 14,
+    defenseDamage: 1,
+    score: 70,
+    energyReward: 4,
+    behavior: "movement"
+  },
+  shooter: {
+    name: "弹幕兵",
+    hp: 1,
+    speed: 30,
+    radius: 16,
+    defenseDamage: 1,
+    score: 90,
+    energyReward: 5,
+    behavior: "projectile"
+  },
 };
 
 export const PICKUP_BALANCE: Record<

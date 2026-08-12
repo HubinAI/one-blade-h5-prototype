@@ -64,5 +64,27 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDefinition> = {
     hint: "进入中场后连接附近敌人，聚拢后形成一刀切团机会。",
     color: "#5dade2",
     accent: "#8fdcff"
-  }
+  },
+  // V0812018: 新普通怪
+  charger: {
+    kind: "charger",
+    name: "冲",
+    hint: "短暂停顿后高速冲锋，冲锋后短暂硬直。",
+    color: "#c0392b",
+    accent: "#f5b7b1"
+  },
+  mover: {
+    kind: "mover",
+    name: "游",
+    hint: "横向位移明显，轨迹异常，需预判走位出刀。",
+    color: "#8e44ad",
+    accent: "#d7bde2"
+  },
+  shooter: {
+    kind: "shooter",
+    name: "弹",
+    hint: "中后排停滞蓄力，发射弹幕。刀可切弹。",
+    color: "#2980b9",
+    accent: "#a3d4ff"
+  },
 };

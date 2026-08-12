@@ -18,16 +18,16 @@ export const ENEMY_META: Record<string, EnemyMeta> = {
   shield:   { displayName:"盾兵",  experienceAxis:"HARD",      unlockFloor:3,  proxyType:null,      implemented:true },
   splitter: { displayName:"分裂兵",experienceAxis:"TIMING",    unlockFloor:7,  proxyType:null,      implemented:true },
   tractor:  { displayName:"牵引兵",experienceAxis:"GATHER",    unlockFloor:12, proxyType:null,      implemented:true },
-  charger:  { displayName:"冲锋兵",experienceAxis:"TIMING_THREAT",unlockFloor:17,proxyType:"tractor", implemented:false },
-  mover:    { displayName:"游袭兵",experienceAxis:"MOVEMENT",  unlockFloor:22, proxyType:"infantry",implemented:false },
-  shooter:  { displayName:"弹幕兵",experienceAxis:"PROJECTILE",unlockFloor:27, proxyType:"powder",  implemented:false },
+  charger:  { displayName:"冲锋兵",experienceAxis:"TIMING_THREAT",unlockFloor:17,proxyType:null,      implemented:true },
+  mover:    { displayName:"游袭兵",experienceAxis:"MOVEMENT",  unlockFloor:22, proxyType:null,      implemented:true },
+  shooter:  { displayName:"弹幕兵",experienceAxis:"PROJECTILE",unlockFloor:27, proxyType:null,      implemented:true },
   core:     { displayName:"核心兵",experienceAxis:"PRIORITY",  unlockFloor:31, proxyType:null,      implemented:true },
 };
 
 // ══════════════════ 普通怪 ══════════════════
 
-export const NORMAL_IMPLEMENTED = ["infantry","powder","tractor","splitter","core","shield"] as const;
-export const NORMAL_RESERVED    = ["charger","mover","shooter"] as const;
+export const NORMAL_IMPLEMENTED = ["infantry","powder","tractor","splitter","core","shield","charger","mover","shooter"] as const;
+export const NORMAL_RESERVED = [] as const;
 
 export const NORMAL_PROXY: Record<string, string> = {
   charger: "tractor",

@@ -28,8 +28,8 @@ describe("EnemyRegistry", () => {
   it("unknown→unknown", () => { const r=resolveEnemyType("unknown"); expect(r.runtimeType).toBe("unknown"); expect(r.isProxy).toBe(false); });
 
   // Counts
-  it("6 normal implemented", () => expect(NORMAL_IMPLEMENTED.length).toBe(6));
-  it("3 normal reserved", () => expect(NORMAL_RESERVED.length).toBe(3));
+  it("9 normal implemented", () => expect(NORMAL_IMPLEMENTED.length).toBe(9));
+  it("0 normal reserved (V0812018: all implemented)", () => expect(NORMAL_RESERVED.length).toBe(0));
   it("3 elite implemented", () => expect(ELITE_IMPLEMENTED.length).toBe(3));
   it("2 elite reserved", () => expect(ELITE_RESERVED.length).toBe(2));
 });

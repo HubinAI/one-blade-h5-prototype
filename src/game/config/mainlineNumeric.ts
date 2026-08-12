@@ -74,6 +74,7 @@ export function getBladeAttack(quality: string, level: number): number {
 export const ENEMY_TYPE_HP_MULTIPLIER: Record<string, number> = {
   infantry: 0.75, powder: 0.80, tractor: 0.85, splitter: 0.90,
   core: 0.95, shield: 1.20,
+  charger: 0.90, mover: 0.80, shooter: 0.85,
   elite_fireRing: 35, elite_aura: 40, elite_heal: 45,
 };
 

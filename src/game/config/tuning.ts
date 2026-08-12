@@ -116,7 +116,25 @@ export const ENEMY_TUNING: Record<EnemyKind, { radius: number; hpDamage: number;
     hpDamage: ENEMY_BALANCE.tractor.defenseDamage,
     score: ENEMY_BALANCE.tractor.score,
     energy: ENEMY_BALANCE.tractor.energyReward
-  }
+  },
+  charger: {
+    radius: ENEMY_BALANCE.charger.radius,
+    hpDamage: ENEMY_BALANCE.charger.defenseDamage,
+    score: ENEMY_BALANCE.charger.score,
+    energy: ENEMY_BALANCE.charger.energyReward
+  },
+  mover: {
+    radius: ENEMY_BALANCE.mover.radius,
+    hpDamage: ENEMY_BALANCE.mover.defenseDamage,
+    score: ENEMY_BALANCE.mover.score,
+    energy: ENEMY_BALANCE.mover.energyReward
+  },
+  shooter: {
+    radius: ENEMY_BALANCE.shooter.radius,
+    hpDamage: ENEMY_BALANCE.shooter.defenseDamage,
+    score: ENEMY_BALANCE.shooter.score,
+    energy: ENEMY_BALANCE.shooter.energyReward
+  },
 };
 
 export const PICKUP_LABELS: Record<PickupKind, string> = {
