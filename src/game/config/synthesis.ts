@@ -1,5 +1,8 @@
 import type { BossId } from "../types";
 import { LEVEL1_TUTORIAL_WAVES } from "../../data/levels";
+import { generateAllRecipes } from "./generator/floorRecipeGen";
+import { generateWavePlan } from "./generator/wavePlanGen";
+import { resolveEnemyType } from "./enemyRegistry";
 
 // ════════════════════════════════════════════
 // 品质阶梯
@@ -561,129 +564,40 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
   if (floor === 1) return createLevel1Config();
 
   const stats = getFloorStats(floor);
-  const waveTemplates = generateFloorWaves(floor);
-  const density = getMainlineDensityConfig(floor);
+  // V0811069: F2-180 → Recipe → WavePlan Generator
+  const allRecipes = generateAllRecipes();
+  const recipe = allRecipes.find(r => r.floor === floor) ?? allRecipes[0];
+  if (floor === 2) { recipe.primaryEnemy = "powder"; recipe.secondaryEnemy = null; }
+  recipe.elite = resolveEnemyType(recipe.elite).runtimeType;
+  const plan = generateWavePlan(recipe as any);
+  const primaryKind = resolveEnemyType(recipe.primaryEnemy).runtimeType;
+  const secKind = recipe.secondaryEnemy ? resolveEnemyType(recipe.secondaryEnemy).runtimeType : null;
 
-  const waves: WaveConfig[] = waveTemplates.map((tpl, idx) => {
-    const lane = (idx * 3 + 1) % LANES.length;
-    const templateTotal = tpl.enemies.reduce((sum, e) => sum + e.count, 0);
-    const targetTotal = Math.floor(density.minWaveEnemies + Math.random() * (density.maxWaveEnemies - density.minWaveEnemies + 1));
-
-    const enemies: EnemySpawn[] = tpl.enemies.map((e, ei) => {
-      const ratio = e.count / Math.max(1, templateTotal);
-      const cnt = Math.max(1, Math.min(density.groupMax, Math.round(targetTotal * ratio)));
-      return {
-        kind: e.kind as any,
-        count: cnt,
-        x: LANES[(lane + ei * 2) % LANES.length],
-        yOffset: ei * 8,
-      } as any;
-    });
-    return {
-      name: tpl.name,
-      delay: idx === 0 ? 0.2 : 0.2,
-      spawnAt: idx * (floor <= 5 ? 4.5 : 4.8),
-      speedMultiplier: 1 + floor * 0.005,
-      enemies,
-    };
+  const waves: WaveConfig[] = plan.waves.map((ws, idx) => {
+    const enemies: EnemySpawn[] = [];
+    enemies.push({ kind: "infantry", count: ws.baseCount, x: 48, yOffset: 0 } as any);
+    if (ws.primary > 0) enemies.push({ kind: primaryKind, count: ws.primary, x: 140, yOffset: 8 } as any);
+    if (ws.secondary > 0 && secKind) enemies.push({ kind: secKind, count: ws.secondary, x: 236, yOffset: 16 } as any);
+    return { name: `波${idx+1}`, delay: 0.2, spawnAt: idx * 4.5, speedMultiplier: 1 + floor * 0.005, enemies };
   });
 
-  // 决定精英出场时机（每关必出1个）
-  const eliteKinds = ["fireRing", "heal", "aura"];
-  const eKind = eliteKinds[floor % eliteKinds.length] as any;
+  // V0811069: Elite from Recipe shuffle bag (proxy resolved)
+  const eKind = recipe.elite as any;
   const eliteSpawnAt = Math.max(8, waves.length * 1.8);
-
-  // 第2-5关：增加后置波
-  let postChestWaves: WaveConfig[] | undefined;
-  if (floor >= 2 && floor <= 5) {
-    const postCount = floor <= 2 ? 3 : (floor <= 3 ? 4 : 5);
-    postChestWaves = [];
-    for (let i = 0; i < postCount; i++) {
-      const postDelay = i === 0 ? 0.5 : 5.0 + (i - 1) * 5.5;
-      const baseCount = 24 + i * 6;
-      postChestWaves.push({
-        name: `反扑·${['一','二','三','四','五'][i] || String(i+1)}`,
-        delay: 0.2,
-        spawnAt: postDelay,
-        enemies: [
-          { kind: "infantry", count: Math.min(12, Math.floor(baseCount * 0.4)), x: 44 },
-          { kind: "infantry", count: Math.min(10, Math.floor(baseCount * 0.3)), x: 140 },
-          { kind: i % 2 === 0 ? "powder" : "shield", count: 2, x: 236 },
-          { kind: "infantry", count: Math.min(8, Math.floor(baseCount * 0.2)), x: 92 }
-        ]
-      });
-    }
-  }
-
-  const entryOverride = floor <= 5
-    ? { multiplier: 3.4, endY: 560, maxDuration: 2.0, spawnY: -20 }
-    : undefined;
-
-  // P3.4：强制插入机制怪教学波次
-  if (floor === 4) {
-    const sw = (name: string, spawnAt: number, sc: number, ic: number, tutorial = false): WaveConfig => ({
-      name, delay: 0.2, spawnAt,
-      speedMultiplier: 1 + floor * 0.005,
-      enemies: [
-        { kind: "infantry" as any, count: Math.ceil(ic * 0.35), x: LANES[1], yOffset: 0 },
-        { kind: "splitter" as any, count: sc, x: LANES[3], yOffset: 10, isTutorialSplitter: tutorial } as any,
-        { kind: "infantry" as any, count: Math.ceil(ic * 0.65), x: LANES[5], yOffset: 22 },
-      ]
-    });
-    // 5波分裂：8s*2教学, 16s*2教学, 26s*2, 36s*3, 48s*3
-    waves.splice(2, 0, sw("裂变初现", 8, 2, 8, true));
-    waves.splice(4, 0, sw("裂变复现", 16, 2, 12, true));
-    waves.splice(6, 0, sw("双裂压迫", 26, 2, 14, false));
-    waves.splice(8, 0, sw("裂潮", 36, 3, 16, false));
-    waves.splice(10, 0, sw("裂潮再起", 48, 3, 18, false));
-    // P4.1A.10: 第4关插入后统一排序并归一化为3.7秒间隔
-    waves.sort((a, b) => (a.spawnAt ?? 0) - (b.spawnAt ?? 0));
-    waves.forEach((wave, index) => { wave.spawnAt = 0.5 + index * 3.7; });
-  }
-  // P3.3：后置波补分裂兵
-  if (floor === 4 && postChestWaves) {
-    if (postChestWaves[1]) postChestWaves[1].enemies.push({ kind: "splitter" as any, count: 2, x: 188 });
-  }
-  if (floor === 5 && postChestWaves) {
-    if (postChestWaves[0]) postChestWaves[0].enemies.push({ kind: "splitter" as any, count: 2, x: 188 });
-    if (postChestWaves[2]) postChestWaves[2].enemies.push({ kind: "splitter" as any, count: 2, x: 236 });
-  }
-  if (floor === 5) {
-    waves.splice(2, 0, {
-      name: "裂变巩固", delay: 0.2, spawnAt: 20,
-      speedMultiplier: 1 + floor * 0.005,
-      enemies: [{ kind: "infantry" as any, count: 4, x: LANES[1], yOffset: 0 }, { kind: "splitter" as any, count: 1, x: LANES[2], yOffset: 10 }, { kind: "splitter" as any, count: 1, x: LANES[4], yOffset: 16 }, { kind: "infantry" as any, count: 4, x: LANES[5], yOffset: 26 }],
-    });
-  }
-  if (floor === 6) {
-    waves.splice(2, 0, {
-      name: "裂变复习", delay: 0.2, spawnAt: 22,
-      speedMultiplier: 1 + floor * 0.005,
-      enemies: [{ kind: "infantry" as any, count: 5, x: LANES[2], yOffset: 0 }, { kind: "splitter" as any, count: 1, x: LANES[3], yOffset: 12 }, { kind: "infantry" as any, count: 5, x: LANES[4], yOffset: 24 }],
-    });
-  }
-  if (floor === 7) {
-    waves.splice(2, 0, {
-      name: "牵引初现", delay: 0.2, spawnAt: 22,
-      speedMultiplier: 1 + floor * 0.005,
-      enemies: [{ kind: "infantry" as any, count: 4, x: LANES[1], yOffset: 0 }, { kind: "tractor" as any, count: 1, x: LANES[3], yOffset: 12 }, { kind: "infantry" as any, count: 4, x: LANES[5], yOffset: 24 }],
-    });
-  }
 
   return {
     id: 10000 + floor,
-    title: `第${floor}关`,
-    subtitle: `难度 ${Math.floor(floor / 5)} | 敌军HP ${stats.enemyHp}`,
-    initialEnergy: Math.min(100, 50 + floor * 0.5),
-    hp: 3,
-    enemySpeed: Math.min(3.0, 0.85 + floor * 0.012),
-    pickupChance: Math.min(0.15, 0.03 + floor * 0.002),
-    durationSeconds: Math.min(360, 120 + floor * 0.8),
+    title: "第" + floor + "关",
+    subtitle: recipe.mode ?? "",
+    initialEnergy: 30,
+    hp: stats.enemyHp,
+    enemySpeed: stats.enemySpeed,
+    pickupChance: 0,
+    durationSeconds: 90,
     buffTimes: [],
     waves,
+    maxChestCount: Math.min(3, 1 + Math.floor(floor / 10)),
     eliteSpawnAt,
     eliteKind: eKind,
-    postChestWaves,
-    entryOverride,
   };
 }
