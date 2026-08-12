@@ -1202,7 +1202,7 @@ export class Game {
   private static _TEST_VARIANTS: Record<string, string[]> = {
     charger: ['DEFAULT','FAST','DOUBLE'],
     mover:   ['DEFAULT','S_CURVE','SPIRAL','FAST','WIDE'],
-    shooter: ['DEFAULT','FAST','BURST'],
+    shooter: ['DEFAULT','SPREAD3','FAST','BURST'],
   };
   private _getTestVariant(): string {
     const kind = (NORMAL_IMPLEMENTED as readonly string[])[this._enemyTestKind % NORMAL_IMPLEMENTED.length];

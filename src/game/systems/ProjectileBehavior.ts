@@ -35,11 +35,15 @@ export function updateProjectileBehavior(enemy: Enemy, dt: number, projectiles: 
     enemy._shootTimer = (enemy._shootTimer ?? 0) - dt;
     if ((enemy._shootTimer ?? 0) <= 0) {
       enemy._shootState = 'firing'; enemy.visualState = undefined;
-      projectiles.push({
-        id: np(), x: enemy.x, y: enemy.y + 10, vx: 0, vy: 1,
-        speed: PROJ_SPEED, radius: PROJ_RADIUS, alive: true, damage: 1,
-        sourceEnemyId: enemy.id,
-      });
+      const spread = (enemy as any)._shootVariant === 'SPREAD3' ? [-0.314, 0, 0.314] : [0];
+      for (const offset of spread) {
+        projectiles.push({
+          id: np(), x: enemy.x, y: enemy.y + 10,
+          vx: Math.sin(offset), vy: Math.cos(offset),
+          speed: PROJ_SPEED, radius: PROJ_RADIUS, alive: true, damage: 1,
+          sourceEnemyId: enemy.id,
+        });
+      }
     }
     return true;
   }
