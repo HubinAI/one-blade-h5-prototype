@@ -13,7 +13,7 @@ describe("EnemyRegistry", () => {
   // Normal: reserved → proxy
   it("charger→tractor", () => { const r=resolveEnemyType("charger"); expect(r.runtimeType).toBe("tractor"); expect(r.isProxy).toBe(true); expect(r.logicalType).toBe("charger"); });
   it("mover→infantry", () => { const r=resolveEnemyType("mover"); expect(r.runtimeType).toBe("infantry"); expect(r.isProxy).toBe(true); });
-  it("shooter→shield", () => { const r=resolveEnemyType("shooter"); expect(r.runtimeType).toBe("shield"); expect(r.isProxy).toBe(true); });
+  it("shooter→powder", () => { const r=resolveEnemyType("shooter"); expect(r.runtimeType).toBe("powder"); expect(r.isProxy).toBe(true); });
 
   // Elite: implemented pass through
   it("fireRing→fireRing", () => expect(resolveEnemyType("fireRing").isProxy).toBe(false));
