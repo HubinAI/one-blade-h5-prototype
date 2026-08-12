@@ -75,16 +75,16 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDefinition> = {
   },
   mover: {
     kind: "mover",
-    name: "游",
-    hint: "横向位移明显，轨迹异常，需预判走位出刀。",
-    color: "#8e44ad",
-    accent: "#d7bde2"
+    name: "飘",
+    hint: "高速游袭，轨迹异常，DIAGONAL/ARC。",
+    color: "#0e8a7a",
+    accent: "#8fdcff"
   },
   shooter: {
     kind: "shooter",
     name: "弹",
-    hint: "中后排停滞蓄力，发射弹幕。刀可切弹。",
-    color: "#2980b9",
-    accent: "#a3d4ff"
+    hint: "中后排蓄力发射不可切弹幕。",
+    color: "#5842b8",
+    accent: "#b8a4ff"
   },
 };

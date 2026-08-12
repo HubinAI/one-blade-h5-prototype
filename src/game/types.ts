@@ -309,6 +309,7 @@ export type EnemyProjectile = {
   vx: number; vy: number; speed: number;
   radius: number; alive: boolean;
   damage: number; sourceEnemyId: string;
+  uncleavable?: boolean; // V0812023
 };
 
 export type Pickup = {

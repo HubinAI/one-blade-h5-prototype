@@ -4413,7 +4413,7 @@ export class Game {
     // 一刀斩时强制破盾/破精英
     const canBreakAll = oneBladeMul > 1 ? true : stage.canBreakShield;
 
-    if (enemy.kind === "infantry") {
+    if (enemy.kind === "infantry" || enemy.kind === "charger" || enemy.kind === "mover" || enemy.kind === "shooter") {
       if (!isEnemyCombatTargetable(enemy)) return; // 0807-11D-3G: 影化不可战斗
       // 0807-11D-5B: 本刀去重 — 同一敌人只结算1次直接伤害
       if (this.isNormalMainline() && this._slashDirectHitIds.has(enemy.id)) {
@@ -10726,6 +10726,28 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         ctx.stroke();
       }
 
+      // ═══ V0812023: 三新怪大字圆心 ═══
+      if (enemy.kind === "charger" || enemy.kind === "mover" || enemy.kind === "shooter") {
+        const ch = enemy.kind === "charger" ? "冲" : enemy.kind === "mover" ? "飘" : "弹";
+        const bg = enemy.kind === "charger" ? "#d6452c" : enemy.kind === "mover" ? "#129b8b" : "#5b3faa";
+        const glow = enemy.kind === "charger" ? "rgba(214,69,44,0.4)" : enemy.kind === "mover" ? "rgba(18,155,139,0.35)" : "rgba(91,63,170,0.35)";
+        ctx.save();
+        ctx.globalAlpha = 1;
+        ctx.shadowColor = "rgba(0,0,0,0)";
+        ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+        // 发光底圈
+        ctx.beginPath(); ctx.arc(0, 0, enemy.radius + 3, 0, Math.PI*2);
+        ctx.fillStyle = glow; ctx.fill();
+        // 主圆
+        ctx.beginPath(); ctx.arc(0, 0, enemy.radius, 0, Math.PI*2);
+        ctx.fillStyle = bg; ctx.fill();
+        // 大字
+        ctx.fillStyle = "#fff"; ctx.font = `900 ${enemy.radius*1.35}px "Microsoft YaHei","SimHei",sans-serif`;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(ch, 0, 1);
+        ctx.restore();
+      }
+
       ctx.restore();
     }
     // P4.1A.12: 第二遍 — 屏幕空间血条/名牌（不继承怪物旋转/缩放）
@@ -12057,7 +12079,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const meta = ENEMY_META[e.kind] as any;
       let label = meta?.displayName ?? e.kind;
       if (e.kind === 'charger') label = '冲 | ' + (e._chargeState === 'telegraph' ? '预警' : e._chargeState === 'dashing' ? '冲锋' : e._chargeState === 'recovery' ? '硬直' : 'idle');
-      else if (e.kind === 'mover') label = '游 | ' + (e._movePattern ?? 'idle');
+      else if (e.kind === 'mover') label = '飘 | ' + (e._movePattern ?? 'idle');
       else if (e.kind === 'shooter') label = '弹 | ' + (e._shootState === 'telegraph' ? '蓄力' : e._shootState === 'cooldown' ? '冷却' : e._shootState ?? 'idle');
       ctx.fillStyle = "rgba(0,0,0,0.55)";
       const tw = ctx.measureText(label).width + 6;
