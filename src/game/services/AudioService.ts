@@ -181,7 +181,7 @@ export const AudioService = {
     playDef("slash_end");
   },
 
-  /** 火药兵爆炸 */
+  /** 爆炸兵爆炸 */
   explosion() {
     playDef("explosion");
   },

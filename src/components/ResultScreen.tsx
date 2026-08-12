@@ -15,7 +15,7 @@ type ResultScreenProps = {
 function getFailReason(result: BattleResult): string {
   if (result.kills === 0) return "没有及时挥刀";
   if (result.maxSingleBlade <= 3) return "单刀击杀过少，积蓄刀势再挥刀";
-  if (result.explosiveCount === 0) return "没有利用火药兵连锁爆炸";
+  if (result.explosiveCount === 0) return "没有利用爆炸兵连锁爆炸";
   return "炼刀变强，再战此关";
 }
 

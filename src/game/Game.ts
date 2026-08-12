@@ -4378,7 +4378,7 @@ export class Game {
       this.particles.push(...sparkBurst(enemy, 10, "#ffb15c"));
       AudioService.slashHit();
 
-      // ---- 火油浸润(oilSoak)：击中火药兵时点燃附近1个敌军 ----
+      // ---- 火油浸润(oilSoak)：击中爆炸兵时点燃附近1个敌军 ----
       if (this.hasBuff("oilSoak")) {
         const nearby = this.enemies.filter(
           (e) => e.alive && !e.ignited && e.kind !== "core" && distance(e, enemy) < 55
@@ -4649,7 +4649,7 @@ export class Game {
           affectByBlast(target, ENEMY_BALANCE.powder.explosionDamage ?? 1, "chain");
         }
 
-        // ---- 连锁引信(chainFuse)：爆炸自动点燃相邻火药兵（无需刀触） ----
+        // ---- 连锁引信(chainFuse)：爆炸自动点燃相邻爆炸兵（无需刀触） ----
         if (this.hasBuff("chainFuse")) {
           for (const target of this.enemies) {
             if (!target.alive || target.kind !== "powder" || distance(target, enemy) > radius * 1.1) continue;
@@ -4738,7 +4738,7 @@ export class Game {
     }
     enemy.flash = 0.25;
     if (enemy.hp <= 0) {
-      // 0807-11D-6F-5: 火药兵进入引信而非直接死亡
+      // 0807-11D-6F-5: 爆炸兵进入引信而非直接死亡
       if (enemy.kind === 'powder' && !enemy._fuseDetonated) {
         enemy.hp = 0;
         this._startPowderFuse(enemy, source);
@@ -4775,7 +4775,7 @@ export class Game {
       trail.energyBank = Math.min(BALANCE.swordEnergy.maxEnergyGainPerSlash, trail.energyBank + 5);
     }
 
-    // 陷阱阵特殊机制：阵眼死→引爆附近火药兵
+    // 陷阱阵特殊机制：阵眼死→引爆附近爆炸兵
     if (this._currentEventType === "trapFormation" && enemy.kind === "core") {
       for (const powder of this.enemies) {
         if (!powder.alive || powder.kind !== "powder") continue;
@@ -5240,14 +5240,14 @@ export class Game {
    */
   /** 0814-01C-0: 统一副刀有效目标筛选 + 锁敌排序
    *  优先级：距离防线最近（Y最大）的有效敌人
-   *  排除：死亡/离场/无敌/Boss/火环/弹幕/命核/引爆中火药兵/已离场实体 */
+   *  排除：死亡/离场/无敌/Boss/火环/弹幕/命核/引爆中爆炸兵/已离场实体 */
   private getValidSubBladeTargets(alsoExcludeTargetId: string | null = null): Enemy[] {
     return this.enemies
       .filter(e => {
         if (!e.alive) return false;
         if (e.kind === "boss") return false;
         if (e.kind === "core") return false; // 命核
-        if ((e as any)._fuseState === 'arming') return false; // 引爆中火药兵
+        if ((e as any)._fuseState === 'arming') return false; // 引爆中爆炸兵
         if (e.y < BATTLEFIELD_ZONES.midfieldStartY) return false; // 未入战区
         if (e.y > BALANCE.battlefield.bottomDefenseY - 30) return false; // 已近防线
         if (this._eliteInvuln && (e as any).eliteKind === "fireRing") return false; // 精英无敌帧
@@ -6346,7 +6346,7 @@ export class Game {
       this.wavesFinishedAt = this.elapsed;
       this.allNormalWavesSpawned = true;
     }
-    this.waveHpBonus = Math.min(5, this.wavesSpawned);
+    this.waveHpBonus = 0; // V0811067: 正常主线纯倍率HP, 波次不再加额外HP
 
     // ── 决定是否触发事件波（20%概率，同局不重复，第1波不触发）──
     // V0730002: 第1关关闭随机事件潮
@@ -6985,7 +6985,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
   }
 
-  /** 0807-11D-6F-5: 开启火药兵引信 */
+  /** 0807-11D-6F-5: 开启爆炸兵引信 */
   private _startPowderFuse(enemy: Enemy, source: string) {
     if (enemy._fuseDetonated || enemy._fuseState === 'arming') return;
     enemy._fuseState = 'arming'; enemy._fuseTimer = 0;
@@ -6996,7 +6996,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     this.addText(enemy.x, enemy.y - 22, "引爆", "#ff8c28", 15);
   }
 
-  /** 0807-11D-6F-4: 引爆火药兵 */
+  /** 0807-11D-6F-4: 引爆爆炸兵 */
   private _detonatePowder(enemy: Enemy) {
     enemy._fuseState = 'detonated';
     const radius = (ENEMY_BALANCE.powder.explosionRadius ?? 85);
@@ -8373,7 +8373,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const dailyShieldBonus = this.runContext.mode === "dailyChallenge" && this.runContext.dailyChallengeId === "hard_shield" && kind === "shield" ? 1 : 0;
     // 0807-11B-3: infantry HP 由节点倍率管理，不再叠加 waveHpBonus
     const isBasicEnemy = kind === "infantry" || kind === "shield" || kind === "powder" || kind === "core";
-    const hpBonus = (kind === "infantry") ? 0 : (isBasicEnemy ? this.waveHpBonus : 0);
+    const hpBonus = 0; // V0811067: 正常主线纯倍率, 删除waveHpBonus
     // 第六轮修正：精英也使用 entryPhase（使用 ENTRY_PROFILE_ELITE）
     const shouldUseEntryPhase = isBasicEnemy || kind === "elite";
     // 第一轮修正：优先使用传入的 entryProfile，fallback 到 getEntryProfile()
@@ -12664,9 +12664,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   /** 第六轮修正：副刀/系统伤害造成的敌人死亡处理（确保精英走宝箱流程） */
   private handleDirectEnemyKilledBySystem(enemy: Enemy, source: "sub_momentum" | "sub_weakpoint" | "chain" | "system") {
     if (!enemy.alive) return;
-    // 0807-11D-6F-5: 火药兵在引信中不可被子刀/链击靜默击杀
+    // 0807-11D-6F-5: 爆炸兵在引信中不可被子刀/链击靜默击杀
     if (enemy.kind === 'powder' && enemy._fuseState === 'arming') return;
-    // 火药兵HP≤0触发引信
+    // 爆炸兵HP≤0触发引信
     if (enemy.kind === 'powder' && !enemy._fuseDetonated && enemy.hp <= 0) {
       this._startPowderFuse(enemy, source);
       return;

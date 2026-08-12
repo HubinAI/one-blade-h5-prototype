@@ -76,7 +76,7 @@ export const FRAGMENT_CONFIG = [
 ] as const;
 
 export const DAILY_CHALLENGES = [
-  { id: "more_powder", name: "火药日", description: "今日火药兵更多，连爆奖励提高" },
+  { id: "more_powder", name: "火药日", description: "今日爆炸兵更多，连爆奖励提高" },
   { id: "fast_energy", name: "疾风日", description: "今日刀势恢复更快" },
   { id: "hard_shield", name: "盾墙日", description: "今日盾兵更密，破盾奖励提高" },
   { id: "core_bonus", name: "阵眼日", description: "今日阵眼奖励翻倍" },

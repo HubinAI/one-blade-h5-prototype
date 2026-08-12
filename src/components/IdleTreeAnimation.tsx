@@ -6,7 +6,7 @@ type MenuTip = { text: string; minFloor?: number; maxFloor?: number; pendingGate
 const TIPS_POOL: MenuTip[] = [
   { text: "按住屏幕拖动，松开即可挥出斩击", maxFloor: 3 },
   { text: "刀势越满，一刀伤害越高" },
-  { text: "火药兵会爆炸，靠近时小心连锁" },
+  { text: "爆炸兵会爆炸，靠近时小心连锁" },
   { text: "阵眼崩坏会带走周围所有敌人" },
   { text: "副刀自动战斗，前期即可获得强援" },
   { text: "满刀势触发「一刀破阵」伤害翻倍" },

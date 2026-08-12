@@ -103,7 +103,7 @@ describe('桥接保留档位', () => {
 });
 
 describe('0807-11D-6F-4 引信与爆炸', () => {
-  it('火药兵生成后有enemyKind=powder', () => {
+  it('爆炸兵生成后有enemyKind=powder', () => {
     const d = new PostEdictDirector(); d.start();
     let ms = 0; let foundPowder = false;
     for (let i = 0; i < 5000; i++) {
@@ -119,7 +119,7 @@ describe('0807-11D-6F-4 引信与爆炸', () => {
     expect(foundPowder).toBe(true);
   });
 
-  it('火药兵总数=3', () => {
+  it('爆炸兵总数=3', () => {
     const d = new PostEdictDirector(); d.start();
     let ms = 0; let powderCount = 0;
     for (let i = 0; i < 5000; i++) {
@@ -135,7 +135,7 @@ describe('0807-11D-6F-4 引信与爆炸', () => {
     expect(powderCount).toBe(3);
   });
 
-  it('火药兵spawnInPlace=true', () => {
+  it('爆炸兵spawnInPlace=true', () => {
     const d = new PostEdictDirector(); d.start();
     let ms = 0;
     for (let i = 0; i < 5000; i++) {
@@ -168,7 +168,7 @@ describe('0807-11D-6F-6 确定性脉冲', () => {
     const p = [calcFuseScale(0.15), calcFuseScale(0.425), calcFuseScale(0.655), calcFuseScale(0.96)];
     for (let i = 1; i < p.length; i++) expect(p[i]).toBeGreaterThan(p[i - 1]);
   });
-  it('火药兵总量仍=3', () => {
+  it('爆炸兵总量仍=3', () => {
     const d = new PostEdictDirector(); d.start(); let ms = 0, c = 0;
     for (let i = 0; i < 5000; i++) { ms += 500; for (const r of tick(d, 0.5, 0, 0, 0, 0, ms, 0, 0, 0, 0)) for (const it of r.items) if (it.enemyKind === 'powder') c++; if (!d.active && d.allComplete) break; }
     expect(c).toBe(3);

@@ -405,7 +405,7 @@ interface MicroBatch {
   rapidPulse?: true;
   /** 0807-11D-6D: 分裂兵数量(从tough中替换) */
   splitters?: number;
-  /** 0807-11D-6F: 火药兵数量(从tough中替换) */
+  /** 0807-11D-6F: 爆炸兵数量(从tough中替换) */
   powders?: number;
 }
 
@@ -861,7 +861,7 @@ export class PostEdictDirector {
       if (cnt <= 0) continue;
       for (let i = 0; i < cnt; i++) {
         const p = placements[idx];
-        // 0807-11D-6F: 火药兵替换tough
+        // 0807-11D-6F: 爆炸兵替换tough
         const isPowder = tier === 'tough' && powdersRemaining > 0;
         if (isPowder) powdersRemaining--;
         const enemyKind = isPowder ? 'powder' : 'infantry';

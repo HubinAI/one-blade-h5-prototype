@@ -25,7 +25,7 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDefinition> = {
   },
   powder: {
     kind: "powder",
-    name: "火药兵",
+    name: "爆炸兵",
     hint: "切中后点燃，收刀时爆炸连锁。",
     color: "#9f3a24",
     accent: "#ffd67c"

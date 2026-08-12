@@ -154,8 +154,8 @@ export const LEVELS: LevelConfig[] = [
       wave("分裂复现", 95, mix([row("infantry", [0, 1, 2, 4, 5], 0), [enemy("splitter", 3, 1)], row("infantry", [1, 3, 5], 2)]))
     ],
     briefing: {
-      highlightEnemies: [{ kind: "powder", label: "火药兵集群", icon: "🔥" }],
-      tacticalHint: "击中火药兵后收刀引爆，燎原路线可连锁",
+      highlightEnemies: [{ kind: "powder", label: "爆炸兵集群", icon: "🔥" }],
+      tacticalHint: "击中爆炸兵后收刀引爆，燎原路线可连锁",
       initialBladeTier: "常锋/强锋"
     }
   },
@@ -214,7 +214,7 @@ export const LEVELS: LevelConfig[] = [
     briefing: {
       highlightEnemies: [
         { kind: "shield", label: "盾兵", icon: "🛡" },
-        { kind: "powder", label: "火药兵", icon: "🔥" }
+        { kind: "powder", label: "爆炸兵", icon: "🔥" }
       ],
       tacticalHint: "两次军令，选一条路线深耕",
       initialBladeTier: "常锋/强锋"
@@ -245,7 +245,7 @@ export const LEVELS: LevelConfig[] = [
     briefing: {
       highlightEnemies: [
         { kind: "shield", label: "盾兵", icon: "🛡" },
-        { kind: "powder", label: "火药兵", icon: "🔥" }
+        { kind: "powder", label: "爆炸兵", icon: "🔥" }
       ],
       tacticalHint: "不利用火药，压力会很大",
       initialBladeTier: "强锋"
@@ -306,7 +306,7 @@ export const LEVELS: LevelConfig[] = [
     ],
     briefing: {
       highlightEnemies: [
-        { kind: "powder", label: "火药兵", icon: "🔥" },
+        { kind: "powder", label: "爆炸兵", icon: "🔥" },
         { kind: "shield", label: "盾兵", icon: "🛡" },
         { kind: "core", label: "阵眼", icon: "◎" }
       ],
@@ -339,7 +339,7 @@ export const LEVELS: LevelConfig[] = [
     briefing: {
       highlightEnemies: [
         { kind: "shield", label: "盾兵大阵", icon: "🛡" },
-        { kind: "powder", label: "火药兵集群", icon: "🔥" },
+        { kind: "powder", label: "爆炸兵集群", icon: "🔥" },
         { kind: "core", label: "阵眼核心", icon: "◎" }
       ],
       tacticalHint: "最后一刀破阵，全路线成型之战",
