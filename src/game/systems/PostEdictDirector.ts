@@ -641,6 +641,8 @@ export class PostEdictDirector {
   private _floorProfile: DirectorFloorProfile | null = null;
 
   get placementSeed(): number { return this._placementSeed; }
+  /** V0812011: 实例阶段配置 (只读, 供debug/test) */
+  get runtimePhases(): Record<DirectorPhase, PhaseConfig> { return this._runtimePhases; }
 
   get active(): boolean { return this._active; }
   get allComplete(): boolean { return this._allComplete; }

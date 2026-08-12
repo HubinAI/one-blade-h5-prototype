@@ -111,8 +111,8 @@ describe('Mainline Rhythm Template — Runtime矩阵', () => {
     g.wavesSpawned = 8; g.allNormalWavesSpawned = true;
     // 手动触发军令
     g.startEdictBurstOnce();
-    // 验证_runtimePhases已初始化
-    expect(postEdictDirector._runtimePhases).toBeDefined();
+    // 验证runtimePhases已初始化
+    expect(postEdictDirector.runtimePhases).toBeDefined();
   });
 
   // ═══ Invariant 8: Root Count = FloorDensity × 24:30:36 ═══
@@ -166,20 +166,20 @@ describe('Mainline Rhythm Template — Runtime矩阵', () => {
     postEdictDirector.reset();
     postEdictDirector.start(1);
     postEdictDirector.configureForFloor({ floor: 2, p1Count: p2count, p2Count: 30, p3Count: 36, p1Speed: 1.0, p2Speed: 1.25, p3Speed: 1.45 });
-    expect(postEdictDirector._runtimePhases.P1.totalEnemies).toBe(p2count);
+    expect(postEdictDirector.runtimePhases.P1.totalEnemies).toBe(p2count);
 
     // F180
     postEdictDirector.reset();
     postEdictDirector.start(2);
     postEdictDirector.configureForFloor({ floor: 180, p1Count: p180count, p2Count: 30 * 5, p3Count: 36 * 5, p1Speed: 1.0, p2Speed: 1.25, p3Speed: 1.45 });
-    expect(postEdictDirector._runtimePhases.P1.totalEnemies).toBe(p180count);
+    expect(postEdictDirector.runtimePhases.P1.totalEnemies).toBe(p180count);
 
     // 再F2 — 不继承F180配置
     postEdictDirector.reset();
     postEdictDirector.start(3);
     postEdictDirector.configureForFloor({ floor: 2, p1Count: p2count, p2Count: 30, p3Count: 36, p1Speed: 1.0, p2Speed: 1.25, p3Speed: 1.45 });
-    expect(postEdictDirector._runtimePhases.P1.totalEnemies).toBe(p2count);
-    expect(postEdictDirector._runtimePhases.P1.totalEnemies).not.toBe(p180count);
+    expect(postEdictDirector.runtimePhases.P1.totalEnemies).toBe(p2count);
+    expect(postEdictDirector.runtimePhases.P1.totalEnemies).not.toBe(p180count);
   });
 
   // ═══ Invariant 12: 同seed可复现 ═══

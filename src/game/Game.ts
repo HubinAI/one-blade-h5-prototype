@@ -593,6 +593,8 @@ export class Game {
   private eliteKilled = false;
   /** 所有前置波是否已生成 */
   private allNormalWavesSpawned = false;
+  /** V0812012: 军令启动后永久关闭普通Wave调度 */
+  private mainWaveScheduleClosedByEdict = false;
   /** 宝箱后爆发波索引 */
   private postChestWaveIndex = 0;
   /** V0803036: 军令后验证潮状态机 */
@@ -1216,7 +1218,7 @@ export class Game {
     this.currentSlash = undefined; this.splitFlashes = [];
     this.screenShake = 0; this.flash = 0; this.hitStopTimer = 0; this.slowMoTimer = 0;
     this.pointerDown = false;
-    this.wavesSpawned = 0; this.allNormalWavesSpawned = false;
+    this.wavesSpawned = 0; this.allNormalWavesSpawned = false; this.mainWaveScheduleClosedByEdict = false;
     this._lastWaveElapsed = 0; this.waveAdvanceLockedUntil = 0;
     this.edictRewardState = "none"; this.edictPostWavesQueued = false; this.allPostChestWavesSpawned = false;
     postEdictDirector.reset(); // 0807-11D: 导演重置
@@ -1502,7 +1504,10 @@ export class Game {
     this.updateBattlePhase();
     // V0812010: Director活跃时不覆盖_currentStageNode, 每个item自带stageNode
     if (!postEdictDirector.active) {
-      this._currentStageNode = resolveLevel1Node(this.battlePhase, this.wavesSpawned, this.postChestWaveIndex);
+      // V0812012: 军令关闭后防止回退到pre-edict节点
+      if (!this.mainWaveScheduleClosedByEdict) {
+        this._currentStageNode = resolveLevel1Node(this.battlePhase, this.wavesSpawned, this.postChestWaveIndex);
+      }
     }
     this.updateBuffChoiceTriggers();
     this.checkBattleEnd();
@@ -5636,10 +5641,21 @@ export class Game {
     };
   }
 
+  /** V0812012: 军令启动时永久关闭普通Wave调度 */
+  private closeNormalWaveSchedule(): void {
+    if (this.mainWaveScheduleClosedByEdict) return;
+    this.mainWaveScheduleClosedByEdict = true;
+  }
+
+  /** V0812012: 普通波已解决 — allSpawned OR 军令关闭 */
+  private get normalWaveScheduleResolved(): boolean {
+    return this.allNormalWavesSpawned || this.mainWaveScheduleClosedByEdict;
+  }
+
   /** P4.3A.3+5: 普通波提前推进（军令active时暂停） */
   private shouldAdvanceNextWave(): boolean {
-    // V0730002: 第1关禁止压力系统提前推进，严格按配置时间生成波次
     if (this.isLogicalLevel1()) return false;
+    if (this.mainWaveScheduleClosedByEdict) return false; // V0812012
     if (this.edictRewardState === "active" || this.battlePhase === "edict_burst") return false;
     const pressure = this.getCombatPressure("normal", 1.2);
     const activeThreat = pressure.proj.projected.mid + pressure.proj.projected.front;
@@ -6151,8 +6167,9 @@ export class Game {
 
   /** P4.3A.4: 普通波调度——固定截止时间+压力提前接入 */
   private updateWaves(dt: number) {
-    // P4.4A.1-R3: Boss模式阻断所有波次
     if (this.gameMode === "boss") return;
+    // V0812012: 军令后永久关闭普通Wave, 不可恢复
+    if (this.mainWaveScheduleClosedByEdict) return;
     // V0730017: L1三组教学状态机控制波次
     if (this.isLogicalLevel1()) {
       const phase = this._l1TutorialPhase;
@@ -6366,6 +6383,7 @@ export class Game {
   }
 
   private spawnCurrentWave(wave: typeof this.level.waves[0]) {
+    if (this.mainWaveScheduleClosedByEdict) return; // V0812012: 双重保护
     this._lastWaveElapsed = this.elapsed;
     this.wavesSpawned += 1;
     this._lastSpawnSource = `normal_wave_${this.wavesSpawned}`;
@@ -6956,8 +6974,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   /** 判定是否应立刻胜利结算（二次打磨：检查 battlePhase） */
   private shouldFinishVictory(): boolean {
     if (this.gameMode === "boss") return false;
-    const allWavesDone = this.wavesSpawned >= this.level.waves.length;
-    if (!allWavesDone || this.currentSlash) return false;
+    // V0812012: 使用resolved语义替代wavesSpawned >= length
+    if (!this.normalWaveScheduleResolved || this.currentSlash) return false;
 
     // V0801002: 通用精英结算 — 所有以final_elite_defeat结尾的关卡
     if (this.level.eliteSpawnAt && this.level.eliteKind) {
@@ -7250,6 +7268,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     if (this.allNormalWavesSpawned && this.postChestStartAt === null && this._chestProgressPaused && this.getEffectivePostChestWaves().length > 0) {
       this.setPostChestSequenceState('waiting_spawn', 'chest_paused_skip');
       this.startEdictBurstOnce();
+    }
+    // V0812012: 军令关闭普通波后, battlePhase保持edict_burst直到精英
+    if (this.mainWaveScheduleClosedByEdict && !this.eliteSpawned) {
+      this.battlePhase = 'edict_burst'; return;
     }
     // V0812010: 正常主线军令 — Director唯一生产链
     if (postEdictDirector.active && postEdictDirector.isRunning) {
@@ -8051,10 +8073,9 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const p2S = 1.25;
     const p3S = 1.45;
     postEdictDirector.configureForFloor({ floor, p1Count:p1C, p2Count:p2C, p3Count:p3C, p1Speed:p1S, p2Speed:p2S, p3Speed:p3S });
-    // budget-based threshold
-    const budget = p1C + p2C + p3C;
-    this._edictTriggerKills = Math.round(budget * 0.55);
+    // V0812012: 军令阈值唯一源=calcMainlineEdictThreshold(preEdictBudget×55%), 不再从Director二次计算
     // V0812010: 正常主线军令只由Director控制, 清除legacy postChestWaves状态
+    this.closeNormalWaveSchedule(); // V0812012: 永久关闭普通Wave调度
     this.battlePhase = "edict_burst";
     this.postChestStartAt = this.elapsed;
     this.allPostChestWavesSpawned = false;
@@ -9399,19 +9420,16 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
         phaseText = "";
         break;
       case 'edict_burst': {
-        // 0807-11D-3C-UI: 优先读取导演真实阶段
+        // V0812012: 优先读取导演真实阶段, P3收尾保持3/3
         const dPhase = postEdictDirector.currentPhase;
         if (dPhase) {
           const rnd = dPhase === 'P1' ? 1 : dPhase === 'P2' ? 2 : 3;
           phaseText = `军令爆发 ${rnd}/3`;
-        } else if (postEdictDirector.allComplete) {
+        } else if (postEdictDirector.allComplete || this.postChestSequenceState === 'complete') {
+          // Director完成后保持3/3, 不回退到legacy fallback
           phaseText = '军令爆发 3/3';
         } else {
-          // fallback: 旧流程索引
-          const postWaves = this.getEffectivePostChestWaves();
-          const total = this.edictBurstRoundTotal || postWaves.length || 0;
-          const current = Math.min(Math.max(this.edictBurstRoundIndex || 1, 1), total);
-          phaseText = `军令爆发 ${current}/${total}`;
+          phaseText = `军令爆发 3/3`; // V0812012: edict_burst期间默认3/3
         }
         break;
       }
@@ -11994,7 +12012,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   /** 精英怪生成 — V0801008: 全关卡事件驱动 */
   private updateEliteSpawn() {
     if (this.eliteSpawned || !this.level.eliteSpawnAt || !this.level.eliteKind) return;
-    if (!this.allNormalWavesSpawned) { this._eliteGateReason = 'no(not_all_waves)'; this._lastEliteGateBlocked = true; return; }
+    // V0812012: 使用resolved语义(军令关闭=已解决)
+    if (!this.normalWaveScheduleResolved) { this._eliteGateReason = 'no(not_all_waves)'; this._lastEliteGateBlocked = true; return; }
     // V0812010: 正常主线精英门控 — 只认Director完成
     if (postEdictDirector.active && postEdictDirector.isRunning && !postEdictDirector.p3HandoffReady) {
       this._eliteGateReason = 'no(director_running)'; this._lastEliteGateBlocked = true; return;
