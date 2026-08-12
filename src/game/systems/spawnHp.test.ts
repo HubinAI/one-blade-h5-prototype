@@ -31,10 +31,9 @@ describe('生成链路HP验证', () => {
     });
   });
 
-  it('精英保持1265HP', () => {
+  it('精英 fireRing F1=3500HP', () => {
     const game = g('tutorial');
-    // 精英不走 createEnemy，走 createElite
-    const e = (game as any).createElite('fireRing', 200, 400, { maxHp: 1265, speed: 60, radius: 18, minKillsRequired: 0, spawnAfterWave: 1, preferredBatchSize: 1 });
-    expect(e.maxHp).toBe(1265);
+    const e = (game as any).createElite('fireRing', 200, 400, { maxHp: 3500, speed: 60, radius: 18, minKillsRequired: 0, spawnAfterWave: 1, preferredBatchSize: 1 });
+    expect(e.maxHp).toBe(3500);
   });
 });
