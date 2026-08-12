@@ -1195,6 +1195,7 @@ export class Game {
 
   // ═══ V0812022: EnemyTest工具 ═══
   private _enemyTestDefenseHits = 0;
+  private _debugProjChecks = 0; private _debugProjHits = 0; private _debugHitVisualCount = 0; // V0812025
   activateEnemyTest(): void {
     this._enemyTestActive = true; this.debugEnabled = true; this._debugShowDetail = false;
     console.warn("[V0812019] EnemyTest ACTIVATED");
@@ -4181,12 +4182,16 @@ export class Game {
         }
     }
   }
-  // V0812018: 弹幕被刀切
+  // V0812024: 弹幕被刀切 — 全线段碰撞
   for (const proj of this.projectiles) {
     if (!proj.alive) continue;
-    if (checkProjectileSlashHit(proj, b.x, b.y, bladeReach + 8)) {
+    this._debugProjChecks++;
+    const d = distanceToSegment(proj, a, b);
+    if (d < proj.radius + bladeReach + 10) { // +10px碰撞padding
       proj.alive = false;
-      this.particles.push(...sparkBurst({ x: proj.x, y: proj.y } as any, 3, "#5bc0ff"));
+      this.particles.push(...sparkBurst({ x: proj.x, y: proj.y } as any, 6, "#5bc0ff"));
+      AudioService.slashHit();
+      this._debugProjHits++;
     }
   }
   }
@@ -4847,6 +4852,10 @@ export class Game {
     }
     enemy.flash = 0.25;
     if (enemy.hp <= 0) {
+      // V0812025: 致死时先创建独立death visual — 敌人被killEnemy清理后仍可见
+      this._debugHitVisualCount++;
+      this.particles.push(...sparkBurst(enemy, 20, "#ffd67c"));
+      this.particles.push(...sparkBurst(enemy, 10, "#fff1b8"));
       // 0807-11D-6F-5: 爆炸兵进入引信而非直接死亡
       if (enemy.kind === 'powder' && !enemy._fuseDetonated) {
         enemy.hp = 0;
@@ -4855,7 +4864,16 @@ export class Game {
       }
       return this.killEnemy(enemy, trail, chainKill, source);
     }
-    this.particles.push(...sparkBurst(enemy, 8, "#ffd67c"));
+    this.particles.push(...sparkBurst(enemy, 10, "#ffd67c"));
+    this._debugHitVisualCount++;
+    // V0812025: scale punch + hit kick沿刀方向
+    enemy._hitScale = 1.18; enemy._hitScaleTimer = 0.12;
+    if (trail.points?.length >= 2) {
+      const last = trail.points[trail.points.length - 1];
+      const prev = trail.points[trail.points.length - 2];
+      enemy._hitKickX = (last.x - prev.x) * 0.15;
+      enemy._hitKickY = (last.y - prev.y) * 0.15;
+    }
     return false;
   }
 
@@ -4994,6 +5012,11 @@ export class Game {
       if (!enemy.alive) continue;
       enemy.wobble += dt;
       enemy.flash = Math.max(0, enemy.flash - dt * 3);
+      // V0812025: scale punch decay
+      if ((enemy as any)._hitScaleTimer > 0) {
+        (enemy as any)._hitScaleTimer -= dt;
+        if ((enemy as any)._hitScaleTimer <= 0) { (enemy as any)._hitScale = 1.0; (enemy as any)._hitKickX = 0; (enemy as any)._hitKickY = 0; }
+      }
       // 0808-11E-2E: inkCut计时
       if ((enemy as any)._inkCutTimer > 0) (enemy as any)._inkCutTimer -= dt;
       if (enemy.shieldBrokenFlash !== undefined) {
@@ -10190,6 +10213,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       const wobbleX = Math.sin(enemy.wobble * 5) * 1.2;
       ctx.save();
       ctx.translate(enemy.x + wobbleX, enemy.y);
+      // V0812025: hit kick offset
+      if ((enemy as any)._hitKickX) ctx.translate((enemy as any)._hitKickX, (enemy as any)._hitKickY ?? 0);
+      // V0812025: hit scale punch
+      if ((enemy as any)._hitScale) ctx.scale((enemy as any)._hitScale, (enemy as any)._hitScale);
       // 0808-11E-4A: fireRing在split/ring/gather阶段隐藏boss主体
       if (enemy.eliteKind === "fireRing" && this._eliteBattleActive) {
         if (!this._isFireRingBodyPresent()) { ctx.restore(); continue; }
@@ -12055,11 +12082,14 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.save();
     // 顶部信息
     ctx.fillStyle = "rgba(0,0,0,0.82)";
-    ctx.fillRect(0, 0, DESIGN_WIDTH, 54);
+    ctx.fillRect(0, 0, DESIGN_WIDTH, 56);
     ctx.font = "bold 15px monospace";
     ctx.textAlign = "center";
     ctx.fillStyle = "#ffd35a";
     ctx.fillText(`怪物测试 — 当前: ${name} (${kind})  ${idx+1}/${kinds.length}  场上: ${alive}只  防线: ${this._enemyTestDefenseHits}`, DESIGN_WIDTH / 2, 28);
+    ctx.font = "12px monospace";
+    ctx.fillStyle = "#8af";
+    ctx.fillText(`HitVisual:${this._debugHitVisualCount}  ProjCheck:${this._debugProjChecks}  ProjHit:${this._debugProjHits}`, DESIGN_WIDTH / 2, 44);
     ctx.fillStyle = "rgba(0,0,0,0.75)";
     ctx.fillRect(0, DESIGN_HEIGHT - 30, DESIGN_WIDTH, 30);
     ctx.font = "13px monospace";

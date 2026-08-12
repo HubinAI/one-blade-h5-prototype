@@ -297,11 +297,11 @@ export type Enemy = {
   _chargeTargetX?: number; _chargeTargetY?: number; // V0812022: 冲锋目标坐标
   /** V0812018: 游袭兵运动模式 */
   _movePattern?: 'diagonal' | 'arc';
+  /** V0812025: 受击scale punch + hit kick */
+  _hitScale?: number; _hitScaleTimer?: number; _hitKickX?: number; _hitKickY?: number;
   _moveOriginX?: number; _moveOriginY?: number; _movePhase?: number; _moveDir?: number;
-  _moveTargetX?: number; _moveTargetY?: number; _moveDur?: number; // V0812024
-  _moveArcStartX?: number; _moveArcStartY?: number;
-  _moveArcMidX?: number; _moveArcMidY?: number;
-  _moveArcEndX?: number; _moveArcEndY?: number;
+  _moveTargetX?: number; _moveTargetY?: number; _moveDur?: number; _moveStartX?: number; _moveStartY?: number;
+  _moveArcHeight?: number;
   /** V0812018: 弹幕兵状态 */
   _shootState?: 'idle' | 'telegraph' | 'firing' | 'cooldown';
   _shootTimer?: number; _shootCooldown?: number;
