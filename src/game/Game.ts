@@ -1193,28 +1193,26 @@ export class Game {
     this.addText(DESIGN_WIDTH / 2, 240, "+ 破绽 调试触发", "#ff6a33", 18, 1.2);
   }
 
-  // ═══ V0812019: EnemyTest工具 ═══
+  // ═══ V0812022: EnemyTest工具 ═══
+  private _enemyTestDefenseHits = 0;
   activateEnemyTest(): void {
-    this._enemyTestActive = true;
-    this.debugEnabled = true;
-    this._debugShowDetail = false;
-    console.warn("[V0812019] EnemyTest ACTIVATED — [/]切怪 [J/K]刷 [L]清场 [点底部条]切换");
+    this._enemyTestActive = true; this.debugEnabled = true; this._debugShowDetail = false;
+    console.warn("[V0812019] EnemyTest ACTIVATED");
   }
   private _spawnTestEnemy(count = 1) {
-    const kind = (NORMAL_IMPLEMENTED as readonly string[])[this._enemyTestKind % NORMAL_IMPLEMENTED.length] as EnemyKind;
-    const spacing = Math.min(340 / Math.max(count, 1), 60);
-    const startX = 28 + Math.max(0, (340 - spacing * count) / 2);
+    const minX = BATTLE_SAFE_X.normalMin + 12, maxX = BATTLE_SAFE_X.normalMax - 12, w = maxX - minX;
+    const gap = Math.min(w / Math.max(count, 1), 55);
+    const start = minX + Math.max(0, (w - gap * count) / 2);
     for (let i = 0; i < count; i++) {
-      const x = startX + spacing * i + (Math.random() - 0.5) * 8;
-      const e = this.createEnemy(kind, x, -20, 1);
-      this.enemies.push(e);
+      const x = start + gap * i + (Math.random() - 0.5) * 6;
+      this.enemies.push(this.createEnemy((NORMAL_IMPLEMENTED as readonly string[])[this._enemyTestKind % NORMAL_IMPLEMENTED.length] as EnemyKind, x, -20, 1));
     }
   }
-  enemyTestNext() { this._enemyTestKind = (this._enemyTestKind + 1) % ((NORMAL_IMPLEMENTED as readonly string[]).length); }
-  enemyTestPrev() { this._enemyTestKind = (this._enemyTestKind - 1 + ((NORMAL_IMPLEMENTED as readonly string[]).length)) % ((NORMAL_IMPLEMENTED as readonly string[]).length); }
   enemyTestSpawn1() { this._spawnTestEnemy(1); }
-  enemyTestSpawn10() { this._spawnTestEnemy(10); }
-  enemyTestClear() { for (const e of this.enemies) e.alive = false; this.enemies = []; this.subSpawnQueue = []; this.projectiles = []; }
+  enemyTestSpawn5() { this._spawnTestEnemy(5); }
+  enemyTestClear() { for (const e of this.enemies) e.alive = false; this.enemies = []; this.subSpawnQueue = []; this.projectiles = []; this._enemyTestDefenseHits = 0; }
+  enemyTestNext() { this._enemyTestKind = this._enemyTestKind + 1; if (this._enemyTestKind >= (NORMAL_IMPLEMENTED as readonly string[]).length) this._enemyTestKind = 0; }
+  enemyTestPrev() { this._enemyTestKind = this._enemyTestKind - 1; if (this._enemyTestKind < 0) this._enemyTestKind = (NORMAL_IMPLEMENTED as readonly string[]).length - 1; }
   /** 处理EnemyTest debug条点击, 返回true表示消费事件(禁止挥刀) */
   handleEnemyTestClick(px: number, py: number): boolean {
     if (!this._enemyTestActive) return false;
@@ -1223,7 +1221,7 @@ export class Game {
       const rightThird = px > DESIGN_WIDTH * 2 / 3;
       if (leftThird) { this.enemyTestPrev(); }
       else if (rightThird) { this.enemyTestNext(); }
-      else { this.enemyTestSpawn10(); }
+      else { this.enemyTestSpawn5(); }
       return true; // 消费点击, 不挥刀
     }
     return false;
@@ -5333,6 +5331,7 @@ export class Game {
       if (!p.alive) return;
       this.hp = Math.max(0, this.hp - p.damage);
       this.screenShake = Math.max(this.screenShake, 0.05);
+      if (this._enemyTestActive) this._enemyTestDefenseHits++;
     });
     this.projectiles = this.projectiles.filter(p => p.alive);
   }
@@ -7076,6 +7075,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   /** 判定是否应立刻胜利结算（二次打磨：检查 battlePhase） */
   private shouldFinishVictory(): boolean {
     if (this.gameMode === "boss") return false;
+    if (this._enemyTestActive) return false; // V0812022
     // V0812012: 使用resolved语义替代wavesSpawned >= length
     if (!this.normalWaveScheduleResolved || this.currentSlash) return false;
 
@@ -7416,8 +7416,8 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
   }
 
   private checkBattleEnd() {
-    // P4.4A.1-R3: Boss模式自然失败阻断
     if (this.gameMode === "boss") return;
+    if (this._enemyTestActive) { this.hp = Math.max(this.hp, 1); return; } // V0812022: 测试不结束
     if (this.hp <= 0) {
       // ---- 魂返(soulReturn)buff：首次HP归零自动复活 ----
       if (this.hasBuff("soulReturn") && !this.soulReturnUsed) {
@@ -10110,23 +10110,29 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       if (!e.alive) continue;
       // charger telegraph: 方向箭头
       if (e.kind === "charger" && e._chargeState === 'telegraph') {
-        const angle = e._chargeDashAngle ?? 1.65;
+        const tx = e._chargeTargetX ?? e.x, ty = e._chargeTargetY ?? (e.y + 100);
         ctx.save();
-        ctx.strokeStyle = "rgba(255,100,30,0.7)";
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 3]);
+        // 冲锋路径主线 — 宽虚线, 混战中可辨
+        ctx.strokeStyle = "rgba(255,120,30,0.75)";
+        ctx.lineWidth = 3;
+        ctx.setLineDash([8, 4]);
         ctx.beginPath();
         ctx.moveTo(e.x, e.y);
-        ctx.lineTo(e.x + Math.cos(angle) * 50, e.y + Math.sin(angle) * 50);
+        ctx.lineTo(tx, ty);
         ctx.stroke();
         ctx.setLineDash([]);
-        // arrowhead
-        const hx = e.x + Math.cos(angle) * 48;
-        const hy = e.y + Math.sin(angle) * 48;
+        // 终点箭头
+        const angle = Math.atan2(ty - e.y, tx - e.x);
+        ctx.strokeStyle = "rgba(255,60,20,0.9)";
+        ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.arc(hx, hy, 6, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(255,100,30,0.8)";
-        ctx.fill();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(tx - Math.cos(angle - 0.5) * 12, ty - Math.sin(angle - 0.5) * 12);
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(tx - Math.cos(angle + 0.5) * 12, ty - Math.sin(angle + 0.5) * 12);
+        ctx.stroke();
+        ctx.fillStyle = "rgba(255,120,30,0.6)";
+        ctx.beginPath(); ctx.arc(tx, ty, 5, 0, Math.PI * 2); ctx.fill();
         ctx.restore();
       }
       // charger dashing: 短残影
@@ -12030,38 +12036,33 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.font = "bold 15px monospace";
     ctx.textAlign = "center";
     ctx.fillStyle = "#ffd35a";
-    ctx.fillText(`怪物测试 — 当前: ${name} (${kind})  ${idx+1}/${kinds.length}  场上: ${alive}只`, DESIGN_WIDTH / 2, 28);
-    // 底部控制条
+    ctx.fillText(`怪物测试 — 当前: ${name} (${kind})  ${idx+1}/${kinds.length}  场上: ${alive}只  防线: ${this._enemyTestDefenseHits}`, DESIGN_WIDTH / 2, 28);
     ctx.fillStyle = "rgba(0,0,0,0.75)";
     ctx.fillRect(0, DESIGN_HEIGHT - 30, DESIGN_WIDTH, 30);
     ctx.font = "13px monospace";
     ctx.fillStyle = "#a0a0a0";
-    ctx.fillText("[◀]切换  [J]刷1  [K]刷10  [L]清场  [▶]", DESIGN_WIDTH / 2, DESIGN_HEIGHT - 8);
+    ctx.fillText("[◀]切换  [J]刷1  [K]刷5  [L]清场  [▶]", DESIGN_WIDTH / 2, DESIGN_HEIGHT - 8);
     ctx.restore();
     // 每只测试怪头顶标签
     this._drawEnemyTestLabels(ctx);
   }
 
   /** V0812019: 测试怪头顶行为标签 */
+  /** V0812022: 短标签 */
   private _drawEnemyTestLabels(ctx: CanvasRenderingContext2D) {
     if (!this._enemyTestActive) return;
-    ctx.save();
-    ctx.font = "10px monospace";
-    ctx.textAlign = "center";
+    ctx.save(); ctx.font = "9px monospace"; ctx.textAlign = "center";
     for (const e of this.enemies) {
       if (!e.alive) continue;
       const meta = ENEMY_META[e.kind] as any;
-      const dname = meta?.displayName ?? e.kind;
-      let state = '';
-      if (e.kind === 'charger') state = ' | ' + (e._chargeState ?? 'idle');
-      if (e.kind === 'mover') state = ' | ' + (e._movePattern ?? 'idle');
-      if (e.kind === 'shooter') state = ' | ' + (e._shootState ?? 'idle');
-      ctx.fillStyle = "rgba(0,0,0,0.65)";
-      const text = dname + state;
-      const tw = ctx.measureText(text).width + 8;
-      ctx.fillRect(e.x - tw / 2, e.y - e.radius - 20, tw, 14);
-      ctx.fillStyle = "#ffd35a";
-      ctx.fillText(text, e.x, e.y - e.radius - 10);
+      let label = meta?.displayName ?? e.kind;
+      if (e.kind === 'charger') label = '冲 | ' + (e._chargeState === 'telegraph' ? '预警' : e._chargeState === 'dashing' ? '冲锋' : e._chargeState === 'recovery' ? '硬直' : 'idle');
+      else if (e.kind === 'mover') label = '游 | ' + (e._movePattern ?? 'idle');
+      else if (e.kind === 'shooter') label = '弹 | ' + (e._shootState === 'telegraph' ? '蓄力' : e._shootState === 'cooldown' ? '冷却' : e._shootState ?? 'idle');
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      const tw = ctx.measureText(label).width + 6;
+      ctx.fillRect(e.x - tw / 2, e.y - e.radius - 16, tw, 12);
+      ctx.fillStyle = "#ffd35a"; ctx.fillText(label, e.x, e.y - e.radius - 7);
     }
     ctx.restore();
   }

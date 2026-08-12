@@ -294,6 +294,7 @@ export type Enemy = {
   _chargeState?: 'idle' | 'telegraph' | 'dashing' | 'recovery';
   _chargeTimer?: number; _chargeDashAngle?: number; _chargeDashSpeed?: number;
   _chargeDashDist?: number; _chargeTraveled?: number;
+  _chargeTargetX?: number; _chargeTargetY?: number; // V0812022: 冲锋目标坐标
   /** V0812018: 游袭兵运动模式 */
   _movePattern?: 'diagonal' | 's_curve' | 'arc' | 'spiral';
   _moveOriginX?: number; _moveOriginY?: number; _movePhase?: number; _moveDir?: number;

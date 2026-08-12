@@ -17,7 +17,9 @@ function nextPid() { return `proj_${++_pid}`; }
 
 export function initProjectileBehavior(enemy: Enemy): void {
   enemy._shootState = 'idle';
-  enemy._shootTimer = 1.5;
+  // V0812022: 错峰 ±0.8s
+  let h = 0; for(let i=0;i<enemy.id.length;i++) h=(h*31+enemy.id.charCodeAt(i))|0;
+  enemy._shootTimer = 1.5 + ((Math.abs(h) % 1600) * 0.001 - 0.8);
   enemy._shootCooldown = COOLDOWN;
 }
 

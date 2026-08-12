@@ -171,7 +171,7 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
         gameRef.current?.enemyTestSpawn1();
       } else if (event.key.toLowerCase() === "k") {
         // V0812019: EnemyTest 刷10 (覆盖旧的chest toggle)
-        gameRef.current?.enemyTestSpawn10();
+        gameRef.current?.enemyTestSpawn5();
       } else if (event.key === "[") {
         gameRef.current?.enemyTestPrev();
       } else if (event.key === "]") {
