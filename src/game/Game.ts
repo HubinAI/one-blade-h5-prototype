@@ -505,6 +505,7 @@ export class Game {
   // V0812019: EnemyTest工具
   private _enemyTestActive = false;
   private _enemyTestKind = 0; // index into NORMAL_IMPLEMENTED
+  private _enemyTestVariant = 0; // V0812026: variant index
   /** 0807-11B-1: 同刀去重 */
   private _slashDedupTestTarget: string | null = null;
   private _slashDedupFireRings: Set<string> = new Set();
@@ -1196,17 +1197,37 @@ export class Game {
   // ═══ V0812022: EnemyTest工具 ═══
   private _enemyTestDefenseHits = 0;
   private _debugProjChecks = 0; private _debugProjHits = 0; private _debugHitVisualCount = 0; // V0812025
+
+  // V0812026: behavior variant map
+  private static _TEST_VARIANTS: Record<string, string[]> = {
+    charger: ['DEFAULT','FAST','DOUBLE'],
+    mover:   ['DEFAULT','FAST','WIDE'],
+    shooter: ['DEFAULT','FAST','BURST'],
+  };
+  private _getTestVariant(): string {
+    const kind = (NORMAL_IMPLEMENTED as readonly string[])[this._enemyTestKind % NORMAL_IMPLEMENTED.length];
+    const vars = Game._TEST_VARIANTS[kind];
+    return vars ? vars[this._enemyTestVariant % vars.length] : 'DEFAULT';
+  }
+  enemyTestCycleVariant(): void {
+    const kind = (NORMAL_IMPLEMENTED as readonly string[])[this._enemyTestKind % NORMAL_IMPLEMENTED.length];
+    const vars = Game._TEST_VARIANTS[kind];
+    if (vars) this._enemyTestVariant = (this._enemyTestVariant + 1) % vars.length;
+  }
   activateEnemyTest(): void {
     this._enemyTestActive = true; this.debugEnabled = true; this._debugShowDetail = false;
     console.warn("[V0812019] EnemyTest ACTIVATED");
   }
   private _spawnTestEnemy(count = 1) {
+    const kinds = NORMAL_IMPLEMENTED as readonly string[];
+    const kind = kinds[this._enemyTestKind % kinds.length] as EnemyKind;
+    const variant = this._getTestVariant();
     const minX = BATTLE_SAFE_X.normalMin + 12, maxX = BATTLE_SAFE_X.normalMax - 12, w = maxX - minX;
     const gap = Math.min(w / Math.max(count, 1), 55);
     const start = minX + Math.max(0, (w - gap * count) / 2);
     for (let i = 0; i < count; i++) {
       const x = start + gap * i + (Math.random() - 0.5) * 6;
-      this.enemies.push(this.createEnemy((NORMAL_IMPLEMENTED as readonly string[])[this._enemyTestKind % NORMAL_IMPLEMENTED.length] as EnemyKind, x, -20, 1));
+      this.enemies.push(this.createEnemy(kind, x, -20, 1, undefined, variant));
     }
   }
   enemyTestSpawn1() { this._spawnTestEnemy(1); }
@@ -8522,7 +8543,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     }
   }
 
-  private createEnemy(kind: EnemyKind, x: number, y: number, speedMultiplier = 1, entryProfile?: { spawnY: number; entryEndY: number; entryMultiplier: number; entryMaxDuration: number }): Enemy {
+  private createEnemy(kind: EnemyKind, x: number, y: number, speedMultiplier = 1, entryProfile?: { spawnY: number; entryEndY: number; entryMultiplier: number; entryMaxDuration: number }, behaviorVariant?: string): Enemy {
     const balance = ENEMY_BALANCE[kind];
     const dailyShieldBonus = this.runContext.mode === "dailyChallenge" && this.runContext.dailyChallengeId === "hard_shield" && kind === "shield" ? 1 : 0;
     // 0807-11B-3: infantry HP 由节点倍率管理，不再叠加 waveHpBonus
@@ -8583,10 +8604,10 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
       _spawnSource: this._lastSpawnSource,
       _spawnBatchId: this._spawnBatchId,
     };
-    // V0812018: 新怪行为初始化
-    if (kind === "charger") initChargeBehavior(newEnemy);
-    if (kind === "mover") initMovementPattern(newEnemy);
-    if (kind === "shooter") initProjectileBehavior(newEnemy);
+    // V0812026: 新怪行为初始化 (传variant)
+    if (kind === "charger") initChargeBehavior(newEnemy, behaviorVariant);
+    if (kind === "mover") initMovementPattern(newEnemy, behaviorVariant);
+    if (kind === "shooter") initProjectileBehavior(newEnemy, behaviorVariant);
     return newEnemy;
   }
 
@@ -12077,6 +12098,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const kind = kinds[idx];
     const meta = ENEMY_META[kind];
     const name = meta?.displayName ?? kind;
+    const variant = this._getTestVariant();
     const alive = this.enemies.filter(e => e.alive).length;
 
     ctx.save();
@@ -12086,7 +12108,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.font = "bold 15px monospace";
     ctx.textAlign = "center";
     ctx.fillStyle = "#ffd35a";
-    ctx.fillText(`怪物测试 — 当前: ${name} (${kind})  ${idx+1}/${kinds.length}  场上: ${alive}只  防线: ${this._enemyTestDefenseHits}`, DESIGN_WIDTH / 2, 28);
+    ctx.fillText(`怪物测试 — ${name} / ${variant}  (${kind})  ${idx+1}/${kinds.length}  场上: ${alive}只  防线: ${this._enemyTestDefenseHits}`, DESIGN_WIDTH / 2, 28);
     ctx.font = "12px monospace";
     ctx.fillStyle = "#8af";
     ctx.fillText(`HitVisual:${this._debugHitVisualCount}  ProjCheck:${this._debugProjChecks}  ProjHit:${this._debugProjHits}`, DESIGN_WIDTH / 2, 44);
@@ -12094,7 +12116,7 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.fillRect(0, DESIGN_HEIGHT - 30, DESIGN_WIDTH, 30);
     ctx.font = "13px monospace";
     ctx.fillStyle = "#a0a0a0";
-    ctx.fillText("[◀]切换  [J]刷1  [K]刷5  [L]清场  [▶]", DESIGN_WIDTH / 2, DESIGN_HEIGHT - 8);
+    ctx.fillText("[◀]切换  [N]变体  [J]刷1  [K]刷5  [L]清场  [▶]", DESIGN_WIDTH / 2, DESIGN_HEIGHT - 8);
     ctx.restore();
     // 每只测试怪头顶标签
     this._drawEnemyTestLabels(ctx);

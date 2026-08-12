@@ -9,9 +9,16 @@ const TELEGRAPH = 0.85, DASH_SPEED = 380, RECOVERY = 0.55, COOLDOWN = 2.2;
 
 function hash(enemy: Enemy): number { let h=0; for(let i=0;i<enemy.id.length;i++) h=(h*31+enemy.id.charCodeAt(i))|0; return Math.abs(h); }
 
-export function initChargeBehavior(enemy: Enemy): void {
+export function initChargeBehavior(enemy: Enemy, variant?: string): void {
+  const spd = variant === 'FAST' ? 500 : (variant === 'DOUBLE' ? 420 : DASH_SPEED);
+  const tlg = variant === 'FAST' ? 0.65 : TELEGRAPH;
+  const cd = variant === 'DOUBLE' ? 1.5 : COOLDOWN;
   enemy._chargeState = 'idle';
-  enemy._chargeTimer = 0.9 + (hash(enemy) % 800) * 0.0005; // ±0.4s 错峰
+  enemy._chargeTimer = 0.9 + (hash(enemy) % 800) * 0.0005;
+  // 将variant参数存入enemy供后续使用
+  (enemy as any)._chargeVariant = variant ?? 'DEFAULT';
+  if (variant === 'FAST') (enemy as any)._chargeDashSpeed = spd;
+  if (variant === 'DOUBLE') (enemy as any)._chargeVariantDouble = true;
 }
 
 export function updateChargeBehavior(enemy: Enemy, dt: number): boolean {

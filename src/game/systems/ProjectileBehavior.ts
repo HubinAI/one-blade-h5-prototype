@@ -12,10 +12,11 @@ let _pid = 0; function np() { return `proj_${++_pid}`; }
 
 function hash(enemy: Enemy): number { let h=0; for(let i=0;i<enemy.id.length;i++) h=(h*31+enemy.id.charCodeAt(i))|0; return Math.abs(h); }
 
-export function initProjectileBehavior(enemy: Enemy): void {
+export function initProjectileBehavior(enemy: Enemy, variant?: string): void {
   enemy._shootState = 'idle';
   enemy._shootTimer = 1.5 + ((hash(enemy) % 1800) * 0.001 - 0.9); // ±0.9s 错峰
-  enemy._shootCooldown = COOLDOWN;
+  enemy._shootCooldown = variant === 'FAST' ? 1.5 : COOLDOWN;
+  (enemy as any)._shootVariant = variant ?? 'DEFAULT';
 }
 
 export function updateProjectileBehavior(enemy: Enemy, dt: number, projectiles: EnemyProjectile[]): boolean {

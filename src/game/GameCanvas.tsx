@@ -143,6 +143,11 @@ export function GameCanvas({ level, onFinish, onReviveOffer, reviveSignal = 0, d
         // 0807-11A: 调试跳过新手教学
         gameRef.current?.skipSwipeTutorial();
       } else if (event.key.toLowerCase() === "n") {
+        // V0812026: EnemyTest优先 — 切variant
+        if (new URLSearchParams(window.location.search).get('enemytest') === '1') {
+          gameRef.current?.enemyTestCycleVariant();
+          return;
+        }
         // 0807-11B-1: 调试数值测试模式
         gameRef.current?.toggleNumericalTestMode();
       } else if (event.key === "1") {

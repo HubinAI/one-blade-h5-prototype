@@ -13,10 +13,11 @@ function hash(enemy: Enemy): number { let h=0; for(let i=0;i<enemy.id.length;i++
 
 const BW = BATTLE_SAFE_X.normalMax - BATTLE_SAFE_X.normalMin; // 战场有效宽度
 
-export function initMovementPattern(enemy: Enemy): void {
+export function initMovementPattern(enemy: Enemy, variant?: string): void {
   const h = hash(enemy);
   enemy._movePattern = h % 2 === 0 ? 'diagonal' : 'arc';
   enemy._moveDir = enemy.x < (BATTLE_SAFE_X.normalMin + BW/2) ? 1 : -1;
+  (enemy as any)._moveVariant = variant ?? 'DEFAULT';
   _nextMove(enemy, h);
 }
 
