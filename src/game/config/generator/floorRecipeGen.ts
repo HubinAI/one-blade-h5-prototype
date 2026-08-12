@@ -32,7 +32,7 @@ function floorPool(f: number): string[] {
 
 const INTENSITY_CYCLE = ["RELAX","INTRO","MIX","PRESSURE","CHECK"] as const;
 
-function intensityRole(f: number): string { return INTENSITY_CYCLE[(f-1)%5]; }
+function intensityRole(f: number): string { return f === 1 ? "TUTORIAL" : INTENSITY_CYCLE[(f-2)%5]; }
 
 // Priority axes for intensity roles
 const RELAX_AXES = ["infantry","powder"];
