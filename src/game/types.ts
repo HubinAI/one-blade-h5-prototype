@@ -297,7 +297,7 @@ export type Enemy = {
   _chargeTargetX?: number; _chargeTargetY?: number;
   _chargeDoubleDash?: number; // V0812028: DOUBLE phase (1=first, 2=second)
   /** V0812018: 游袭兵运动模式 */
-  _movePattern?: 'diagonal' | 'arc' | 's_curve';
+  _movePattern?: 'diagonal' | 'arc' | 's_curve' | 'spiral';
   /** V0812025: 受击scale punch + hit kick */
   _hitScale?: number; _hitScaleTimer?: number; _hitKickX?: number; _hitKickY?: number;
   _moveOriginX?: number; _moveOriginY?: number; _movePhase?: number; _moveDir?: number;

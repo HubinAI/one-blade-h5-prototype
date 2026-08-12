@@ -7,7 +7,7 @@
 import type { Enemy } from "../types";
 import { BATTLEFIELD_ZONES, BATTLE_SAFE_X } from "../config/balance";
 
-export type MovePattern = 'diagonal' | 'arc' | 's_curve';
+export type MovePattern = 'diagonal' | 'arc' | 's_curve' | 'spiral';
 
 function hash(enemy: Enemy): number { let h=0; for(let i=0;i<enemy.id.length;i++) h=(h*31+enemy.id.charCodeAt(i))|0; return Math.abs(h); }
 
@@ -15,9 +15,9 @@ const BW = BATTLE_SAFE_X.normalMax - BATTLE_SAFE_X.normalMin; // 战场有效宽
 
 export function initMovementPattern(enemy: Enemy, variant?: string): void {
   const h = hash(enemy);
-  if (variant === 'S_CURVE') {
-    enemy._movePattern = 's_curve';
-  } else {
+  if (variant === 'SPIRAL') {
+    enemy._movePattern = 'spiral';
+  } else if (variant === 'S_CURVE') {
     enemy._movePattern = h % 2 === 0 ? 'diagonal' : 'arc';
   }
   enemy._moveDir = enemy.x < (BATTLE_SAFE_X.normalMin + BW/2) ? 1 : -1;
@@ -28,13 +28,18 @@ export function initMovementPattern(enemy: Enemy, variant?: string): void {
 function _nextMove(enemy: Enemy, seed?: number): void {
   const h = seed ?? hash(enemy);
   const dir = enemy._moveDir ?? 1;
-  const durBase = enemy._movePattern === 'diagonal' ? 0.9 : (enemy._movePattern === 's_curve' ? 1.3 : 1.05);
-  const durVar = enemy._movePattern === 'diagonal' ? 0.35 : (enemy._movePattern === 's_curve' ? 0.40 : 0.35);
+  const durBase = enemy._movePattern === 'diagonal' ? 0.9 : (enemy._movePattern === 's_curve' ? 1.3 : (enemy._movePattern === 'spiral' ? 1.7 : 1.05));
+  const durVar = enemy._movePattern === 'diagonal' ? 0.35 : (enemy._movePattern === 's_curve' ? 0.40 : (enemy._movePattern === 'spiral' ? 0.40 : 0.35));
   enemy._moveDur = durBase + (h % 100) * durVar * 0.01;
   enemy._moveStartX = enemy.x;
   enemy._moveStartY = enemy.y;
 
-  if (enemy._movePattern === 's_curve') {
+  if (enemy._movePattern === 'spiral') {
+    // SPIRAL: 围绕下移中心旋转1.1-1.4圈, radius 140→70px, 中心推进120-160px
+    enemy._moveTargetY = enemy.y + 120 + (h % 40);
+    enemy._moveArcHeight = 1.1 + (h % 30) * 0.01; // 圈数 1.1-1.4
+    enemy._moveStartX = enemy.x; // 旋转中心X保持不变
+  } else if (enemy._movePattern === 's_curve') {
     const span = BW * (0.70 + (h % 15) * 0.01);
     enemy._moveTargetX = BATTLE_SAFE_X.normalMin + (dir > 0 ? span + BW*0.08 : BW*0.92 - span);
     enemy._moveTargetY = enemy.y + 100 + (h % 50);
@@ -67,9 +72,20 @@ export function updateMovementPattern(enemy: Enemy, dt: number): boolean {
   const tx = enemy._moveTargetX ?? enemy.x, ty = enemy._moveTargetY ?? enemy.y;
 
   // 线性横向插值 → 保持匀速
-  enemy.x = sx + (tx - sx) * t;
+  if (enemy._movePattern !== 'spiral') {
+    enemy.x = sx + (tx - sx) * t;
+  }
 
-  if (enemy._movePattern === 'diagonal') {
+  if (enemy._movePattern === 'spiral') {
+    // SPIRAL: 旋转中心匀速下降, 半径从140收缩到70, 圈数1.1-1.4
+    const rotations = enemy._moveArcHeight ?? 1.25;
+    const angle = Math.PI * 2 * rotations * t;
+    const r = 140 * (1 - t) + 70 * t; // 140→70
+    const cx = enemy._moveStartX ?? enemy.x;
+    const cy = sy + ((enemy._moveTargetY ?? sy + 120) - sy) * t;
+    enemy.x = cx + Math.cos(angle) * r;
+    enemy.y = cy + Math.sin(angle) * r;
+  } else if (enemy._movePattern === 'diagonal') {
     enemy.y = sy + (ty - sy) * t;
   } else if (enemy._movePattern === 's_curve') {
     // S_CURVE: 横向sin(2π×2×t)形成两个完整转向弯

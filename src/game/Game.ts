@@ -1201,7 +1201,7 @@ export class Game {
   // V0812026: behavior variant map
   private static _TEST_VARIANTS: Record<string, string[]> = {
     charger: ['DEFAULT','FAST','DOUBLE'],
-    mover:   ['DEFAULT','S_CURVE','FAST','WIDE'],
+    mover:   ['DEFAULT','S_CURVE','SPIRAL','FAST','WIDE'],
     shooter: ['DEFAULT','FAST','BURST'],
   };
   private _getTestVariant(): string {
