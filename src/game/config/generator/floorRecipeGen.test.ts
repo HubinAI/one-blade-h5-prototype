@@ -54,12 +54,13 @@ describe("FloorRecipe 1-180", () => {
     for (let i=0; i<180; i++) expect(r2[i]).toEqual(recipes[i]);
   });
 
-  it("intensityRole 5关循环 F1=TUTORIAL, F2+=RELAX→INTRO→...", () => {
+  it("intensityRole: F1=TUTORIAL, 首次INTRO关=INTRO, 其余保持5关循环(无新怪INTRO降为RELAX)", () => {
     expect(recipes[0].intensityRole).toBe("TUTORIAL");
-    const cycle = ["RELAX","INTRO","MIX","PRESSURE","CHECK"];
-    for (let f=2; f<=180; f++) {
-      expect(recipes[f-1].intensityRole).toBe(cycle[(f-2)%5]);
-    }
+    // V0812016: 首次INTRO关固定INTRO
+    const introFloors = new Set([2, 3, 7, 12, 17, 22, 27, 31]);
+    for (const f of introFloors) expect(recipes[f - 1].intensityRole).toBe("INTRO");
+    const validRoles = new Set(["TUTORIAL", "RELAX", "INTRO", "MIX", "PRESSURE", "CHECK"]);
+    for (const r of recipes) expect(validRoles.has(r.intensityRole)).toBe(true);
   });
 
   it("审计 无违规", () => {
@@ -67,6 +68,10 @@ describe("FloorRecipe 1-180", () => {
     expect(a.consecutiveViolations).toBe(0);
     expect(a.primaryRepeat3).toBe(0);
     expect(a.modeRepeat).toBe(0);
+    // V0812016
+    expect(a.unlockViolations).toBe(0);
+    expect(a.firstIntroViolations).toBe(0);
+    expect(a.checkViolations).toBe(0);
   });
 
   // Stats output

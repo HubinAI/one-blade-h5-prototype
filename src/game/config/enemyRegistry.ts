@@ -14,14 +14,14 @@ export interface EnemyMeta {
 
 export const ENEMY_META: Record<string, EnemyMeta> = {
   infantry: { displayName:"步兵",  experienceAxis:"MASS",      unlockFloor:1,  proxyType:null,      implemented:true },
-  shield:   { displayName:"盾兵",  experienceAxis:"HARD",      unlockFloor:1,  proxyType:null,      implemented:true },
-  powder:   { displayName:"爆炸兵",experienceAxis:"OPPORTUNITY",unlockFloor:1,  proxyType:null,      implemented:true },
-  splitter: { displayName:"分裂兵",experienceAxis:"TIMING",    unlockFloor:4,  proxyType:null,      implemented:true },
-  tractor:  { displayName:"牵引兵",experienceAxis:"GATHER",    unlockFloor:7,  proxyType:null,      implemented:true },
-  core:     { displayName:"核心兵",experienceAxis:"PRIORITY",  unlockFloor:50, proxyType:null,      implemented:true },
-  charger:  { displayName:"冲锋兵",experienceAxis:"TIMING_THREAT",unlockFloor:0,proxyType:"tractor", implemented:false },
-  mover:    { displayName:"游袭兵",experienceAxis:"MOVEMENT",  unlockFloor:0,  proxyType:"infantry",implemented:false },
-  shooter:  { displayName:"弹幕兵",experienceAxis:"PROJECTILE",unlockFloor:0,  proxyType:"powder",  implemented:false },
+  powder:   { displayName:"爆炸兵",experienceAxis:"OPPORTUNITY",unlockFloor:2,  proxyType:null,      implemented:true },
+  shield:   { displayName:"盾兵",  experienceAxis:"HARD",      unlockFloor:3,  proxyType:null,      implemented:true },
+  splitter: { displayName:"分裂兵",experienceAxis:"TIMING",    unlockFloor:7,  proxyType:null,      implemented:true },
+  tractor:  { displayName:"牵引兵",experienceAxis:"GATHER",    unlockFloor:12, proxyType:null,      implemented:true },
+  charger:  { displayName:"冲锋兵",experienceAxis:"TIMING_THREAT",unlockFloor:17,proxyType:"tractor", implemented:false },
+  mover:    { displayName:"游袭兵",experienceAxis:"MOVEMENT",  unlockFloor:22, proxyType:"infantry",implemented:false },
+  shooter:  { displayName:"弹幕兵",experienceAxis:"PROJECTILE",unlockFloor:27, proxyType:"powder",  implemented:false },
+  core:     { displayName:"核心兵",experienceAxis:"PRIORITY",  unlockFloor:31, proxyType:null,      implemented:true },
 };
 
 // ══════════════════ 普通怪 ══════════════════
