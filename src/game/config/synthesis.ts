@@ -2,7 +2,7 @@ import type { BossId } from "../types";
 import { LEVEL1_TUTORIAL_WAVES } from "../../data/levels";
 import { generateAllRecipes } from "./generator/floorRecipeGen";
 import { generateWavePlan } from "./generator/wavePlanGen";
-import { resolveEnemyType } from "./enemyRegistry";
+import { resolveEnemyType, ENEMY_META } from "./enemyRegistry";
 import { getSpeedMultiplier } from "./mainlineNumeric";
 
 // ════════════════════════════════════════════
@@ -271,7 +271,7 @@ export const WAVE_TEMPLATES: WaveTemplate[] = [
   { id: "elite_guard_21", name: "精锐护阵", unlockFloor: 100, enemies: [{ kind: "shield", count: 4 }, { kind: "tractor", count: 1 }, { kind: "infantry", count: 4 }] },
 ];
 
-/** 根据当前层数和可用模板生成一局的波次列表 */
+/** @deprecated V0811071R: 正常主线已改为 FloorRecipe + WavePlan Generator */
 export function generateFloorWaves(floor: number, templateCount?: number): WaveTemplate[] {
   const available = WAVE_TEMPLATES.filter(t => floor >= t.unlockFloor);
   if (available.length === 0) return [WAVE_TEMPLATES[0]];
@@ -295,7 +295,11 @@ function getMainlineDensityConfig(floor: number) {
   return { waveCount: Math.min(10, 8 + Math.floor((floor - 10) / 10)), minWaveEnemies: 28, maxWaveEnemies: 48, groupMax: 18 };
 }
 
-/** 主线每层的基础数值公式 */
+/**
+ * @deprecated V0811071R: 正常主线已不再使用此函数。
+ * 正常主线HP/Speed/Count从 mainlineNumeric + FloorRecipe + Mainline Rhythm Template 获取。
+ * 仅legacy模式可能需要保留。
+ */
 export function getFloorStats(floor: number) {
   return {
     enemyHp: 1 + Math.floor(floor / 5),
@@ -571,6 +575,18 @@ export function createFloorLevelConfig(floor: number): LevelConfig {
   const plan = generateWavePlan(recipe as any);
   const primaryKind = resolveEnemyType(recipe.primaryEnemy).runtimeType;
   const secKind = recipe.secondaryEnemy ? resolveEnemyType(recipe.secondaryEnemy).runtimeType : null;
+
+  // V0811071R: Recipe四字段一致性验证
+  if (recipe.primaryEnemy) {
+    const rt = resolveEnemyType(recipe.primaryEnemy);
+    const meta = ENEMY_META[recipe.primaryEnemy];
+    if (meta && rt.runtimeType !== recipe.resolvedRuntimeType) {
+      console.error(`[RUNTIME-TYPE-MISMATCH] F${floor}: ${recipe.primaryEnemy} → meta=${meta.experienceAxis} rt=${rt.runtimeType} recipe=${recipe.resolvedRuntimeType}`);
+    }
+    if (meta && meta.experienceAxis !== recipe.primaryExperienceAxis) {
+      console.error(`[EXPERIENCE-AXIS-MISMATCH] F${floor}: ${recipe.primaryEnemy} → axis=${meta.experienceAxis} recipe=${recipe.primaryExperienceAxis}`);
+    }
+  }
 
   const waves: WaveConfig[] = plan.waves.map((ws, idx) => {
     const enemies: EnemySpawn[] = [];

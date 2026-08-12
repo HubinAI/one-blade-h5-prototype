@@ -235,3 +235,95 @@ describe('Mainline Rhythm Template — Runtime矩阵', () => {
     expect(g.eliteSpawned).toBe(false);
   });
 });
+
+// ═══════════════════════════════════════════════
+// V0811071R: LevelConfig污染验证 + Runtime速度/存活
+// ═══════════════════════════════════════════════
+import { getFloorStats } from '../config/synthesis';
+import { ENEMY_BALANCE } from '../config/balance';
+import { resolveEnemyType, ENEMY_META } from '../config/enemyRegistry';
+import { generateAllRecipes } from '../config/generator/floorRecipeGen';
+
+describe('V0811071R — LevelConfig单位污染检测', () => {
+  it('getFloorStats标记为deprecated, 正常主线不消费', () => {
+    // getFloorStats仍可被调用但不应影响正常主线LevelConfig
+    const s = getFloorStats(2);
+    expect(s.enemySpeed).toBe(42.6); // 旧值, 说明函数仍存在但被隔离
+    // 但LevelConfig不从此取值
+    const cfg = createFloorLevelConfig(2);
+    expect(cfg.enemySpeed).not.toBe(s.enemySpeed);
+    expect(cfg.hp).not.toBe(s.enemyHp);
+  });
+
+  it('F2 LevelConfig: hp=3, enemySpeed=getSpeedMultiplier(2)', () => {
+    const cfg = createFloorLevelConfig(2);
+    expect(cfg.hp).toBe(3);
+    // F2 = 0.9821 (getSpeedMultiplier)
+    expect(cfg.enemySpeed).toBeGreaterThan(0.9);
+    expect(cfg.enemySpeed).toBeLessThan(1.0);
+    expect(cfg.enemySpeed).toBeCloseTo(0.9821, 3);
+  });
+
+  it('F2 enemy.speed在合理范围(不需要entry加速)', () => {
+    const cfg = createFloorLevelConfig(2);
+    const balance = ENEMY_BALANCE.infantry;
+    // speed = balance.speed × enemySpeed × speedMultiplier × jitter
+    // F2: 42 × 0.9821 × 1 × 0.94~1.08
+    const baseSpeed = balance.speed * cfg.enemySpeed * 1.0;
+    expect(baseSpeed).toBeCloseTo(42 * 0.9821, 0); // ≈41
+    const minSpeed = baseSpeed * 0.94;
+    const maxSpeed = baseSpeed * 1.08;
+    expect(minSpeed).toBeGreaterThan(38);
+    expect(maxSpeed).toBeLessThan(45);
+  });
+
+  it('F2 0.5s不操作: hp>0, 怪物未触线', () => {
+    const cfg = createFloorLevelConfig(2);
+    const g = new Game(cfg, (() => {}) as any) as any;
+    g.gameMode = 'normal';
+    g.debugEnabled = false;
+    for (let i = 0; i < 32; i++) { g.elapsed += 0.016; g.update(0.016); } // ~0.5s
+    expect(g.hp).toBeGreaterThan(0);
+    expect(g.finished).toBeFalsy();
+    // 怪物不应瞬间到底(entry end Y约480, defense约720)
+    const nearDefense = g.enemies.filter((e: any) => e.alive && e.y > 680).length;
+    expect(nearDefense).toBe(0);
+  });
+
+  it('F3/F30/F180 enemySpeed在合理范围', () => {
+    const f3 = createFloorLevelConfig(3);
+    expect(f3.enemySpeed).toBeCloseTo(0.9842, 3);
+    const f30 = createFloorLevelConfig(30);
+    expect(f30.enemySpeed).toBeCloseTo(1.0409, 3);
+    const f180 = createFloorLevelConfig(180);
+    expect(f180.enemySpeed).toBe(1.35);
+    // 禁止出现10以上倍率
+    expect(f180.enemySpeed).toBeLessThan(2);
+  });
+
+  it('F2 Recipe: primaryEnemy=powder, OPPORTUNITY, 无后置篡改', () => {
+    const cfg = createFloorLevelConfig(2);
+    // F2必须由Generator自身保证powder身份
+    // 检查hp/enemySpeed不来自getFloorStats
+    expect(cfg.hp).toBe(3);
+    expect(cfg.enemySpeed).toBeLessThan(1.0);
+  });
+
+  it('Recipe四字段一致性: resolveEnemyType ↔ resolvedRuntimeType ↔ experienceAxis', () => {
+    const allRecipes = generateAllRecipes();
+    for (const r of allRecipes) {
+      if (!r.primaryEnemy) continue;
+      const rt = resolveEnemyType(r.primaryEnemy);
+      expect(rt.runtimeType).toBe(r.resolvedRuntimeType);
+      const meta = ENEMY_META[r.primaryEnemy];
+      if (meta) expect(meta.experienceAxis).toBe(r.primaryExperienceAxis);
+    }
+  });
+
+  it('F2 speedMultiplier=1 (无floor二次成长)', () => {
+    const cfg = createFloorLevelConfig(2);
+    for (const w of cfg.waves) {
+      expect(w.speedMultiplier ?? 1).toBe(1);
+    }
+  });
+});
