@@ -34,18 +34,30 @@ export function updateProjectileBehavior(enemy: Enemy, dt: number, projectiles: 
   if (s === 'telegraph') {
     enemy._shootTimer = (enemy._shootTimer ?? 0) - dt;
     if ((enemy._shootTimer ?? 0) <= 0) {
-      enemy._shootState = 'firing'; enemy.visualState = undefined;
-      const isSpread = (enemy as any)._shootVariant;
-      let angles: number[] = [0];
-      if (isSpread === 'SPREAD3') angles = [-0.314, 0, 0.314];
-      else if (isSpread === 'SPREAD5') angles = [-0.471, -0.236, 0, 0.236, 0.471]; // ±27°=54°总展开
-      for (const offset of angles) {
-        projectiles.push({
-          id: np(), x: enemy.x, y: enemy.y + 10,
-          vx: Math.sin(offset), vy: Math.cos(offset),
-          speed: PROJ_SPEED, radius: PROJ_RADIUS, alive: true, damage: 1,
-          sourceEnemyId: enemy.id,
-        });
+      enemy.visualState = undefined;
+      const v = (enemy as any)._shootVariant;
+      if (v === 'BURST') {
+        // 进入bursting: 射出第1发, 准备后续2发
+        enemy._shootState = 'bursting';
+        enemy._shootBurstCount = 1;
+        enemy._shootTimer = 0.19; // 间隔~0.19s
+        _fireProj(enemy, 'BURST', projectiles);
+      } else {
+        enemy._shootState = 'firing';
+        _fireProj(enemy, (enemy as any)._shootVariant, projectiles);
+      }
+    }
+    return true;
+  }
+  if (s === 'bursting') {
+    enemy._shootTimer = (enemy._shootTimer ?? 0) - dt;
+    if ((enemy._shootTimer ?? 0) <= 0) {
+      _fireProj(enemy, undefined, projectiles);
+      (enemy as any)._shootBurstCount = ((enemy as any)._shootBurstCount ?? 1) + 1;
+      if ((enemy as any)._shootBurstCount >= 3) {
+        enemy._shootState = 'cooldown'; enemy._shootTimer = enemy._shootCooldown ?? COOLDOWN;
+      } else {
+        enemy._shootTimer = 0.16 + Math.random() * 0.06; // 0.16-0.22s
       }
     }
     return true;
@@ -53,6 +65,18 @@ export function updateProjectileBehavior(enemy: Enemy, dt: number, projectiles: 
   if (s === 'firing') { enemy._shootState = 'cooldown'; enemy._shootTimer = enemy._shootCooldown ?? COOLDOWN; return true; }
   if (s === 'cooldown') { enemy._shootTimer = (enemy._shootTimer ?? 0) - dt; if ((enemy._shootTimer ?? 0) <= 0) enemy._shootState = 'idle'; return false; }
   return false;
+}
+
+function _fireProj(enemy: Enemy, variant: string | undefined, projectiles: EnemyProjectile[]) {
+  const angles: number[] = variant === 'SPREAD3' ? [-0.314,0,0.314] : variant === 'SPREAD5' ? [-0.471,-0.236,0,0.236,0.471] : [0];
+  for (const o of angles) {
+    projectiles.push({
+      id: np(), x: enemy.x, y: enemy.y + 10,
+      vx: Math.sin(o), vy: Math.cos(o),
+      speed: PROJ_SPEED, radius: PROJ_RADIUS, alive: true, damage: 1,
+      sourceEnemyId: enemy.id,
+    });
+  }
 }
 
 export function updateProjectiles(projectiles: EnemyProjectile[], dt: number, defY: number, onHit: (p: EnemyProjectile) => void): void {

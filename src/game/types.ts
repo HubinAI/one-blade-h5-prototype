@@ -304,8 +304,9 @@ export type Enemy = {
   _moveTargetX?: number; _moveTargetY?: number; _moveDur?: number; _moveStartX?: number; _moveStartY?: number;
   _moveArcHeight?: number;
   /** V0812018: 弹幕兵状态 */
-  _shootState?: 'idle' | 'telegraph' | 'firing' | 'cooldown';
+  _shootState?: 'idle' | 'telegraph' | 'firing' | 'cooldown' | 'bursting';
   _shootTimer?: number; _shootCooldown?: number;
+  _shootBurstCount?: number; // V0812033
 };
 
 /** V0812018: 弹幕 */
