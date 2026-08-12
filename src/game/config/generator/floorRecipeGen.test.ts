@@ -54,10 +54,11 @@ describe("FloorRecipe 1-180", () => {
     for (let i=0; i<180; i++) expect(r2[i]).toEqual(recipes[i]);
   });
 
-  it("intensityRole 5关循环 RELAX→INTRO→MIX→PRESSURE→CHECK", () => {
+  it("intensityRole 5关循环 F1=TUTORIAL, F2+=RELAX→INTRO→...", () => {
+    expect(recipes[0].intensityRole).toBe("TUTORIAL");
     const cycle = ["RELAX","INTRO","MIX","PRESSURE","CHECK"];
-    for (let f=1; f<=180; f++) {
-      expect(recipes[f-1].intensityRole).toBe(cycle[(f-1)%5]);
+    for (let f=2; f<=180; f++) {
+      expect(recipes[f-1].intensityRole).toBe(cycle[(f-2)%5]);
     }
   });
 
