@@ -1756,6 +1756,10 @@ export function debugJumpToFloor(floor: number): void {
   } else {
     progress.clearedBreakthroughs = ["breakthrough_lianqi"];
   }
+  // V0811066: 同步clearedFloors → 跳到N关=1~N-1已通关, 触发对应解锁
+  for (let f = 1; f < floor; f++) {
+    if (!progress.clearedFloors.includes(f)) progress.clearedFloors.push(f);
+  }
   writeProgress(progress);
 }
 
