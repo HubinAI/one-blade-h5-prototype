@@ -12102,24 +12102,51 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     const alive = this.enemies.filter(e => e.alive).length;
 
     ctx.save();
-    // 顶部信息
+    // V0812034: 顶部安全区布局 — 独立安全区, 分层, 防溢出
+    const safeTop = 8, safeLeft = 8, safeRight = DESIGN_WIDTH - 8;
+    const maxW = safeRight - safeLeft;      // 文字最大可用宽度
+    const cx = DESIGN_WIDTH / 2;            // 水平居中锚点
+    // 背景框覆盖两层(敌人信息 + debug统计)
     ctx.fillStyle = "rgba(0,0,0,0.82)";
-    ctx.fillRect(0, 0, DESIGN_WIDTH, 56);
-    ctx.font = "bold 15px monospace";
+    ctx.fillRect(0, 0, DESIGN_WIDTH, 54);
     ctx.textAlign = "center";
+    // 第一层: 敌人信息(居中, 自适应字号防溢出)
+    const line1 = `当前: ${name}(${kind}) / ${variant}  ${idx+1}/${kinds.length}  场上${alive}只`;
     ctx.fillStyle = "#ffd35a";
-    ctx.fillText(`怪物测试 — ${name} / ${variant}  (${kind})  ${idx+1}/${kinds.length}  场上: ${alive}只  防线: ${this._enemyTestDefenseHits}`, DESIGN_WIDTH / 2, 28);
-    ctx.font = "12px monospace";
+    this._drawCenteredFitText(ctx, line1, cx, 20, 14, 9, maxW);
+    // 第二层: Debug统计
+    const line2 = `HitVisual:${this._debugHitVisualCount}  ProjCheck:${this._debugProjChecks}  ProjHit:${this._debugProjHits}  防线:${this._enemyTestDefenseHits}`;
     ctx.fillStyle = "#8af";
-    ctx.fillText(`HitVisual:${this._debugHitVisualCount}  ProjCheck:${this._debugProjChecks}  ProjHit:${this._debugProjHits}`, DESIGN_WIDTH / 2, 44);
+    this._drawCenteredFitText(ctx, line2, cx, 40, 12, 8, maxW);
+    // 底部控制条
     ctx.fillStyle = "rgba(0,0,0,0.75)";
     ctx.fillRect(0, DESIGN_HEIGHT - 30, DESIGN_WIDTH, 30);
-    ctx.font = "13px monospace";
     ctx.fillStyle = "#a0a0a0";
-    ctx.fillText("[◀]切换  [N]变体  [J]刷1  [K]刷5  [L]清场  [▶]", DESIGN_WIDTH / 2, DESIGN_HEIGHT - 8);
+    this._drawCenteredFitText(ctx, "[◀]切换  [N]变体  [J]刷1  [K]刷5  [L]清场  [▶]", cx, DESIGN_HEIGHT - 8, 13, 9, maxW);
     ctx.restore();
     // 每只测试怪头顶标签
     this._drawEnemyTestLabels(ctx);
+  }
+
+  /** V0812034: 居中绘制自适应字号文字 — 超出maxW先缩小字号, 仍超出则截断+省略号 */
+  private _drawCenteredFitText(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, baseSize: number, minSize: number, maxW: number) {
+    let size = baseSize;
+    ctx.font = `bold ${size}px monospace`;
+    // 优先缩小字号
+    while (ctx.measureText(text).width > maxW && size > minSize) {
+      size--;
+      ctx.font = `bold ${size}px monospace`;
+    }
+    // 兜底: 到达minSize仍溢出则截断+省略号
+    if (ctx.measureText(text).width > maxW) {
+      const ellipsis = "…";
+      let trimmed = text;
+      while (trimmed.length > 1 && ctx.measureText(trimmed + ellipsis).width > maxW) {
+        trimmed = trimmed.slice(0, -1);
+      }
+      text = trimmed + ellipsis;
+    }
+    ctx.fillText(text, cx, cy);
   }
 
   /** V0812019: 测试怪头顶行为标签 */
@@ -12212,15 +12239,15 @@ private finalizeBossSlashCommon(trail: SlashTrail): void {
     ctx.save();
     const panelH = lines.length * 16 + 16;
     ctx.fillStyle = "rgba(13, 16, 17, 0.78)";
-    ctx.fillRect(10, 82, 220, panelH);
+    ctx.fillRect(10, 96, 220, panelH);
     ctx.strokeStyle = "rgba(255, 214, 124, 0.36)";
-    ctx.strokeRect(10, 82, 220, panelH);
+    ctx.strokeRect(10, 96, 220, panelH);
     ctx.fillStyle = "#f6e7bd";
     ctx.font = '11px "Consolas", monospace';
     ctx.textAlign = "left";
     lines.forEach((line, index) => {
       ctx.fillStyle = line.startsWith("---") ? "#ffd35a" : "#f6e7bd";
-      ctx.fillText(line, 18, 102 + index * 16);
+      ctx.fillText(line, 18, 116 + index * 16);
     });
     ctx.restore();
 
